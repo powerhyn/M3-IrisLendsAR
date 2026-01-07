@@ -1,19 +1,71 @@
-target/
-log/
-upload/
-.idea/
-public/
+# Build directories
+build/
+cmake-build-*/
+out/
 bin/
+lib/
+target/
+
+# IDE
+.idea/
 .vscode/
-.java-version
+*.xcworkspace/
+*.xcodeproj/xcuserdata/
 .cursor/
-*.log
-tools/*
+
+# macOS
 .DS_Store
-deploy-to-ecr.sh
+*.dSYM/
+
+# C++ artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Android
+*.apk
+*.aar
+.gradle/
+local.properties
+bindings/android/.cxx/
+
+# iOS
+*.ipa
+Pods/
+DerivedData/
+
+# Flutter
+bindings/flutter/.dart_tool/
+bindings/flutter/.packages
+bindings/flutter/pubspec.lock
+bindings/flutter/build/
+
+# Web/WASM
+bindings/web/dist/
+*.wasm
+
+# Logs
+*.log
+log/
+
+# Credentials
 *.pem
+*.key
+
+# Project-specific
 .serena/
-start_local_server.sh
-stop_local_server.sh
-claude-code-review.yml
-docker-compose-back.yml
+upload/
+public/
+tools/*

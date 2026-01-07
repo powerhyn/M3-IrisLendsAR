@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__serena__list_memories",
+      "mcp__serena__activate_project",
+      "mcp__serena__list_dir",
+      "WebSearch",
+      "Bash(mkdir:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(brew list:*)",
+      "Bash(pkg-config:*)",
+      "mcp__serena__initial_instructions",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__onboarding",
+      "mcp__serena__write_memory",
+      "mcp__serena__think_about_collected_information",
+      "Bash(cmake --build:*)"
+    ]
+  },
+  "enabledPlugins": {
+    "systems-programming@claude-code-workflows": true
+  }
+}

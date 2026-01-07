@@ -1,295 +1,273 @@
 # IrisLensSDK 개발 로드맵
 
+**버전**: 2.0
+**최종 수정**: 2026-01-07
+
+---
+
 ## 전체 개발 단계 개요
 
 ```
 Phase 1: MVP (MediaPipe 기반)
+├── Desktop 코어 엔진
+└── Android 바인딩
     ↓
-Phase 2: 하이브리드 시스템 (커스텀 모델 추가)
+Phase 2: 크로스플랫폼 확장
+├── iOS 바인딩
+├── Flutter Plugin
+└── 하이브리드 검출 시스템
     ↓
-Phase 3: 최적화 및 확장
+Phase 3: 최적화 및 Web 확장
+├── Web WASM 지원
+├── 성능 최적화
+└── 기능 확장
 ```
 
 ---
 
-## Phase 1: MVP 개발 (예상 6-8주)
+## 프로젝트 구조
 
-### Week 1-2: 환경 설정 및 기반 구축
-
-#### 목표
-- [ ] 개발 환경 구성
-- [ ] 프로젝트 구조 생성
-- [ ] 의존성 라이브러리 빌드
-
-#### 상세 작업
-
-**1.1 개발 환경**
 ```
-필요 도구:
-├── CMake 3.18+
-├── C++17 호환 컴파일러
-│   ├── macOS: Xcode Command Line Tools
-│   ├── Linux: GCC 9+ / Clang 10+
-│   └── Windows: MSVC 2019+
-├── Android NDK r21+
-├── Xcode 13+ (iOS 빌드용)
-└── Python 3.8+ (MediaPipe 빌드 스크립트용)
-```
-
-**1.2 MediaPipe 빌드**
-```bash
-# Bazel 설치 (MediaPipe 빌드에 필요)
-# MediaPipe 소스 클론
-git clone https://github.com/google/mediapipe.git
-
-# 필요한 그래프만 추출하여 C++ 라이브러리화
-# - face_mesh
-# - iris_tracking
-```
-
-**1.3 OpenCV 빌드**
-```bash
-# 최소 모듈만 포함하여 빌드 (SDK 크기 최소화)
-cmake -DBUILD_LIST=core,imgproc,imgcodecs ...
-```
-
-**1.4 프로젝트 구조 생성**
-```
-iris-lens-sdk/
-├── CMakeLists.txt
-├── core/
-│   ├── include/
+IrisLensSDK/
+├── README.md                       ← 프로젝트 소개
+├── CLAUDE.md                       ← AI 어시스턴트 가이드
+├── .gitignore
+├── .gitattributes                  ← Git LFS 설정
+│
+├── docs/                           ← 📚 전체 문서
+│   ├── PROJECT_SPEC.md             ← 프로젝트 명세서
+│   ├── DECISION_RECORD.md          ← 의사결정 기록
+│   ├── DEVELOPMENT_ROADMAP.md      ← 개발 로드맵 (본 문서)
+│   ├── ARCHITECTURE.md             ← 아키텍처 문서
+│   └── workPaper/                  ← 작업 히스토리
+│       ├── 000_phase1_plan.md      ← Phase 1 마스터 계획
+│       ├── 000_phase2_plan.md      ← Phase 2 마스터 계획 (예정)
+│       ├── 000_phase3_plan.md      ← Phase 3 마스터 계획 (예정)
+│       └── 00N_xxx.md              ← 작업 로그
+│
+├── shared/                         ← 🔗 공유 리소스
+│   ├── models/                     ← ML 모델 파일 (.tflite)
+│   │   ├── face_detection_short_range.tflite
+│   │   ├── face_landmark.tflite
+│   │   └── iris_landmark.tflite
+│   ├── textures/                   ← 렌즈 텍스처 이미지
+│   └── test_data/                  ← 테스트용 이미지/영상
+│
+├── cpp/                            ← ⚙️ C++ 코어 엔진
+│   ├── CMakeLists.txt
+│   ├── include/                    ← 공개 헤더
+│   │   ├── iris_sdk/
+│   │   │   ├── iris_detector.h
+│   │   │   ├── mediapipe_detector.h
+│   │   │   ├── lens_renderer.h
+│   │   │   ├── frame_processor.h
+│   │   │   ├── sdk_manager.h
+│   │   │   └── sdk_api.h           ← C API (바인딩용)
+│   │   └── iris_sdk.h              ← 통합 헤더
+│   ├── src/                        ← 구현 파일
+│   │   ├── iris_detector.cpp
+│   │   ├── mediapipe_detector.cpp
+│   │   ├── lens_renderer.cpp
+│   │   ├── frame_processor.cpp
+│   │   ├── sdk_manager.cpp
+│   │   └── sdk_api.cpp
+│   ├── tests/                      ← 단위/통합 테스트
+│   │   ├── CMakeLists.txt
+│   │   ├── test_iris_detector.cpp
+│   │   ├── test_lens_renderer.cpp
+│   │   └── test_integration.cpp
+│   ├── examples/                   ← 데스크톱 예제
+│   │   ├── CMakeLists.txt
+│   │   ├── image_demo.cpp          ← 이미지 기반 데모
+│   │   └── camera_demo.cpp         ← 웹캠 기반 데모
+│   ├── third_party/                ← 사전빌드 의존성
+│   │   ├── mediapipe/
+│   │   └── opencv/
+│   └── build/                      ← 빌드 결과물 (gitignore)
+│
+├── python/                         ← 🐍 Python 프로토타이핑
+│   ├── requirements.txt
+│   ├── setup.py
+│   ├── iris_sdk/                   ← ctypes 바인딩
+│   │   ├── __init__.py
+│   │   └── bindings.py
+│   ├── examples/
+│   │   └── demo.py
+│   └── tests/
+│
+├── android/                        ← 🤖 Android
+│   ├── settings.gradle.kts
+│   ├── build.gradle.kts
+│   ├── iris-sdk/                   ← AAR 라이브러리 모듈
+│   │   ├── build.gradle.kts
+│   │   ├── src/main/
+│   │   │   ├── cpp/                ← JNI 코드
+│   │   │   │   ├── CMakeLists.txt
+│   │   │   │   └── iris_jni.cpp
+│   │   │   ├── java/com/irislenssdk/
+│   │   │   │   ├── IrisLensSDK.kt
+│   │   │   │   └── IrisResult.kt
+│   │   │   └── AndroidManifest.xml
+│   │   └── proguard-rules.pro
+│   └── demo-app/                   ← 데모 앱
+│       ├── build.gradle.kts
+│       └── src/main/
+│
+├── ios/                            ← 🍎 iOS (Phase 2)
+│   ├── IrisSDK/
+│   └── DemoApp/
+│
+├── flutter/                        ← 🦋 Flutter Plugin (Phase 2)
+│   ├── pubspec.yaml
+│   ├── lib/
+│   ├── android/
+│   └── ios/
+│
+├── web/                            ← 🌐 WASM (Phase 3)
+│   ├── package.json
 │   └── src/
-├── bindings/
-├── examples/
-├── models/
-└── docs/
+│
+└── scripts/                        ← 🔧 빌드/배포 스크립트
+    ├── build_cpp.sh                ← C++ 빌드 (Desktop)
+    ├── build_android.sh            ← Android 빌드
+    ├── build_ios.sh                ← iOS 빌드
+    ├── sync_libs.sh                ← 빌드 결과물 → 플랫폼 복사
+    ├── download_models.sh          ← 모델 파일 다운로드
+    └── setup_env.sh                ← 개발 환경 설정
 ```
 
 ---
 
-### Week 3-4: 코어 엔진 개발
+## Phase 1: MVP 개발
 
-#### 목표
-- [ ] 홍채 검출 인터페이스 구현
-- [ ] MediaPipe 기반 검출기 구현
-- [ ] 렌즈 렌더링 로직 구현
-- [ ] C API 래퍼 작성
+**목표**: Desktop 코어 엔진 + Android 바인딩
+**상세 계획**: [workPaper/000_phase1_plan.md](workPaper/000_phase1_plan.md)
 
-#### 상세 작업
+### 범위
 
-**3.1 인터페이스 정의**
-```cpp
-// IrisDetector 추상 인터페이스
-// - detect() 메서드
-// - IrisResult 구조체
-```
+| 구분 | 포함 | 제외 |
+|------|------|------|
+| 플랫폼 | Desktop, Android | iOS, Flutter, Web |
+| 검출기 | MediaPipe | Eye-Only, Hybrid |
+| 기능 | 홍채 검출, 렌즈 오버레이 | 다중 렌즈, 색상 커스텀 |
 
-**3.2 MediaPipe 통합**
-```cpp
-// MediaPipeIrisDetector 구현
-// - MediaPipe 그래프 로드
-// - 프레임 처리
-// - 결과 변환
-```
+### 마일스톤
 
-**3.3 렌즈 렌더링**
-```cpp
-// LensRenderer 구현
-// - 텍스처 로드
-// - 홍채 영역에 매핑
-// - 블렌딩 처리
-```
-
-**3.4 C API**
-```cpp
-// sdk_api.h / sdk_api.cpp
-// - iris_sdk_init()
-// - iris_sdk_detect()
-// - iris_sdk_render_lens()
-// - iris_sdk_destroy()
-```
-
-#### 검증 기준
-- [ ] 단위 테스트 통과
-- [ ] 샘플 이미지로 검출 확인
-- [ ] 렌즈 오버레이 시각적 확인
+| 마일스톤 | 완료 기준 |
+|----------|----------|
+| M1: 환경 구축 | MediaPipe + OpenCV 빌드 성공 |
+| M2: 코어 완성 | 이미지 기반 검출 + 렌더링 동작 |
+| M3: 데스크톱 실시간 | 웹캠 30fps 실시간 처리 |
+| M4: Android MVP | 실기기 30fps 달성 |
 
 ---
 
-### Week 5-6: Android 바인딩 및 데모
+## Phase 2: 크로스플랫폼 확장
 
-#### 목표
-- [ ] JNI 바인딩 작성
-- [ ] Android 데모 앱 제작
-- [ ] 실시간 카메라 연동
-- [ ] 성능 측정 및 최적화
+**목표**: iOS/Flutter 지원 + 하이브리드 검출
+**상세 계획**: [workPaper/000_phase2_plan.md](workPaper/000_phase2_plan.md) (예정)
 
-#### 상세 작업
+### 범위
 
-**5.1 JNI 바인딩**
-```java
-// IrisLensSDK.java
-public class IrisLensSDK {
-    public native int init(String modelPath);
-    public native IrisResult detect(byte[] frame, int w, int h);
-    public native void renderLens(...);
-    public native void destroy();
-}
-```
+| 구분 | 포함 |
+|------|------|
+| 플랫폼 | iOS, Flutter |
+| 검출기 | Eye-Only 모델, Hybrid 시스템 |
+| 기능 | MediaPipe 한계 보완 |
 
-**5.2 NDK 빌드 설정**
-```cmake
-# Android.cmake
-# ABI별 빌드 (arm64-v8a, armeabi-v7a, x86_64)
-```
+### 주요 작업
 
-**5.3 데모 앱**
-```
-android-demo/
-├── CameraX 연동
-├── 프리뷰 화면
-├── 렌즈 선택 UI
-└── FPS 표시
-```
+1. **iOS Framework 생성**
+   - Objective-C++ 래퍼
+   - XCFramework 빌드
+   - AVCaptureSession 연동
 
-#### 검증 기준
-- [ ] 실제 디바이스에서 30fps 이상
-- [ ] 검출 지연 33ms 이하
-- [ ] 메모리 누수 없음
+2. **Flutter Plugin**
+   - dart:ffi 바인딩
+   - 플랫폼 채널
+   - 크로스플랫폼 데모 앱
+
+3. **Eye-Only 모델**
+   - 데이터 수집 (5,000~10,000장)
+   - 모델 학습 (U-Net/MobileNet 기반)
+   - 하이브리드 시스템 구축
 
 ---
 
-### Week 7-8: iOS 및 Flutter 바인딩
+## Phase 3: 최적화 및 Web 확장
 
-#### 목표
-- [ ] iOS Framework 생성
-- [ ] Flutter Plugin 생성
-- [ ] 각 플랫폼 데모 앱
+**목표**: Web WASM + 성능 최적화 + 기능 확장
+**상세 계획**: [workPaper/000_phase3_plan.md](workPaper/000_phase3_plan.md) (예정)
 
-#### iOS 작업
+### 범위
 
-**7.1 Objective-C++ 래퍼**
-```objc
-// IrisLensSDK.h / IrisLensSDK.mm
-@interface IrisLensSDK : NSObject
-- (BOOL)initWithModelPath:(NSString *)path;
-- (IrisResult *)detectWithPixelBuffer:(CVPixelBufferRef)buffer;
-@end
-```
+| 구분 | 포함 |
+|------|------|
+| 플랫폼 | Web (WASM) |
+| 최적화 | GPU 가속, 모델 양자화, 멀티스레드 |
+| 기능 | 다중 렌즈, 색상 커스텀, 눈 깜빡임 처리 |
 
-**7.2 XCFramework 생성**
-```bash
-# 시뮬레이터 + 디바이스 통합 프레임워크
-xcodebuild -create-xcframework ...
-```
+### 주요 작업
 
-#### Flutter 작업
+1. **Web WASM**
+   - Emscripten 빌드
+   - JavaScript API
+   - WebGL 렌더링
 
-**7.3 dart:ffi 바인딩**
-```dart
-// iris_lens_sdk.dart
-class IrisLensSDK {
-  late DynamicLibrary _lib;
-  // FFI 함수 바인딩
-}
-```
+2. **성능 최적화**
+   - 모델 양자화 (INT8)
+   - GPU 가속 (OpenGL ES / Metal)
+   - 멀티스레드 파이프라인
 
-**7.4 Flutter Plugin 구조**
-```
-iris_lens_sdk/
-├── pubspec.yaml
-├── lib/iris_lens_sdk.dart
-├── android/ (AAR 포함)
-└── ios/ (Framework 포함)
-```
-
-#### 검증 기준
-- [ ] iOS 실기기 동작 확인
-- [ ] Flutter 양 플랫폼 동작 확인
-- [ ] API 일관성 확인
+3. **기능 확장**
+   - 다중 렌즈 스타일
+   - 렌즈 색상 커스터마이징
+   - 눈 깜빡임 감지 및 처리
+   - 조명 반사 시뮬레이션
 
 ---
 
-## Phase 2: 하이브리드 시스템 (예상 4-6주)
+## 성능 목표
 
-### 목표
-- Eye-Only 커스텀 모델 개발
-- 하이브리드 검출 시스템 구축
-- MediaPipe 한계 상황 대응
-
-### 작업 내용
-
-**데이터 수집**
-```
-필요 데이터:
-├── 눈 클로즈업 이미지 5,000~10,000장
-├── 다양한 각도/조명/인종
-└── 홍채 경계 라벨링
-```
-
-**모델 학습**
-```
-아키텍처 후보:
-├── U-Net 기반 세그멘테이션
-├── HRNet (고해상도)
-└── MobileNet 기반 경량 모델
-```
-
-**하이브리드 시스템**
-```cpp
-class HybridIrisDetector : public IrisDetector {
-    MediaPipeDetector mediapipe_;
-    EyeOnlyDetector eyeOnly_;
-
-    IrisResult detect(Frame frame) {
-        auto result = mediapipe_.detect(frame);
-        if (result.confidence > threshold) {
-            return result;
-        }
-        return eyeOnly_.detect(frame);
-    }
-};
-```
+| 지표 | 목표 | 측정 방법 |
+|------|------|----------|
+| 프레임 레이트 | 30fps 이상 | 1초당 처리 프레임 수 |
+| 검출 지연 | 33ms 이하 | 입력→출력 시간 |
+| 메모리 사용 | 100MB 이하 | 런타임 메모리 |
+| SDK 크기 | 20MB 이하 | 라이브러리 파일 크기 |
+| 검출 정확도 | 95% 이상 | 정상 조건 기준 |
 
 ---
 
-## Phase 3: 최적화 및 확장 (지속적)
+## 문서 체계
 
-### 성능 최적화
-- [ ] 모델 양자화 (INT8)
-- [ ] GPU 가속 (OpenGL ES / Metal)
-- [ ] 멀티스레드 파이프라인
+```
+docs/
+├── PROJECT_SPEC.md         ← 제품 명세 (WHAT)
+├── DECISION_RECORD.md      ← 의사결정 (WHY)
+├── ARCHITECTURE.md         ← 시스템 설계 (HOW)
+├── DEVELOPMENT_ROADMAP.md  ← 전체 로드맵 (본 문서)
+│
+└── workPaper/
+    ├── 000_phase1_plan.md  ← Phase 1 마스터 (진행 관리)
+    ├── 000_phase2_plan.md  ← Phase 2 마스터 (예정)
+    ├── 000_phase3_plan.md  ← Phase 3 마스터 (예정)
+    └── 00N_xxx.md          ← 작업 로그
+```
 
-### 기능 확장
-- [ ] 다중 렌즈 스타일
-- [ ] 렌즈 색상 커스터마이징
-- [ ] 눈 깜빡임 처리
-- [ ] 조명 반사 시뮬레이션
+### Phase별 000 문서 역할
 
-### 플랫폼 확장
-- [ ] Web WASM 지원
-- [ ] Desktop (Windows/macOS/Linux)
-
----
-
-## 마일스톤 요약
-
-| 마일스톤 | 완료 기준 | 예상 시점 |
-|----------|----------|----------|
-| M1: 환경 구축 | MediaPipe + OpenCV 빌드 성공 | Week 2 |
-| M2: 코어 완성 | 이미지 기반 검출 + 렌더링 동작 | Week 4 |
-| M3: Android MVP | 실기기 30fps 달성 | Week 6 |
-| M4: 크로스플랫폼 | iOS + Flutter 동작 | Week 8 |
-| M5: 하이브리드 | Eye-Only 모델 통합 | Phase 2 |
+각 `000_phaseN_plan.md`는 해당 Phase의 마스터 문서로:
+- **진척도 추적**: 완료/진행중/대기 상태
+- **워크플로우 기반**: 세부 태스크 분리 및 실행
+- **이슈 트래킹**: 발생한 문제 및 해결 방안
+- **기반 지식**: 학습한 내용 및 결정 사항
 
 ---
 
-## 리스크 및 대응
+## 변경 이력
 
-| 리스크 | 영향 | 대응 방안 |
-|--------|------|----------|
-| MediaPipe 빌드 복잡성 | 일정 지연 | 사전 빌드된 바이너리 활용 검토 |
-| 성능 미달 | 품질 저하 | GPU 가속 우선 적용 |
-| 모바일 메모리 제한 | 크래시 | 모델 경량화, 메모리 풀링 |
-| Eye-Only 모델 정확도 | 기능 제한 | 데이터 추가 수집, 앙상블 |
+| 버전 | 날짜 | 변경 내용 |
+|------|------|----------|
+| 1.0 | 2025-01-07 | 초안 작성 |
+| 2.0 | 2026-01-07 | 프로젝트 구조 업데이트, 문서 체계 정립 |
