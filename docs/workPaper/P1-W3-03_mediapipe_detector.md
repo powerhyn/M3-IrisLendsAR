@@ -251,15 +251,25 @@ ctest --output-on-failure
 ## 6. 다음 단계
 
 ### Phase 2 작업
-1. TensorFlow Lite 빌드 및 통합
-2. 모델 파일 다운로드 스크립트 작성
-3. 실제 추론 파이프라인 구현
-4. 성능 측정 및 최적화
+1. ~~TensorFlow Lite 빌드 및 통합~~ ✅ CMake FetchContent 설정 완료
+2. ~~모델 파일 다운로드 스크립트 작성~~ ✅ 3개 모델 다운로드 완료
+3. 실제 추론 파이프라인 구현 ⏳
+4. 성능 측정 및 최적화 ⏳
 
-### 필요 리소스
-- TensorFlow Lite C++ 라이브러리
-- MediaPipe 모델 파일 (3개)
-- 테스트용 얼굴 이미지
+### 완료된 리소스
+| 리소스 | 상태 | 경로/비고 |
+|--------|------|----------|
+| TensorFlow Lite | ✅ 설정됨 | CMake FetchContent (-DIRIS_SDK_FETCH_TFLITE=ON) |
+| face_detection_short_range.tflite | ✅ 225KB | `shared/models/` |
+| face_landmark.tflite | ✅ 1.2MB | `shared/models/` |
+| iris_landmark.tflite | ✅ 2.5MB | `shared/models/` |
+| 테스트용 얼굴 이미지 | ⏳ 대기 | |
+
+### 다음 구현 항목
+1. TFLite 인터프리터 초기화 (`MediaPipeDetector::Impl`)
+2. 모델 로딩 로직 구현
+3. 추론 파이프라인 구현 (Face Detection → Face Mesh → Iris)
+4. IrisResult 구조체에 결과 매핑
 
 ---
 
@@ -269,3 +279,4 @@ ctest --output-on-failure
 |------|----------|
 | 2026-01-07 | 태스크 문서 생성, 구현 설계 완료 |
 | 2026-01-08 | TDD 기반 Phase 1 구현 완료 (71개 테스트 통과) |
+| 2026-01-08 | TFLite FetchContent 설정, MediaPipe 모델 3개 다운로드 완료 |
