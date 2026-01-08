@@ -975,6 +975,164 @@ TEST_F(MediaPipeDetectorIntegrationTest, ConfidenceThresholdEffect) {
     detector_->setMinDetectionConfidence(0.5f);
 }
 
+// ============================================================
+// P1-W3-04: 경계 조건 테스트 (Edge Case Tests)
+// ============================================================
+
+TEST_F(MediaPipeDetectorIntegrationTest, EdgeCase_EmptyImage) {
+    if (!setup_success_) {
+        GTEST_SKIP() << "Setup failed - models not available";
+    }
+
+    std::cout << "\n=== Edge Case: Empty Image ===" << std::endl;
+
+    // 빈 이미지 생성
+    cv::Mat empty_image;
+    EXPECT_TRUE(empty_image.empty());
+
+    // detect 호출 - 빈 데이터로는 검출 불가
+    // nullptr 전달
+    IrisResult result = detector_->detect(nullptr, 0, 0, FrameFormat::RGB);
+
+    EXPECT_FALSE(result.detected);
+    EXPECT_FLOAT_EQ(result.confidence, 0.0f);
+    std::cout << "  Empty image: detected=" << result.detected << " (expected: false)" << std::endl;
+}
+
+TEST_F(MediaPipeDetectorIntegrationTest, EdgeCase_VerySmallImage) {
+    if (!setup_success_) {
+        GTEST_SKIP() << "Setup failed - models not available";
+    }
+
+    std::cout << "\n=== Edge Case: Very Small Image (10x10) ===" << std::endl;
+
+    // 10x10 크기의 매우 작은 이미지
+    cv::Mat small_image(10, 10, CV_8UC3, cv::Scalar(128, 128, 128));
+    cv::cvtColor(small_image, small_image, cv::COLOR_BGR2RGB);
+
+    IrisResult result = detector_->detect(
+        small_image.data, small_image.cols, small_image.rows, FrameFormat::RGB
+    );
+
+    // 너무 작은 이미지에서는 얼굴 검출 불가능해야 함
+    EXPECT_FALSE(result.detected);
+    std::cout << "  Small (10x10): detected=" << result.detected
+              << ", confidence=" << result.confidence << std::endl;
+}
+
+TEST_F(MediaPipeDetectorIntegrationTest, EdgeCase_NoFaceImage) {
+    if (!setup_success_) {
+        GTEST_SKIP() << "Setup failed - models not available";
+    }
+
+    std::cout << "\n=== Edge Case: No Face Image (Solid Color) ===" << std::endl;
+
+    // 단색 이미지 (얼굴 없음)
+    cv::Mat no_face_image(480, 640, CV_8UC3, cv::Scalar(100, 150, 200));
+    cv::cvtColor(no_face_image, no_face_image, cv::COLOR_BGR2RGB);
+
+    IrisResult result = detector_->detect(
+        no_face_image.data, no_face_image.cols, no_face_image.rows, FrameFormat::RGB
+    );
+
+    // 얼굴이 없는 이미지에서는 검출 실패해야 함
+    EXPECT_FALSE(result.detected);
+    std::cout << "  No face (solid): detected=" << result.detected
+              << ", confidence=" << result.confidence << std::endl;
+}
+
+TEST_F(MediaPipeDetectorIntegrationTest, EdgeCase_NoFaceGradient) {
+    if (!setup_success_) {
+        GTEST_SKIP() << "Setup failed - models not available";
+    }
+
+    std::cout << "\n=== Edge Case: No Face Image (Gradient) ===" << std::endl;
+
+    // 그라데이션 이미지 (얼굴처럼 보일 수 있는 패턴)
+    cv::Mat gradient(480, 640, CV_8UC3);
+    for (int y = 0; y < gradient.rows; y++) {
+        for (int x = 0; x < gradient.cols; x++) {
+            gradient.at<cv::Vec3b>(y, x) = cv::Vec3b(
+                (x * 255) / gradient.cols,
+                (y * 255) / gradient.rows,
+                128
+            );
+        }
+    }
+    cv::cvtColor(gradient, gradient, cv::COLOR_BGR2RGB);
+
+    IrisResult result = detector_->detect(
+        gradient.data, gradient.cols, gradient.rows, FrameFormat::RGB
+    );
+
+    // 그라데이션 이미지에서도 검출 실패해야 함
+    EXPECT_FALSE(result.detected);
+    std::cout << "  No face (gradient): detected=" << result.detected
+              << ", confidence=" << result.confidence << std::endl;
+}
+
+TEST_F(MediaPipeDetectorIntegrationTest, EdgeCase_LargeImage) {
+    if (!setup_success_) {
+        GTEST_SKIP() << "Setup failed - models not available";
+    }
+
+    if (test_images_.empty()) {
+        GTEST_SKIP() << "No test images available";
+    }
+
+    std::cout << "\n=== Edge Case: Large Image (2x upscale) ===" << std::endl;
+
+    // 원본 이미지를 2배 확대
+    cv::Mat large_image;
+    cv::resize(test_images_[0], large_image, cv::Size(), 2.0, 2.0, cv::INTER_LINEAR);
+    cv::cvtColor(large_image, large_image, cv::COLOR_BGR2RGB);
+
+    std::cout << "  Original size: " << test_images_[0].cols << "x" << test_images_[0].rows << std::endl;
+    std::cout << "  Upscaled size: " << large_image.cols << "x" << large_image.rows << std::endl;
+
+    auto start = std::chrono::high_resolution_clock::now();
+    IrisResult result = detector_->detect(
+        large_image.data, large_image.cols, large_image.rows, FrameFormat::RGB
+    );
+    auto end = std::chrono::high_resolution_clock::now();
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    // 큰 이미지도 내부적으로 리사이즈하여 검출 가능해야 함
+    std::cout << "  Large image: detected=" << result.detected
+              << ", confidence=" << result.confidence
+              << ", latency=" << latency << "ms" << std::endl;
+
+    // 큰 이미지에서도 검출 성공 기대 (내부 리사이즈 처리)
+    // 단, 처리 시간이 더 걸릴 수 있음
+    if (result.detected) {
+        EXPECT_GT(result.confidence, 0.5f);
+    }
+}
+
+TEST_F(MediaPipeDetectorIntegrationTest, EdgeCase_InvalidDimensions) {
+    if (!setup_success_) {
+        GTEST_SKIP() << "Setup failed - models not available";
+    }
+
+    std::cout << "\n=== Edge Case: Invalid Dimensions ===" << std::endl;
+
+    // 유효한 데이터지만 잘못된 크기
+    std::vector<uint8_t> dummy_data(640 * 480 * 3, 128);
+
+    // 너비 0
+    IrisResult result1 = detector_->detect(dummy_data.data(), 0, 480, FrameFormat::RGB);
+    EXPECT_FALSE(result1.detected);
+    std::cout << "  Width=0: detected=" << result1.detected << std::endl;
+
+    // 높이 0
+    IrisResult result2 = detector_->detect(dummy_data.data(), 640, 0, FrameFormat::RGB);
+    EXPECT_FALSE(result2.detected);
+    std::cout << "  Height=0: detected=" << result2.detected << std::endl;
+
+    // 음수 크기 (size_t이므로 매우 큰 값으로 변환)
+    // 이 경우 내부에서 적절히 처리해야 함
+}
+
 } // namespace testing
 } // namespace iris_sdk
 
