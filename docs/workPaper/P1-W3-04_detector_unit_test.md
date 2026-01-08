@@ -20,7 +20,7 @@ MediaPipeDetector의 단위 테스트를 작성하여 검출 기능의 정확성
 | `shared/test_data/expected/*.json` | 예상 결과 (Ground Truth) |
 
 ### 검증 기준
-- [x] 모든 테스트 케이스 통과 (21/21 통과)
+- [x] 모든 테스트 케이스 통과 (22/22 통과)
 - [x] 정상 조건 정확도 95% 이상 (신뢰도 ~90%)
 - [x] 경계 조건 처리 확인 (6개 Edge Case 테스트 추가)
 - [x] 에러 케이스 적절한 처리 (InvalidDimensions, EmptyImage 등)
@@ -297,7 +297,7 @@ TEST(IrisDetectorPerformanceTest, MemoryUsage) {
 |------|------|----------|
 | `test_iris_detector.cpp` | IrisDetector 인터페이스 테스트 | 16개 |
 | `test_mediapipe_detector.cpp` | MediaPipeDetector 단위 테스트 | 15개 |
-| `test_mediapipe_detector_integration.cpp` | 통합 테스트 (TFLite + OpenCV) | 21개 |
+| `test_mediapipe_detector_integration.cpp` | 통합 테스트 (TFLite + OpenCV) | 22개 |
 | `test_mediapipe_detector_performance.cpp` | 성능 벤치마크 테스트 | 8개 |
 | `test_types.cpp` | 데이터 구조 테스트 | 다수 |
 
@@ -331,8 +331,8 @@ TEST_F(MediaPipeDetectorIntegrationTest, EdgeCase_InvalidDimensions)   // 0 크�
 
 ```bash
 $ ./bin/test_mediapipe_detector_integration
-[==========] Running 21 tests from 1 test suite.
-[  PASSED  ] 21 tests.
+[==========] Running 22 tests from 1 test suite.
+[  PASSED  ] 22 tests.
 
 # Edge Case 테스트 결과
 EdgeCase_EmptyImage:         PASSED (103 ms)
@@ -389,6 +389,7 @@ EdgeCase_InvalidDimensions:  PASSED (126 ms)
 |----|------|------|----------|
 | I-01 | 매우 작은 이미지(10x10)에서 낮은 score | ✅ 해결 | BlazeFace가 128x128 리사이즈 후 추론하므로 정상 동작 |
 | I-02 | 그라데이션 이미지에서 false positive 가능성 | ✅ 해결 | 실제 테스트 결과 detected=false 반환 |
+| I-03 | 시각화에서 홍채가 입 주변에 그려짐 | ✅ 해결 | Face/Iris Landmark 좌표 정규화 버그 수정 |
 
 ### 결정 사항
 
@@ -415,6 +416,12 @@ EdgeCase_InvalidDimensions:  PASSED (126 ms)
    - 큰 이미지(2x 확대)도 내부 리사이즈로 처리 가능
    - 평균 검출 시간 ~30ms로 30fps 기준 충족
 
+4. **좌표 정규화 (I-03 해결)**
+   - Face Landmark 모델: 192x192 픽셀 좌표 출력 → /192로 정규화 필요
+   - Iris Landmark 모델: 64x64 픽셀 좌표 출력 → /64로 정규화 필요
+   - 크롭 영역(face_rect, eye_crop) 기준 → 전체 이미지 좌표 변환 필수
+   - 시각화 테스트로 좌표 변환 정확성 검증 가능
+
 ---
 
 ## 변경 이력
@@ -424,3 +431,4 @@ EdgeCase_InvalidDimensions:  PASSED (126 ms)
 | 2026-01-07 | 태스크 문서 생성, 테스트 케이스 설계 완료 |
 | 2026-01-08 | Edge Case 테스트 6개 추가, 통합 테스트 21개 전체 통과 |
 | 2026-01-08 | 검증 결과 및 학습 내용 문서화, 태스크 완료 |
+| 2026-01-08 | 시각화 테스트 추가, 좌표 정규화 버그 수정 (I-03), 22개 테스트 통과 |
