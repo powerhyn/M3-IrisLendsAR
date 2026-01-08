@@ -434,13 +434,13 @@ TEST(MediaPipeDetectorIntegrationTest, SkippedWithoutDependencies) {
 |----------|--------|------|------|
 | 초기화 | InitializeWithValidModels | 유효한 모델로 초기화 | ✅ |
 | | AllModelsAreLoaded | 3개 모델 파일 로드 확인 | ✅ |
-| 검출 | DetectOnRealImages_RGB | RGB 포맷 이미지 검출 | ⏳ |
-| | DetectOnRealImages_BGR | BGR 포맷 이미지 검출 | ⏳ |
-| | DetectOnRealImages_RGBA | RGBA 포맷 이미지 검출 | ⏳ |
-| 정확도 | ConfidenceAboveThreshold | 신뢰도 0.8 이상 | ⏳ |
-| | LandmarkCoordinatesValid | 좌표 범위 검증 | ⏳ |
-| 성능 | LatencyUnder33ms | 지연 시간 33ms 이하 | ⏳ |
-| | LatencyStatistics | P95 지연 통계 | ⏳ |
+| 검출 | DetectOnRealImages_RGB | RGB 포맷 이미지 검출 | ✅ |
+| | DetectOnRealImages_BGR | BGR 포맷 이미지 검출 | ✅ |
+| | DetectOnRealImages_RGBA | RGBA 포맷 이미지 검출 | ✅ |
+| 정확도 | ConfidenceAboveThreshold | 신뢰도 0.8 이상 | ✅ |
+| | LandmarkCoordinatesValid | 좌표 범위 검증 | ✅ |
+| 성능 | PerImageLatencyMeasurement | 지연 시간 33ms 이하 | ❌ (~43ms) |
+| | LatencyStatistics | P95 지연 통계 | ✅ |
 | 크기 | DifferentImageSizes | 다양한 이미지 크기 | ✅ |
 | 추적 | TrackingModePerformance | 추적 모드 성능 | ✅ |
 | 특수 | GrayscaleImageDetection | 그레이스케일 이미지 | ✅ |
