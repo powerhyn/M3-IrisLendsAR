@@ -7,8 +7,8 @@
  */
 
 #include "iris_sdk/mediapipe_detector.h"
+#include <algorithm>  // std::clamp
 #include <filesystem>
-#include <stdexcept>
 
 namespace iris_sdk {
 
@@ -157,13 +157,11 @@ DetectorType MediaPipeDetector::getDetectorType() const {
 // ============================================================
 
 void MediaPipeDetector::setMinDetectionConfidence(float confidence) {
-    // 범위 클램핑 (0.0 ~ 1.0)
-    impl_->min_detection_confidence = std::max(0.0f, std::min(1.0f, confidence));
+    impl_->min_detection_confidence = std::clamp(confidence, 0.0f, 1.0f);
 }
 
 void MediaPipeDetector::setMinTrackingConfidence(float confidence) {
-    // 범위 클램핑 (0.0 ~ 1.0)
-    impl_->min_tracking_confidence = std::max(0.0f, std::min(1.0f, confidence));
+    impl_->min_tracking_confidence = std::clamp(confidence, 0.0f, 1.0f);
 }
 
 void MediaPipeDetector::setNumFaces(int num_faces) {
