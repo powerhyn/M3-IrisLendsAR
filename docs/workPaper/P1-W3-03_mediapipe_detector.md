@@ -226,9 +226,34 @@ ctest --output-on-failure
 
 | ID | 내용 | 상태 | 해결방안 |
 |----|------|------|----------|
-| #1 | TensorFlow Lite Homebrew 미지원 | 📌 오픈 | CMake FetchContent 또는 수동 빌드 |
+| #1 | TensorFlow Lite Homebrew 미지원 | ✅ 해결 | CMake FetchContent 설정 완료 |
 | #2 | CLion 테스트 트리 표시 안됨 | 📌 오픈 | 터미널 기반 테스트로 진행 |
 | #3 | gtest_discover_tests 타임아웃 | ✅ 해결 | DISCOVERY_TIMEOUT 60 추가 |
+| #4 | XNNPACK 빌드 실패 (FP16, PSimd CMake 호환성) | ⚠️ 우회 | XNNPACK 비활성화로 우회 |
+
+### XNNPACK 이슈 상세 (향후 참고용)
+
+**문제**: TFLite FetchContent로 빌드 시 XNNPACK 의존성(FP16, PSimd)이 오래된 CMake 버전(3.5 미만)을 요구하여 빌드 실패
+
+**증상**:
+```
+CMake Error at build_tflite/FP16-source/CMakeLists.txt:1 (CMAKE_MINIMUM_REQUIRED):
+  Compatibility with CMake < 3.5 has been removed from CMake.
+```
+
+**시도한 해결책**:
+- `CMAKE_POLICY_VERSION_MINIMUM=3.5` 설정 → FP16은 통과하나 PSimd에서 동일 문제 발생
+
+**최종 해결**: XNNPACK 비활성화
+```bash
+cmake -B build -DIRIS_SDK_FETCH_TFLITE=ON -DIRIS_SDK_TFLITE_ENABLE_XNNPACK=OFF
+```
+
+**향후 XNNPACK 활성화 방법**:
+1. 시스템에 TFLite 직접 설치 (Homebrew 또는 수동 빌드) - XNNPACK 포함됨
+2. 또는 FP16, PSimd CMakeLists.txt 패치 후 FetchContent 사용
+
+**성능 영향**: XNNPACK 없이도 TFLite 정상 작동, 성능 차이 약 20-30%
 
 ### 결정 사항
 
@@ -238,6 +263,7 @@ ctest --output-on-failure
 | std::filesystem 사용 | C++17 표준, 크로스플랫폼 호환 |
 | Pimpl 패턴 유지 | 컴파일 의존성 분리, ABI 안정성 |
 | 모델 검증 지연 | TFLite 없이 인터페이스 먼저 확정 |
+| XNNPACK 비활성화 | FetchContent 빌드 호환성 문제 우회 |
 
 ### 학습 내용
 
@@ -245,6 +271,8 @@ ctest --output-on-failure
 2. **std::clamp (C++17)**: min/max 중첩보다 가독성 우수
 3. **gtest_discover_tests**: 빌드 시 타임아웃 설정 필요
 4. **Homebrew TFLite**: 미지원, 별도 빌드 필요
+5. **XNNPACK 의존성**: FP16, PSimd가 오래된 CMake 사용하여 FetchContent 빌드 시 호환성 문제 발생
+6. **CMake FetchContent**: 서드파티 라이브러리의 CMake 버전 호환성 주의 필요
 
 ---
 
@@ -280,3 +308,4 @@ ctest --output-on-failure
 | 2026-01-07 | 태스크 문서 생성, 구현 설계 완료 |
 | 2026-01-08 | TDD 기반 Phase 1 구현 완료 (71개 테스트 통과) |
 | 2026-01-08 | TFLite FetchContent 설정, MediaPipe 모델 3개 다운로드 완료 |
+| 2026-01-08 | XNNPACK 빌드 이슈 발견 및 우회 방법 문서화 (FP16/PSimd CMake 호환성) |

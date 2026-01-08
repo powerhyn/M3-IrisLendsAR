@@ -6,6 +6,10 @@
 # 독립 실행 시에만 필수 설정 추가 (서브프로젝트로 사용될 때는 스킵)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.18)
+
+    # 오래된 서드파티 라이브러리 호환성 (FP16, XNNPACK 등)
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum CMake policy version for legacy deps")
+
     project(IrisSDK_Core
         VERSION 0.1.0
         DESCRIPTION "IrisLensSDK C++ Core Engine"
