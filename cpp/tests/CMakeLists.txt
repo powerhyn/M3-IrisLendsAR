@@ -55,9 +55,21 @@ target_link_libraries(test_mediapipe_detector PRIVATE
 )
 
 # ============================================================
+# MediaPipeDetector 성능 벤치마크 테스트
+# ============================================================
+add_executable(test_mediapipe_detector_performance test_mediapipe_detector_performance.cpp)
+target_include_directories(test_mediapipe_detector_performance PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_mediapipe_detector_performance PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# ============================================================
 # 테스트 디스커버리
 # ============================================================
 include(GoogleTest)
 gtest_discover_tests(test_types DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_iris_detector DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_mediapipe_detector DISCOVERY_TIMEOUT 60)
+gtest_discover_tests(test_mediapipe_detector_performance DISCOVERY_TIMEOUT 120)

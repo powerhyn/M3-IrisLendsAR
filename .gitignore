@@ -1,10 +1,14 @@
 # Build directories
 build/
+build_*/
 cmake-build-*/
 out/
 bin/
 lib/
 target/
+
+# Cache directories
+.cache/
 
 # IDE
 .idea/
@@ -69,6 +73,13 @@ log/
 upload/
 public/
 tools/*
+
+# Test artifacts
+cpp/tests/*.png
+cpp/tests/test_placeholder
+
+# Temporary files
+*.zip
 
 # MediaPipe model files (download via scripts/download_models.sh)
 shared/models/*.tflite

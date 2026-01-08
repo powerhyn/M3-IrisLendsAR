@@ -228,7 +228,7 @@ if(NOT TFLITE_FOUND AND IRIS_SDK_FETCH_TFLITE)
 
     # TFLite 빌드 옵션 설정 (빌드 시간 최적화)
     set(TFLITE_ENABLE_RUY ON CACHE BOOL "Enable RUY matrix multiplication library" FORCE)
-    set(TFLITE_ENABLE_RESOURCE OFF CACHE BOOL "Disable resource support" FORCE)
+    set(TFLITE_ENABLE_RESOURCE ON CACHE BOOL "Enable resource support" FORCE)
     set(TFLITE_ENABLE_NNAPI OFF CACHE BOOL "Disable NNAPI (Android only)" FORCE)
     set(TFLITE_ENABLE_GPU OFF CACHE BOOL "Disable GPU delegate" FORCE)
     set(TFLITE_ENABLE_MMAP ON CACHE BOOL "Enable memory-mapped model loading" FORCE)

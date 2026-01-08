@@ -1,5 +1,12 @@
 {
   "enabledPlugins": {
-    "tdd-workflows@claude-code-workflows": true
+    "code-review-ai@claude-code-workflows": true,
+    "c4-architecture@claude-code-workflows": true,
+    "code-documentation@claude-code-workflows": true,
+    "application-performance@claude-code-workflows": true,
+    "dependency-management@claude-code-workflows": true,
+    "cicd-automation@claude-code-workflows": true,
+    "debugging-toolkit@claude-code-workflows": true,
+    "unit-testing@claude-code-workflows": true
   }
 }

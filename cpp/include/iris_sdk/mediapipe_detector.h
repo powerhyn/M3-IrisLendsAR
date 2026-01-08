@@ -96,6 +96,39 @@ public:
      */
     void setNumFaces(int num_faces);
 
+    // ========================================
+    // 성능 최적화 설정
+    // ========================================
+
+    /**
+     * @brief TFLite 추론에 사용할 스레드 수 설정
+     *
+     * 초기화 전에 호출해야 효과적임.
+     * 기본값: 4
+     *
+     * @param num_threads 스레드 수 (1 이상)
+     */
+    void setNumThreads(int num_threads);
+
+    /**
+     * @brief 추적 모드 활성화/비활성화
+     *
+     * 추적 모드 활성화 시 연속 프레임에서 Face Detection을 스킵하여
+     * 성능을 향상시킴. 얼굴이 급격히 움직이는 경우 정확도가 떨어질 수 있음.
+     * 기본값: true
+     *
+     * @param enable 활성화 여부
+     */
+    void setTrackingEnabled(bool enable);
+
+    /**
+     * @brief 추적 캐시 초기화
+     *
+     * 이전 프레임 결과를 무효화하고 다음 detect() 호출에서
+     * Face Detection을 강제로 수행함.
+     */
+    void resetTracking();
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
