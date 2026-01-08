@@ -10,7 +10,8 @@
 #include <algorithm>  // std::clamp
 #include <filesystem>
 #include <cstring>    // std::memcpy
-#include <cmath>      // std::sqrt
+#include <cmath>      // std::sqrt, std::exp
+#include <cstdio>     // std::fprintf (디버그용)
 
 // TensorFlow Lite 헤더 (조건부 컴파일)
 #ifdef IRIS_SDK_HAS_TFLITE
@@ -137,6 +138,19 @@ public:
     int face_landmark_output_index = -1;
 
     int iris_landmark_input_index = -1;
+
+    // ========================================
+    // BlazeFace 앵커 (SSD-style anchors)
+    // ========================================
+    struct Anchor {
+        float x_center;
+        float y_center;
+        float width;
+        float height;
+    };
+    std::vector<Anchor> face_detection_anchors;
+    bool anchors_generated = false;
+
     int iris_landmark_output_index = -1;
 #endif
 
@@ -241,6 +255,71 @@ public:
 #endif
 
 #ifdef IRIS_SDK_HAS_TFLITE
+    /**
+     * @brief Sigmoid 함수 (logit → probability)
+     * @param x 입력 logit 값
+     * @return 확률 값 (0.0 ~ 1.0)
+     */
+    static float sigmoid(float x) {
+        return 1.0f / (1.0f + std::exp(-x));
+    }
+
+    /**
+     * @brief BlazeFace 앵커 생성
+     *
+     * MediaPipe BlazeFace short range 모델의 앵커 구성:
+     * - 입력: 128x128
+     * - Feature maps: 16x16 (stride 8), 8x8 (stride 16)
+     * - 각 위치에 2개 앵커
+     * - 총 앵커 수: 16*16*2 + 8*8*2 = 512 + 128 = 640
+     *
+     * 참고: 실제 모델은 896개 앵커를 사용할 수 있음 (추가 feature map)
+     */
+    void generateAnchors() {
+        if (anchors_generated) return;
+
+        face_detection_anchors.clear();
+
+        // BlazeFace short range 앵커 옵션
+        // MediaPipe 기본 설정 기반
+        struct AnchorOption {
+            int feature_map_size;
+            int num_anchors;
+            float stride;
+        };
+
+        // 두 가지 feature map 레벨
+        // 실제 MediaPipe BlazeFace는 더 복잡한 앵커 구조를 사용할 수 있음
+        std::vector<AnchorOption> options = {
+            {16, 2, 8.0f},   // 16x16 feature map, 2 anchors per cell, stride 8
+            {8, 6, 16.0f}    // 8x8 feature map, 6 anchors per cell, stride 16
+        };
+
+        float input_size = static_cast<float>(FACE_DETECTION_INPUT_WIDTH);
+
+        for (const auto& opt : options) {
+            for (int y = 0; y < opt.feature_map_size; ++y) {
+                for (int x = 0; x < opt.feature_map_size; ++x) {
+                    // 앵커 중심 좌표 (정규화된 0~1)
+                    float x_center = (static_cast<float>(x) + 0.5f) * opt.stride / input_size;
+                    float y_center = (static_cast<float>(y) + 0.5f) * opt.stride / input_size;
+
+                    for (int n = 0; n < opt.num_anchors; ++n) {
+                        Anchor anchor;
+                        anchor.x_center = x_center;
+                        anchor.y_center = y_center;
+                        // BlazeFace는 앵커 크기를 사용하지 않음 (scale만 사용)
+                        anchor.width = 1.0f;
+                        anchor.height = 1.0f;
+                        face_detection_anchors.push_back(anchor);
+                    }
+                }
+            }
+        }
+
+        anchors_generated = true;
+    }
+
     /**
      * @brief TFLite 모델 로드 및 인터프리터 생성
      * @param model_file 모델 파일 경로
@@ -740,16 +819,26 @@ public:
     }
 
     /**
-     * @brief Face Detection 실행
+     * @brief Face Detection 실행 (BlazeFace 앵커 기반 디코딩)
      * @param input_data 전처리된 입력 데이터 (128x128 RGB float)
      * @param face_rect 검출된 얼굴 영역 (출력, 정규화 좌표)
      * @param confidence 신뢰도 (출력)
      * @return 얼굴 검출 성공 여부
+     *
+     * BlazeFace short range 모델 출력 구조:
+     * - Output 0 (regressors): [1, num_anchors, 16]
+     *   - [0-3]: yc, xc, h, w (앵커 상대 오프셋)
+     *   - [4-15]: 6개 키포인트 좌표 (각 x, y)
+     * - Output 1 (classificators): [1, num_anchors, 1]
+     *   - logit 값 (sigmoid 적용 필요)
      */
     bool runFaceDetection(const float* input_data, Rect& face_rect, float& confidence) {
         if (!face_detection_interpreter || !input_data) {
             return false;
         }
+
+        // 앵커 생성 (처음 한 번만)
+        generateAnchors();
 
         // 입력 텐서에 데이터 복사
         float* input_tensor = face_detection_interpreter->typed_input_tensor<float>(0);
@@ -766,50 +855,107 @@ public:
             return false;
         }
 
-        // 출력 텐서 읽기
-        // MediaPipe BlazeFace 모델 출력 구조 (모델에 따라 다를 수 있음):
-        // - boxes: [num_detections, 4] (ymin, xmin, ymax, xmax) 또는 (cx, cy, w, h)
-        // - scores: [num_detections]
-        float* output_data = face_detection_interpreter->typed_output_tensor<float>(0);
-        if (!output_data) {
-            return false;
-        }
-
-        // 가장 높은 신뢰도의 얼굴 찾기
-        // 참고: 실제 출력 구조는 모델 버전에 따라 다를 수 있으므로
-        //       모델 분석 후 조정 필요
-        TfLiteTensor* output_tensor = face_detection_interpreter->tensor(
+        // 출력 텐서 가져오기
+        // Output 0: regressors (box offsets)
+        TfLiteTensor* boxes_tensor = face_detection_interpreter->tensor(
             face_detection_interpreter->outputs()[0]);
-        if (!output_tensor) {
+        if (!boxes_tensor) {
             return false;
         }
 
-        // 출력 텐서 크기 확인
-        int num_dims = output_tensor->dims->size;
-        if (num_dims < 2) {
+        float* boxes_data = face_detection_interpreter->typed_output_tensor<float>(0);
+        if (!boxes_data) {
             return false;
         }
 
-        // 간단한 파싱 (첫 번째 검출 결과 사용)
-        // BlazeFace 출력: [1, num_anchors, 16] 또는 유사한 구조
-        // 여기서는 간단히 첫 번째 유효한 검출 결과 사용
-        int num_detections = output_tensor->dims->data[1];
+        // Output 1: classificators (scores)
+        float* scores_data = nullptr;
+        int num_anchors = 0;
 
+        // 출력 텐서 차원 분석 및 디버그 출력 (최초 1회만)
+        static bool debug_printed = false;
+        int num_dims = boxes_tensor->dims->size;
+        int num_outputs = static_cast<int>(face_detection_interpreter->outputs().size());
+
+        if (!debug_printed) {
+            std::fprintf(stderr, "[DEBUG] Face Detection Model Output Info:\n");
+            std::fprintf(stderr, "  - Number of outputs: %d\n", num_outputs);
+            std::fprintf(stderr, "  - Output 0 dims: %d [", num_dims);
+            for (int d = 0; d < num_dims; ++d) {
+                std::fprintf(stderr, "%d%s", boxes_tensor->dims->data[d],
+                           (d < num_dims - 1) ? ", " : "");
+            }
+            std::fprintf(stderr, "]\n");
+
+            if (num_outputs >= 2) {
+                TfLiteTensor* scores_tensor = face_detection_interpreter->tensor(
+                    face_detection_interpreter->outputs()[1]);
+                if (scores_tensor) {
+                    std::fprintf(stderr, "  - Output 1 dims: %d [", scores_tensor->dims->size);
+                    for (int d = 0; d < scores_tensor->dims->size; ++d) {
+                        std::fprintf(stderr, "%d%s", scores_tensor->dims->data[d],
+                                   (d < scores_tensor->dims->size - 1) ? ", " : "");
+                    }
+                    std::fprintf(stderr, "]\n");
+                }
+            }
+            std::fprintf(stderr, "  - Generated anchors: %zu\n", face_detection_anchors.size());
+            debug_printed = true;
+        }
+
+        if (num_dims >= 2) {
+            // [1, num_anchors, 16] 또는 [num_anchors, 16]
+            num_anchors = (num_dims == 3) ? boxes_tensor->dims->data[1] : boxes_tensor->dims->data[0];
+        }
+
+        if (num_anchors <= 0) {
+            return false;
+        }
+
+        // 점수 텐서 확인 (두 번째 출력이 있는 경우)
+        if (face_detection_interpreter->outputs().size() >= 2) {
+            scores_data = face_detection_interpreter->typed_tensor<float>(
+                face_detection_interpreter->outputs()[1]);
+        }
+
+        // 앵커 수와 모델 출력 확인
+        int anchor_count = static_cast<int>(face_detection_anchors.size());
+        int effective_anchors = std::min(num_anchors, anchor_count);
+
+        // 디버그: 첫 몇 개 점수 출력
+        static bool scores_debug_printed = false;
+        if (!scores_debug_printed && scores_data) {
+            std::fprintf(stderr, "[DEBUG] First 10 scores (raw logits):\n  ");
+            for (int i = 0; i < std::min(10, effective_anchors); ++i) {
+                std::fprintf(stderr, "%.4f ", scores_data[i]);
+            }
+            std::fprintf(stderr, "\n[DEBUG] First 10 scores (after sigmoid):\n  ");
+            for (int i = 0; i < std::min(10, effective_anchors); ++i) {
+                std::fprintf(stderr, "%.4f ", sigmoid(scores_data[i]));
+            }
+            std::fprintf(stderr, "\n");
+            scores_debug_printed = true;
+        }
+
+        // 모든 앵커에서 가장 높은 점수 찾기
         float best_score = 0.0f;
         int best_idx = -1;
 
-        // 점수 출력 텐서 확인
-        float* scores_data = nullptr;
-        if (face_detection_output_scores_index >= 0) {
-            scores_data = face_detection_interpreter->typed_tensor<float>(
-                face_detection_output_scores_index);
-        }
+        for (int i = 0; i < effective_anchors; ++i) {
+            float score_logit;
 
-        // 간단한 휴리스틱: 출력 데이터에서 바운딩 박스와 점수 추출
-        // 실제 MediaPipe BlazeFace 모델은 앵커 기반으로 더 복잡한 후처리 필요
-        // 여기서는 단순화된 버전 구현
-        for (int i = 0; i < std::min(num_detections, 100); ++i) {
-            float score = (scores_data) ? scores_data[i] : output_data[i * 16 + 15];
+            if (scores_data) {
+                // 별도 점수 텐서가 있는 경우
+                score_logit = scores_data[i];
+            } else {
+                // 점수가 boxes 텐서에 포함된 경우 (일부 모델)
+                // 일반적으로 BlazeFace는 별도 텐서 사용
+                score_logit = boxes_data[i * 16 + 15];
+            }
+
+            // sigmoid로 확률 변환
+            float score = sigmoid(score_logit);
+
             if (score > best_score && score > min_detection_confidence) {
                 best_score = score;
                 best_idx = i;
@@ -820,18 +966,29 @@ public:
             return false;
         }
 
-        // 바운딩 박스 추출 (모델 출력 형식에 따라 조정 필요)
-        // BlazeFace: [cx, cy, w, h, kp1_x, kp1_y, ..., score]
-        float cx = output_data[best_idx * 16 + 0];
-        float cy = output_data[best_idx * 16 + 1];
-        float w = output_data[best_idx * 16 + 2];
-        float h = output_data[best_idx * 16 + 3];
+        // 바운딩 박스 디코딩 (앵커 기반)
+        const Anchor& anchor = face_detection_anchors[best_idx];
 
-        // 정규화된 좌표로 변환
+        // BlazeFace 출력: [yc_offset, xc_offset, h_scale, w_scale, ...]
+        // 실제 좌표 = 앵커 좌표 + 오프셋
+        float yc_offset = boxes_data[best_idx * 16 + 0];
+        float xc_offset = boxes_data[best_idx * 16 + 1];
+        float h_scale = boxes_data[best_idx * 16 + 2];
+        float w_scale = boxes_data[best_idx * 16 + 3];
+
+        // 정규화된 좌표로 디코딩
+        // 오프셋은 입력 크기에 상대적인 값
+        float input_size_f = static_cast<float>(FACE_DETECTION_INPUT_WIDTH);
+        float cx = anchor.x_center + xc_offset / input_size_f;
+        float cy = anchor.y_center + yc_offset / input_size_f;
+        float w = w_scale / input_size_f;
+        float h = h_scale / input_size_f;
+
+        // 최종 바운딩 박스 (정규화 좌표 0~1)
         face_rect.x = std::clamp(cx - w / 2.0f, 0.0f, 1.0f);
         face_rect.y = std::clamp(cy - h / 2.0f, 0.0f, 1.0f);
-        face_rect.width = std::clamp(w, 0.0f, 1.0f);
-        face_rect.height = std::clamp(h, 0.0f, 1.0f);
+        face_rect.width = std::clamp(w, 0.0f, 1.0f - face_rect.x);
+        face_rect.height = std::clamp(h, 0.0f, 1.0f - face_rect.y);
 
         confidence = best_score;
         return true;
@@ -1001,6 +1158,25 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     result.frame_width = width;
     result.frame_height = height;
 
+    // 디버그: 초기화 상태 및 조건부 컴파일 매크로 확인
+    static bool init_debug_printed = false;
+    if (!init_debug_printed) {
+        std::fprintf(stderr, "[DEBUG] detect() entry point\n");
+        std::fprintf(stderr, "[DEBUG] impl_->initialized = %s\n",
+                    impl_->initialized ? "true" : "false");
+#if defined(IRIS_SDK_HAS_TFLITE)
+        std::fprintf(stderr, "[DEBUG] IRIS_SDK_HAS_TFLITE = defined\n");
+#else
+        std::fprintf(stderr, "[DEBUG] IRIS_SDK_HAS_TFLITE = NOT defined\n");
+#endif
+#if defined(IRIS_SDK_HAS_OPENCV)
+        std::fprintf(stderr, "[DEBUG] IRIS_SDK_HAS_OPENCV = defined\n");
+#else
+        std::fprintf(stderr, "[DEBUG] IRIS_SDK_HAS_OPENCV = NOT defined\n");
+#endif
+        init_debug_printed = true;
+    }
+
     // 초기화 상태 검사
     if (!impl_->initialized) {
         return result;
@@ -1041,21 +1217,51 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     // 1. Face Detection: 얼굴 바운딩 박스 검출
     // (추적 모드에서 스킵 가능)
     // =========================================================
+    static bool detect_debug_printed = false;
+    if (!detect_debug_printed) {
+        std::fprintf(stderr, "[DEBUG] detect() called: %dx%d, format=%d\n",
+                    width, height, static_cast<int>(format));
+        detect_debug_printed = true;
+    }
+
     if (!skip_face_detection) {
         // 사전 할당 버퍼 사용 (메모리 재할당 방지)
         if (!impl_->preprocessImage(frame_data, width, height, format,
                                     FACE_DETECTION_INPUT_WIDTH,
                                     FACE_DETECTION_INPUT_HEIGHT,
                                     impl_->face_detection_input_buffer.data())) {
+            static bool preprocess_fail_printed = false;
+            if (!preprocess_fail_printed) {
+                std::fprintf(stderr, "[DEBUG] preprocessImage failed!\n");
+                preprocess_fail_printed = true;
+            }
             impl_->resetTrackingCache();
             return result;
+        }
+
+        static bool preprocess_ok_printed = false;
+        if (!preprocess_ok_printed) {
+            std::fprintf(stderr, "[DEBUG] preprocessImage succeeded, calling runFaceDetection\n");
+            preprocess_ok_printed = true;
         }
 
         if (!impl_->runFaceDetection(impl_->face_detection_input_buffer.data(),
                                      face_rect, face_confidence)) {
             // 얼굴 미검출 시 추적 캐시 초기화
+            static bool facedet_fail_printed = false;
+            if (!facedet_fail_printed) {
+                std::fprintf(stderr, "[DEBUG] runFaceDetection failed (no face found)\n");
+                facedet_fail_printed = true;
+            }
             impl_->resetTrackingCache();
             return result;
+        }
+
+        static bool facedet_ok_printed = false;
+        if (!facedet_ok_printed) {
+            std::fprintf(stderr, "[DEBUG] runFaceDetection succeeded: face_rect=(%.2f,%.2f,%.2f,%.2f), conf=%.2f\n",
+                        face_rect.x, face_rect.y, face_rect.width, face_rect.height, face_confidence);
+            facedet_ok_printed = true;
         }
     }
 

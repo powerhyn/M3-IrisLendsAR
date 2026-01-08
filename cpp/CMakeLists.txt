@@ -168,7 +168,7 @@ if(IRIS_SDK_USE_SYSTEM_TFLITE)
             target_include_directories(iris_sdk PRIVATE ${TFLITE_PKG_INCLUDE_DIRS})
             target_link_libraries(iris_sdk PRIVATE ${TFLITE_PKG_LIBRARIES})
             target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_HAS_TFLITE)
-            set(TFLITE_FOUND TRUE)
+            set(TFLITE_FOUND TRUE CACHE BOOL "TensorFlow Lite found and configured" FORCE)
         endif()
     endif()
 
@@ -179,7 +179,7 @@ if(IRIS_SDK_USE_SYSTEM_TFLITE)
             message(STATUS "Using system-installed TensorFlow Lite")
             target_link_libraries(iris_sdk PRIVATE TFLite::TFLite)
             target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_HAS_TFLITE)
-            set(TFLITE_FOUND TRUE)
+            set(TFLITE_FOUND TRUE CACHE BOOL "TensorFlow Lite found and configured" FORCE)
         endif()
     endif()
 
@@ -205,11 +205,104 @@ if(IRIS_SDK_USE_SYSTEM_TFLITE)
                     target_include_directories(iris_sdk PRIVATE ${TFLITE_INCLUDE_DIR})
                     target_link_libraries(iris_sdk PRIVATE ${TFLITE_LIBRARY})
                     target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_HAS_TFLITE)
-                    set(TFLITE_FOUND TRUE)
+                    set(TFLITE_FOUND TRUE CACHE BOOL "TensorFlow Lite found and configured" FORCE)
                     break()
                 endif()
             endif()
         endforeach()
+    endif()
+endif()
+
+# 1.5 빌드 디렉토리에 사전 빌드된 라이브러리 확인 (FetchContent로 이미 빌드된 경우)
+if(NOT TFLITE_FOUND)
+    if(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a" OR TARGET tensorflow-lite)
+        message(STATUS "Found pre-built TensorFlow Lite in build directory")
+
+        # tensorflow-lite 타겟이 있으면 사용
+        if(TARGET tensorflow-lite)
+            target_link_libraries(iris_sdk PRIVATE tensorflow-lite)
+            message(STATUS "  - Using tensorflow-lite target")
+        else()
+            # 타겟이 없으면 라이브러리 파일 직접 링크
+            # 주의: libfft2d_fft4f2d.a와 libfft2d_fftsg.a는 중복 심볼 충돌이 있음
+            #       libfft2d_fftsg*.a만 사용 (TFLite 표준 구성)
+            file(GLOB TFLITE_DEP_LIBS
+                "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a"
+                "${CMAKE_BINARY_DIR}/lib/libflatbuffers.a"
+                "${CMAKE_BINARY_DIR}/lib/libfft2d_fftsg.a"
+                "${CMAKE_BINARY_DIR}/lib/libfft2d_fftsg2d.a"
+                "${CMAKE_BINARY_DIR}/lib/libfft2d_fftsg3d.a"
+                "${CMAKE_BINARY_DIR}/lib/libfft2d_alloc.a"
+                "${CMAKE_BINARY_DIR}/lib/libfft2d_shrtdct.a"
+                "${CMAKE_BINARY_DIR}/lib/libfarmhash.a"
+                "${CMAKE_BINARY_DIR}/lib/libruy*.a"
+                "${CMAKE_BINARY_DIR}/lib/libcpuinfo*.a"
+                "${CMAKE_BINARY_DIR}/lib/libXNNPACK.a"
+                "${CMAKE_BINARY_DIR}/lib/libpthreadpool.a"
+            )
+            file(GLOB ABSEIL_LIBS "${CMAKE_BINARY_DIR}/lib/libabsl_*.a")
+
+            target_link_libraries(iris_sdk PRIVATE ${TFLITE_DEP_LIBS} ${ABSEIL_LIBS})
+            list(LENGTH TFLITE_DEP_LIBS DEP_COUNT)
+            list(LENGTH ABSEIL_LIBS ABSEIL_COUNT)
+            message(STATUS "  - Linked ${DEP_COUNT} TFLite libraries")
+            message(STATUS "  - Linked ${ABSEIL_COUNT} Abseil libraries")
+        endif()
+
+        # TFLite include 디렉토리 추가 (여러 위치 검색)
+        set(TFLITE_INCLUDE_FOUND FALSE)
+
+        # 1. 현재 빌드 디렉토리
+        if(EXISTS "${CMAKE_BINARY_DIR}/_deps/tensorflow-src")
+            target_include_directories(iris_sdk PRIVATE "${CMAKE_BINARY_DIR}/_deps/tensorflow-src")
+            set(TFLITE_INCLUDE_FOUND TRUE)
+            message(STATUS "  - Added TFLite include: ${CMAKE_BINARY_DIR}/_deps/tensorflow-src")
+        endif()
+
+        # 2. 다른 빌드 디렉토리 검색 (기존 빌드에서 재사용)
+        if(NOT TFLITE_INCLUDE_FOUND)
+            foreach(ALT_BUILD_DIR "build_tflite" "build")
+                set(ALT_TFLITE_SRC "${CMAKE_SOURCE_DIR}/${ALT_BUILD_DIR}/_deps/tensorflow-src")
+                if(EXISTS "${ALT_TFLITE_SRC}/tensorflow/lite/interpreter.h")
+                    target_include_directories(iris_sdk PRIVATE "${ALT_TFLITE_SRC}")
+                    set(TFLITE_INCLUDE_FOUND TRUE)
+                    message(STATUS "  - Added TFLite include (alt): ${ALT_TFLITE_SRC}")
+                    break()
+                endif()
+            endforeach()
+        endif()
+
+        if(NOT TFLITE_INCLUDE_FOUND)
+            message(WARNING "TFLite libraries found but headers missing. TFLite features disabled.")
+        else()
+            # TFLite 의존성 헤더 경로 추가
+            # FlatBuffers
+            if(EXISTS "${CMAKE_BINARY_DIR}/flatbuffers/include")
+                target_include_directories(iris_sdk PRIVATE "${CMAKE_BINARY_DIR}/flatbuffers/include")
+                message(STATUS "  - Added FlatBuffers include")
+            endif()
+
+            # Abseil
+            if(EXISTS "${CMAKE_BINARY_DIR}/abseil-cpp")
+                target_include_directories(iris_sdk PRIVATE "${CMAKE_BINARY_DIR}/abseil-cpp")
+                message(STATUS "  - Added Abseil include")
+            endif()
+
+            # Eigen (일부 TFLite 기능에 필요)
+            if(EXISTS "${CMAKE_BINARY_DIR}/eigen")
+                target_include_directories(iris_sdk PRIVATE "${CMAKE_BINARY_DIR}/eigen")
+                message(STATUS "  - Added Eigen include")
+            endif()
+
+            # RUY
+            if(EXISTS "${CMAKE_BINARY_DIR}/ruy")
+                target_include_directories(iris_sdk PRIVATE "${CMAKE_BINARY_DIR}/ruy")
+                message(STATUS "  - Added RUY include")
+            endif()
+
+            target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_HAS_TFLITE)
+            set(TFLITE_FOUND TRUE CACHE BOOL "TensorFlow Lite found and configured" FORCE)
+        endif()
     endif()
 endif()
 
@@ -288,7 +381,7 @@ if(NOT TFLITE_FOUND AND IRIS_SDK_FETCH_TFLITE)
             ${tensorflow_SOURCE_DIR}
         )
 
-        set(TFLITE_FOUND TRUE)
+        set(TFLITE_FOUND TRUE CACHE BOOL "TensorFlow Lite found and configured" FORCE)
     else()
         message(WARNING "Failed to configure TensorFlow Lite target.")
     endif()
@@ -296,6 +389,7 @@ endif()
 
 # TFLite 상태 요약
 if(TFLITE_FOUND)
+    set(TFLITE_FOUND TRUE CACHE BOOL "TensorFlow Lite found and configured" FORCE)
     message(STATUS "TensorFlow Lite: ENABLED")
     if(IRIS_SDK_TFLITE_ENABLE_XNNPACK)
         message(STATUS "  - XNNPACK acceleration: ENABLED")

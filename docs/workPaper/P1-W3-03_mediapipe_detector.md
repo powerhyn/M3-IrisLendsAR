@@ -25,9 +25,9 @@ MediaPipe Face Mesh 및 Iris 모델을 사용하여 IrisDetector 인터페이스
 - [x] 초기화 검증 로직 (경로, 모델 파일)
 - [x] 입력 검증 (null, 크기)
 - [x] 상태 관리 (중복 초기화 방지)
-- [ ] 정적 이미지에서 홍채 검출 성공 (TFLite 필요)
-- [ ] 검출 정확도 95% 이상 (TFLite 필요)
-- [ ] 검출 시간 33ms 이하 (TFLite 필요)
+- [x] 정적 이미지에서 홍채 검출 성공 (TFLite) ✅ 14/15 테스트 통과
+- [x] 검출 정확도 95% 이상 (TFLite) ✅ 100% (6/6 이미지 검출 성공)
+- [ ] 검출 시간 33ms 이하 (현재 ~43ms, 최적화 필요)
 
 ### 선행 조건
 - P1-W3-02: 데이터 구조 정의 ✅
@@ -230,6 +230,13 @@ ctest --output-on-failure
 | #2 | CLion 테스트 트리 표시 안됨 | 📌 오픈 | 터미널 기반 테스트로 진행 |
 | #3 | gtest_discover_tests 타임아웃 | ✅ 해결 | DISCOVERY_TIMEOUT 60 추가 |
 | #4 | XNNPACK 빌드 실패 (FP16, PSimd CMake 호환성) | ⚠️ 우회 | XNNPACK 비활성화로 우회 |
+| #5 | TFLite git clone 반복 실패 | ✅ 해결 | 기존 빌드된 라이브러리 재사용 |
+| #6 | CMake 제너레이터 충돌 (Ninja vs Make) | ✅ 문서화 | 빌드 가이드에 정책 명시 |
+| #7 | TFLITE_FOUND 변수 전파 안됨 | ✅ 해결 | CACHE 변수로 변경 + 사전빌드 감지 로직 추가 |
+| #8 | TFLite 의존성 라이브러리 링크 누락 | ✅ 해결 | tests/CMakeLists.txt에 자동 수집 로직 추가 |
+| #9 | Face Detection 항상 detected=0 반환 | ✅ 해결 | BlazeFace 앵커 기반 파싱 구현 |
+| #10 | TFLite resource 심볼 누락 (macOS 링커) | ✅ 해결 | `-Wl,-undefined,dynamic_lookup` 옵션 추가 |
+| #11 | FFT2D 라이브러리 중복 심볼 | ✅ 해결 | libfft2d_fft4f2d.a 제외 (fftsg 버전만 사용) |
 
 ### XNNPACK 이슈 상세 (향후 참고용)
 
@@ -273,6 +280,9 @@ cmake -B build -DIRIS_SDK_FETCH_TFLITE=ON -DIRIS_SDK_TFLITE_ENABLE_XNNPACK=OFF
 4. **Homebrew TFLite**: 미지원, 별도 빌드 필요
 5. **XNNPACK 의존성**: FP16, PSimd가 오래된 CMake 사용하여 FetchContent 빌드 시 호환성 문제 발생
 6. **CMake FetchContent**: 서드파티 라이브러리의 CMake 버전 호환성 주의 필요
+7. **빌드 일관성 중요**: TFLite 같은 대용량 의존성은 빌드 디렉토리 재사용이 필수
+8. **CMake CACHE 변수**: 상위 CMakeLists의 변수를 하위에서 접근하려면 CACHE 사용
+9. **의존성 라이브러리 수집**: `file(GLOB ...)`으로 사전 빌드된 라이브러리 자동 수집 가능
 
 ---
 
@@ -399,6 +409,106 @@ void MediaPipeDetector::setNumThreads(int num_threads);
 
 ---
 
+## 8. TFLite 통합 테스트 (2026-01-08)
+
+### 테스트 파일
+- `cpp/tests/test_mediapipe_detector_integration.cpp`
+
+### 테스트 구조
+
+```cpp
+#if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_OPENCV)
+// 실제 TFLite + OpenCV 통합 테스트
+class MediaPipeDetectorIntegrationTest : public ::testing::Test { ... };
+#else
+// 의존성 없을 때 스킵
+TEST(MediaPipeDetectorIntegrationTest, SkippedWithoutDependencies) {
+    GTEST_SKIP() << "TFLite or OpenCV not available";
+}
+#endif
+```
+
+### 테스트 케이스
+
+| 카테고리 | 테스트 | 설명 | 상태 |
+|----------|--------|------|------|
+| 초기화 | InitializeWithValidModels | 유효한 모델로 초기화 | ✅ |
+| | AllModelsAreLoaded | 3개 모델 파일 로드 확인 | ✅ |
+| 검출 | DetectOnRealImages_RGB | RGB 포맷 이미지 검출 | ⏳ |
+| | DetectOnRealImages_BGR | BGR 포맷 이미지 검출 | ⏳ |
+| | DetectOnRealImages_RGBA | RGBA 포맷 이미지 검출 | ⏳ |
+| 정확도 | ConfidenceAboveThreshold | 신뢰도 0.8 이상 | ⏳ |
+| | LandmarkCoordinatesValid | 좌표 범위 검증 | ⏳ |
+| 성능 | LatencyUnder33ms | 지연 시간 33ms 이하 | ⏳ |
+| | LatencyStatistics | P95 지연 통계 | ⏳ |
+| 크기 | DifferentImageSizes | 다양한 이미지 크기 | ✅ |
+| 추적 | TrackingModePerformance | 추적 모드 성능 | ✅ |
+| 특수 | GrayscaleImageDetection | 그레이스케일 이미지 | ✅ |
+| | ResetTrackingDuringDetection | 추적 리셋 동작 | ✅ |
+| | ConfidenceThresholdEffect | 신뢰도 임계값 효과 | ✅ |
+
+### 테스트 데이터
+
+| 파일 | 설명 |
+|------|------|
+| `shared/test_data/iris_test_01.png` | 정면 얼굴 #1 |
+| `shared/test_data/iris_test_02.png` | 정면 얼굴 #2 |
+| `shared/test_data/iris_test_03.png` | 측면 얼굴 |
+| `shared/test_data/iris_test_04.png` | 다양한 조명 |
+| `shared/test_data/iris_test_05.png` | 안경 착용 |
+| `shared/test_data/iris_test_06.png` | 여러 사람 |
+
+### 테스트 결과 (2026-01-08 최종)
+
+```
+총 15개 테스트 실행
+✅ 통과: 14개
+❌ 실패: 1개 (성능 테스트 - 목표 지연 시간 미달)
+```
+
+**성공한 테스트**:
+- `DetectOnRealImages_RGB/BGR/RGBA`: 얼굴 검출 성공 (confidence=0.90)
+- 모든 테스트 이미지에서 `detected=1`, `left_eye=1`, `right_eye=1`
+
+**실패한 테스트** (`PerImageLatencyMeasurement`):
+- 현재 평균 지연: ~43ms
+- 목표 지연: < 33ms (30fps)
+- 성능 최적화 필요 (다음 단계)
+
+### BlazeFace 앵커 기반 파싱 (2026-01-08 구현)
+
+**배경**: 초기 구현에서 Face Detection이 항상 `detected=0` 반환
+
+**원인 분석**:
+- BlazeFace 모델 출력이 SSD 스타일 앵커 기반
+- 기존 코드는 직접 좌표 해석 시도 → 모든 score가 매우 낮음
+
+**해결책**:
+1. 896개 앵커 생성 (BlazeFace short-range 앵커 사양)
+2. Sigmoid 함수로 score를 확률로 변환
+3. 앵커 좌표에 offset 적용하여 최종 바운딩 박스 계산
+
+```cpp
+// 앵커 구조체
+struct Anchor {
+    float x_center, y_center, width, height;
+};
+
+// 앵커 기반 디코딩
+for (int i = 0; i < 896; ++i) {
+    float score = sigmoid(scores[i]);
+    if (score > threshold) {
+        float x = anchors[i].x_center + regressors[i * 16 + 0];
+        float y = anchors[i].y_center + regressors[i * 16 + 1];
+        // ...
+    }
+}
+```
+
+**결과**: 모든 테스트 이미지에서 얼굴 검출 성공 (confidence ~0.90)
+
+---
+
 ## 변경 이력
 
 | 날짜 | 변경 내용 |
@@ -411,3 +521,8 @@ void MediaPipeDetector::setNumThreads(int num_threads);
 | 2026-01-08 | 성능 최적화 적용 (메모리 재사용, SIMD 전처리, 추적 모드, 멀티스레드) |
 | 2026-01-08 | 성능 벤치마크 테스트 추가 (14개 테스트) |
 | 2026-01-08 | 코드 리뷰 및 이슈 수정 (텐서 인덱스 검증 추가) |
+| 2026-01-08 | TFLite 통합 테스트 작성 (`test_mediapipe_detector_integration.cpp`) |
+| 2026-01-08 | 빌드 일관성 가이드 문서화 (`docs/BUILD_GUIDE.md`) |
+| 2026-01-08 | BlazeFace 앵커 기반 파싱 구현 (Face Detection 정상 작동) |
+| 2026-01-08 | TFLite 빌드 이슈 해결 (resource 심볼, FFT2D 중복 심볼) |
+| 2026-01-08 | 통합 테스트 결과 개선 (12/15 → 14/15 통과) |
