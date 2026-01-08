@@ -1302,6 +1302,23 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         return result;
     }
 
+    // Face Landmark 좌표 변환: 크롭된 얼굴 영역 → 전체 이미지 좌표
+    // Face Landmark 모델은 192x192 픽셀 좌표를 출력
+    // 1. 먼저 픽셀 좌표 → 정규화 좌표 (0-1)
+    // 2. 그 다음 face_rect 기준 → 전체 이미지 기준으로 변환
+    for (int i = 0; i < FACE_LANDMARK_COUNT; ++i) {
+        // 픽셀 좌표 → 정규화 좌표 (0-1 범위)
+        float local_x = impl_->face_landmarks_buffer[i * 3 + 0] /
+                        static_cast<float>(FACE_LANDMARK_INPUT_WIDTH);
+        float local_y = impl_->face_landmarks_buffer[i * 3 + 1] /
+                        static_cast<float>(FACE_LANDMARK_INPUT_HEIGHT);
+        // z 좌표는 변환 없이 유지
+
+        // 크롭 영역 내 좌표를 전체 이미지 좌표로 변환
+        impl_->face_landmarks_buffer[i * 3 + 0] = face_rect.x + local_x * face_rect.width;
+        impl_->face_landmarks_buffer[i * 3 + 1] = face_rect.y + local_y * face_rect.height;
+    }
+
     // =========================================================
     // 4. Iris Landmark: 왼쪽 눈 (사전 할당 버퍼 사용)
     // =========================================================
@@ -1314,9 +1331,13 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         if (impl_->runIrisLandmark(impl_->left_iris_input_buffer.data(),
                                    impl_->left_iris_landmarks_buffer.data())) {
             // 크롭 좌표를 원본 이미지 좌표로 변환
+            // 참고: Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
             for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
-                float local_x = impl_->left_iris_landmarks_buffer[i * 3 + 0];
-                float local_y = impl_->left_iris_landmarks_buffer[i * 3 + 1];
+                // 픽셀 좌표 → 정규화 좌표 (0-1)
+                float local_x = impl_->left_iris_landmarks_buffer[i * 3 + 0] /
+                                static_cast<float>(IRIS_LANDMARK_INPUT_WIDTH);
+                float local_y = impl_->left_iris_landmarks_buffer[i * 3 + 1] /
+                                static_cast<float>(IRIS_LANDMARK_INPUT_HEIGHT);
                 float local_z = impl_->left_iris_landmarks_buffer[i * 3 + 2];
 
                 // 크롭 영역 내 좌표를 원본 이미지 좌표로 변환
@@ -1342,9 +1363,13 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         if (impl_->runIrisLandmark(impl_->right_iris_input_buffer.data(),
                                    impl_->right_iris_landmarks_buffer.data())) {
             // 크롭 좌표를 원본 이미지 좌표로 변환
+            // 참고: Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
             for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
-                float local_x = impl_->right_iris_landmarks_buffer[i * 3 + 0];
-                float local_y = impl_->right_iris_landmarks_buffer[i * 3 + 1];
+                // 픽셀 좌표 → 정규화 좌표 (0-1)
+                float local_x = impl_->right_iris_landmarks_buffer[i * 3 + 0] /
+                                static_cast<float>(IRIS_LANDMARK_INPUT_WIDTH);
+                float local_y = impl_->right_iris_landmarks_buffer[i * 3 + 1] /
+                                static_cast<float>(IRIS_LANDMARK_INPUT_HEIGHT);
                 float local_z = impl_->right_iris_landmarks_buffer[i * 3 + 2];
 
                 result.right_iris[i].x = right_eye_crop.x + local_x * right_eye_crop.width;

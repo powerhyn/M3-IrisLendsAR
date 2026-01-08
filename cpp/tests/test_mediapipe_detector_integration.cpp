@@ -976,6 +976,167 @@ TEST_F(MediaPipeDetectorIntegrationTest, ConfidenceThresholdEffect) {
 }
 
 // ============================================================
+// 시각화 테스트 (Visualization Tests)
+// ============================================================
+
+/**
+ * @brief 검출 결과를 이미지에 시각화하여 저장
+ *
+ * 얼굴 바운딩 박스와 홍채 랜드마크를 이미지에 그리고
+ * output 폴더에 저장합니다.
+ */
+TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
+    if (!setup_success_) {
+        GTEST_SKIP() << "Setup failed - models or images not available";
+    }
+
+    if (test_images_.empty()) {
+        GTEST_SKIP() << "No test images available";
+    }
+
+    std::cout << "\n=== Detection Results Visualization ===" << std::endl;
+
+    // 출력 디렉토리 생성
+    std::filesystem::path output_path = test_data_path_ / "output";
+    std::filesystem::create_directories(output_path);
+    std::string output_dir = output_path.string();
+    std::cout << "Output directory: " << output_dir << std::endl;
+
+    int success_count = 0;
+
+    for (size_t i = 0; i < test_images_.size(); ++i) {
+        const auto& image = test_images_[i];
+        std::string image_name = TEST_IMAGE_FILES[i];
+
+        // BGR -> RGB 변환 (검출용)
+        cv::Mat rgb_image;
+        cv::cvtColor(image, rgb_image, cv::COLOR_BGR2RGB);
+
+        // 검출 수행
+        IrisResult result = detector_->detect(
+            rgb_image.data, rgb_image.cols, rgb_image.rows, FrameFormat::RGB
+        );
+
+        // 시각화용 이미지 복사 (BGR 유지)
+        cv::Mat vis_image = image.clone();
+
+        // 디버그: 결과 상세 출력
+        std::cout << "\n  [" << image_name << "] Detection details:" << std::endl;
+        std::cout << "    detected=" << result.detected
+                  << ", left_detected=" << result.left_detected
+                  << ", right_detected=" << result.right_detected << std::endl;
+        std::cout << "    face_rect: x=" << result.face_rect.x
+                  << ", y=" << result.face_rect.y
+                  << ", w=" << result.face_rect.width
+                  << ", h=" << result.face_rect.height << std::endl;
+        if (result.left_detected) {
+            std::cout << "    left_iris[0]: x=" << result.left_iris[0].x
+                      << ", y=" << result.left_iris[0].y << std::endl;
+        }
+        if (result.right_detected) {
+            std::cout << "    right_iris[0]: x=" << result.right_iris[0].x
+                      << ", y=" << result.right_iris[0].y << std::endl;
+        }
+
+        if (result.detected) {
+            int img_w = vis_image.cols;
+            int img_h = vis_image.rows;
+
+            // 1. 얼굴 바운딩 박스 그리기 (녹색)
+            cv::Rect face_box(
+                static_cast<int>(result.face_rect.x * img_w),
+                static_cast<int>(result.face_rect.y * img_h),
+                static_cast<int>(result.face_rect.width * img_w),
+                static_cast<int>(result.face_rect.height * img_h)
+            );
+            cv::rectangle(vis_image, face_box, cv::Scalar(0, 255, 0), 3);
+
+            // 2. 왼쪽 홍채 그리기 (파란색)
+            if (result.left_detected) {
+                // 중심점
+                cv::Point left_center(
+                    static_cast<int>(result.left_iris[0].x * img_w),
+                    static_cast<int>(result.left_iris[0].y * img_h)
+                );
+                cv::circle(vis_image, left_center, 8, cv::Scalar(255, 0, 0), -1);  // 채운 원
+
+                // 경계점들
+                for (int j = 1; j < 5; ++j) {
+                    cv::Point pt(
+                        static_cast<int>(result.left_iris[j].x * img_w),
+                        static_cast<int>(result.left_iris[j].y * img_h)
+                    );
+                    cv::circle(vis_image, pt, 4, cv::Scalar(255, 100, 100), -1);
+                }
+
+                // 홍채 원 (반지름 사용)
+                if (result.left_radius > 0) {
+                    cv::circle(vis_image, left_center, static_cast<int>(result.left_radius),
+                               cv::Scalar(255, 0, 0), 2);
+                }
+            }
+
+            // 3. 오른쪽 홍채 그리기 (빨간색)
+            if (result.right_detected) {
+                // 중심점
+                cv::Point right_center(
+                    static_cast<int>(result.right_iris[0].x * img_w),
+                    static_cast<int>(result.right_iris[0].y * img_h)
+                );
+                cv::circle(vis_image, right_center, 8, cv::Scalar(0, 0, 255), -1);
+
+                // 경계점들
+                for (int j = 1; j < 5; ++j) {
+                    cv::Point pt(
+                        static_cast<int>(result.right_iris[j].x * img_w),
+                        static_cast<int>(result.right_iris[j].y * img_h)
+                    );
+                    cv::circle(vis_image, pt, 4, cv::Scalar(100, 100, 255), -1);
+                }
+
+                // 홍채 원 (반지름 사용)
+                if (result.right_radius > 0) {
+                    cv::circle(vis_image, right_center, static_cast<int>(result.right_radius),
+                               cv::Scalar(0, 0, 255), 2);
+                }
+            }
+
+            // 4. 정보 텍스트 추가
+            std::string info = "conf=" + std::to_string(result.confidence).substr(0, 4);
+            cv::putText(vis_image, info, cv::Point(10, 30),
+                        cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0), 2);
+
+            success_count++;
+        } else {
+            // 검출 실패 표시
+            cv::putText(vis_image, "NO FACE DETECTED", cv::Point(10, 30),
+                        cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 0, 255), 2);
+        }
+
+        // 출력 파일명 생성 (확장자를 jpg로 변경)
+        std::string base_name = image_name.substr(0, image_name.find_last_of('.'));
+        std::string output_path = output_dir + "/" + base_name + "_result.jpg";
+
+        // 저장
+        bool saved = cv::imwrite(output_path, vis_image);
+        if (saved) {
+            std::cout << "  Saved: " << output_path
+                      << " (detected=" << result.detected
+                      << ", conf=" << result.confidence << ")" << std::endl;
+        } else {
+            std::cout << "  FAILED to save: " << output_path << std::endl;
+        }
+    }
+
+    std::cout << "\n=== Summary ===" << std::endl;
+    std::cout << "Total images: " << test_images_.size() << std::endl;
+    std::cout << "Detected: " << success_count << std::endl;
+    std::cout << "Output directory: " << output_dir << std::endl;
+
+    EXPECT_GT(success_count, 0);
+}
+
+// ============================================================
 // P1-W3-04: 경계 조건 테스트 (Edge Case Tests)
 // ============================================================
 
