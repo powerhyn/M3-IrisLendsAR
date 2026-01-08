@@ -1,6 +1,38 @@
 # IrisLensSDK - C++ Core Engine CMakeLists.txt
 
 # =============================================================================
+# Standalone Build Support (CLion에서 cpp 폴더만 열 때)
+# =============================================================================
+# 독립 실행 시에만 필수 설정 추가 (서브프로젝트로 사용될 때는 스킵)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.18)
+    project(IrisSDK_Core
+        VERSION 0.1.0
+        DESCRIPTION "IrisLensSDK C++ Core Engine"
+        LANGUAGES CXX
+    )
+
+    # 독립 빌드 옵션
+    option(BUILD_TESTS "Build unit tests" ON)
+    option(BUILD_EXAMPLES "Build examples" ON)
+
+    # C++ 표준 설정
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+
+    # 출력 디렉토리
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+    # 컴파일 명령어 내보내기 (IDE 지원)
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+    message(STATUS "Building IrisSDK Core as standalone project")
+endif()
+
+# =============================================================================
 # CMake Module Path
 # =============================================================================
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
