@@ -29,7 +29,7 @@ target_link_libraries(test_types PRIVATE
     GTest::gtest
     GTest::gtest_main
 )
-add_test(NAME test_types COMMAND test_types)
+# add_test는 gtest_discover_tests가 대체함
 
 # ============================================================
 # P1-W3-01: IrisDetector 인터페이스 테스트
@@ -41,11 +41,23 @@ target_link_libraries(test_iris_detector PRIVATE
     GTest::gtest_main
     iris_sdk
 )
-add_test(NAME test_iris_detector COMMAND test_iris_detector)
+# add_test는 gtest_discover_tests가 대체함
 
 # ============================================================
-# 테스트 디스커버리 (선택적)
+# P1-W3-03: MediaPipeDetector 테스트
+# ============================================================
+add_executable(test_mediapipe_detector test_mediapipe_detector.cpp)
+target_include_directories(test_mediapipe_detector PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_mediapipe_detector PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# ============================================================
+# 테스트 디스커버리
 # ============================================================
 include(GoogleTest)
-gtest_discover_tests(test_types)
-gtest_discover_tests(test_iris_detector)
+gtest_discover_tests(test_types DISCOVERY_TIMEOUT 60)
+gtest_discover_tests(test_iris_detector DISCOVERY_TIMEOUT 60)
+gtest_discover_tests(test_mediapipe_detector DISCOVERY_TIMEOUT 60)

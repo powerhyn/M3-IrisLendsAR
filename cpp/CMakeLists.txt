@@ -43,7 +43,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(IRIS_SDK_SOURCES
     # Core implementation
     src/iris_detector.cpp
-    # src/mediapipe_detector.cpp
+    src/mediapipe_detector.cpp
     # src/lens_renderer.cpp
     # src/frame_processor.cpp
     # src/sdk_manager.cpp
