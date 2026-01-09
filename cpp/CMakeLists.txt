@@ -48,7 +48,7 @@ set(IRIS_SDK_SOURCES
     # Core implementation
     src/iris_detector.cpp
     src/mediapipe_detector.cpp
-    # src/lens_renderer.cpp
+    src/lens_renderer.cpp
     # src/frame_processor.cpp
     # src/sdk_manager.cpp
     # src/sdk_api.cpp
@@ -126,7 +126,7 @@ endif()
 # =============================================================================
 
 # OpenCV (required)
-find_package(OpenCV QUIET COMPONENTS core imgproc highgui)
+find_package(OpenCV QUIET COMPONENTS core imgproc imgcodecs highgui)
 if(OpenCV_FOUND)
     message(STATUS "OpenCV found: ${OpenCV_VERSION}")
     target_link_libraries(iris_sdk PRIVATE ${OpenCV_LIBS})

@@ -77,6 +77,25 @@ target_link_libraries(test_mediapipe_detector_integration PRIVATE
     iris_sdk
 )
 
+# ============================================================
+# LensRenderer 테스트
+# ============================================================
+add_executable(test_lens_renderer test_lens_renderer.cpp)
+target_include_directories(test_lens_renderer PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_lens_renderer PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (LensRenderer는 OpenCV 필수)
+if(OpenCV_FOUND)
+    target_link_libraries(test_lens_renderer PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_lens_renderer PRIVATE IRIS_SDK_HAS_OPENCV)
+else()
+    message(WARNING "LensRenderer tests require OpenCV. Tests will be disabled.")
+endif()
+
 # OpenCV 연결 (통합 테스트에 필요)
 if(OpenCV_FOUND)
     target_link_libraries(test_mediapipe_detector_integration PRIVATE ${OpenCV_LIBS})
@@ -156,3 +175,4 @@ gtest_discover_tests(test_iris_detector DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_mediapipe_detector DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_mediapipe_detector_performance DISCOVERY_TIMEOUT 120)
 gtest_discover_tests(test_mediapipe_detector_integration DISCOVERY_TIMEOUT 180)
+gtest_discover_tests(test_lens_renderer DISCOVERY_TIMEOUT 60)

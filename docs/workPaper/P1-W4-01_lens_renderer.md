@@ -1,9 +1,9 @@
 # P1-W4-01: LensRenderer 기본 구현
 
 **태스크 ID**: P1-W4-01
-**상태**: ⏳ 대기
-**시작일**: -
-**완료일**: -
+**상태**: ✅ 완료
+**시작일**: 2026-01-09
+**완료일**: 2026-01-09
 
 ---
 
@@ -13,22 +13,22 @@
 검출된 홍채 위치에 가상 렌즈 텍스처를 오버레이하는 렌더러를 구현한다.
 
 ### 산출물
-| 파일 | 설명 |
-|------|------|
-| `cpp/include/iris_sdk/lens_renderer.h` | LensRenderer 클래스 선언 |
-| `cpp/src/lens_renderer.cpp` | LensRenderer 구현 |
-| `shared/textures/sample_lens.png` | 샘플 렌즈 텍스처 |
+| 파일 | 설명 | 상태 |
+|------|------|------|
+| `cpp/include/iris_sdk/lens_renderer.h` | LensRenderer 클래스 선언 | ✅ 완료 |
+| `cpp/src/lens_renderer.cpp` | LensRenderer 구현 | ✅ 완료 |
+| `shared/textures/sample_lens.png` | 샘플 렌즈 텍스처 | ⏳ 별도 태스크 |
 
 ### 검증 기준
-- [ ] 텍스처 로딩 성공
-- [ ] 정적 이미지에 렌즈 오버레이 성공
-- [ ] 양눈 독립 렌더링 지원
-- [ ] 렌더링 시간 10ms 이하
-- [ ] 시각적 품질 확인
+- [x] 텍스처 로딩 성공 (PNG, JPEG, Grayscale 지원)
+- [x] 정적 이미지에 렌즈 오버레이 성공 (API 구현 완료)
+- [x] 양눈 독립 렌더링 지원 (renderLeftEye, renderRightEye)
+- [ ] 렌더링 시간 10ms 이하 (통합 테스트 필요)
+- [ ] 시각적 품질 확인 (통합 테스트 필요)
 
 ### 선행 조건
 - P1-W3-02: 데이터 구조 정의 ✅
-- P1-W3-03: MediaPipeDetector 구현 (병렬 가능)
+- P1-W3-03: MediaPipeDetector 구현 ✅
 
 ---
 
@@ -46,275 +46,184 @@ IrisResult (검출 결과)
     │
     ▼
 ┌─────────────────┐
-│ 마스크 생성     │ 원형 마스크 (홍채 크기)
+│ 영역 계산       │ 중심, 반지름, 회전 각도
 └─────────────────┘
     │
     ▼
 ┌─────────────────┐
-│ 텍스처 변환     │ 크기 조절, 위치 맞춤
+│ 텍스처 변환     │ 리사이즈 + 회전 (warpAffine)
 └─────────────────┘
     │
     ▼
 ┌─────────────────┐
-│ 블렌딩          │ 알파 블렌딩 + 마스크 적용
+│ 마스크 생성     │ 원형 페더링 마스크
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│ 블렌딩          │ 알파 블렌딩 (Normal/Multiply/Screen/Overlay)
 └─────────────────┘
     │
     ▼
 Output Frame (렌즈 적용된 이미지)
 ```
 
-### 2.2 클래스 설계
+### 2.2 구현된 클래스 설계
 
 ```cpp
-#pragma once
-
-#include "iris_sdk/types.h"
-#include "iris_sdk/export.h"
-#include <memory>
-#include <string>
-
-namespace cv { class Mat; }
-
-namespace iris_sdk {
-
-/**
- * @brief 가상 렌즈 렌더러
- *
- * 검출된 홍채 위치에 렌즈 텍스처를 오버레이
- */
 class IRIS_SDK_EXPORT LensRenderer {
 public:
     LensRenderer();
     ~LensRenderer();
+    LensRenderer(LensRenderer&&) noexcept;
+    LensRenderer& operator=(LensRenderer&&) noexcept;
 
-    /**
-     * @brief 렌더러 초기화
-     * @return 성공 여부
-     */
+    // 초기화/해제
     bool initialize();
-
-    /**
-     * @brief 파일에서 렌즈 텍스처 로드
-     * @param texture_path 텍스처 이미지 경로
-     * @return 성공 여부
-     */
-    bool loadTexture(const std::string& texture_path);
-
-    /**
-     * @brief 메모리에서 렌즈 텍스처 로드
-     * @param data RGBA 데이터
-     * @param width 너비
-     * @param height 높이
-     * @return 성공 여부
-     */
-    bool loadTexture(const uint8_t* data, int width, int height);
-
-    /**
-     * @brief 프레임에 렌즈 렌더링
-     * @param frame 입출력 이미지 (in-place 수정)
-     * @param iris_result 홍채 검출 결과
-     * @param config 렌더링 설정
-     * @return 성공 여부
-     */
-    bool render(cv::Mat& frame,
-                const IrisResult& iris_result,
-                const LensConfig& config);
-
-    /**
-     * @brief 왼쪽 눈에만 렌더링
-     */
-    bool renderLeftEye(cv::Mat& frame,
-                       const IrisResult& iris_result,
-                       const LensConfig& config);
-
-    /**
-     * @brief 오른쪽 눈에만 렌더링
-     */
-    bool renderRightEye(cv::Mat& frame,
-                        const IrisResult& iris_result,
-                        const LensConfig& config);
-
-    /**
-     * @brief 텍스처 언로드
-     */
-    void unloadTexture();
-
-    /**
-     * @brief 리소스 해제
-     */
     void release();
+    bool isInitialized() const;
 
-    /**
-     * @brief 텍스처 로드 상태 확인
-     */
+    // 텍스처 관리
+    bool loadTexture(const std::string& texture_path);
+    bool loadTexture(const uint8_t* data, int width, int height);
+    void unloadTexture();
     bool hasTexture() const;
+
+    // 렌더링
+    bool render(cv::Mat& frame, const IrisResult& iris_result, const LensConfig& config);
+    bool renderLeftEye(cv::Mat& frame, const IrisResult& iris_result, const LensConfig& config);
+    bool renderRightEye(cv::Mat& frame, const IrisResult& iris_result, const LensConfig& config);
+
+    // 통계
+    double getLastRenderTimeMs() const;
 
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
-
-} // namespace iris_sdk
 ```
 
-### 2.3 핵심 렌더링 로직
+### 2.3 핵심 구현 세부사항
 
-**2.3.1 좌표 변환**
-```cpp
-cv::Point2f normalizedToPixel(const IrisLandmark& landmark,
-                              int frame_width, int frame_height) {
-    return cv::Point2f(
-        landmark.x * frame_width,
-        landmark.y * frame_height
-    );
-}
-```
-
-**2.3.2 홍채 영역 계산**
+**2.3.1 홍채 영역 구조체**
 ```cpp
 struct IrisRegion {
-    cv::Point2f center;
-    float radius;
-    float angle;  // 회전 각도 (눈 기울기)
+    cv::Point2f center;     // 홍채 중심 (픽셀 좌표)
+    float radius;           // 홍채 반지름 (픽셀)
+    float angle;            // 회전 각도 (도)
+    bool valid;             // 유효성 플래그
 };
-
-IrisRegion calculateIrisRegion(const IrisLandmark iris[5],
-                                int frame_width, int frame_height) {
-    IrisRegion region;
-
-    // 중심점 (landmark[0])
-    region.center = normalizedToPixel(iris[0], frame_width, frame_height);
-
-    // 반지름 (landmark[1,2,3,4]의 평균 거리)
-    float sum_radius = 0;
-    for (int i = 1; i <= 4; ++i) {
-        cv::Point2f pt = normalizedToPixel(iris[i], frame_width, frame_height);
-        sum_radius += cv::norm(pt - region.center);
-    }
-    region.radius = sum_radius / 4.0f;
-
-    // 회전 각도 (수평 랜드마크로 계산)
-    cv::Point2f left = normalizedToPixel(iris[3], frame_width, frame_height);
-    cv::Point2f right = normalizedToPixel(iris[4], frame_width, frame_height);
-    region.angle = std::atan2(right.y - left.y, right.x - left.x) * 180.0f / CV_PI;
-
-    return region;
-}
 ```
 
-**2.3.3 텍스처 변환**
-```cpp
-cv::Mat transformTexture(const cv::Mat& texture,
-                         const IrisRegion& region,
-                         const LensConfig& config) {
-    // 목표 크기 계산
-    int target_size = static_cast<int>(region.radius * 2 * config.scale);
+**2.3.2 좌표 변환**
+- IrisLandmark의 정규화 좌표(0~1)를 픽셀 좌표로 변환
+- 프레임 크기에 따라 동적 스케일링
 
-    // 리사이즈
-    cv::Mat resized;
-    cv::resize(texture, resized, cv::Size(target_size, target_size),
-               0, 0, cv::INTER_LINEAR);
+**2.3.3 반지름 계산**
+- landmark[0]: 중심점
+- landmark[1~4]: 상/하/좌/우 경계점
+- 4개 경계점의 평균 거리로 반지름 계산
+- 최소 5px ~ 최대 200px 범위 검증
 
-    // 회전 적용
-    cv::Mat rotated;
-    cv::Point2f center(resized.cols / 2.0f, resized.rows / 2.0f);
-    cv::Mat rot_mat = cv::getRotationMatrix2D(center, region.angle, 1.0);
-    cv::warpAffine(resized, rotated, rot_mat, resized.size(),
-                   cv::INTER_LINEAR, cv::BORDER_TRANSPARENT);
+**2.3.4 회전 각도 계산**
+- landmark[3] (좌측)과 landmark[4] (우측) 사용
+- atan2로 수평 기준 회전 각도 계산
 
-    return rotated;
-}
-```
+**2.3.5 텍스처 변환**
+- cv::resize로 홍채 크기에 맞게 리사이즈
+- cv::warpAffine으로 회전 적용
+- BORDER_CONSTANT로 회전 시 빈 영역 처리
 
-**2.3.4 알파 블렌딩**
-```cpp
-void alphaBlend(cv::Mat& dst, const cv::Mat& src, const cv::Mat& mask,
-                cv::Point2i position, float opacity) {
-    // ROI 계산 (경계 처리)
-    cv::Rect src_rect(0, 0, src.cols, src.rows);
-    cv::Rect dst_rect(position.x - src.cols/2, position.y - src.rows/2,
-                      src.cols, src.rows);
+**2.3.6 페더링 마스크**
+- 코사인 보간으로 부드러운 가장자리 생성
+- 내부 원: 완전 불투명 (alpha=1.0)
+- 외부 가장자리: 점진적 페이드아웃
 
-    // 프레임 경계 클리핑
-    cv::Rect frame_rect(0, 0, dst.cols, dst.rows);
-    cv::Rect valid_dst = dst_rect & frame_rect;
-    if (valid_dst.empty()) return;
-
-    // 소스 영역 조정
-    cv::Rect valid_src(
-        valid_dst.x - dst_rect.x,
-        valid_dst.y - dst_rect.y,
-        valid_dst.width,
-        valid_dst.height
-    );
-
-    // 블렌딩
-    cv::Mat dst_roi = dst(valid_dst);
-    cv::Mat src_roi = src(valid_src);
-    cv::Mat mask_roi = mask(valid_src);
-
-    for (int y = 0; y < dst_roi.rows; ++y) {
-        for (int x = 0; x < dst_roi.cols; ++x) {
-            float alpha = mask_roi.at<float>(y, x) * opacity;
-            if (alpha > 0.01f) {
-                cv::Vec3b& d = dst_roi.at<cv::Vec3b>(y, x);
-                cv::Vec3b s = src_roi.at<cv::Vec3b>(y, x);
-                d = cv::Vec3b(
-                    static_cast<uint8_t>(d[0] * (1 - alpha) + s[0] * alpha),
-                    static_cast<uint8_t>(d[1] * (1 - alpha) + s[1] * alpha),
-                    static_cast<uint8_t>(d[2] * (1 - alpha) + s[2] * alpha)
-                );
-            }
-        }
-    }
-}
-```
+**2.3.7 블렌드 모드**
+| 모드 | 수식 | 용도 |
+|------|------|------|
+| Normal | dst = src*a + dst*(1-a) | 기본 오버레이 |
+| Multiply | dst = src*dst/255 | 어둡게 |
+| Screen | dst = 255 - (255-src)*(255-dst)/255 | 밝게 |
+| Overlay | if d<0.5: 2*s*d else: 1-2*(1-s)*(1-d) | 대비 강화 |
 
 ### 2.4 텍스처 요구사항
 
 | 항목 | 요구사항 |
 |------|----------|
-| 포맷 | PNG (알파 채널 포함) |
+| 포맷 | PNG (알파 채널 포함 권장), JPEG, Grayscale |
 | 크기 | 256x256 ~ 512x512 권장 |
 | 형태 | 원형, 중심 정렬 |
 | 알파 | 경계 그라데이션 권장 |
 
 ### 2.5 성능 최적화
 
-| 전략 | 설명 |
-|------|------|
-| 텍스처 캐싱 | 미리 변환된 텍스처 저장 |
-| ROI 처리 | 눈 영역만 렌더링 |
-| SIMD 블렌딩 | OpenCV 최적화 활용 |
-| 룩업 테이블 | 알파 계산 미리 수행 |
+| 전략 | 구현 상태 |
+|------|----------|
+| ROI 기반 처리 | ✅ 홍채 영역만 렌더링 |
+| 경계 클리핑 | ✅ 프레임 경계 자동 처리 |
+| 조건부 컴파일 | ✅ IRIS_SDK_HAS_OPENCV |
+| 렌더링 시간 측정 | ✅ getLastRenderTimeMs() |
 
 ---
 
 ## 3. 실행 내역
 
-### 3.1 헤더 파일 작성
+### 3.1 헤더 파일 작성 ✅
 
 ```bash
-# 예정: cpp/include/iris_sdk/lens_renderer.h
+# 생성됨: cpp/include/iris_sdk/lens_renderer.h
+# - Pimpl 패턴 적용
+# - cv::Mat 전방 선언
+# - IRIS_SDK_EXPORT 매크로 사용
+# - Doxygen 주석 완료
 ```
 
-### 3.2 구현 파일 작성
+### 3.2 구현 파일 작성 ✅
 
 ```bash
-# 예정: cpp/src/lens_renderer.cpp
+# 생성됨: cpp/src/lens_renderer.cpp
+# - 조건부 컴파일 (IRIS_SDK_HAS_OPENCV)
+# - 4가지 블렌드 모드 구현
+# - 페더링 마스크 생성
+# - ROI 기반 블렌딩
 ```
 
-### 3.3 샘플 텍스처 생성
+### 3.3 CMake 업데이트 ✅
 
 ```bash
-# 예정: shared/textures/sample_lens.png
+# 수정됨: cpp/CMakeLists.txt
+# - IRIS_SDK_SOURCES에 lens_renderer.cpp 추가
+# - OpenCV imgcodecs 컴포넌트 추가
 ```
 
-### 3.4 테스트 작성
+### 3.4 빌드 검증 ✅
 
 ```bash
-# 예정: cpp/tests/test_lens_renderer.cpp
+cd cpp/cmake-build-debug
+cmake --build . --target iris_sdk
+# 결과: 성공적으로 컴파일됨
 ```
+
+### 3.5 단위 테스트 작성 ✅
+
+```bash
+# 생성됨: cpp/tests/test_lens_renderer.cpp
+# - 총 57개 테스트 케이스
+# - 초기화, 텍스처, 렌더링, 경계 조건, 성능 테스트
+# - 모든 테스트 통과
+```
+
+### 3.6 코드 리뷰 및 최적화 ✅
+
+**리뷰 결과:**
+- 1 Critical, 11 Warning, 11 Info 이슈 발견
+- 주요 수정 사항:
+  - 텍스처 크기 최대값 검증 (4096px)
+  - frame 유효성 검사 추가
+  - frame_width/height 검증
+  - impl_ nullptr 체크 (이동 후 안전성)
+  - noexcept 지정자 추가
 
 ---
 
@@ -324,12 +233,18 @@ void alphaBlend(cv::Mat& dst, const cv::Mat& src, const cv::Mat& mask,
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
-| 텍스처 로딩 | ⏳ 대기 | PNG, JPEG |
-| 좌표 변환 | ⏳ 대기 | |
-| 렌더링 정확성 | ⏳ 대기 | |
-| 양눈 렌더링 | ⏳ 대기 | |
-| 렌더링 시간 | ⏳ 대기 | 목표: 10ms |
-| 시각적 품질 | ⏳ 대기 | |
+| 컴파일 | ✅ 성공 | CMake 빌드 성공 |
+| 텍스처 로딩 API | ✅ 구현 | PNG, JPEG, Grayscale, RGBA |
+| 좌표 변환 | ✅ 구현 | normalizedToPixel() |
+| 홍채 영역 계산 | ✅ 구현 | calculateIrisRegion() |
+| 텍스처 변환 | ✅ 구현 | transformTexture() |
+| 페더링 마스크 | ✅ 구현 | createFeatherMask() |
+| 알파 블렌딩 | ✅ 구현 | 4가지 블렌드 모드 |
+| 양눈 렌더링 | ✅ 구현 | renderLeftEye(), renderRightEye() |
+| 단위 테스트 | ✅ 57개 통과 | 초기화, 텍스처, 렌더링, 경계 조건, 성능 |
+| 코드 리뷰 | ✅ 완료 | Critical/Warning 이슈 수정 완료 |
+| 렌더링 시간 | ⏳ 대기 | 통합 테스트 필요 (목표: 10ms) |
+| 시각적 품질 | ⏳ 대기 | 통합 테스트 필요 |
 
 ---
 
@@ -345,13 +260,19 @@ void alphaBlend(cv::Mat& dst, const cv::Mat& src, const cv::Mat& mask,
 
 | 결정 | 이유 |
 |------|------|
-| in-place 렌더링 | 메모리 복사 최소화 |
-| Pimpl 패턴 | OpenCV 헤더 의존성 분리 |
-| 원형 마스크 | 홍채 형태에 가장 적합 |
+| in-place 렌더링 | 메모리 복사 최소화, cv::Mat& 참조 사용 |
+| Pimpl 패턴 | OpenCV 헤더 의존성 분리, ABI 안정성 |
+| 원형 페더링 마스크 | 홍채 형태에 가장 적합, 자연스러운 경계 |
+| 코사인 보간 | 선형 보간보다 부드러운 페이드아웃 |
+| 조건부 컴파일 | OpenCV 없이도 컴파일 가능하도록 |
+| 이동 생성자 지원 | std::vector 등에서 효율적 사용 |
 
 ### 학습 내용
 
-(실행 후 기록)
+1. **cv::warpAffine 경계 처리**: BORDER_CONSTANT로 회전 시 빈 영역을 투명하게 처리
+2. **알파 블렌딩 최적화**: ROI 기반 처리로 전체 프레임 순회 방지
+3. **경계 클리핑**: 홍채가 프레임 경계에 걸릴 때 안전하게 처리
+4. **블렌드 모드 수식**: Photoshop 스타일 블렌드 모드 구현
 
 ---
 
@@ -360,3 +281,4 @@ void alphaBlend(cv::Mat& dst, const cv::Mat& src, const cv::Mat& mask,
 | 날짜 | 변경 내용 |
 |------|----------|
 | 2026-01-07 | 태스크 문서 생성, 렌더링 파이프라인 설계 완료 |
+| 2026-01-09 | LensRenderer 구현 완료, 빌드 검증 성공 |
