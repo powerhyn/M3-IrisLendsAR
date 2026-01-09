@@ -167,6 +167,44 @@ else()
 endif()
 
 # ============================================================
+# LensRenderer 통합 테스트 (MediaPipeDetector 연동)
+# ============================================================
+add_executable(test_lens_renderer_integration test_lens_renderer_integration.cpp)
+target_include_directories(test_lens_renderer_integration PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_lens_renderer_integration PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (필수)
+if(OpenCV_FOUND)
+    target_link_libraries(test_lens_renderer_integration PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_lens_renderer_integration PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+# TFLite 연결 (MediaPipeDetector에 필요)
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_lens_renderer_integration PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_lens_renderer_integration PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_lens_renderer_integration PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_lens_renderer_integration PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_lens_renderer_integration PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+# ============================================================
 # 테스트 디스커버리
 # ============================================================
 include(GoogleTest)
@@ -176,3 +214,44 @@ gtest_discover_tests(test_mediapipe_detector DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_mediapipe_detector_performance DISCOVERY_TIMEOUT 120)
 gtest_discover_tests(test_mediapipe_detector_integration DISCOVERY_TIMEOUT 180)
 gtest_discover_tests(test_lens_renderer DISCOVERY_TIMEOUT 60)
+gtest_discover_tests(test_lens_renderer_integration DISCOVERY_TIMEOUT 180)
+
+# ============================================================
+# FrameProcessor 테스트
+# ============================================================
+add_executable(test_frame_processor test_frame_processor.cpp)
+target_include_directories(test_frame_processor PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_frame_processor PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (필수)
+if(OpenCV_FOUND)
+    target_link_libraries(test_frame_processor PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_frame_processor PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+# TFLite 연결 (MediaPipeDetector에 필요)
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_frame_processor PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_frame_processor PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_frame_processor PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_frame_processor PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_frame_processor PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+gtest_discover_tests(test_frame_processor DISCOVERY_TIMEOUT 180)
