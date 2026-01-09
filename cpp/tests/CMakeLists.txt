@@ -255,3 +255,43 @@ elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
 endif()
 
 gtest_discover_tests(test_frame_processor DISCOVERY_TIMEOUT 180)
+
+# ============================================================
+# P1-W4-07: CameraDemo 기본 테스트
+# ============================================================
+add_executable(test_camera_demo test_camera_demo.cpp)
+target_include_directories(test_camera_demo PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_camera_demo PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (필수)
+if(OpenCV_FOUND)
+    target_link_libraries(test_camera_demo PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_camera_demo PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+# TFLite 연결
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_camera_demo PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_camera_demo PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_camera_demo PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_camera_demo PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_camera_demo PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+gtest_discover_tests(test_camera_demo DISCOVERY_TIMEOUT 60)
