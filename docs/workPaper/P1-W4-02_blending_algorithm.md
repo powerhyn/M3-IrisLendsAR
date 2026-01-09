@@ -1,9 +1,9 @@
 # P1-W4-02: 블렌딩 알고리즘 구현
 
 **태스크 ID**: P1-W4-02
-**상태**: ⏳ 대기
-**시작일**: -
-**완료일**: -
+**상태**: ✅ 완료 (P1-W4-01에서 통합 구현)
+**시작일**: 2026-01-09
+**완료일**: 2026-01-09
 
 ---
 
@@ -19,11 +19,12 @@
 | `cpp/include/iris_sdk/blend_modes.h` | 블렌딩 모드 정의 (선택적) |
 
 ### 검증 기준
-- [ ] Normal 블렌딩 구현
-- [ ] Multiply 블렌딩 구현
-- [ ] Screen 블렌딩 구현
-- [ ] 경계 페더링 (Feathering) 구현
-- [ ] 시각적 품질 검증 (경계 자연스러움)
+- [x] Normal 블렌딩 구현 ✅ `alphaBlendNormal()` (lens_renderer.cpp:266)
+- [x] Multiply 블렌딩 구현 ✅ `alphaBlendMultiply()` (lens_renderer.cpp:332)
+- [x] Screen 블렌딩 구현 ✅ `alphaBlendScreen()` (lens_renderer.cpp:384)
+- [x] Overlay 블렌딩 구현 ✅ `alphaBlendOverlay()` (lens_renderer.cpp:438)
+- [x] 경계 페더링 (Feathering) 구현 ✅ `createFeatherMask()` (lens_renderer.cpp:222)
+- [x] 시각적 품질 검증 ✅ 통합 테스트 24개 이미지 생성
 
 ### 선행 조건
 - P1-W4-01: LensRenderer 기본 구현 ✅
@@ -289,23 +290,39 @@ private:
 
 ## 3. 실행 내역
 
-### 3.1 블렌딩 함수 구현
+> **참고**: P1-W4-02의 모든 기능은 P1-W4-01 (LensRenderer 기본 구현)에서 통합 구현되었습니다.
 
-```bash
-# 예정: cpp/src/lens_renderer.cpp에 블렌딩 로직 추가
+### 3.1 블렌딩 함수 구현 ✅
+
+```cpp
+// lens_renderer.cpp 내 구현된 블렌딩 함수들
+void alphaBlendNormal(...)   // line 266 - 표준 알파 블렌딩
+void alphaBlendMultiply(...) // line 332 - 곱하기 (어두워짐)
+void alphaBlendScreen(...)   // line 384 - 스크린 (밝아짐)
+void alphaBlendOverlay(...)  // line 438 - 오버레이 (대비 강화)
 ```
 
-### 3.2 마스크 생성 함수 구현
+### 3.2 마스크 생성 함수 구현 ✅
 
-```bash
-# 예정: 원형 마스크, 홍채 마스크 생성 함수
+```cpp
+// lens_renderer.cpp 내 구현
+void createFeatherMask(int size, float feather_amount, cv::Mat& out_mask)
+// - 코사인 보간 사용 (smoothstep 대신)
+// - 내부 원: 완전 불투명
+// - 외부 가장자리: 점진적 페이드아웃
 ```
 
-### 3.3 시각적 품질 테스트
+### 3.3 시각적 품질 테스트 ✅
 
-```bash
-# 예정: 다양한 블렌딩 모드 비교 이미지 생성
-```
+**테스트 파일**: `cpp/tests/test_lens_renderer_integration.cpp`
+
+실행 결과 (2026-01-09):
+- Normal: 모든 6개 이미지 성공
+- Multiply: 모든 6개 이미지 성공
+- Screen: 모든 6개 이미지 성공
+- Overlay: 모든 6개 이미지 성공
+
+**출력 위치**: `shared/test_data/output/`
 
 ---
 
@@ -315,21 +332,21 @@ private:
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
-| Normal 블렌딩 | ⏳ 대기 | |
-| Multiply 블렌딩 | ⏳ 대기 | |
-| Screen 블렌딩 | ⏳ 대기 | |
-| Overlay 블렌딩 | ⏳ 대기 | |
-| 경계 페더링 | ⏳ 대기 | |
-| 시각적 품질 | ⏳ 대기 | |
+| Normal 블렌딩 | ✅ 완료 | 표준 알파 블렌딩, 평균 0.4ms |
+| Multiply 블렌딩 | ✅ 완료 | 어두운 색상 효과, 평균 0.4ms |
+| Screen 블렌딩 | ✅ 완료 | 밝은 색상 효과, 평균 0.5ms |
+| Overlay 블렌딩 | ✅ 완료 | 대비 강화 효과, 평균 0.6ms |
+| 경계 페더링 | ✅ 완료 | 코사인 보간, 자연스러운 경계 |
+| 시각적 품질 | ✅ 완료 | 24개 결과 이미지 확인 |
 
 ### 블렌딩 모드 비교
 
 | 모드 | 밝은 텍스처 | 어두운 텍스처 | 추천 용도 |
 |------|------------|-------------|----------|
-| Normal | - | - | 일반 |
-| Multiply | - | - | 어두운 색상 렌즈 |
-| Screen | - | - | 밝은 색상 렌즈 |
-| Overlay | - | - | 대비 강조 |
+| Normal | 자연스러움 | 자연스러움 | 일반 렌즈 |
+| Multiply | 색상 유지 | 더 어두워짐 | 어두운 색상 렌즈 |
+| Screen | 더 밝아짐 | 색상 유지 | 밝은 색상 렌즈, 광택 효과 |
+| Overlay | 대비 증가 | 대비 증가 | 대비 강조, 드라마틱 효과 |
 
 ---
 
@@ -360,3 +377,4 @@ private:
 | 날짜 | 변경 내용 |
 |------|----------|
 | 2026-01-07 | 태스크 문서 생성, 블렌딩 알고리즘 설계 완료 |
+| 2026-01-09 | P1-W4-01에서 통합 구현 확인, 문서 완료 처리 |

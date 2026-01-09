@@ -49,7 +49,7 @@ set(IRIS_SDK_SOURCES
     src/iris_detector.cpp
     src/mediapipe_detector.cpp
     src/lens_renderer.cpp
-    # src/frame_processor.cpp
+    src/frame_processor.cpp
     # src/sdk_manager.cpp
     # src/sdk_api.cpp
 )
