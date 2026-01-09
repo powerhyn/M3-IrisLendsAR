@@ -77,6 +77,7 @@ tools/*
 # Test artifacts
 cpp/tests/*.png
 cpp/tests/test_placeholder
+shared/test_data/output
 
 # Temporary files
 *.zip

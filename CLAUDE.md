@@ -10,26 +10,51 @@ IrisLensSDK는 실시간 카메라 영상에서 홍채를 추적하여 가상 �
 
 ## 빌드 명령어
 
+### CLion 개발 환경 (권장)
 ```bash
-# 루트 빌드 (Desktop/테스트용)
+# CLion은 cpp/cmake-build-debug 디렉토리를 사용
+# Ninja 제너레이터가 기본으로 설정됨
+# TFLite 등 대용량 의존성이 사전 빌드되어 있음
+
+# CLion 빌드 디렉토리에서 직접 테스트 실행
+cd cpp/cmake-build-debug
+cmake --build . --target test_mediapipe_detector_integration
+./bin/test_mediapipe_detector_integration
+```
+
+### 터미널 빌드 (CLion 빌드 디렉토리 재사용)
+```bash
+# ⚠️ 중요: 새 빌드 디렉토리 생성 금지!
+# 기존 cmake-build-debug 디렉토리를 재사용해야 TFLite 재다운로드 방지
+
+cd cpp/cmake-build-debug
+cmake .. -DIRIS_SDK_FETCH_TFLITE=OFF  # TFLite 재다운로드 방지
+cmake --build . --parallel
+```
+
+### 클린 빌드 (주의 필요)
+```bash
+# ⚠️ 클린 빌드 시 TFLite 재다운로드 필요 (~400MB, 10분+)
+# 가급적 기존 빌드 디렉토리 유지 권장
+
 mkdir build && cd build
 cmake -DBUILD_TESTS=ON ..
 make
-
-# Android 빌드
-./scripts/build_android.sh
-# 또는 CMake 직접 사용
-cmake -DBUILD_ANDROID=ON -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake ..
-
-# iOS 빌드
-./scripts/build_ios.sh
-
-# 전체 플랫폼 빌드
-./scripts/build_all.sh
-
-# 테스트 실행
-cd build && ctest
 ```
+
+### Android/iOS 빌드
+```bash
+./scripts/build_android.sh
+./scripts/build_ios.sh
+./scripts/build_all.sh
+```
+
+### 테스트 실행
+```bash
+cd cpp/cmake-build-debug && ctest
+```
+
+> **빌드 일관성 가이드**: 자세한 빌드 설정은 `docs/BUILD_GUIDE.md` 참조
 
 ## 아키텍처
 

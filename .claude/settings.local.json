@@ -23,7 +23,18 @@
       "mcp__serena__get_symbols_overview",
       "mcp__serena__find_symbol",
       "mcp__serena__think_about_whether_you_are_done",
-      "mcp__serena__get_current_config"
+      "mcp__serena__get_current_config",
+      "mcp__serena__think_about_task_adherence",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(cmake:*)",
+      "mcp__serena__search_for_pattern",
+      "Bash(git add:*)",
+      "Bash(./bin/test_mediapipe_detector_integration:*)",
+      "WebFetch(domain:storage.googleapis.com)",
+      "mcp__tavily__tavily-search",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:codepen.io)"
     ]
   },
   "enabledPlugins": {
