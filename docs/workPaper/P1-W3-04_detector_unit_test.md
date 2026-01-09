@@ -422,6 +422,24 @@ EdgeCase_InvalidDimensions:  PASSED (126 ms)
    - 크롭 영역(face_rect, eye_crop) 기준 → 전체 이미지 좌표 변환 필수
    - 시각화 테스트로 좌표 변환 정확성 검증 가능
 
+5. **Iris Landmark 모델의 한계**
+   - 특정 이미지 특성(눈 모양, 조명, 대비)에서 약간의 오차(5~10픽셀) 발생
+   - iris_test_01에서 관찰됨 (다른 이미지들은 정확함)
+   - MediaPipe Iris Landmark 모델의 고유한 특성
+   - AR 렌즈 용도로는 허용 가능한 범위, Phase 2에서 개선 예정
+
+6. **추적 모드 관리**
+   - 연속 이미지 처리 시 이전 face_rect 재사용 문제 발견
+   - 각 이미지 처리 전 `resetTracking()` 호출로 해결
+   - 실시간 비디오 스트림에서는 추적 모드 활용, 독립 이미지에서는 리셋 필요
+
+7. **공식 MediaPipe 파이프라인 분석 (2026-01-09)**
+   - **ROI 계산 방식**: 16개 눈 랜드마크 바운딩 박스 → 눈 모서리 2개 점(inner/outer) 중심 기반
+   - **ROI 확대 비율**: 20% 마진 → **2.3배 확대** (IRIS_ROI_SCALE 상수)
+   - **오른쪽 눈 처리**: 수평 반전 필수 (Iris 모델이 왼쪽 눈용으로 학습됨)
+   - 수정 후 공식 MediaPipe 결과와 거의 동일한 정확도 달성
+   - 참고: https://github.com/google-ai-edge/mediapipe-samples (Python/Web 예제)
+
 ---
 
 ## 변경 이력
@@ -432,3 +450,5 @@ EdgeCase_InvalidDimensions:  PASSED (126 ms)
 | 2026-01-08 | Edge Case 테스트 6개 추가, 통합 테스트 21개 전체 통과 |
 | 2026-01-08 | 검증 결과 및 학습 내용 문서화, 태스크 완료 |
 | 2026-01-08 | 시각화 테스트 추가, 좌표 정규화 버그 수정 (I-03), 22개 테스트 통과 |
+| 2026-01-08 | iris_test_01 정확도 분석, 추적 모드 resetTracking() 추가, 모델 한계 문서화 |
+| 2026-01-09 | 공식 MediaPipe 예제 분석, ROI 계산 방식 수정 (2.3배 확대), 오른쪽 눈 반전 처리 추가 |

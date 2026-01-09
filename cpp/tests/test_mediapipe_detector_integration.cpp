@@ -984,6 +984,13 @@ TEST_F(MediaPipeDetectorIntegrationTest, ConfidenceThresholdEffect) {
  *
  * 얼굴 바운딩 박스와 홍채 랜드마크를 이미지에 그리고
  * output 폴더에 저장합니다.
+ *
+ * 시각화 항목:
+ * - 녹색 박스: 얼굴 바운딩 박스
+ * - 노란색 박스: 눈 크롭 영역 (홍채 경계점 기반 추정)
+ * - 파란색: 왼쪽 홍채 (중심점: 채운 원, 경계점: 작은 원, 홍채 원)
+ * - 빨간색: 오른쪽 홍채
+ * - 청록색 선: 홍채 경계점 연결선 (다이아몬드 모양)
  */
 TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
     if (!setup_success_) {
@@ -1007,6 +1014,9 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
     for (size_t i = 0; i < test_images_.size(); ++i) {
         const auto& image = test_images_[i];
         std::string image_name = TEST_IMAGE_FILES[i];
+
+        // 각 이미지마다 추적 리셋 (독립적인 검출 수행)
+        detector_->resetTracking();
 
         // BGR -> RGB 변환 (검출용)
         cv::Mat rgb_image;
@@ -1032,6 +1042,13 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
         if (result.left_detected) {
             std::cout << "    left_iris[0]: x=" << result.left_iris[0].x
                       << ", y=" << result.left_iris[0].y << std::endl;
+            // 경계점 좌표도 출력
+            std::cout << "    left_iris bounds: ";
+            for (int j = 1; j < 5; ++j) {
+                std::cout << "[" << j << "](" << result.left_iris[j].x
+                          << "," << result.left_iris[j].y << ") ";
+            }
+            std::cout << std::endl;
         }
         if (result.right_detected) {
             std::cout << "    right_iris[0]: x=" << result.right_iris[0].x
@@ -1051,8 +1068,68 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
             );
             cv::rectangle(vis_image, face_box, cv::Scalar(0, 255, 0), 3);
 
+            // 1.5. actual_face_crop 영역 그리기 (마젠타, 점선 효과를 위해 두께 1)
+            // cropFaceRegion과 동일한 마진 적용
+            float margin_x = result.face_rect.width * 0.1f;
+            float margin_y = result.face_rect.height * 0.1f;
+            float crop_x = std::max(0.0f, result.face_rect.x - margin_x);
+            float crop_y = std::max(0.0f, result.face_rect.y - margin_y);
+            float crop_max_x = std::min(1.0f, result.face_rect.x + result.face_rect.width + margin_x);
+            float crop_max_y = std::min(1.0f, result.face_rect.y + result.face_rect.height + margin_y);
+            cv::Rect actual_crop_box(
+                static_cast<int>(crop_x * img_w),
+                static_cast<int>(crop_y * img_h),
+                static_cast<int>((crop_max_x - crop_x) * img_w),
+                static_cast<int>((crop_max_y - crop_y) * img_h)
+            );
+            cv::rectangle(vis_image, actual_crop_box, cv::Scalar(255, 0, 255), 2);  // 마젠타
+
+            // 디버그: actual_face_crop 정보 출력
+            std::cout << "    actual_face_crop (estimated): x=" << crop_x
+                      << ", y=" << crop_y
+                      << ", w=" << (crop_max_x - crop_x)
+                      << ", h=" << (crop_max_y - crop_y) << std::endl;
+
+            // 1.6. 실제 Eye Crop 영역 시각화 (흰색 점선)
+            // extractEyeRegion의 로직을 재현하여 시각화
+            // 참고: 이 계산은 Face Landmark 출력에 의존하므로,
+            //       현재 IrisResult에는 포함되지 않음
+            // 홍채 중심 좌표와 반지름으로 Eye Crop 영역 추정
+            if (result.left_detected && result.left_radius > 0) {
+                // Eye Crop은 홍채보다 큰 영역이므로 반지름의 2배 정도로 추정
+                float eye_crop_size = result.left_radius * 4.0f / img_w;  // 픽셀을 정규화로
+                float eye_center_x = result.left_iris[0].x;
+                float eye_center_y = result.left_iris[0].y;
+                cv::Rect left_eye_crop_est(
+                    static_cast<int>((eye_center_x - eye_crop_size/2) * img_w),
+                    static_cast<int>((eye_center_y - eye_crop_size/2) * img_h),
+                    static_cast<int>(eye_crop_size * img_w),
+                    static_cast<int>(eye_crop_size * img_h)
+                );
+                cv::rectangle(vis_image, left_eye_crop_est, cv::Scalar(255, 255, 255), 1);  // 흰색
+            }
+
             // 2. 왼쪽 홍채 그리기 (파란색)
             if (result.left_detected) {
+                // 홍채 경계점들의 바운딩 박스 계산 (눈 크롭 영역 추정, 노란색)
+                float left_min_x = 1.0f, left_min_y = 1.0f;
+                float left_max_x = 0.0f, left_max_y = 0.0f;
+                for (int j = 0; j < 5; ++j) {
+                    left_min_x = std::min(left_min_x, result.left_iris[j].x);
+                    left_min_y = std::min(left_min_y, result.left_iris[j].y);
+                    left_max_x = std::max(left_max_x, result.left_iris[j].x);
+                    left_max_y = std::max(left_max_y, result.left_iris[j].y);
+                }
+                // 마진 추가 (50% - 눈 크롭 영역 추정)
+                float left_margin = std::max(left_max_x - left_min_x, left_max_y - left_min_y) * 0.5f;
+                cv::Rect left_eye_box(
+                    static_cast<int>((left_min_x - left_margin) * img_w),
+                    static_cast<int>((left_min_y - left_margin) * img_h),
+                    static_cast<int>((left_max_x - left_min_x + 2 * left_margin) * img_w),
+                    static_cast<int>((left_max_y - left_min_y + 2 * left_margin) * img_h)
+                );
+                cv::rectangle(vis_image, left_eye_box, cv::Scalar(0, 255, 255), 2);  // 노란색
+
                 // 중심점
                 cv::Point left_center(
                     static_cast<int>(result.left_iris[0].x * img_w),
@@ -1060,13 +1137,22 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
                 );
                 cv::circle(vis_image, left_center, 8, cv::Scalar(255, 0, 0), -1);  // 채운 원
 
-                // 경계점들
+                // 경계점들 및 연결선 (다이아몬드 모양)
+                std::vector<cv::Point> left_boundary_pts;
                 for (int j = 1; j < 5; ++j) {
                     cv::Point pt(
                         static_cast<int>(result.left_iris[j].x * img_w),
                         static_cast<int>(result.left_iris[j].y * img_h)
                     );
                     cv::circle(vis_image, pt, 4, cv::Scalar(255, 100, 100), -1);
+                    left_boundary_pts.push_back(pt);
+                }
+                // 경계점 연결선 (청록색)
+                if (left_boundary_pts.size() == 4) {
+                    cv::line(vis_image, left_boundary_pts[0], left_boundary_pts[1], cv::Scalar(255, 255, 0), 1);
+                    cv::line(vis_image, left_boundary_pts[1], left_boundary_pts[2], cv::Scalar(255, 255, 0), 1);
+                    cv::line(vis_image, left_boundary_pts[2], left_boundary_pts[3], cv::Scalar(255, 255, 0), 1);
+                    cv::line(vis_image, left_boundary_pts[3], left_boundary_pts[0], cv::Scalar(255, 255, 0), 1);
                 }
 
                 // 홍채 원 (반지름 사용)
@@ -1078,6 +1164,25 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
 
             // 3. 오른쪽 홍채 그리기 (빨간색)
             if (result.right_detected) {
+                // 홍채 경계점들의 바운딩 박스 계산 (눈 크롭 영역 추정, 노란색)
+                float right_min_x = 1.0f, right_min_y = 1.0f;
+                float right_max_x = 0.0f, right_max_y = 0.0f;
+                for (int j = 0; j < 5; ++j) {
+                    right_min_x = std::min(right_min_x, result.right_iris[j].x);
+                    right_min_y = std::min(right_min_y, result.right_iris[j].y);
+                    right_max_x = std::max(right_max_x, result.right_iris[j].x);
+                    right_max_y = std::max(right_max_y, result.right_iris[j].y);
+                }
+                // 마진 추가 (50% - 눈 크롭 영역 추정)
+                float right_margin = std::max(right_max_x - right_min_x, right_max_y - right_min_y) * 0.5f;
+                cv::Rect right_eye_box(
+                    static_cast<int>((right_min_x - right_margin) * img_w),
+                    static_cast<int>((right_min_y - right_margin) * img_h),
+                    static_cast<int>((right_max_x - right_min_x + 2 * right_margin) * img_w),
+                    static_cast<int>((right_max_y - right_min_y + 2 * right_margin) * img_h)
+                );
+                cv::rectangle(vis_image, right_eye_box, cv::Scalar(0, 255, 255), 2);  // 노란색
+
                 // 중심점
                 cv::Point right_center(
                     static_cast<int>(result.right_iris[0].x * img_w),
@@ -1085,13 +1190,22 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
                 );
                 cv::circle(vis_image, right_center, 8, cv::Scalar(0, 0, 255), -1);
 
-                // 경계점들
+                // 경계점들 및 연결선
+                std::vector<cv::Point> right_boundary_pts;
                 for (int j = 1; j < 5; ++j) {
                     cv::Point pt(
                         static_cast<int>(result.right_iris[j].x * img_w),
                         static_cast<int>(result.right_iris[j].y * img_h)
                     );
                     cv::circle(vis_image, pt, 4, cv::Scalar(100, 100, 255), -1);
+                    right_boundary_pts.push_back(pt);
+                }
+                // 경계점 연결선 (청록색)
+                if (right_boundary_pts.size() == 4) {
+                    cv::line(vis_image, right_boundary_pts[0], right_boundary_pts[1], cv::Scalar(255, 255, 0), 1);
+                    cv::line(vis_image, right_boundary_pts[1], right_boundary_pts[2], cv::Scalar(255, 255, 0), 1);
+                    cv::line(vis_image, right_boundary_pts[2], right_boundary_pts[3], cv::Scalar(255, 255, 0), 1);
+                    cv::line(vis_image, right_boundary_pts[3], right_boundary_pts[0], cv::Scalar(255, 255, 0), 1);
                 }
 
                 // 홍채 원 (반지름 사용)
@@ -1115,16 +1229,16 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
 
         // 출력 파일명 생성 (확장자를 jpg로 변경)
         std::string base_name = image_name.substr(0, image_name.find_last_of('.'));
-        std::string output_path = output_dir + "/" + base_name + "_result.jpg";
+        std::string output_file = output_dir + "/" + base_name + "_result.jpg";
 
         // 저장
-        bool saved = cv::imwrite(output_path, vis_image);
+        bool saved = cv::imwrite(output_file, vis_image);
         if (saved) {
-            std::cout << "  Saved: " << output_path
+            std::cout << "  Saved: " << output_file
                       << " (detected=" << result.detected
                       << ", conf=" << result.confidence << ")" << std::endl;
         } else {
-            std::cout << "  FAILED to save: " << output_path << std::endl;
+            std::cout << "  FAILED to save: " << output_file << std::endl;
         }
     }
 
