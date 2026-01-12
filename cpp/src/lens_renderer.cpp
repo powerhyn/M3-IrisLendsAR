@@ -183,6 +183,11 @@ public:
             return false;
         }
 
+        // 텍스처 유효성 체크
+        if (texture_bgr.empty() || texture_alpha.empty()) {
+            return false;
+        }
+
         // 리사이즈
         cv::resize(texture_bgr, out_texture,
                    cv::Size(target_size, target_size),

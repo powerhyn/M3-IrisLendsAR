@@ -8,6 +8,7 @@
     "cicd-automation@claude-code-workflows": true,
     "debugging-toolkit@claude-code-workflows": true,
     "unit-testing@claude-code-workflows": true,
-    "machine-learning-ops@claude-code-workflows": true
+    "machine-learning-ops@claude-code-workflows": true,
+    "agent-orchestration@claude-code-workflows": true
   }
 }

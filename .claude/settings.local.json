@@ -34,7 +34,11 @@
       "WebFetch(domain:storage.googleapis.com)",
       "mcp__tavily__tavily-search",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:codepen.io)"
+      "WebFetch(domain:codepen.io)",
+      "Bash(./bin/test_lens_renderer:*)",
+      "Bash(./bin/test_lens_renderer_integration:*)",
+      "Bash(./bin/test_frame_processor:*)",
+      "WebFetch(domain:ai.google.dev)"
     ]
   },
   "enabledPlugins": {

@@ -864,10 +864,13 @@ int main(int argc, char* argv[]) {
     // 텍스처 경로 결정
     std::vector<std::string> texture_paths;
     std::vector<fs::path> possible_texture_dirs = {
+        // cmake-build-debug/bin 에서 프로젝트 루트까지: ../../..
+        exe_path / ".." / ".." / ".." / "shared" / "test_data",
         exe_path / ".." / ".." / "shared" / "test_data",
         exe_path / ".." / "shared" / "test_data",
         fs::current_path() / "shared" / "test_data",
-        fs::current_path() / ".." / "shared" / "test_data"
+        fs::current_path() / ".." / "shared" / "test_data",
+        fs::current_path() / ".." / ".." / "shared" / "test_data"
     };
 
     for (const auto& dir : possible_texture_dirs) {
