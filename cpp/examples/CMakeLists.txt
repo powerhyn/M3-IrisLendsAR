@@ -103,6 +103,57 @@ if(OpenCV_FOUND)
     endif()
 
     message(STATUS "camera_demo: Enabled (OpenCV ${OpenCV_VERSION})")
+
+    # ============================================
+    # Image Demo (단일 이미지 처리 데모)
+    # ============================================
+    # 커맨드라인에서 이미지 파일을 입력받아 홍채 검출 및 렌즈 오버레이
+    #
+    # 사용법:
+    #   image_demo <input_image> [output_image]
+    #
+    # 예시:
+    #   image_demo face.jpg                    # face_output.jpg로 저장
+    #   image_demo face.jpg result.png         # result.png로 저장
+
+    add_executable(image_demo image_demo.cpp)
+
+    target_link_libraries(image_demo
+        PRIVATE
+            iris_sdk
+            ${OpenCV_LIBS}
+    )
+
+    target_include_directories(image_demo
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/include
+            ${OpenCV_INCLUDE_DIRS}
+    )
+
+    # C++17 필요 (std::filesystem)
+    target_compile_features(image_demo PRIVATE cxx_std_17)
+
+    # macOS 특화 설정
+    if(APPLE)
+        target_link_options(image_demo PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+
+    # 모델 파일 복사 (빌드 후)
+    if(EXISTS "${MODEL_SOURCE_DIR}")
+        add_custom_command(TARGET image_demo POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:image_demo>/models
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${MODEL_SOURCE_DIR}"
+                $<TARGET_FILE_DIR:image_demo>/models
+            COMMENT "Copying model files for image_demo..."
+        )
+    endif()
+
+    message(STATUS "image_demo: Enabled (OpenCV ${OpenCV_VERSION})")
 else()
     message(STATUS "camera_demo: Disabled (OpenCV not found)")
+    message(STATUS "image_demo: Disabled (OpenCV not found)")
 endif()

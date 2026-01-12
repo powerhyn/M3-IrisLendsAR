@@ -375,3 +375,43 @@ elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
 endif()
 
 gtest_discover_tests(test_sdk_api DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P1-W4-06: 통합 테스트 (전체 C API 파이프라인)
+# ============================================================
+add_executable(test_integration test_integration.cpp)
+target_include_directories(test_integration PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_integration PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (필수)
+if(OpenCV_FOUND)
+    target_link_libraries(test_integration PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_integration PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+# TFLite 연결 (통합 테스트에 필요)
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_integration PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_integration PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_integration PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_integration PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_integration PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+gtest_discover_tests(test_integration DISCOVERY_TIMEOUT 300)
