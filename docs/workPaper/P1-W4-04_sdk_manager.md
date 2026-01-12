@@ -1,9 +1,9 @@
 # P1-W4-04: SDKManager 싱글톤
 
 **태스크 ID**: P1-W4-04
-**상태**: ⏳ 대기
-**시작일**: -
-**완료일**: -
+**상태**: ✅ 완료
+**시작일**: 2026-01-12
+**완료일**: 2026-01-12
 
 ---
 
@@ -19,11 +19,11 @@ SDK의 전역 진입점인 SDKManager 싱글톤을 구현한다. 라이프사이
 | `cpp/src/sdk_manager.cpp` | SDKManager 구현 |
 
 ### 검증 기준
-- [ ] 싱글톤 패턴 동작 확인
-- [ ] 스레드 안전한 초기화
-- [ ] 라이프사이클 관리 (init → use → destroy)
-- [ ] 전역 설정 관리
-- [ ] 로깅 인터페이스 제공
+- [x] 싱글톤 패턴 동작 확인
+- [x] 스레드 안전한 초기화
+- [x] 라이프사이클 관리 (init → use → destroy)
+- [x] 전역 설정 관리
+- [x] 로깅 인터페이스 제공
 
 ### 선행 조건
 - P1-W4-03: FrameProcessor 파이프라인 ✅
@@ -371,20 +371,36 @@ void SDKManager::Impl::logV(LogLevel level, const char* tag,
 
 ### 3.1 헤더 파일 작성
 
-```bash
-# 예정: cpp/include/iris_sdk/sdk_manager.h
-```
+✅ `cpp/include/iris_sdk/sdk_manager.h` 작성 완료
+- Meyer's Singleton 패턴 적용
+- Pimpl 패턴으로 구현 세부사항 은닉
+- [[nodiscard]] 및 noexcept 속성 적용
+- LogLevel, LogCallback, SDKConfig, SDKState 정의
+- IRIS_LOG 편의 매크로 제공
 
 ### 3.2 구현 파일 작성
 
-```bash
-# 예정: cpp/src/sdk_manager.cpp
-```
+✅ `cpp/src/sdk_manager.cpp` 작성 완료
+- SDKManager::Impl 내부 클래스로 구현
+- mutable 뮤텍스로 스레드 안전성 보장
+- 팩토리 메서드 스레드 안전하게 구현
+- getBuildInfo() 람다 초기화로 스레드 안전 보장
+- 로그 콜백 복사 패턴으로 데이터 레이스 방지
 
 ### 3.3 단위 테스트
 
+✅ `cpp/tests/test_sdk_manager.cpp` 작성 완료 (27개 테스트)
+- 싱글톤 패턴 테스트 (3개)
+- 라이프사이클 테스트 (5개)
+- 설정 테스트 (4개)
+- 팩토리 메서드 테스트 (6개)
+- 로깅 테스트 (5개)
+- 스레드 안전성 테스트 (4개)
+
 ```bash
-# 예정: cpp/tests/test_sdk_manager.cpp
+# 테스트 실행 결과
+[==========] 27 tests from 1 test suite ran. (5 ms total)
+[  PASSED  ] 27 tests.
 ```
 
 ---
@@ -395,12 +411,12 @@ void SDKManager::Impl::logV(LogLevel level, const char* tag,
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
-| 싱글톤 동작 | ⏳ 대기 | |
-| 스레드 안전 초기화 | ⏳ 대기 | |
-| 라이프사이클 | ⏳ 대기 | |
-| 팩토리 메서드 | ⏳ 대기 | |
-| 설정 관리 | ⏳ 대기 | |
-| 로깅 | ⏳ 대기 | |
+| 싱글톤 동작 | ✅ 통과 | Meyer's Singleton, 동일 인스턴스 반환 확인 |
+| 스레드 안전 초기화 | ✅ 통과 | mutable mutex, atomic 변수 사용 |
+| 라이프사이클 | ✅ 통과 | init → use → shutdown → reinit 테스트 완료 |
+| 팩토리 메서드 | ✅ 통과 | mutex 보호, 미초기화 시 nullptr 반환 |
+| 설정 관리 | ✅ 통과 | 복사본 반환으로 스레드 안전성 확보 |
+| 로깅 | ✅ 통과 | 레벨 필터링, 커스텀 콜백 지원 |
 
 ---
 
@@ -410,7 +426,10 @@ void SDKManager::Impl::logV(LogLevel level, const char* tag,
 
 | ID | 내용 | 상태 | 해결방안 |
 |----|------|------|----------|
-| - | - | - | - |
+| 1 | getConfig() 데이터 레이스 | ✅ 해결 | 참조 대신 복사본 반환 |
+| 2 | 팩토리 메서드 경쟁 조건 | ✅ 해결 | mutex 보호 추가 |
+| 3 | const 메서드에서 mutex 사용 | ✅ 해결 | mutable 키워드 적용 |
+| 4 | [[nodiscard]] 경고 | ✅ 해결 | 테스트에서 (void) 캐스트 |
 
 ### 결정 사항
 
@@ -419,10 +438,17 @@ void SDKManager::Impl::logV(LogLevel level, const char* tag,
 | Meyer's Singleton | C++11 스레드 안전 보장, 간결한 구현 |
 | 지연 초기화 | 리소스 효율성, 명시적 초기화 시점 |
 | 팩토리 메서드 | 컴포넌트 생성 중앙 집중화 |
+| Pimpl 패턴 | ABI 안정성, 구현 세부사항 은닉 |
+| mutable mutex | const correctness 유지하면서 스레드 안전 |
+| getConfig() 복사 반환 | 스레드 안전성, 외부 수정 방지 |
 
 ### 학습 내용
 
-(실행 후 기록)
+1. **Meyer's Singleton의 스레드 안전성**: C++11 이상에서 지역 정적 변수는 스레드 안전하게 초기화됨
+2. **mutable과 const correctness**: const 메서드에서 스레드 동기화를 위해 mutex를 mutable로 선언
+3. **[[nodiscard]] 활용**: 반환값 무시 방지로 API 오용 예방
+4. **팩토리 메서드 스레드 안전성**: isReady() 체크와 config_ 사용 사이의 경쟁 조건 방지를 위해 단일 lock 필요
+5. **정적 멤버 스레드 안전성**: 람다 초기화 패턴으로 getBuildInfo() 스레드 안전 보장
 
 ---
 
@@ -432,3 +458,7 @@ void SDKManager::Impl::logV(LogLevel level, const char* tag,
 |------|----------|
 | 2026-01-07 | 태스크 문서 생성, 설계 완료 |
 | 2026-01-07 | 아키텍처 리뷰: log() public 메서드 선언 추가 (IRIS_LOG 매크로 지원) |
+| 2026-01-12 | 구현 완료: sdk_manager.h, sdk_manager.cpp |
+| 2026-01-12 | 테스트 완료: 27개 단위 테스트 작성 및 통과 |
+| 2026-01-12 | 코드 리뷰 피드백 반영: 스레드 안전성 개선 |
+| 2026-01-12 | 태스크 완료 ✅ |

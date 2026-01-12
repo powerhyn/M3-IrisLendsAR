@@ -257,6 +257,46 @@ endif()
 gtest_discover_tests(test_frame_processor DISCOVERY_TIMEOUT 180)
 
 # ============================================================
+# P1-W4-04: SDKManager 테스트
+# ============================================================
+add_executable(test_sdk_manager test_sdk_manager.cpp)
+target_include_directories(test_sdk_manager PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_sdk_manager PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (팩토리 메서드 테스트에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_sdk_manager PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_sdk_manager PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+# TFLite 연결 (팩토리 메서드 테스트에 필요)
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_sdk_manager PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_sdk_manager PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_sdk_manager PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_sdk_manager PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_sdk_manager PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+gtest_discover_tests(test_sdk_manager DISCOVERY_TIMEOUT 60)
+
+# ============================================================
 # P1-W4-07: CameraDemo 기본 테스트
 # ============================================================
 add_executable(test_camera_demo test_camera_demo.cpp)
