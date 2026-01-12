@@ -90,6 +90,22 @@ namespace {
 
     // 공식 MediaPipe iris 모델의 ROI 확대 비율 (2.3x)
     constexpr float IRIS_ROI_SCALE = 2.3f;
+
+    // ========================================
+    // Face Landmark V2 모델 상수 (FaceMesh V2)
+    // V2는 홍채 랜드마크가 내장되어 있음 (478개 = 468 + 10)
+    // ========================================
+    constexpr int FACE_LANDMARK_V2_INPUT_WIDTH = 256;
+    constexpr int FACE_LANDMARK_V2_INPUT_HEIGHT = 256;
+    constexpr int FACE_LANDMARK_V2_COUNT = 478;
+
+    // V2 모델 내장 홍채 인덱스 (Face Landmark 출력에서 직접 추출)
+    // 왼쪽 눈 홍채: 인덱스 468-472 (중심 + 4개 경계점)
+    constexpr int V2_LEFT_IRIS_CENTER = 468;
+    constexpr int V2_LEFT_IRIS_INDICES[] = {468, 469, 470, 471, 472};
+    // 오른쪽 눈 홍채: 인덱스 473-477 (중심 + 4개 경계점)
+    constexpr int V2_RIGHT_IRIS_CENTER = 473;
+    constexpr int V2_RIGHT_IRIS_INDICES[] = {473, 474, 475, 476, 477};
 }
 #endif  // IRIS_SDK_HAS_TFLITE && IRIS_SDK_HAS_OPENCV
 
@@ -102,7 +118,7 @@ public:
     std::string model_path;
 
     // MediaPipe 설정
-    float min_detection_confidence = 0.5f;
+    float min_detection_confidence = 0.3f;  // 기본값 낮춤 (더 많은 후보 검출)
     float min_tracking_confidence = 0.5f;
     int num_faces = 1;
 
@@ -112,6 +128,11 @@ public:
     int num_threads = 4;           ///< TFLite 추론 스레드 수
     bool use_tracking = true;      ///< 추적 모드 활성화 여부
     float tracking_iou_threshold = 0.5f;  ///< 추적 유지 IoU 임계값
+
+    // ========================================
+    // 모델 버전 (V1: 192x192, V2: 256x256)
+    // ========================================
+    int model_version = 1;  ///< 1: V1 (face_landmark.tflite), 2: V2 (face_landmark_v2.tflite)
 
     // ========================================
     // 성능 최적화: 사전 할당 버퍼 (메모리 재사용)
@@ -222,28 +243,47 @@ public:
      *
      * 모든 입출력 버퍼를 미리 할당하여 detect() 호출 시
      * 메모리 할당 오버헤드를 제거합니다.
+     *
+     * @note 모델 버전에 따라 버퍼 크기가 달라짐
+     *       - V1: 192x192 입력, 468 랜드마크
+     *       - V2: 256x256 입력, 478 랜드마크 (홍채 내장)
      */
     void initializeBuffers() {
-        // Face Detection 입력 버퍼
+        // Face Detection 입력 버퍼 (모든 버전 동일)
         face_detection_input_buffer.resize(
             FACE_DETECTION_INPUT_WIDTH * FACE_DETECTION_INPUT_HEIGHT *
             FACE_DETECTION_INPUT_CHANNELS);
 
-        // Face Landmark 입력/출력 버퍼
-        face_landmark_input_buffer.resize(
-            FACE_LANDMARK_INPUT_WIDTH * FACE_LANDMARK_INPUT_HEIGHT *
-            FACE_LANDMARK_INPUT_CHANNELS);
-        face_landmarks_buffer.resize(FACE_LANDMARK_COUNT * 3);
+        // Face Landmark 입력/출력 버퍼 (모델 버전에 따라 크기 결정)
+        if (model_version == 2) {
+            // V2 모델: 256x256 입력, 478 랜드마크
+            face_landmark_input_buffer.resize(
+                FACE_LANDMARK_V2_INPUT_WIDTH * FACE_LANDMARK_V2_INPUT_HEIGHT *
+                FACE_LANDMARK_INPUT_CHANNELS);
+            face_landmarks_buffer.resize(FACE_LANDMARK_V2_COUNT * 3);
+        } else {
+            // V1 모델: 192x192 입력, 468 랜드마크
+            face_landmark_input_buffer.resize(
+                FACE_LANDMARK_INPUT_WIDTH * FACE_LANDMARK_INPUT_HEIGHT *
+                FACE_LANDMARK_INPUT_CHANNELS);
+            face_landmarks_buffer.resize(FACE_LANDMARK_COUNT * 3);
+        }
 
-        // Iris Landmark 입력/출력 버퍼 (왼쪽, 오른쪽)
-        left_iris_input_buffer.resize(
-            IRIS_LANDMARK_INPUT_WIDTH * IRIS_LANDMARK_INPUT_HEIGHT *
-            IRIS_LANDMARK_INPUT_CHANNELS);
-        right_iris_input_buffer.resize(
-            IRIS_LANDMARK_INPUT_WIDTH * IRIS_LANDMARK_INPUT_HEIGHT *
-            IRIS_LANDMARK_INPUT_CHANNELS);
-        // 5개 홍채 랜드마크만 저장 (center + 4 boundary)
-        // runIrisLandmark()가 항상 인덱스 0-4에 저장하도록 수정됨
+        // Iris Landmark 입력/출력 버퍼 (V1에서만 사용)
+        if (model_version == 1) {
+            left_iris_input_buffer.resize(
+                IRIS_LANDMARK_INPUT_WIDTH * IRIS_LANDMARK_INPUT_HEIGHT *
+                IRIS_LANDMARK_INPUT_CHANNELS);
+            right_iris_input_buffer.resize(
+                IRIS_LANDMARK_INPUT_WIDTH * IRIS_LANDMARK_INPUT_HEIGHT *
+                IRIS_LANDMARK_INPUT_CHANNELS);
+        } else {
+            // V2 모델에서는 iris 입력 버퍼 불필요
+            left_iris_input_buffer.clear();
+            right_iris_input_buffer.clear();
+        }
+
+        // 홍채 랜드마크 출력 버퍼 (모든 버전에서 5개 랜드마크)
         left_iris_landmarks_buffer.resize(IRIS_LANDMARK_COUNT * 3);
         right_iris_landmarks_buffer.resize(IRIS_LANDMARK_COUNT * 3);
     }
@@ -418,9 +458,24 @@ public:
             face_detection_output_scores_index = -1;
         }
 
-        // Face Landmark 모델 로드
-        std::string face_landmark_path = (base / REQUIRED_MODELS[1]).string();
-        if (!loadModel(face_landmark_path, face_landmark_model, face_landmark_interpreter)) {
+        // ========================================
+        // Face Landmark 모델 로드 (V2 우선, V1 폴백)
+        // V2 모델: face_landmark_v2.tflite (256x256, 478 랜드마크, 홍채 내장)
+        // V1 모델: face_landmark.tflite (192x192, 468 랜드마크)
+        // ========================================
+        std::string face_landmark_v2_path = (base / "face_landmark_v2.tflite").string();
+        std::string face_landmark_v1_path = (base / REQUIRED_MODELS[1]).string();
+
+        if (std::filesystem::exists(face_landmark_v2_path) &&
+            loadModel(face_landmark_v2_path, face_landmark_model, face_landmark_interpreter)) {
+            // V2 모델 로드 성공
+            model_version = 2;
+            std::fprintf(stderr, "[INFO] Face Landmark V2 model loaded (256x256, 478 landmarks)\n");
+        } else if (loadModel(face_landmark_v1_path, face_landmark_model, face_landmark_interpreter)) {
+            // V1 모델로 폴백
+            model_version = 1;
+            std::fprintf(stderr, "[INFO] Face Landmark V1 model loaded (192x192, 468 landmarks)\n");
+        } else {
             return false;
         }
 
@@ -432,19 +487,31 @@ public:
         face_landmark_input_index = face_landmark_interpreter->inputs()[0];
         face_landmark_output_index = face_landmark_interpreter->outputs()[0];
 
-        // Iris Landmark 모델 로드
-        std::string iris_landmark_path = (base / REQUIRED_MODELS[2]).string();
-        if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter)) {
-            return false;
-        }
+        // ========================================
+        // Iris Landmark 모델 로드 (V1에서만 필요)
+        // V2 모델은 Face Landmark 출력에 홍채가 내장되어 있음
+        // ========================================
+        if (model_version == 1) {
+            std::string iris_landmark_path = (base / REQUIRED_MODELS[2]).string();
+            if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter)) {
+                return false;
+            }
 
-        // Iris Landmark 텐서 인덱스 설정
-        if (iris_landmark_interpreter->inputs().empty() ||
-            iris_landmark_interpreter->outputs().empty()) {
-            return false;  // 모델 구조 오류
+            // Iris Landmark 텐서 인덱스 설정
+            if (iris_landmark_interpreter->inputs().empty() ||
+                iris_landmark_interpreter->outputs().empty()) {
+                return false;  // 모델 구조 오류
+            }
+            iris_landmark_input_index = iris_landmark_interpreter->inputs()[0];
+            iris_landmark_output_index = iris_landmark_interpreter->outputs()[0];
+        } else {
+            // V2 모델은 별도 iris_landmark 모델 불필요
+            iris_landmark_model.reset();
+            iris_landmark_interpreter.reset();
+            iris_landmark_input_index = -1;
+            iris_landmark_output_index = -1;
+            std::fprintf(stderr, "[INFO] V2 model: iris_landmark model not required (embedded in face_landmark)\n");
         }
-        iris_landmark_input_index = iris_landmark_interpreter->inputs()[0];
-        iris_landmark_output_index = iris_landmark_interpreter->outputs()[0];
 
         return true;
     }
@@ -939,36 +1006,77 @@ public:
         int img_width = rgb_image.cols;
         int img_height = rgb_image.rows;
 
-        // 마진 추가 (10%) - 얼굴 영역 약간 확장
-        float margin_x = face_rect.width * 0.1f;
-        float margin_y = face_rect.height * 0.1f;
+        // ========================================
+        // 픽셀 기준 정사각형 crop 영역 생성
+        // 이미지 종횡비와 관계없이 정사각형이 되도록 함
+        // ========================================
 
-        float min_x = std::max(0.0f, face_rect.x - margin_x);
-        float min_y = std::max(0.0f, face_rect.y - margin_y);
-        float max_x = std::min(1.0f, face_rect.x + face_rect.width + margin_x);
-        float max_y = std::min(1.0f, face_rect.y + face_rect.height + margin_y);
+        // 얼굴 영역을 픽셀 단위로 변환
+        float face_center_x = (face_rect.x + face_rect.width / 2.0f) * img_width;
+        float face_center_y = (face_rect.y + face_rect.height / 2.0f) * img_height;
+        float face_width_px = face_rect.width * img_width;
+        float face_height_px = face_rect.height * img_height;
 
-        // 실제 크롭 영역 저장 (좌표 변환에 사용)
-        actual_crop_rect.x = min_x;
-        actual_crop_rect.y = min_y;
-        actual_crop_rect.width = max_x - min_x;
-        actual_crop_rect.height = max_y - min_y;
+        // 정사각형 크기 = 더 큰 쪽 기준 + 20% 마진
+        float square_size = std::max(face_width_px, face_height_px) * 1.2f;
 
-        // 픽셀 좌표로 변환
-        int px_min_x = static_cast<int>(min_x * img_width);
-        int px_min_y = static_cast<int>(min_y * img_height);
-        int px_max_x = static_cast<int>(max_x * img_width);
-        int px_max_y = static_cast<int>(max_y * img_height);
+        // 정사각형 crop 영역 (픽셀 단위)
+        int px_min_x = static_cast<int>(face_center_x - square_size / 2.0f);
+        int px_min_y = static_cast<int>(face_center_y - square_size / 2.0f);
+        int px_max_x = static_cast<int>(face_center_x + square_size / 2.0f);
+        int px_max_y = static_cast<int>(face_center_y + square_size / 2.0f);
 
-        // 경계 체크
+        // 경계 체크 및 조정 (정사각형 유지하면서)
+        if (px_min_x < 0) {
+            px_max_x -= px_min_x;
+            px_min_x = 0;
+        }
+        if (px_min_y < 0) {
+            px_max_y -= px_min_y;
+            px_min_y = 0;
+        }
+        if (px_max_x > img_width) {
+            px_min_x -= (px_max_x - img_width);
+            px_max_x = img_width;
+        }
+        if (px_max_y > img_height) {
+            px_min_y -= (px_max_y - img_height);
+            px_max_y = img_height;
+        }
+
+        // 최종 경계 체크
         px_min_x = std::clamp(px_min_x, 0, img_width - 1);
         px_min_y = std::clamp(px_min_y, 0, img_height - 1);
         px_max_x = std::clamp(px_max_x, 1, img_width);
         px_max_y = std::clamp(px_max_y, 1, img_height);
 
-        // 크롭
+        // 실제 크롭 영역 저장 (정규화 좌표, 좌표 변환에 사용)
+        // 주의: 정사각형 픽셀 영역을 정규화 좌표로 변환하면 직사각형이 됨
+        actual_crop_rect.x = static_cast<float>(px_min_x) / img_width;
+        actual_crop_rect.y = static_cast<float>(px_min_y) / img_height;
+        actual_crop_rect.width = static_cast<float>(px_max_x - px_min_x) / img_width;
+        actual_crop_rect.height = static_cast<float>(px_max_y - px_min_y) / img_height;
+
+        // 크롭 (픽셀 기준 정사각형)
         cv::Rect roi(px_min_x, px_min_y, px_max_x - px_min_x, px_max_y - px_min_y);
         cv::Mat cropped = rgb_image(roi);
+
+        // 디버그: 픽셀 기준 정사각형 crop 확인
+        static bool crop_debug = false;
+        if (!crop_debug) {
+            std::fprintf(stderr, "[DEBUG] Square Crop (pixel-based):\n");
+            std::fprintf(stderr, "  face_rect: x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
+                        face_rect.x, face_rect.y, face_rect.width, face_rect.height);
+            std::fprintf(stderr, "  face_center (px): (%.1f, %.1f)\n", face_center_x, face_center_y);
+            std::fprintf(stderr, "  face_size (px): %.1f x %.1f\n", face_width_px, face_height_px);
+            std::fprintf(stderr, "  square_size (px): %.1f\n", square_size);
+            std::fprintf(stderr, "  crop_roi (px): x=%d, y=%d, w=%d, h=%d\n",
+                        roi.x, roi.y, roi.width, roi.height);
+            std::fprintf(stderr, "  actual_crop_rect (norm): x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
+                        actual_crop_rect.x, actual_crop_rect.y,
+                        actual_crop_rect.width, actual_crop_rect.height);
+            crop_debug = true;
+        }
 
         // 리사이즈
         cv::resize(cropped, cropped_buffer, cv::Size(target_width, target_height),
@@ -1170,9 +1278,9 @@ public:
     }
 
     /**
-     * @brief Face Landmark 실행
-     * @param input_data 전처리된 입력 데이터 (192x192 RGB float)
-     * @param landmarks 출력 랜드마크 (468 * 3 = 1404 floats)
+     * @brief Face Landmark 실행 (V1/V2 모델 지원)
+     * @param input_data 전처리된 입력 데이터 (V1: 192x192, V2: 256x256 RGB float)
+     * @param landmarks 출력 랜드마크 (V1: 468 * 3 floats, V2: 478 * 3 floats)
      * @return 성공 여부
      */
     bool runFaceLandmark(const float* input_data, float* landmarks) {
@@ -1186,8 +1294,10 @@ public:
             return false;
         }
 
-        int input_size = FACE_LANDMARK_INPUT_WIDTH * FACE_LANDMARK_INPUT_HEIGHT *
-                         FACE_LANDMARK_INPUT_CHANNELS;
+        // 모델 버전에 따라 입력 크기 결정
+        int input_width = (model_version == 2) ? FACE_LANDMARK_V2_INPUT_WIDTH : FACE_LANDMARK_INPUT_WIDTH;
+        int input_height = (model_version == 2) ? FACE_LANDMARK_V2_INPUT_HEIGHT : FACE_LANDMARK_INPUT_HEIGHT;
+        int input_size = input_width * input_height * FACE_LANDMARK_INPUT_CHANNELS;
         std::memcpy(input_tensor, input_data, input_size * sizeof(float));
 
         // 추론 실행
@@ -1201,10 +1311,209 @@ public:
             return false;
         }
 
-        // 랜드마크 복사 (468 * 3 = 1404 values)
-        std::memcpy(landmarks, output_data, FACE_LANDMARK_COUNT * 3 * sizeof(float));
+        // 모델 버전에 따라 출력 랜드마크 수 결정
+        int landmark_count = (model_version == 2) ? FACE_LANDMARK_V2_COUNT : FACE_LANDMARK_COUNT;
+        std::memcpy(landmarks, output_data, landmark_count * 3 * sizeof(float));
 
         return true;
+    }
+
+    /**
+     * @brief Face Landmark V2 출력에서 홍채 좌표 추출
+     *
+     * V2 모델은 478개 랜드마크 중 인덱스 468-477에 홍채 좌표가 내장되어 있음.
+     * 별도의 iris_landmark 모델 호출 없이 직접 추출 가능.
+     *
+     * @param face_landmarks Face Landmark V2 출력 (478 * 3 floats, 정규화 좌표)
+     * @param crop_rect 크롭 영역 (전체 이미지 기준 정규화 좌표)
+     * @param left_iris 왼쪽 홍채 출력 버퍼 (5 * 3 floats)
+     * @param right_iris 오른쪽 홍채 출력 버퍼 (5 * 3 floats)
+     * @param left_detected 왼쪽 홍채 검출 여부 (출력)
+     * @param right_detected 오른쪽 홍채 검출 여부 (출력)
+     *
+     * @note Face Landmark V2 홍채 인덱스:
+     *       - 왼쪽 눈: 468 (중심), 469-472 (경계점)
+     *       - 오른쪽 눈: 473 (중심), 474-477 (경계점)
+     */
+    void extractIrisFromFaceLandmarkV2(const float* face_landmarks,
+                                        const Rect& crop_rect,
+                                        float* left_iris,
+                                        float* right_iris,
+                                        bool& left_detected,
+                                        bool& right_detected) {
+        left_detected = false;
+        right_detected = false;
+
+        if (!face_landmarks || !left_iris || !right_iris) {
+            return;
+        }
+
+        // 디버그: V2 홍채 추출 확인 (최초 1회만)
+        static bool v2_iris_debug = false;
+        if (!v2_iris_debug) {
+            std::fprintf(stderr, "[DEBUG] Extracting iris from Face Landmark V2 (embedded):\n");
+            std::fprintf(stderr, "  crop_rect: x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
+                        crop_rect.x, crop_rect.y, crop_rect.width, crop_rect.height);
+        }
+
+        // ========================================
+        // 왼쪽 눈 홍채 추출 (인덱스 468-472)
+        // ========================================
+        bool left_valid = true;
+        for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+            int idx = V2_LEFT_IRIS_INDICES[i];
+            float x = face_landmarks[idx * 3 + 0];
+            float y = face_landmarks[idx * 3 + 1];
+            float z = face_landmarks[idx * 3 + 2];
+
+            // 좌표가 유효한지 확인 (0~1 범위)
+            if (x < 0.0f || x > 1.0f || y < 0.0f || y > 1.0f) {
+                left_valid = false;
+                break;
+            }
+
+            // 크롭 영역 → 전체 이미지 좌표로 변환 (이미 변환된 경우 스킵)
+            // face_landmarks는 detect()에서 이미 전체 이미지 좌표로 변환됨
+            left_iris[i * 3 + 0] = x;
+            left_iris[i * 3 + 1] = y;
+            left_iris[i * 3 + 2] = z;
+
+            if (!v2_iris_debug) {
+                std::fprintf(stderr, "  left_iris[%d]: idx=%d, x=%.4f, y=%.4f, z=%.4f\n",
+                            i, idx, x, y, z);
+            }
+        }
+        left_detected = left_valid;
+
+        // ========================================
+        // 오른쪽 눈 홍채 추출 (인덱스 473-477)
+        // ========================================
+        bool right_valid = true;
+        for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+            int idx = V2_RIGHT_IRIS_INDICES[i];
+            float x = face_landmarks[idx * 3 + 0];
+            float y = face_landmarks[idx * 3 + 1];
+            float z = face_landmarks[idx * 3 + 2];
+
+            // 좌표가 유효한지 확인 (0~1 범위)
+            if (x < 0.0f || x > 1.0f || y < 0.0f || y > 1.0f) {
+                right_valid = false;
+                break;
+            }
+
+            right_iris[i * 3 + 0] = x;
+            right_iris[i * 3 + 1] = y;
+            right_iris[i * 3 + 2] = z;
+
+            if (!v2_iris_debug) {
+                std::fprintf(stderr, "  right_iris[%d]: idx=%d, x=%.4f, y=%.4f, z=%.4f\n",
+                            i, idx, x, y, z);
+            }
+        }
+        right_detected = right_valid;
+
+        if (!v2_iris_debug) {
+            std::fprintf(stderr, "  Result: left=%s, right=%s\n",
+                        left_detected ? "detected" : "not detected",
+                        right_detected ? "detected" : "not detected");
+            v2_iris_debug = true;
+        }
+    }
+
+    /**
+     * @brief 홍채 좌표 검증 및 수정
+     *
+     * V2 모델이 잘못된 홍채 좌표를 출력하는 경우(특히 landscape 이미지),
+     * 눈 랜드마크를 사용하여 홍채 중심 위치를 보정합니다.
+     *
+     * @param face_landmarks Face Landmark 출력 버퍼 (변환된 전체 이미지 좌표)
+     * @param left_iris 왼쪽 홍채 랜드마크 (수정될 수 있음)
+     * @param right_iris 오른쪽 홍채 랜드마크 (수정될 수 있음)
+     * @param max_distance_threshold 눈-홍채 거리 임계값 (정규화 좌표 기준)
+     */
+    void validateAndFixIrisCoordinates(const float* face_landmarks,
+                                       float* left_iris, float* right_iris,
+                                       float max_distance_threshold = 0.05f) {
+        // 눈 모서리 좌표 가져오기
+        float left_eye_inner_x = face_landmarks[LEFT_EYE_INNER_CORNER * 3 + 0];  // idx 133
+        float left_eye_inner_y = face_landmarks[LEFT_EYE_INNER_CORNER * 3 + 1];
+        float left_eye_outer_x = face_landmarks[LEFT_EYE_OUTER_CORNER * 3 + 0];  // idx 33
+        float left_eye_outer_y = face_landmarks[LEFT_EYE_OUTER_CORNER * 3 + 1];
+
+        float right_eye_inner_x = face_landmarks[RIGHT_EYE_INNER_CORNER * 3 + 0];  // idx 362
+        float right_eye_inner_y = face_landmarks[RIGHT_EYE_INNER_CORNER * 3 + 1];
+        float right_eye_outer_x = face_landmarks[RIGHT_EYE_OUTER_CORNER * 3 + 0];  // idx 263
+        float right_eye_outer_y = face_landmarks[RIGHT_EYE_OUTER_CORNER * 3 + 1];
+
+        // 눈 중심 계산 (내측/외측 모서리의 중점)
+        float left_eye_center_x = (left_eye_inner_x + left_eye_outer_x) / 2.0f;
+        float left_eye_center_y = (left_eye_inner_y + left_eye_outer_y) / 2.0f;
+        float right_eye_center_x = (right_eye_inner_x + right_eye_outer_x) / 2.0f;
+        float right_eye_center_y = (right_eye_inner_y + right_eye_outer_y) / 2.0f;
+
+        // 현재 홍채 중심 위치
+        float left_iris_x = left_iris[0];
+        float left_iris_y = left_iris[1];
+        float right_iris_x = right_iris[0];
+        float right_iris_y = right_iris[1];
+
+        // 눈 중심과 홍채 중심의 거리 계산
+        float left_distance = std::sqrt(
+            std::pow(left_iris_x - left_eye_center_x, 2.0f) +
+            std::pow(left_iris_y - left_eye_center_y, 2.0f));
+        float right_distance = std::sqrt(
+            std::pow(right_iris_x - right_eye_center_x, 2.0f) +
+            std::pow(right_iris_y - right_eye_center_y, 2.0f));
+
+        static bool fix_debug_printed = false;
+
+        // 왼쪽 홍채 검증 및 수정
+        if (left_distance > max_distance_threshold) {
+            if (!fix_debug_printed) {
+                std::fprintf(stderr, "[DEBUG] Iris position fix (left):\n");
+                std::fprintf(stderr, "  Eye center: (%.4f, %.4f)\n", left_eye_center_x, left_eye_center_y);
+                std::fprintf(stderr, "  Iris (before): (%.4f, %.4f), distance=%.4f\n",
+                            left_iris_x, left_iris_y, left_distance);
+            }
+            // 홍채 중심을 눈 중심으로 이동
+            left_iris[0] = left_eye_center_x;
+            left_iris[1] = left_eye_center_y;
+            // 경계점들도 눈 중심 기준으로 조정 (반지름 유지)
+            float offset_x = left_eye_center_x - left_iris_x;
+            float offset_y = left_eye_center_y - left_iris_y;
+            for (int i = 1; i < IRIS_LANDMARK_COUNT; ++i) {
+                left_iris[i * 3 + 0] += offset_x;
+                left_iris[i * 3 + 1] += offset_y;
+            }
+            if (!fix_debug_printed) {
+                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f)\n", left_iris[0], left_iris[1]);
+            }
+        }
+
+        // 오른쪽 홍채 검증 및 수정
+        if (right_distance > max_distance_threshold) {
+            if (!fix_debug_printed) {
+                std::fprintf(stderr, "[DEBUG] Iris position fix (right):\n");
+                std::fprintf(stderr, "  Eye center: (%.4f, %.4f)\n", right_eye_center_x, right_eye_center_y);
+                std::fprintf(stderr, "  Iris (before): (%.4f, %.4f), distance=%.4f\n",
+                            right_iris_x, right_iris_y, right_distance);
+            }
+            // 홍채 중심을 눈 중심으로 이동
+            right_iris[0] = right_eye_center_x;
+            right_iris[1] = right_eye_center_y;
+            // 경계점들도 눈 중심 기준으로 조정
+            float offset_x = right_eye_center_x - right_iris_x;
+            float offset_y = right_eye_center_y - right_iris_y;
+            for (int i = 1; i < IRIS_LANDMARK_COUNT; ++i) {
+                right_iris[i * 3 + 0] += offset_x;
+                right_iris[i * 3 + 1] += offset_y;
+            }
+            if (!fix_debug_printed) {
+                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f)\n", right_iris[0], right_iris[1]);
+            }
+        }
+
+        fix_debug_printed = true;
     }
 
     /**
@@ -1503,33 +1812,90 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     }
 
     // =========================================================
-    // 3. Face Landmark: 468개 얼굴 랜드마크 추출
-    // 성능 최적화: 얼굴 영역만 크롭하여 모델에 입력
+    // 3. Face Landmark: 얼굴 랜드마크 추출
+    // V1: 192x192 입력, 468개 랜드마크
+    // V2: 256x256 입력, 478개 랜드마크 (홍채 내장)
     // =========================================================
-    // 얼굴 영역 크롭 후 전처리 (사전 할당 버퍼 사용)
-    // actual_face_crop: 실제로 크롭된 영역 (마진 포함)
+
+    // 모델 버전에 따른 입력 크기 결정
+    int fl_input_width = (impl_->model_version == 2) ? FACE_LANDMARK_V2_INPUT_WIDTH : FACE_LANDMARK_INPUT_WIDTH;
+    int fl_input_height = (impl_->model_version == 2) ? FACE_LANDMARK_V2_INPUT_HEIGHT : FACE_LANDMARK_INPUT_HEIGHT;
+
+    // ========================================
+    // 🔧 테스트 모드: 전체 이미지 직접 입력 (crop/변환 우회)
+    // 모델 입출력을 순수하게 확인하기 위한 모드
+    // ========================================
+    constexpr bool USE_FULL_IMAGE_TEST_MODE = false;  // 정상 얼굴 crop 모드 사용
+
     Rect actual_face_crop{};
     bool use_full_image = false;
 
-    if (!impl_->cropFaceRegion(rgb_mat, face_rect,
-                               FACE_LANDMARK_INPUT_WIDTH,
-                               FACE_LANDMARK_INPUT_HEIGHT,
-                               impl_->face_landmark_input_buffer.data(),
-                               actual_face_crop)) {
-        // 크롭 실패 시 전체 이미지 사용 (폴백)
-        if (!impl_->preprocessImage(frame_data, width, height, format,
-                                    FACE_LANDMARK_INPUT_WIDTH,
-                                    FACE_LANDMARK_INPUT_HEIGHT,
-                                    impl_->face_landmark_input_buffer.data())) {
+    if (USE_FULL_IMAGE_TEST_MODE) {
+        // ========================================
+        // 테스트 모드: 중앙 정사각형 crop (종횡비 유지)
+        // 1280x720에서 720x720 중앙 영역만 사용
+        // ========================================
+        int square_size = std::min(width, height);  // 720
+        int crop_x = (width - square_size) / 2;     // (1280-720)/2 = 280
+        int crop_y = (height - square_size) / 2;    // 0
+
+        // RGB 변환
+        cv::Mat rgb_mat;
+        if (!impl_->convertToRgb(frame_data, width, height, format, rgb_mat)) {
             impl_->resetTrackingCache();
             return result;
         }
-        // 폴백 시 전체 이미지를 크롭 영역으로 설정
-        actual_face_crop.x = 0.0f;
-        actual_face_crop.y = 0.0f;
-        actual_face_crop.width = 1.0f;
-        actual_face_crop.height = 1.0f;
+
+        // 중앙 정사각형 crop
+        cv::Rect center_roi(crop_x, crop_y, square_size, square_size);
+        cv::Mat cropped = rgb_mat(center_roi);
+
+        // 256x256으로 리사이즈
+        cv::Mat resized;
+        cv::resize(cropped, resized, cv::Size(fl_input_width, fl_input_height), 0, 0, cv::INTER_LINEAR);
+
+        // 0-1 정규화
+        cv::Mat float_mat;
+        resized.convertTo(float_mat, CV_32FC3, 1.0 / 255.0);
+
+        // 출력 버퍼로 복사
+        std::memcpy(impl_->face_landmark_input_buffer.data(), float_mat.ptr<float>(),
+                   fl_input_width * fl_input_height * 3 * sizeof(float));
+
+        // crop 영역 설정 (정규화 좌표)
+        actual_face_crop.x = static_cast<float>(crop_x) / width;
+        actual_face_crop.y = static_cast<float>(crop_y) / height;
+        actual_face_crop.width = static_cast<float>(square_size) / width;
+        actual_face_crop.height = static_cast<float>(square_size) / height;
         use_full_image = true;
+
+        // 매 프레임마다 출력 (디버그용)
+        std::fprintf(stderr, "[TEST MODE] Center square crop: %dx%d → crop(%d,%d,%dx%d) → 256x256\n",
+                    width, height, crop_x, crop_y, square_size, square_size);
+        std::fprintf(stderr, "  actual_face_crop: x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
+                    actual_face_crop.x, actual_face_crop.y, actual_face_crop.width, actual_face_crop.height);
+    } else {
+        // 원래 로직: 얼굴 영역 크롭 후 전처리
+        if (!impl_->cropFaceRegion(rgb_mat, face_rect,
+                                   fl_input_width,
+                                   fl_input_height,
+                                   impl_->face_landmark_input_buffer.data(),
+                                   actual_face_crop)) {
+            // 크롭 실패 시 전체 이미지 사용 (폴백)
+            if (!impl_->preprocessImage(frame_data, width, height, format,
+                                        fl_input_width,
+                                        fl_input_height,
+                                        impl_->face_landmark_input_buffer.data())) {
+                impl_->resetTrackingCache();
+                return result;
+            }
+            // 폴백 시 전체 이미지를 크롭 영역으로 설정
+            actual_face_crop.x = 0.0f;
+            actual_face_crop.y = 0.0f;
+            actual_face_crop.width = 1.0f;
+            actual_face_crop.height = 1.0f;
+            use_full_image = true;
+        }
     }
 
     // 사전 할당 버퍼 사용
@@ -1554,6 +1920,46 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                     impl_->face_landmarks_buffer[1 * 3 + 0],
                     impl_->face_landmarks_buffer[1 * 3 + 1],
                     impl_->face_landmarks_buffer[1 * 3 + 2]);
+
+        // V2 모델에서 홍채 RAW 좌표 확인 (변환 전)
+        if (impl_->model_version == 2) {
+            std::fprintf(stderr, "[DEBUG] V2 Iris RAW Output (before transform):\n");
+            // 왼쪽 홍채 (468-472)
+            for (int i = 0; i < 5; ++i) {
+                int idx = 468 + i;
+                std::fprintf(stderr, "  left_iris[%d] (idx %d): x=%.4f, y=%.4f, z=%.4f\n",
+                            i, idx,
+                            impl_->face_landmarks_buffer[idx * 3 + 0],
+                            impl_->face_landmarks_buffer[idx * 3 + 1],
+                            impl_->face_landmarks_buffer[idx * 3 + 2]);
+            }
+            // 오른쪽 홍채 (473-477)
+            for (int i = 0; i < 5; ++i) {
+                int idx = 473 + i;
+                std::fprintf(stderr, "  right_iris[%d] (idx %d): x=%.4f, y=%.4f, z=%.4f\n",
+                            i, idx,
+                            impl_->face_landmarks_buffer[idx * 3 + 0],
+                            impl_->face_landmarks_buffer[idx * 3 + 1],
+                            impl_->face_landmarks_buffer[idx * 3 + 2]);
+            }
+
+            // 홍채 중심과 경계점 거리 계산 (픽셀 단위)
+            float left_center_x = impl_->face_landmarks_buffer[468 * 3 + 0];
+            float left_center_y = impl_->face_landmarks_buffer[468 * 3 + 1];
+            float total_dist = 0.0f;
+            for (int i = 1; i < 5; ++i) {
+                int idx = 468 + i;
+                float px = impl_->face_landmarks_buffer[idx * 3 + 0];
+                float py = impl_->face_landmarks_buffer[idx * 3 + 1];
+                float dx = px - left_center_x;
+                float dy = py - left_center_y;
+                float dist = std::sqrt(dx * dx + dy * dy);
+                total_dist += dist;
+                std::fprintf(stderr, "  left_iris distance[%d]: dx=%.4f, dy=%.4f, dist=%.4f\n",
+                            i, dx, dy, dist);
+            }
+            std::fprintf(stderr, "  left_iris avg_radius (RAW): %.4f\n", total_dist / 4.0f);
+        }
         fl_raw_debug = true;
     }
 
@@ -1561,30 +1967,44 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     //
     // MediaPipe Face Landmark 모델 출력 분석:
     // - 공식 MediaPipe는 0-1 정규화 좌표를 출력 (입력 이미지 기준)
-    // - TFLite 모델에 따라 픽셀 좌표(0-192) 또는 정규화 좌표(0-1) 출력 가능
+    // - TFLite 모델에 따라 픽셀 좌표(0-192/0-256) 또는 정규화 좌표(0-1) 출력 가능
     //
     // 좌표 범위 확인 후 적절한 변환 적용:
-    // - 값이 1.0 초과면 픽셀 좌표 → 192로 나눔
-    // - 값이 1.0 이하면 이미 정규화 좌표 → 나눔 불필요
-    bool is_pixel_coords = impl_->face_landmarks_buffer[0] > 1.0f ||
-                           impl_->face_landmarks_buffer[1] > 1.0f;
+    // - 값이 1.5 초과면 픽셀 좌표 → 입력 크기로 나눔
+    // - 값이 1.5 이하면 이미 정규화 좌표 → 나눔 불필요
+    //
+    // 개선: 첫 번째 랜드마크만 확인하면 불안정함
+    //       여러 랜드마크의 최대값으로 판단하여 안정성 확보
+    int fl_landmark_count = (impl_->model_version == 2) ? FACE_LANDMARK_V2_COUNT : FACE_LANDMARK_COUNT;
+
+    float max_x = 0.0f, max_y = 0.0f;
+    for (int i = 0; i < fl_landmark_count; ++i) {
+        max_x = std::max(max_x, impl_->face_landmarks_buffer[i * 3 + 0]);
+        max_y = std::max(max_y, impl_->face_landmarks_buffer[i * 3 + 1]);
+    }
+    // 정규화 좌표는 절대 1.5를 초과할 수 없음 (약간의 여유 포함)
+    bool is_pixel_coords = (max_x > 1.5f || max_y > 1.5f);
 
     static bool coord_type_printed = false;
     if (!coord_type_printed) {
-        std::fprintf(stderr, "[DEBUG] Face Landmark coordinate type: %s\n",
-                    is_pixel_coords ? "PIXEL (0-192)" : "NORMALIZED (0-1)");
+        std::fprintf(stderr, "[DEBUG] Face Landmark V%d coordinate type: %s (max_x=%.2f, max_y=%.2f)\n",
+                    impl_->model_version,
+                    is_pixel_coords ? (impl_->model_version == 2 ? "PIXEL (0-256)" : "PIXEL (0-192)") : "NORMALIZED (0-1)",
+                    max_x, max_y);
+        std::fprintf(stderr, "[DEBUG] actual_face_crop BEFORE transform: x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
+                    actual_face_crop.x, actual_face_crop.y, actual_face_crop.width, actual_face_crop.height);
         coord_type_printed = true;
     }
 
-    for (int i = 0; i < FACE_LANDMARK_COUNT; ++i) {
+    for (int i = 0; i < fl_landmark_count; ++i) {
         float local_x, local_y;
 
         if (is_pixel_coords) {
             // 픽셀 좌표 → 정규화 좌표 (0-1 범위)
             local_x = impl_->face_landmarks_buffer[i * 3 + 0] /
-                            static_cast<float>(FACE_LANDMARK_INPUT_WIDTH);
+                            static_cast<float>(fl_input_width);
             local_y = impl_->face_landmarks_buffer[i * 3 + 1] /
-                            static_cast<float>(FACE_LANDMARK_INPUT_HEIGHT);
+                            static_cast<float>(fl_input_height);
         } else {
             // 이미 정규화된 좌표 (MediaPipe 공식 모델)
             local_x = impl_->face_landmarks_buffer[i * 3 + 0];
@@ -1597,13 +2017,41 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         impl_->face_landmarks_buffer[i * 3 + 1] = actual_face_crop.y + local_y * actual_face_crop.height;
     }
 
+    // 변환 후 좌표 범위 디버그
+    static bool transform_result_printed = false;
+    if (!transform_result_printed) {
+        float post_min_x = 1.0f, post_max_x = 0.0f;
+        float post_min_y = 1.0f, post_max_y = 0.0f;
+        int valid_count = 0;
+        for (int i = 0; i < fl_landmark_count; ++i) {
+            float x = impl_->face_landmarks_buffer[i * 3 + 0];
+            float y = impl_->face_landmarks_buffer[i * 3 + 1];
+            if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+                post_min_x = std::min(post_min_x, x);
+                post_max_x = std::max(post_max_x, x);
+                post_min_y = std::min(post_min_y, y);
+                post_max_y = std::max(post_max_y, y);
+                valid_count++;
+            }
+        }
+        std::fprintf(stderr, "[DEBUG] AFTER transform coordinate range:\n");
+        std::fprintf(stderr, "  Valid: %d / %d landmarks\n", valid_count, fl_landmark_count);
+        std::fprintf(stderr, "  X range: %.4f ~ %.4f (expected: %.4f ~ %.4f)\n",
+                    post_min_x, post_max_x, actual_face_crop.x, actual_face_crop.x + actual_face_crop.width);
+        std::fprintf(stderr, "  Y range: %.4f ~ %.4f (expected: %.4f ~ %.4f)\n",
+                    post_min_y, post_max_y, actual_face_crop.y, actual_face_crop.y + actual_face_crop.height);
+        transform_result_printed = true;
+    }
+
     // =========================================================
-    // 4. Iris Landmark: 왼쪽 눈 (사전 할당 버퍼 사용)
+    // 4. Iris Landmark: 홍채 좌표 추출
+    // V1: 별도 iris_landmark 모델 사용 (64x64 입력)
+    // V2: Face Landmark 출력에서 직접 추출 (인덱스 468-477)
     // =========================================================
     // 디버그: Face Landmark 눈 좌표 확인
     static bool eye_debug_printed = false;
     if (!eye_debug_printed) {
-        std::fprintf(stderr, "[DEBUG] Face Landmark Eye Coordinates:\n");
+        std::fprintf(stderr, "[DEBUG] Face Landmark V%d Eye Coordinates:\n", impl_->model_version);
         std::fprintf(stderr, "  LEFT_EYE (idx 33): x=%.4f, y=%.4f\n",
                     impl_->face_landmarks_buffer[33 * 3 + 0],
                     impl_->face_landmarks_buffer[33 * 3 + 1]);
@@ -1620,106 +2068,206 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         std::fprintf(stderr, "  NOSE (idx 1): x=%.4f, y=%.4f\n",
                     impl_->face_landmarks_buffer[1 * 3 + 0],
                     impl_->face_landmarks_buffer[1 * 3 + 1]);
+        if (impl_->model_version == 2) {
+            // V2에서 홍채 인덱스 미리보기
+            std::fprintf(stderr, "  V2 LEFT_IRIS (idx 468): x=%.4f, y=%.4f\n",
+                        impl_->face_landmarks_buffer[468 * 3 + 0],
+                        impl_->face_landmarks_buffer[468 * 3 + 1]);
+            std::fprintf(stderr, "  V2 RIGHT_IRIS (idx 473): x=%.4f, y=%.4f\n",
+                        impl_->face_landmarks_buffer[473 * 3 + 0],
+                        impl_->face_landmarks_buffer[473 * 3 + 1]);
+        }
         eye_debug_printed = true;
     }
 
     // =========================================================
-    // 공식 MediaPipe 방식: 눈 모서리 점 기반 ROI + 오른쪽 눈 반전
+    // 모델 버전에 따른 홍채 추출 분기
     // =========================================================
-    Rect left_eye_crop{};
-    if (impl_->extractEyeRegionMediaPipe(rgb_mat, impl_->face_landmarks_buffer.data(),
-                                          LEFT_EYE_INNER_CORNER, LEFT_EYE_OUTER_CORNER,
-                                          IRIS_LANDMARK_INPUT_WIDTH,
-                                          impl_->left_iris_input_buffer.data(),
-                                          left_eye_crop,
-                                          false)) {  // 왼쪽 눈: 반전 없음
-        // 디버그: 눈 크롭 영역 확인
-        static bool crop_debug_printed = false;
-        if (!crop_debug_printed) {
-            std::fprintf(stderr, "[DEBUG] Left Eye Crop (MediaPipe): x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
-                        left_eye_crop.x, left_eye_crop.y, left_eye_crop.width, left_eye_crop.height);
-            crop_debug_printed = true;
+    if (impl_->model_version == 2) {
+        // =========================================================
+        // V2 모델: Face Landmark 출력에서 직접 홍채 추출
+        // 별도의 iris_landmark 모델 호출 불필요
+        // =========================================================
+        bool left_detected = false, right_detected = false;
+        impl_->extractIrisFromFaceLandmarkV2(
+            impl_->face_landmarks_buffer.data(),
+            actual_face_crop,  // 참조용 (실제로는 이미 변환됨)
+            impl_->left_iris_landmarks_buffer.data(),
+            impl_->right_iris_landmarks_buffer.data(),
+            left_detected,
+            right_detected
+        );
+
+        // =========================================================
+        // 홍채 좌표 검증 및 수정 (눈 중심에서 너무 멀면 보정)
+        // =========================================================
+        if (left_detected || right_detected) {
+            impl_->validateAndFixIrisCoordinates(
+                impl_->face_landmarks_buffer.data(),
+                impl_->left_iris_landmarks_buffer.data(),
+                impl_->right_iris_landmarks_buffer.data(),
+                0.05f  // 정규화 좌표에서 5% 거리 임계값
+            );
+
+            // 보정된 홍채 좌표를 face_landmarks_buffer에도 반영
+            // (getFaceLandmarks() 호출 시 일관된 좌표 제공)
+            if (left_detected) {
+                for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                    int idx = V2_LEFT_IRIS_INDICES[i];
+                    impl_->face_landmarks_buffer[idx * 3 + 0] = impl_->left_iris_landmarks_buffer[i * 3 + 0];
+                    impl_->face_landmarks_buffer[idx * 3 + 1] = impl_->left_iris_landmarks_buffer[i * 3 + 1];
+                    impl_->face_landmarks_buffer[idx * 3 + 2] = impl_->left_iris_landmarks_buffer[i * 3 + 2];
+                }
+            }
+            if (right_detected) {
+                for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                    int idx = V2_RIGHT_IRIS_INDICES[i];
+                    impl_->face_landmarks_buffer[idx * 3 + 0] = impl_->right_iris_landmarks_buffer[i * 3 + 0];
+                    impl_->face_landmarks_buffer[idx * 3 + 1] = impl_->right_iris_landmarks_buffer[i * 3 + 1];
+                    impl_->face_landmarks_buffer[idx * 3 + 2] = impl_->right_iris_landmarks_buffer[i * 3 + 2];
+                }
+            }
         }
 
-        if (impl_->runIrisLandmark(impl_->left_iris_input_buffer.data(),
-                                   impl_->left_iris_landmarks_buffer.data())) {
-            // 크롭 좌표를 원본 이미지 좌표로 변환
-            // runIrisLandmark()는 항상 인덱스 0-4에 5개 홍채 랜드마크를 저장
-            // Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
+        // 왼쪽 홍채 결과 복사
+        if (left_detected) {
             for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
-                // 픽셀 좌표 → 정규화 좌표 (0-1)
-                float local_x = impl_->left_iris_landmarks_buffer[i * 3 + 0] /
-                                static_cast<float>(IRIS_LANDMARK_INPUT_WIDTH);
-                float local_y = impl_->left_iris_landmarks_buffer[i * 3 + 1] /
-                                static_cast<float>(IRIS_LANDMARK_INPUT_HEIGHT);
-                float local_z = impl_->left_iris_landmarks_buffer[i * 3 + 2];
-
-                // 크롭 영역 내 좌표를 원본 이미지 좌표로 변환
-                result.left_iris[i].x = left_eye_crop.x + local_x * left_eye_crop.width;
-                result.left_iris[i].y = left_eye_crop.y + local_y * left_eye_crop.height;
-                result.left_iris[i].z = local_z;
+                result.left_iris[i].x = impl_->left_iris_landmarks_buffer[i * 3 + 0];
+                result.left_iris[i].y = impl_->left_iris_landmarks_buffer[i * 3 + 1];
+                result.left_iris[i].z = impl_->left_iris_landmarks_buffer[i * 3 + 2];
                 result.left_iris[i].visibility = 1.0f;
             }
             result.left_detected = true;
             result.left_radius = impl_->calculateIrisRadius(result.left_iris, width, height);
 
-            // 디버그: 변환된 좌표 확인
-            static bool left_result_debug = false;
-            if (!left_result_debug) {
-                std::fprintf(stderr, "[DEBUG] Left Iris Final (MediaPipe method):\n");
+            static bool v2_left_debug = false;
+            if (!v2_left_debug) {
+                std::fprintf(stderr, "[DEBUG] V2 Left Iris Final (embedded):\n");
                 std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
                             result.left_iris[0].x, result.left_iris[0].y, result.left_radius);
-                left_result_debug = true;
+                v2_left_debug = true;
             }
         }
-    }
 
-    // =========================================================
-    // 5. Iris Landmark: 오른쪽 눈 (공식 MediaPipe 방식: 수평 반전)
-    // =========================================================
-    Rect right_eye_crop{};
-    if (impl_->extractEyeRegionMediaPipe(rgb_mat, impl_->face_landmarks_buffer.data(),
-                                          RIGHT_EYE_INNER_CORNER, RIGHT_EYE_OUTER_CORNER,
-                                          IRIS_LANDMARK_INPUT_WIDTH,
-                                          impl_->right_iris_input_buffer.data(),
-                                          right_eye_crop,
-                                          true)) {  // 오른쪽 눈: 수평 반전
-        if (impl_->runIrisLandmark(impl_->right_iris_input_buffer.data(),
-                                   impl_->right_iris_landmarks_buffer.data())) {
-            // 크롭 좌표를 원본 이미지 좌표로 변환
-            // runIrisLandmark()는 항상 인덱스 0-4에 5개 홍채 랜드마크를 저장
-            // Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
-            //
-            // 오른쪽 눈은 수평 반전되어 입력되었으므로 출력 좌표도 역반전 필요
+        // 오른쪽 홍채 결과 복사
+        if (right_detected) {
             for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
-                // 픽셀 좌표 → 정규화 좌표 (0-1)
-                float local_x = impl_->right_iris_landmarks_buffer[i * 3 + 0] /
-                                static_cast<float>(IRIS_LANDMARK_INPUT_WIDTH);
-                float local_y = impl_->right_iris_landmarks_buffer[i * 3 + 1] /
-                                static_cast<float>(IRIS_LANDMARK_INPUT_HEIGHT);
-                float local_z = impl_->right_iris_landmarks_buffer[i * 3 + 2];
-
-                // ========================================
-                // 공식 MediaPipe 방식: x 좌표 역반전
-                // 입력이 반전되었으므로 출력 x를 다시 반전
-                // ========================================
-                local_x = 1.0f - local_x;
-
-                result.right_iris[i].x = right_eye_crop.x + local_x * right_eye_crop.width;
-                result.right_iris[i].y = right_eye_crop.y + local_y * right_eye_crop.height;
-                result.right_iris[i].z = local_z;
+                result.right_iris[i].x = impl_->right_iris_landmarks_buffer[i * 3 + 0];
+                result.right_iris[i].y = impl_->right_iris_landmarks_buffer[i * 3 + 1];
+                result.right_iris[i].z = impl_->right_iris_landmarks_buffer[i * 3 + 2];
                 result.right_iris[i].visibility = 1.0f;
             }
             result.right_detected = true;
             result.right_radius = impl_->calculateIrisRadius(result.right_iris, width, height);
 
-            // 디버그: 변환된 좌표 확인
-            static bool right_result_debug = false;
-            if (!right_result_debug) {
-                std::fprintf(stderr, "[DEBUG] Right Iris Final (MediaPipe method with flip):\n");
+            static bool v2_right_debug = false;
+            if (!v2_right_debug) {
+                std::fprintf(stderr, "[DEBUG] V2 Right Iris Final (embedded):\n");
                 std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
                             result.right_iris[0].x, result.right_iris[0].y, result.right_radius);
-                right_result_debug = true;
+                v2_right_debug = true;
+            }
+        }
+    } else {
+        // =========================================================
+        // V1 모델: 별도 iris_landmark 모델 사용
+        // 공식 MediaPipe 방식: 눈 모서리 점 기반 ROI + 오른쪽 눈 반전
+        // =========================================================
+        Rect left_eye_crop{};
+        if (impl_->extractEyeRegionMediaPipe(rgb_mat, impl_->face_landmarks_buffer.data(),
+                                              LEFT_EYE_INNER_CORNER, LEFT_EYE_OUTER_CORNER,
+                                              IRIS_LANDMARK_INPUT_WIDTH,
+                                              impl_->left_iris_input_buffer.data(),
+                                              left_eye_crop,
+                                              false)) {  // 왼쪽 눈: 반전 없음
+            // 디버그: 눈 크롭 영역 확인
+            static bool crop_debug_printed = false;
+            if (!crop_debug_printed) {
+                std::fprintf(stderr, "[DEBUG] V1 Left Eye Crop (MediaPipe): x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
+                            left_eye_crop.x, left_eye_crop.y, left_eye_crop.width, left_eye_crop.height);
+                crop_debug_printed = true;
+            }
+
+            if (impl_->runIrisLandmark(impl_->left_iris_input_buffer.data(),
+                                       impl_->left_iris_landmarks_buffer.data())) {
+                // 크롭 좌표를 원본 이미지 좌표로 변환
+                // runIrisLandmark()는 항상 인덱스 0-4에 5개 홍채 랜드마크를 저장
+                // Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
+                for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                    // 픽셀 좌표 → 정규화 좌표 (0-1)
+                    float local_x = impl_->left_iris_landmarks_buffer[i * 3 + 0] /
+                                    static_cast<float>(IRIS_LANDMARK_INPUT_WIDTH);
+                    float local_y = impl_->left_iris_landmarks_buffer[i * 3 + 1] /
+                                    static_cast<float>(IRIS_LANDMARK_INPUT_HEIGHT);
+                    float local_z = impl_->left_iris_landmarks_buffer[i * 3 + 2];
+
+                    // 크롭 영역 내 좌표를 원본 이미지 좌표로 변환
+                    result.left_iris[i].x = left_eye_crop.x + local_x * left_eye_crop.width;
+                    result.left_iris[i].y = left_eye_crop.y + local_y * left_eye_crop.height;
+                    result.left_iris[i].z = local_z;
+                    result.left_iris[i].visibility = 1.0f;
+                }
+                result.left_detected = true;
+                result.left_radius = impl_->calculateIrisRadius(result.left_iris, width, height);
+
+                // 디버그: 변환된 좌표 확인
+                static bool left_result_debug = false;
+                if (!left_result_debug) {
+                    std::fprintf(stderr, "[DEBUG] V1 Left Iris Final (MediaPipe method):\n");
+                    std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
+                                result.left_iris[0].x, result.left_iris[0].y, result.left_radius);
+                    left_result_debug = true;
+                }
+            }
+        }
+
+        // =========================================================
+        // 5. Iris Landmark: 오른쪽 눈 (공식 MediaPipe 방식: 수평 반전)
+        // =========================================================
+        Rect right_eye_crop{};
+        if (impl_->extractEyeRegionMediaPipe(rgb_mat, impl_->face_landmarks_buffer.data(),
+                                              RIGHT_EYE_INNER_CORNER, RIGHT_EYE_OUTER_CORNER,
+                                              IRIS_LANDMARK_INPUT_WIDTH,
+                                              impl_->right_iris_input_buffer.data(),
+                                              right_eye_crop,
+                                              true)) {  // 오른쪽 눈: 수평 반전
+            if (impl_->runIrisLandmark(impl_->right_iris_input_buffer.data(),
+                                       impl_->right_iris_landmarks_buffer.data())) {
+                // 크롭 좌표를 원본 이미지 좌표로 변환
+                // runIrisLandmark()는 항상 인덱스 0-4에 5개 홍채 랜드마크를 저장
+                // Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
+                //
+                // 오른쪽 눈은 수평 반전되어 입력되었으므로 출력 좌표도 역반전 필요
+                for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                    // 픽셀 좌표 → 정규화 좌표 (0-1)
+                    float local_x = impl_->right_iris_landmarks_buffer[i * 3 + 0] /
+                                    static_cast<float>(IRIS_LANDMARK_INPUT_WIDTH);
+                    float local_y = impl_->right_iris_landmarks_buffer[i * 3 + 1] /
+                                    static_cast<float>(IRIS_LANDMARK_INPUT_HEIGHT);
+                    float local_z = impl_->right_iris_landmarks_buffer[i * 3 + 2];
+
+                    // ========================================
+                    // 공식 MediaPipe 방식: x 좌표 역반전
+                    // 입력이 반전되었으므로 출력 x를 다시 반전
+                    // ========================================
+                    local_x = 1.0f - local_x;
+
+                    result.right_iris[i].x = right_eye_crop.x + local_x * right_eye_crop.width;
+                    result.right_iris[i].y = right_eye_crop.y + local_y * right_eye_crop.height;
+                    result.right_iris[i].z = local_z;
+                    result.right_iris[i].visibility = 1.0f;
+                }
+                result.right_detected = true;
+                result.right_radius = impl_->calculateIrisRadius(result.right_iris, width, height);
+
+                // 디버그: 변환된 좌표 확인
+                static bool right_result_debug = false;
+                if (!right_result_debug) {
+                    std::fprintf(stderr, "[DEBUG] V1 Right Iris Final (MediaPipe method with flip):\n");
+                    std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
+                                result.right_iris[0].x, result.right_iris[0].y, result.right_radius);
+                    right_result_debug = true;
+                }
             }
         }
     }
@@ -1742,6 +2290,19 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     result.face_rotation[0] = 0.0f;  // pitch
     result.face_rotation[1] = 0.0f;  // yaw
     result.face_rotation[2] = 0.0f;  // roll
+
+    // Face Mesh 복사 (478개 랜드마크, 시각화/디버그용)
+    if (result.detected && !impl_->face_landmarks_buffer.empty()) {
+        result.face_mesh_valid = true;
+        for (int i = 0; i < IrisResult::FACE_MESH_LANDMARK_COUNT; ++i) {
+            result.face_mesh[i].x = impl_->face_landmarks_buffer[i * 3 + 0];
+            result.face_mesh[i].y = impl_->face_landmarks_buffer[i * 3 + 1];
+            result.face_mesh[i].z = impl_->face_landmarks_buffer[i * 3 + 2];
+            result.face_mesh[i].visibility = 1.0f;
+        }
+    } else {
+        result.face_mesh_valid = false;
+    }
 
     // =========================================================
     // 7. 추적 캐시 업데이트
@@ -1815,6 +2376,48 @@ void MediaPipeDetector::setTrackingEnabled(bool enable) {
 void MediaPipeDetector::resetTracking() {
 #if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_OPENCV)
     impl_->resetTrackingCache();
+#endif
+}
+
+int MediaPipeDetector::getFaceLandmarkCount() const {
+#if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_OPENCV)
+    if (!impl_ || !impl_->initialized) {
+        return 0;
+    }
+    return (impl_->model_version == 2) ? FACE_LANDMARK_V2_COUNT : FACE_LANDMARK_COUNT;
+#else
+    return 0;
+#endif
+}
+
+bool MediaPipeDetector::getFaceLandmarks(float* out_landmarks) const {
+#if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_OPENCV)
+    if (!impl_ || !impl_->initialized || !out_landmarks) {
+        return false;
+    }
+
+    int count = getFaceLandmarkCount();
+    if (count == 0 || impl_->face_landmarks_buffer.empty()) {
+        return false;
+    }
+
+    std::memcpy(out_landmarks, impl_->face_landmarks_buffer.data(),
+                count * 3 * sizeof(float));
+    return true;
+#else
+    (void)out_landmarks;
+    return false;
+#endif
+}
+
+int MediaPipeDetector::getModelVersion() const {
+#if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_OPENCV)
+    if (!impl_) {
+        return 0;
+    }
+    return impl_->model_version;
+#else
+    return 0;
 #endif
 }
 

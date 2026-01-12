@@ -64,6 +64,17 @@ public:
     double getLastProcessingTimeMs() const noexcept { return last_processing_time_ms_; }
     double getAverageFPS() const noexcept;
 
+    // 디버그용 Face Mesh 접근
+    int getFaceLandmarkCount() const {
+        return detector_ ? detector_->getFaceLandmarkCount() : 0;
+    }
+    bool getFaceLandmarks(float* out_landmarks) const {
+        return detector_ ? detector_->getFaceLandmarks(out_landmarks) : false;
+    }
+    int getModelVersion() const {
+        return detector_ ? detector_->getModelVersion() : 0;
+    }
+
 private:
     // 포맷 변환
     bool convertToWorkingFormat(const uint8_t* input, int width, int height,
@@ -605,7 +616,10 @@ bool FrameProcessor::Impl::renderOnly(uint8_t* frame_data,
 
 void FrameProcessor::Impl::setMinConfidence(float min_confidence) {
     min_confidence_ = std::clamp(min_confidence, 0.0f, 1.0f);
-    // TODO: detector에 전달 (MediaPipeDetector에 해당 API 추가 필요)
+    // detector에 전달
+    if (detector_) {
+        detector_->setMinDetectionConfidence(min_confidence_);
+    }
 }
 
 void FrameProcessor::Impl::setFaceTracking(bool enable) {
@@ -738,6 +752,18 @@ double FrameProcessor::getLastProcessingTimeMs() const noexcept {
 
 double FrameProcessor::getAverageFPS() const noexcept {
     return impl_ ? impl_->getAverageFPS() : 0.0;
+}
+
+int FrameProcessor::getFaceLandmarkCount() const {
+    return impl_ ? impl_->getFaceLandmarkCount() : 0;
+}
+
+bool FrameProcessor::getFaceLandmarks(float* out_landmarks) const {
+    return impl_ ? impl_->getFaceLandmarks(out_landmarks) : false;
+}
+
+int FrameProcessor::getModelVersion() const {
+    return impl_ ? impl_->getModelVersion() : 0;
 }
 
 } // namespace iris_sdk

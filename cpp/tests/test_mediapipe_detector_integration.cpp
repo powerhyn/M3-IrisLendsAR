@@ -61,12 +61,13 @@ namespace {
 
     /// 테스트 이미지 파일명 목록
     const std::vector<std::string> TEST_IMAGE_FILES = {
-        "iris_test_01.png",
-        "iris_test_02.png",
-        "iris_test_03.png",
-        "iris_test_04.png",
-        "Iris_test_05.png",
-        "iris_test_06.png"
+        "iris_test_01.png",  // 1024x1536 portrait
+        "iris_test_02.png",  // 1024x1536 portrait
+        "iris_test_03.png",  // 1024x1536 portrait
+        "iris_test_04.png",  // 1024x1536 portrait
+        "Iris_test_05.png",  // 1024x1536 portrait
+        "iris_test_06.png",  // 1024x1536 portrait
+        "iris_test_07.png"   // 1280x720 landscape (카메라 캡처)
     };
 }
 
@@ -1215,7 +1216,48 @@ TEST_F(MediaPipeDetectorIntegrationTest, VisualizeDetectionResults) {
                 }
             }
 
-            // 4. 정보 텍스트 추가
+            // 4. Face Mesh 전체 그리기 (478개 랜드마크, 연두색 점)
+            if (result.face_mesh_valid) {
+                // 모든 랜드마크를 작은 점으로 그리기
+                for (int i = 0; i < IrisResult::FACE_MESH_LANDMARK_COUNT; ++i) {
+                    cv::Point pt(
+                        static_cast<int>(result.face_mesh[i].x * img_w),
+                        static_cast<int>(result.face_mesh[i].y * img_h)
+                    );
+                    // 범위 체크
+                    if (pt.x >= 0 && pt.x < img_w && pt.y >= 0 && pt.y < img_h) {
+                        // 홍채 랜드마크 (468-477)는 다른 색으로 표시
+                        if (i >= 468 && i <= 472) {
+                            cv::circle(vis_image, pt, 3, cv::Scalar(255, 0, 0), -1);  // 왼쪽 홍채: 파랑
+                        } else if (i >= 473 && i <= 477) {
+                            cv::circle(vis_image, pt, 3, cv::Scalar(0, 0, 255), -1);  // 오른쪽 홍채: 빨강
+                        } else {
+                            cv::circle(vis_image, pt, 1, cv::Scalar(0, 255, 128), -1);  // 얼굴: 연두색
+                        }
+                    }
+                }
+
+                // 주요 랜드마크 인덱스 표시 (눈, 코, 입)
+                // 왼쪽 눈: 33 (외측), 133 (내측)
+                // 오른쪽 눈: 362 (외측), 263 (내측)
+                // 코: 1
+                // 입: 61, 291
+                int key_indices[] = {33, 133, 362, 263, 1, 61, 291};
+                for (int idx : key_indices) {
+                    cv::Point pt(
+                        static_cast<int>(result.face_mesh[idx].x * img_w),
+                        static_cast<int>(result.face_mesh[idx].y * img_h)
+                    );
+                    cv::circle(vis_image, pt, 5, cv::Scalar(255, 255, 0), -1);  // 청록색
+                    cv::putText(vis_image, std::to_string(idx),
+                                cv::Point(pt.x + 5, pt.y - 5),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(255, 255, 255), 1);
+                }
+
+                std::cout << "    Face mesh: 478 landmarks drawn" << std::endl;
+            }
+
+            // 5. 정보 텍스트 추가
             std::string info = "conf=" + std::to_string(result.confidence).substr(0, 4);
             cv::putText(vis_image, info, cv::Point(10, 30),
                         cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0), 2);

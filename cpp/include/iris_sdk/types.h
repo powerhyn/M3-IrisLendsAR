@@ -136,6 +136,11 @@ struct IrisResult {
     Rect face_rect;             ///< 얼굴 바운딩 박스
     float face_rotation[3];     ///< 얼굴 회전 [pitch, yaw, roll] (도)
 
+    // Face Mesh (478 랜드마크, 디버그/시각화용)
+    static constexpr int FACE_MESH_LANDMARK_COUNT = 478;
+    IrisLandmark face_mesh[478];    ///< 전체 얼굴 메쉬 랜드마크
+    bool face_mesh_valid;           ///< face_mesh 데이터 유효 여부
+
     // 프레임 정보
     int64_t timestamp_ms;   ///< 타임스탬프 (밀리초)
     int32_t frame_width;    ///< 원본 프레임 너비

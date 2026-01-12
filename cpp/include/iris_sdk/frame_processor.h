@@ -256,6 +256,34 @@ public:
      */
     double getAverageFPS() const noexcept;
 
+    // ========================================
+    // 디버그 및 시각화 (Face Mesh)
+    // ========================================
+
+    /**
+     * @brief 마지막 검출의 얼굴 랜드마크 수 반환
+     * @return 랜드마크 수 (V1: 468, V2: 478, 실패시 0)
+     */
+    int getFaceLandmarkCount() const;
+
+    /**
+     * @brief 마지막 검출의 얼굴 랜드마크 데이터 접근
+     *
+     * 디버그 및 시각화 목적으로 사용.
+     * 각 랜드마크는 (x, y, z) 3개 float로 구성.
+     * 좌표는 정규화 좌표 (0.0~1.0, 전체 이미지 기준)
+     *
+     * @param out_landmarks 출력 버퍼 (최소 getFaceLandmarkCount() * 3 floats)
+     * @return 성공 여부
+     */
+    bool getFaceLandmarks(float* out_landmarks) const;
+
+    /**
+     * @brief 모델 버전 반환
+     * @return 1: V1 (468 랜드마크), 2: V2 (478 랜드마크, 홍채 내장)
+     */
+    int getModelVersion() const;
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
