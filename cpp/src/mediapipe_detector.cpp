@@ -1737,8 +1737,14 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     Rect face_rect{};
     float face_confidence = 0.0f;
 
+    // [옵션 2] 원본 face_rect 저장용 변수
+    Rect original_face_rect{};
+
     if (impl_->use_tracking && impl_->has_prev_result && impl_->prev_result.detected) {
-        // 이전 얼굴 영역을 약간 확장하여 사용
+        // 원본 face_rect는 그대로 유지 (저장 및 시각화용)
+        original_face_rect = impl_->prev_face_rect;
+
+        // 크롭용으로만 확장된 영역 사용 (face_rect는 임시 확장)
         face_rect = impl_->prev_face_rect;
         face_rect.x = std::max(0.0f, face_rect.x - face_rect.width * 0.1f);
         face_rect.y = std::max(0.0f, face_rect.y - face_rect.height * 0.1f);
@@ -1800,6 +1806,8 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         }
     }
 
+    // [옵션 2] 시각화용은 확장된 face_rect 사용 (크롭 영역 표시)
+    // prev_face_rect 저장은 원본으로 하여 누적 방지 (아래 캐시 업데이트 참조)
     result.face_rect = face_rect;
 
     // =========================================================
@@ -2305,11 +2313,36 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     }
 
     // =========================================================
-    // 7. 추적 캐시 업데이트
+    // 7. 추적 캐시 업데이트 (움직임 추적)
     // =========================================================
     if (result.detected) {
         impl_->prev_result = result;
-        impl_->prev_face_rect = face_rect;
+
+        // Face Mesh 결과에서 새로운 face_rect 계산 (움직임 추적)
+        if (result.face_mesh_valid) {
+            float min_x = 1.0f, min_y = 1.0f, max_x = 0.0f, max_y = 0.0f;
+            for (int i = 0; i < IrisResult::FACE_MESH_LANDMARK_COUNT; ++i) {
+                const auto& lm = result.face_mesh[i];
+                if (lm.x >= 0 && lm.x <= 1 && lm.y >= 0 && lm.y <= 1) {
+                    min_x = std::min(min_x, lm.x);
+                    min_y = std::min(min_y, lm.y);
+                    max_x = std::max(max_x, lm.x);
+                    max_y = std::max(max_y, lm.y);
+                }
+            }
+            // Face Mesh 기반 새 face_rect 저장 (다음 프레임 추적용)
+            impl_->prev_face_rect.x = min_x;
+            impl_->prev_face_rect.y = min_y;
+            impl_->prev_face_rect.width = max_x - min_x;
+            impl_->prev_face_rect.height = max_y - min_y;
+        } else {
+            // Face Mesh 없으면 기존 방식
+            if (original_face_rect.width > 0) {
+                impl_->prev_face_rect = original_face_rect;
+            } else {
+                impl_->prev_face_rect = face_rect;
+            }
+        }
         impl_->has_prev_result = true;
     } else {
         // 검출 실패 시 추적 캐시 무효화
