@@ -953,8 +953,15 @@ public:
         px_max_x = std::clamp(px_max_x, 1, img_width);
         px_max_y = std::clamp(px_max_y, 1, img_height);
 
+        // ROI 유효성 체크 (눈이 화면 밖으로 나간 경우)
+        int roi_width = px_max_x - px_min_x;
+        int roi_height = px_max_y - px_min_y;
+        if (roi_width <= 0 || roi_height <= 0) {
+            return false;
+        }
+
         // 크롭 (ROI는 복사 없이 참조)
-        cv::Rect roi(px_min_x, px_min_y, px_max_x - px_min_x, px_max_y - px_min_y);
+        cv::Rect roi(px_min_x, px_min_y, roi_width, roi_height);
         cv::Mat cropped = rgb_image(roi);
 
         // 리사이즈 (cropped_buffer 재사용)
@@ -1050,15 +1057,22 @@ public:
         px_max_x = std::clamp(px_max_x, 1, img_width);
         px_max_y = std::clamp(px_max_y, 1, img_height);
 
+        // ROI 유효성 체크 (얼굴이 화면 밖으로 나간 경우)
+        int roi_width = px_max_x - px_min_x;
+        int roi_height = px_max_y - px_min_y;
+        if (roi_width <= 0 || roi_height <= 0) {
+            return false;
+        }
+
         // 실제 크롭 영역 저장 (정규화 좌표, 좌표 변환에 사용)
         // 주의: 정사각형 픽셀 영역을 정규화 좌표로 변환하면 직사각형이 됨
         actual_crop_rect.x = static_cast<float>(px_min_x) / img_width;
         actual_crop_rect.y = static_cast<float>(px_min_y) / img_height;
-        actual_crop_rect.width = static_cast<float>(px_max_x - px_min_x) / img_width;
-        actual_crop_rect.height = static_cast<float>(px_max_y - px_min_y) / img_height;
+        actual_crop_rect.width = static_cast<float>(roi_width) / img_width;
+        actual_crop_rect.height = static_cast<float>(roi_height) / img_height;
 
         // 크롭 (픽셀 기준 정사각형)
-        cv::Rect roi(px_min_x, px_min_y, px_max_x - px_min_x, px_max_y - px_min_y);
+        cv::Rect roi(px_min_x, px_min_y, roi_width, roi_height);
         cv::Mat cropped = rgb_image(roi);
 
         // 디버그: 픽셀 기준 정사각형 crop 확인
