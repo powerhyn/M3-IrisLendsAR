@@ -1,9 +1,9 @@
 # P1-W4-05: C API 래퍼 구현
 
 **태스크 ID**: P1-W4-05
-**상태**: ⏳ 대기
-**시작일**: -
-**완료일**: -
+**상태**: ✅ 완료
+**시작일**: 2026-01-12
+**완료일**: 2026-01-12
 
 ---
 
@@ -19,11 +19,11 @@
 | `cpp/src/sdk_api.cpp` | C API 구현 |
 
 ### 검증 기준
-- [ ] extern "C" 심볼 export 확인
-- [ ] 모든 함수 ABI 안정성 검증
-- [ ] 에러 코드 반환 표준화
-- [ ] 메모리 관리 규칙 명확화
-- [ ] 문서화 (Doxygen)
+- [x] extern "C" 심볼 export 확인 (nm -g 검증 완료)
+- [x] 모든 함수 ABI 안정성 검증 (POD 구조체, 고정 enum 값)
+- [x] 에러 코드 반환 표준화 (100-199: 초기화, 200-299: 파라미터, 300-399: 검출, 400-499: 렌더링)
+- [x] 메모리 관리 규칙 명확화 (iris_sdk_free_result API)
+- [x] 문서화 (Doxygen 주석 포함)
 
 ### 선행 조건
 - P1-W4-04: SDKManager 싱글톤 ✅
@@ -542,23 +542,46 @@ IRIS_SDK_EXPORT void iris_sdk_free_result(IrisResult* result) {
 
 ## 3. 실행 내역
 
-### 3.1 헤더 파일 작성
+### 3.1 헤더 파일 작성 ✅
+
+- `cpp/include/iris_sdk/sdk_api.h` (446 lines)
+- 16개 C API 함수 선언
+- POD 구조체: IrisLandmark, IrisRect, IrisResult, IrisLensConfig, IrisSdkConfig
+- enum 타입: IrisSdkError, IrisFrameFormat, IrisBlendMode
+
+### 3.2 구현 파일 작성 ✅
+
+- `cpp/src/sdk_api.cpp` (730+ lines)
+- 모든 API 함수 구현 완료
+- 스레드 안전성: std::mutex 보호
+- 예외 처리: std::stof() try-catch 추가
+
+### 3.3 심볼 export 검증 ✅
 
 ```bash
-# 예정: cpp/include/iris_sdk/sdk_api.h
+$ nm -g lib/libiris_sdkd.a | grep "T _iris_sdk" | head -16
+T _iris_sdk_default_lens_config
+T _iris_sdk_destroy
+T _iris_sdk_detect
+T _iris_sdk_error_to_string
+T _iris_sdk_free_result
+T _iris_sdk_get_build_info
+T _iris_sdk_get_last_error
+T _iris_sdk_get_version
+T _iris_sdk_init
+T _iris_sdk_init_with_config
+T _iris_sdk_is_ready
+T _iris_sdk_load_texture
+T _iris_sdk_load_texture_from_memory
+T _iris_sdk_process
+T _iris_sdk_render_lens
+T _iris_sdk_set_config
 ```
 
-### 3.2 구현 파일 작성
+### 3.4 테스트 작성 ✅
 
-```bash
-# 예정: cpp/src/sdk_api.cpp
-```
-
-### 3.3 심볼 export 검증
-
-```bash
-# 예정: nm -gU libiris_sdk.dylib | grep iris_sdk
-```
+- `cpp/tests/test_sdk_api.cpp` (42개 테스트)
+- 결과: 38 passed, 4 skipped (모델 파일 미포함)
 
 ---
 
@@ -568,23 +591,32 @@ IRIS_SDK_EXPORT void iris_sdk_free_result(IrisResult* result) {
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
-| extern "C" 심볼 | ⏳ 대기 | nm 확인 |
-| 함수 시그니처 | ⏳ 대기 | |
-| 구조체 레이아웃 | ⏳ 대기 | sizeof 검증 |
-| 에러 처리 | ⏳ 대기 | |
-| 메모리 관리 | ⏳ 대기 | |
+| extern "C" 심볼 | ✅ 완료 | nm -g 16개 함수 확인 |
+| 함수 시그니처 | ✅ 완료 | Doxygen 문서화 포함 |
+| 구조체 레이아웃 | ✅ 완료 | ABI 테스트 포함 |
+| 에러 처리 | ✅ 완료 | 범주화된 에러 코드 |
+| 메모리 관리 | ✅ 완료 | free_result API |
 
 ### 심볼 export 확인
 
 ```bash
-# 예정 출력
+# nm -g 출력 (총 16개 심볼)
 _iris_sdk_init
+_iris_sdk_init_with_config
 _iris_sdk_destroy
+_iris_sdk_is_ready
 _iris_sdk_detect
 _iris_sdk_process
+_iris_sdk_load_texture
+_iris_sdk_load_texture_from_memory
 _iris_sdk_render_lens
+_iris_sdk_set_config
+_iris_sdk_default_lens_config
 _iris_sdk_get_version
-...
+_iris_sdk_get_build_info
+_iris_sdk_get_last_error
+_iris_sdk_error_to_string
+_iris_sdk_free_result
 ```
 
 ---
@@ -595,7 +627,8 @@ _iris_sdk_get_version
 
 | ID | 내용 | 상태 | 해결방안 |
 |----|------|------|----------|
-| - | - | - | - |
+| 1 | std::stof() 예외 미처리 | ✅ 해결 | try-catch 추가 |
+| 2 | FrameProcessor 생성 실패 시 오류 코드 불일치 | ✅ 해결 | IRIS_SDK_UNKNOWN 반환으로 변경 |
 
 ### 결정 사항
 
@@ -607,7 +640,10 @@ _iris_sdk_get_version
 
 ### 학습 내용
 
-(실행 후 기록)
+1. **C/C++ 바인딩 설계**: POD 구조체와 extern "C" 함수를 통해 JNI, Obj-C++, dart:ffi, WASM에서 안정적으로 호출 가능
+2. **에러 코드 범주화**: 100번대(초기화), 200번대(파라미터), 300번대(검출), 400번대(렌더링)로 분류하여 디버깅 용이
+3. **스레드 안전성**: std::mutex로 전역 상태 보호, thread_local로 에러 메시지 관리
+4. **ABI 안정성**: 구조체 크기 테스트와 enum 고정값으로 바이너리 호환성 유지
 
 ---
 
@@ -617,3 +653,6 @@ _iris_sdk_get_version
 |------|----------|
 | 2026-01-07 | 태스크 문서 생성, C API 설계 완료 |
 | 2026-01-07 | 아키텍처 리뷰: iris_sdk_free_result() 메모리 해제 API 추가 |
+| 2026-01-12 | C API 래퍼 구현 완료 (sdk_api.h, sdk_api.cpp) |
+| 2026-01-12 | 42개 단위 테스트 작성, 코드 리뷰 수행 |
+| 2026-01-12 | 코드 최적화: 예외 처리, 오류 코드 의미 개선 |

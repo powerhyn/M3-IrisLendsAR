@@ -51,7 +51,7 @@ set(IRIS_SDK_SOURCES
     src/lens_renderer.cpp
     src/frame_processor.cpp
     src/sdk_manager.cpp
-    # src/sdk_api.cpp
+    src/sdk_api.cpp
 )
 
 set(IRIS_SDK_HEADERS

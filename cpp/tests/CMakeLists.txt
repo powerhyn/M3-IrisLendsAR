@@ -335,3 +335,43 @@ elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
 endif()
 
 gtest_discover_tests(test_camera_demo DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P1-W4-05: C API 래퍼 테스트
+# ============================================================
+add_executable(test_sdk_api test_sdk_api.cpp)
+target_include_directories(test_sdk_api PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_sdk_api PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (팩토리 메서드 테스트에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_sdk_api PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_sdk_api PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+# TFLite 연결 (통합 테스트에 필요)
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_sdk_api PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_sdk_api PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_sdk_api PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_sdk_api PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_sdk_api PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+gtest_discover_tests(test_sdk_api DISCOVERY_TIMEOUT 60)
