@@ -80,6 +80,12 @@ if(NOT IRIS_SDK_CORE_LIB)
     set(IRIS_SDK_FETCH_TFLITE OFF CACHE BOOL "" FORCE)
     set(IRIS_SDK_USE_SYSTEM_TFLITE OFF CACHE BOOL "" FORCE)
 
+    # OpenCV Android SDK 경로 설정 (add_subdirectory 전에 설정 필수)
+    if(ANDROID)
+        set(OpenCV_DIR "${PROJECT_ROOT}/cpp/third_party/opencv/android/sdk/native/jni" CACHE PATH "" FORCE)
+        message(STATUS "IrisSDK JNI: OpenCV_DIR set to: ${OpenCV_DIR}")
+    endif()
+
     add_subdirectory("${IRIS_SDK_CORE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/iris_sdk_core")
     set(IRIS_SDK_CORE_TARGET iris_sdk)
 else()

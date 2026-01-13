@@ -82,7 +82,8 @@ android {
         }
 
         release {
-            isMinifyEnabled = true
+            // SDK 라이브러리는 minify 비활성화 (앱에서 처리)
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

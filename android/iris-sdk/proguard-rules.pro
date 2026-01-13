@@ -138,3 +138,4 @@
 -dontwarn javax.annotation.**
 -dontwarn org.jetbrains.annotations.**
 -dontwarn kotlin.reflect.jvm.internal.**
+-dontwarn java.lang.invoke.StringConcatFactory
