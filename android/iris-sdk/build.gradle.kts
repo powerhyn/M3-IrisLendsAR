@@ -40,7 +40,7 @@ android {
             cmake {
                 // CMake 빌드 인자
                 arguments += listOf(
-                    "-DANDROID_STL=c++_shared",
+                    "-DANDROID_STL=c++_static",
                     "-DANDROID_ARM_NEON=TRUE",
                     "-DBUILD_TESTS=OFF",
                     "-DBUILD_EXAMPLES=OFF",
