@@ -166,30 +166,39 @@ class MainActivity : AppCompatActivity() {
     private fun initializeSDK() {
         try {
             Log.d(TAG, "Initializing IrisLensSDK...")
+            Log.d(TAG, "Library loaded: ${IrisLensSDK.isLibraryLoaded()}")
 
             // SDK 초기화 (정적 메서드 사용)
             val error = IrisLensSDK.init(this)
 
             if (error == IrisLensSDK.OK) {
                 isSDKInitialized = true
-                Log.i(TAG, "SDK Version: ${IrisLensSDK.getVersion()}")
+                val version = IrisLensSDK.getVersion()
+                val isReady = IrisLensSDK.isReady()
+                Log.i(TAG, "SDK Version: $version")
+                Log.i(TAG, "SDK Ready: $isReady")
                 Log.d(TAG, "IrisLensSDK initialized successfully")
 
-                updateStatus("SDK Ready\n${IrisLensSDK.getVersion()}")
+                if (isReady) {
+                    updateStatus("SDK Ready\n$version")
+                } else {
+                    updateStatus("SDK Loaded (Detection not ready)\n$version")
+                }
             } else {
-                Log.e(TAG, "SDK init error: ${IrisLensSDK.errorToString(error)}")
+                val errorStr = IrisLensSDK.errorToString(error)
+                val lastError = IrisLensSDK.getLastError()
+                Log.e(TAG, "SDK init error: $errorStr")
+                Log.e(TAG, "Last error: $lastError")
                 isSDKInitialized = false
-                updateStatus("SDK Init Error: ${IrisLensSDK.errorToString(error)}")
+
+                // SDK 초기화 실패해도 카메라는 동작하도록 함
+                updateStatus("SDK Error: $errorStr\nCamera preview only")
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize IrisLensSDK", e)
             isSDKInitialized = false
-            Toast.makeText(
-                this,
-                "${getString(R.string.error_sdk_init)}: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
+            updateStatus("SDK Exception: ${e.message}\nCamera preview only")
         }
     }
 
@@ -290,6 +299,8 @@ class MainActivity : AppCompatActivity() {
 
         // 상태 텍스트 업데이트
         val status = when {
+            !isSDKInitialized -> "SDK Not Ready (Model loading...)"
+            !IrisLensSDK.isReady() -> "SDK Initializing..."
             result.result.detected -> {
                 val leftStr = if (result.result.leftDetected) "L" else "-"
                 val rightStr = if (result.result.rightDetected) "R" else "-"

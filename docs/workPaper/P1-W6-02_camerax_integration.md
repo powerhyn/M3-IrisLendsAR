@@ -231,3 +231,53 @@ BUILD SUCCESSFUL in 4s
 |------|----------|
 | 2026-01-12 | 태스크 문서 생성 |
 | 2026-01-13 | CameraX 연동 구현 완료 |
+| 2026-01-13 | SDK 미준비 상태 처리 버그 수정 |
+
+---
+
+## 6. 버그 수정 이력
+
+### 6.1 SDK 미준비 시 UI 업데이트 중단 문제
+
+**증상**:
+- 상태 텍스트가 "Camera starting"에서 변경 안됨
+- FPS 표시 안됨
+- 렌즈 선택해도 반응 없음
+
+**원인**:
+- `FrameAnalyzer.analyze()`에서 `IrisLensSDK.isReady()` false일 때 즉시 return
+- 콜백이 호출되지 않아 UI 업데이트가 전혀 안됨
+- SDK는 모델 파일이 없어 `isReady()` = false 반환
+
+**수정 사항**:
+
+1. **FrameAnalyzer.kt**
+```kotlin
+// FPS 계산을 SDK 체크 이전으로 이동
+frameCount++
+if (currentTime - lastFpsUpdateTime >= 1000) {
+    currentFps = frameCount * 1000f / (currentTime - lastFpsUpdateTime)
+    ...
+}
+
+// SDK 미준비 시에도 빈 결과 전달
+if (!IrisLensSDK.isReady()) {
+    irisResult.reset()
+    onResult(AnalysisResult(result = irisResult, processingTimeMs = 0, fps = currentFps))
+    ...
+    return
+}
+```
+
+2. **MainActivity.kt**
+```kotlin
+// SDK 상태별 상세 메시지
+val status = when {
+    !isSDKInitialized -> "SDK Not Ready (Model loading...)"
+    !IrisLensSDK.isReady() -> "SDK Initializing..."
+    result.result.detected -> "Tracking: L R (${result.processingTimeMs}ms)"
+    else -> getString(R.string.status_no_face)
+}
+```
+
+**결과**: 카메라 프리뷰와 FPS 표시가 SDK 상태와 무관하게 정상 동작

@@ -76,17 +76,35 @@ class FrameAnalyzer(
         }
 
         try {
+            val width = imageProxy.width
+            val height = imageProxy.height
+
+            // FPS 계산 (1초마다 업데이트) - SDK 상태와 무관하게 동작
+            frameCount++
+            if (currentTime - lastFpsUpdateTime >= 1000) {
+                currentFps = frameCount * 1000f / (currentTime - lastFpsUpdateTime)
+                frameCount = 0
+                lastFpsUpdateTime = currentTime
+            }
+
             // SDK 준비 상태 확인
             if (!IrisLensSDK.isReady()) {
-                Log.w(TAG, "SDK not ready, skipping frame")
+                // SDK가 준비되지 않아도 FPS 업데이트 및 빈 결과 전달
+                irisResult.reset()
+                onResult(
+                    AnalysisResult(
+                        result = irisResult,
+                        processingTimeMs = 0,
+                        fps = currentFps
+                    )
+                )
+                lastAnalysisTime = currentTime
                 imageProxy.close()
                 return
             }
 
             // YUV_420_888 → NV21 변환
             val nv21 = imageProxyToNV21(imageProxy)
-            val width = imageProxy.width
-            val height = imageProxy.height
 
             // 홍채 검출
             val startTime = System.nanoTime()
@@ -102,25 +120,8 @@ class FrameAnalyzer(
                 processingTimes.removeFirst()
             }
 
-            // FPS 계산 (1초마다 업데이트)
-            frameCount++
-            if (currentTime - lastFpsUpdateTime >= 1000) {
-                currentFps = frameCount * 1000f / (currentTime - lastFpsUpdateTime)
-                frameCount = 0
-                lastFpsUpdateTime = currentTime
-            }
-
             // 결과 전달
-            if (error == IrisLensSDK.OK) {
-                onResult(
-                    AnalysisResult(
-                        result = irisResult,
-                        processingTimeMs = processingTimeMs,
-                        fps = currentFps
-                    )
-                )
-            } else if (error == IrisLensSDK.NO_FACE) {
-                // 얼굴 미검출 - 빈 결과 전달
+            if (error == IrisLensSDK.OK || error == IrisLensSDK.NO_FACE) {
                 onResult(
                     AnalysisResult(
                         result = irisResult,
@@ -130,6 +131,15 @@ class FrameAnalyzer(
                 )
             } else {
                 Log.w(TAG, "Detection error: ${IrisLensSDK.errorToString(error)}")
+                // 에러가 발생해도 빈 결과 전달하여 UI 업데이트
+                irisResult.reset()
+                onResult(
+                    AnalysisResult(
+                        result = irisResult,
+                        processingTimeMs = processingTimeMs,
+                        fps = currentFps
+                    )
+                )
             }
 
             lastAnalysisTime = currentTime
