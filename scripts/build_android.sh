@@ -70,6 +70,9 @@ build_for_abi() {
     echo "Building for $abi"
     echo "======================================"
 
+    # OpenCV Android SDK 경로
+    local opencv_dir="$PROJECT_ROOT/cpp/third_party/opencv/android/sdk/native/jni"
+
     mkdir -p "$build_dir"
     cd "$build_dir"
 
@@ -77,12 +80,13 @@ build_for_abi() {
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
         -DANDROID_ABI="$abi" \
         -DANDROID_PLATFORM="android-$MIN_SDK_VERSION" \
-        -DANDROID_STL=c++_shared \
+        -DANDROID_STL=c++_static \
         -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
         -DBUILD_SHARED_LIBS=ON \
         -DBUILD_TESTS=OFF \
         -DBUILD_EXAMPLES=OFF \
-        -DBUILD_ANDROID=ON
+        -DBUILD_ANDROID=ON \
+        -DOpenCV_DIR="$opencv_dir"
 
     cmake --build . --parallel
 

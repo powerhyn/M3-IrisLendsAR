@@ -316,6 +316,30 @@ public final class IrisLensSDK {
     }
 
     /**
+     * 회전을 고려하여 프레임에서 홍채를 검출합니다.
+     *
+     * <p>Android 카메라는 센서 방향에 따라 회전된 이미지를 출력합니다.
+     * CameraX ImageProxy.imageInfo.rotationDegrees 값을 전달하여
+     * 올바른 방향으로 검출을 수행합니다.</p>
+     *
+     * @param frameData 프레임 데이터 (읽기 전용)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 프레임 포맷 (FORMAT_* 상수)
+     * @param rotationDegrees 이미지 회전 각도 (0, 90, 180, 270)
+     * @param result 검출 결과 출력 객체
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int detectWithRotation(@NonNull byte[] frameData, int width, int height,
+                                          int format, int rotationDegrees,
+                                          @NonNull IrisResult result) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeDetectWithRotation(frameData, width, height, format, rotationDegrees, result);
+    }
+
+    /**
      * 프레임을 처리합니다 (검출 + 렌더링).
      *
      * <p>프레임 데이터는 in-place로 수정됩니다.</p>
@@ -499,6 +523,9 @@ public final class IrisLensSDK {
 
     private static native int nativeDetect(byte[] frameData, int width, int height,
                                            int format, IrisResult result);
+    private static native int nativeDetectWithRotation(byte[] frameData, int width, int height,
+                                                        int format, int rotationDegrees,
+                                                        IrisResult result);
     private static native int nativeProcess(byte[] frameData, int width, int height,
                                             int format, LensConfig config, IrisResult result);
 

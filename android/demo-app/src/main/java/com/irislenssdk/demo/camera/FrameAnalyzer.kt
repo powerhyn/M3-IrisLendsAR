@@ -106,11 +106,16 @@ class FrameAnalyzer(
             // YUV_420_888 → NV21 변환
             val nv21 = imageProxyToNV21(imageProxy)
 
-            // 홍채 검출
+            // 이미지 회전 정보 (카메라 센서 방향)
+            val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+
+            // 홍채 검출 (회전 보정 적용)
             val startTime = System.nanoTime()
 
             irisResult.reset()
-            val error = IrisLensSDK.detect(nv21, width, height, IrisLensSDK.FORMAT_NV21, irisResult)
+            val error = IrisLensSDK.detectWithRotation(
+                nv21, width, height, IrisLensSDK.FORMAT_NV21, rotationDegrees, irisResult
+            )
 
             val processingTimeMs = (System.nanoTime() - startTime) / 1_000_000
 

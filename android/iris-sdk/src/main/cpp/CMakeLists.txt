@@ -75,9 +75,8 @@ if(NOT IRIS_SDK_CORE_LIB)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-    # Android에서는 TFLite FetchContent 비활성화 (빌드 시간 최적화)
-    # TFLite는 사전 빌드된 AAR로 제공되거나 별도로 통합
-    set(IRIS_SDK_FETCH_TFLITE OFF CACHE BOOL "" FORCE)
+    # TFLite 활성화 - FetchContent로 빌드 (첫 빌드 시 시간 소요)
+    set(IRIS_SDK_FETCH_TFLITE ON CACHE BOOL "" FORCE)
     set(IRIS_SDK_USE_SYSTEM_TFLITE OFF CACHE BOOL "" FORCE)
 
     # OpenCV Android SDK 경로 설정 (add_subdirectory 전에 설정 필수)

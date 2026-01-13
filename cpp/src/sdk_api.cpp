@@ -418,6 +418,64 @@ IrisSdkError iris_sdk_detect(
     return IRIS_SDK_OK;
 }
 
+IrisSdkError iris_sdk_detect_with_rotation(
+    const uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format,
+    int rotation_degrees,
+    IrisResult* result) {
+
+    if (!frame_data) {
+        set_last_error("frame_data is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    if (!result) {
+        set_last_error("result is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    if (width <= 0 || height <= 0) {
+        set_last_error("Invalid frame dimensions");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    // 회전 각도 정규화 (0, 90, 180, 270)
+    int normalized_rotation = ((rotation_degrees % 360) + 360) % 360;
+    if (normalized_rotation != 0 && normalized_rotation != 90 &&
+        normalized_rotation != 180 && normalized_rotation != 270) {
+        set_last_error("Invalid rotation degrees (must be 0, 90, 180, or 270)");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (!g_processor || !g_processor->isInitialized()) {
+        set_last_error("SDK not initialized");
+        return IRIS_SDK_NOT_INITIALIZED;
+    }
+
+    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
+
+    // 회전이 필요 없는 경우 기존 로직 사용
+    if (normalized_rotation == 0) {
+        iris_sdk::IrisResult cpp_result = g_processor->detectOnly(frame_data, width, height, cpp_format);
+        convert_to_c_iris_result(cpp_result, result);
+        set_last_error(nullptr);
+        return IRIS_SDK_OK;
+    }
+
+    // 회전이 필요한 경우: 회전 파라미터를 포함하여 검출
+    iris_sdk::IrisResult cpp_result = g_processor->detectOnlyWithRotation(
+        frame_data, width, height, cpp_format, normalized_rotation);
+
+    convert_to_c_iris_result(cpp_result, result);
+
+    set_last_error(nullptr);
+    return IRIS_SDK_OK;
+}
+
 // ============================================================================
 // 처리 함수 구현
 // ============================================================================

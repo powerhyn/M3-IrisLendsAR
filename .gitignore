@@ -85,3 +85,13 @@ shared/test_data/output
 # MediaPipe model files (download via scripts/download_models.sh)
 shared/models/*.tflite
 shared/models/*.task
+
+# Third-party SDKs (download separately)
+cpp/third_party/opencv/android/
+cpp/third_party/opencv/ios/
+cpp/third_party/tflite/android/
+cpp/third_party/tflite/ios/
+cpp/third_party/tflite/include/
+
+# Android Kotlin build cache
+android/.kotlin/

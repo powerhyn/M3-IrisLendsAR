@@ -274,12 +274,40 @@ IRIS_SDK_EXPORT bool iris_sdk_is_ready(void);
  * @return IRIS_SDK_OK 성공, 그 외 에러 코드
  *
  * @note 검출 성공 시에도 result->detected가 false일 수 있습니다 (얼굴 없음).
+ * @note 회전이 필요한 경우 iris_sdk_detect_with_rotation() 사용
  */
 IRIS_SDK_EXPORT IrisSdkError iris_sdk_detect(
     const uint8_t* frame_data,
     int width,
     int height,
     IrisFrameFormat format,
+    IrisResult* result);
+
+/**
+ * @brief 홍채 검출 (회전 지원)
+ *
+ * 프레임에서 홍채를 검출합니다. 이미지 회전을 지원합니다.
+ * Android/iOS 카메라는 일반적으로 회전된 이미지를 출력하므로
+ * 이 함수를 사용하여 회전을 보정합니다.
+ *
+ * @param frame_data 프레임 데이터 (읽기 전용)
+ * @param width 프레임 너비
+ * @param height 프레임 높이
+ * @param format 픽셀 포맷
+ * @param rotation_degrees 이미지 회전 각도 (0, 90, 180, 270)
+ *                         카메라 센서 방향에 따른 회전 보정값
+ * @param result 검출 결과 출력 (NULL 불가)
+ * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ *
+ * @note rotation_degrees는 이미지를 정방향으로 만들기 위해 필요한 회전 각도입니다.
+ *       예: Android CameraX의 ImageProxy.imageInfo.rotationDegrees 값을 직접 전달
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_detect_with_rotation(
+    const uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format,
+    int rotation_degrees,
     IrisResult* result);
 
 // ============================================================================

@@ -33,7 +33,6 @@
 #  define IRIS_SDK_DEPRECATED_NO_EXPORT IRIS_SDK_NO_EXPORT IRIS_SDK_DEPRECATED
 #endif
 
-/* NOLINTNEXTLINE(readability-avoid-unconditional-preprocessor-if) */
 #if 0 /* DEFINE_NO_DEPRECATED */
 #  ifndef IRIS_SDK_NO_DEPRECATED
 #    define IRIS_SDK_NO_DEPRECATED

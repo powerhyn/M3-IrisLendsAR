@@ -431,6 +431,80 @@ Java_com_irislenssdk_IrisLensSDK_nativeDetect(
 }
 
 /**
+ * @brief 홍채 검출 (회전 지원)
+ *
+ * Java: native int nativeDetectWithRotation(byte[] frameData, int width, int height,
+ *                                           int format, int rotationDegrees, IrisResult result);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeDetectWithRotation(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jbyteArray frameData,
+    jint width,
+    jint height,
+    jint format,
+    jint rotationDegrees,
+    jobject resultObj) {
+
+    LOGV("nativeDetectWithRotation called: %dx%d, format=%d, rotation=%d",
+         width, height, format, rotationDegrees);
+
+    // 파라미터 검증
+    if (!frameData) {
+        LOGE("nativeDetectWithRotation: frameData is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+    if (!resultObj) {
+        LOGE("nativeDetectWithRotation: resultObj is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+    if (width <= 0 || height <= 0) {
+        LOGE("nativeDetectWithRotation: invalid dimensions %dx%d", width, height);
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // RAII로 바이트 배열 접근
+    ScopedByteArray frame(env, frameData, JNI_ABORT);
+    if (!frame.valid()) {
+        LOGE("nativeDetectWithRotation: failed to get frame data");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // 버퍼 크기 검증
+    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
+        LOGE("nativeDetectWithRotation: frame buffer size mismatch");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // C API 호출 (회전 지원)
+    IrisResult nativeResult = {};
+    IrisSdkError error = iris_sdk_detect_with_rotation(
+        frame.data(),
+        static_cast<int>(width),
+        static_cast<int>(height),
+        static_cast<IrisFrameFormat>(format),
+        static_cast<int>(rotationDegrees),
+        &nativeResult);
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("Detection with rotation failed: %d (%s)", error, iris_sdk_error_to_string(error));
+        return static_cast<jint>(error);
+    }
+
+    // 결과를 Java 객체로 복사
+    if (!copyResultToJava(env, nativeResult, resultObj)) {
+        LOGE("Failed to copy result to Java object");
+        return static_cast<jint>(IRIS_SDK_UNKNOWN);
+    }
+
+    LOGV("Detection with rotation completed: detected=%d, confidence=%.2f",
+         nativeResult.detected, nativeResult.confidence);
+
+    return static_cast<jint>(IRIS_SDK_OK);
+}
+
+/**
  * @brief 프레임 처리 (검출 + 렌더링)
  *
  * Java: native int nativeProcess(byte[] frameData, int width, int height,

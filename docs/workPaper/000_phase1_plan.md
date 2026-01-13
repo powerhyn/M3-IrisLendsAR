@@ -1,19 +1,19 @@
     # Phase 1: MVP 개발 마스터 계획서
 
 **작성일**: 2025-01-07
-**최종 수정**: 2026-01-07
+**최종 수정**: 2026-01-12
 **상태**: 진행중 🔄
 
 ---
 
 ## 진척도 현황
 
-### 전체 진행률: 31% (8/26 태스크 완료)
+### 전체 진행률: 69% (18/26 태스크 완료)
 
 ```
 Week 1-2: 환경 설정     [██████████] 100% (8/8 완료) ✅
-Week 3-4: 코어 엔진     [░░░░░░░░░░] 0%
-Week 5-6: Android       [░░░░░░░░░░] 0%
+Week 3-4: 코어 엔진     [██████████] 100% (10/10 완료) ✅
+Week 5-6: Android       [░░░░░░░░░░] 0% (0/8)
 ```
 
 ### 마일스톤 상태
@@ -21,8 +21,8 @@ Week 5-6: Android       [░░░░░░░░░░] 0%
 | 마일스톤 | 상태 | 완료일 |
 |----------|------|--------|
 | M1: 환경 구축 | ✅ 완료 (8/8) | 2026-01-07 |
-| M2: 코어 완성 | ⏳ 대기 | - |
-| M3: 데스크톱 실시간 | ⏳ 대기 | - |
+| M2: 코어 완성 | ✅ 완료 (10/10) | 2026-01-12 |
+| M3: 데스크톱 실시간 | ✅ 완료 | 2026-01-12 |
 | M4: Android MVP | ⏳ 대기 | - |
 
 ### 현재 워크플로우
@@ -30,8 +30,11 @@ Week 5-6: Android       [░░░░░░░░░░] 0%
 - **활성 워크플로우**: [001_phase1_workflow.md](001_phase1_workflow.md)
   - 26개 태스크, 4개 마일스톤
   - 의존성 다이어그램 및 품질 게이트 포함
-- **완료된 태스크**: M1 전체 (P1-W1-01~04, P1-W2-01~04)
-- **다음 단계**: M2 코어 엔진 구현
+- **완료된 태스크**:
+  - M1 전체 (P1-W1-01~04, P1-W2-01~04) - 환경 구축
+  - M2 전체 (P1-W3-01~04, P1-W4-01~06) - 코어 엔진
+  - M3 달성 (웹캠 실시간 30fps+ 확인)
+- **다음 단계**: M4 Android MVP (Week 5-6)
 
 ---
 
@@ -68,6 +71,11 @@ Week 5-6: Android       [░░░░░░░░░░] 0%
 1. **MediaPipe → TFLite 전환**: MediaPipe C++는 Bazel 빌드 필요, TFLite로 직접 모델 추론 가능
 2. **CMake 조건부 컴파일**: `find_package(... QUIET)` + 조건부 링크로 유연한 빌드
 3. **Android NDK CMake**: `android.toolchain.cmake`으로 쉬운 크로스컴파일
+4. **Face Mesh 인덱스 체계**: 좌측 홍채 468-472, 우측 홍채 473-477 (MediaPipe 표준)
+5. **GPU 가속 렌더링**: OpenCV UMat 활용 시 T-API GPU 자동 선택으로 성능 향상
+6. **프레임 포맷 처리**: RGBA/BGR/Grayscale 통합 처리 파이프라인 설계
+7. **홍채 이탈 감지**: 프레임 경계 체크로 부분 가시 상태 안전 처리
+8. **알파 블렌딩 최적화**: 사전 계산 알파와 행 단위 처리로 렌더링 효율화
 
 ### 의사결정 로그
 
@@ -78,6 +86,12 @@ Week 5-6: Android       [░░░░░░░░░░] 0%
 | 2026-01-07 | TFLite 직접 사용 | MediaPipe Bazel 복잡성 회피 | FindTFLite.cmake 생성 필요 |
 | 2026-01-07 | 조건부 컴파일 채택 | 의존성 없이도 빌드 가능 | 개발 환경 유연성 증가 |
 | 2026-01-07 | API 24 최소 타겟 | Android 7.0+, 현재 점유율 충분 | 레거시 제외 |
+| 2026-01-10 | Strategy 패턴 검출기 | 모델 교체 유연성 확보 | EyeOnly/Hybrid 검출기 확장 용이 |
+| 2026-01-10 | 싱글톤 SDKManager | 전역 상태 관리 단순화 | 멀티 인스턴스 불가 (트레이드오프) |
+| 2026-01-11 | OpenCV UMat 사용 | GPU/CPU 자동 선택 | 하드웨어 의존 없이 최적화 |
+| 2026-01-11 | extern "C" API | 플랫폼 바인딩 호환성 | 맹글링 방지, ABI 안정성 |
+| 2026-01-12 | 추적 모드 구현 | 30fps 성능 달성 | face_rect 기반 빠른 재검출 |
+| 2026-01-12 | 정규화 좌표계 | 해상도 독립성 확보 | 모든 해상도 동일 처리 |
 
 ---
 
@@ -459,7 +473,17 @@ extern "C" {
 | 문서 | 내용 | 상태 |
 |------|------|------|
 | [001_phase1_workflow.md](001_phase1_workflow.md) | Phase 1 상세 워크플로우 | ✅ 완료 |
-| 002_project_setup.md | 프로젝트 초기 구조 설정 | 예정 |
+| [P1-W3-01_iris_detector_interface.md](P1-W3-01_iris_detector_interface.md) | IrisDetector 인터페이스 | ✅ 완료 |
+| [P1-W3-02_data_structures.md](P1-W3-02_data_structures.md) | 데이터 구조 정의 | ✅ 완료 |
+| [P1-W3-03_mediapipe_detector.md](P1-W3-03_mediapipe_detector.md) | MediaPipeDetector 구현 | ✅ 완료 |
+| [P1-W3-04_detector_unit_test.md](P1-W3-04_detector_unit_test.md) | 검출기 단위 테스트 | ✅ 완료 |
+| [P1-W4-01_lens_renderer.md](P1-W4-01_lens_renderer.md) | LensRenderer 기본 구현 | ✅ 완료 |
+| [P1-W4-02_blending_algorithm.md](P1-W4-02_blending_algorithm.md) | 블렌딩 알고리즘 | ✅ 완료 |
+| [P1-W4-03_frame_processor.md](P1-W4-03_frame_processor.md) | FrameProcessor 파이프라인 | ✅ 완료 |
+| [P1-W4-04_sdk_manager.md](P1-W4-04_sdk_manager.md) | SDKManager 싱글톤 | ✅ 완료 |
+| [P1-W4-05_c_api_wrapper.md](P1-W4-05_c_api_wrapper.md) | C API 래퍼 | ✅ 완료 |
+| [P1-W4-06_integration_test.md](P1-W4-06_integration_test.md) | 코어 통합 테스트 | ✅ 완료 |
+| [P1-W4-07_webcam_demo.md](P1-W4-07_webcam_demo.md) | 웹캠 데모 애플리케이션 | ✅ 완료 |
 
 ---
 
@@ -470,3 +494,4 @@ extern "C" {
 | v1 | 2025-01-07 | 초안 작성 |
 | v2 | 2025-01-07 | 모노레포 구조로 변경, Phase 1 범위 조정 |
 | v3 | 2026-01-07 | Phase 마스터 문서로 전환, 진행 관리 섹션 추가 |
+| v4 | 2026-01-12 | W3-W4 코어 엔진 완료 (M2, M3 달성), 진척률 69% 업데이트 |

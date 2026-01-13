@@ -200,6 +200,29 @@ public:
                           FrameFormat format);
 
     /**
+     * @brief 검출만 수행 (회전 지원)
+     *
+     * 이미지 회전을 처리하면서 홍채 검출을 수행합니다.
+     * Android/iOS 카메라는 센서 방향에 따라 회전된 이미지를 출력하므로
+     * 이 함수를 사용하여 회전을 보정합니다.
+     *
+     * @param frame_data 프레임 데이터 (읽기 전용)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 픽셀 포맷
+     * @param rotation_degrees 회전 각도 (0, 90, 180, 270)
+     * @return 홍채 검출 결과 (회전 보정된 좌표)
+     *
+     * @note rotation_degrees는 이미지를 정방향으로 만들기 위해 필요한 회전 각도입니다.
+     *       결과 좌표는 원본 프레임 기준으로 변환되어 반환됩니다.
+     */
+    IrisResult detectOnlyWithRotation(const uint8_t* frame_data,
+                                       int width,
+                                       int height,
+                                       FrameFormat format,
+                                       int rotation_degrees);
+
+    /**
      * @brief 렌더링만 수행
      *
      * 기존 검출 결과를 사용하여 렌더링만 수행합니다.

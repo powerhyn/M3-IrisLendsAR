@@ -52,6 +52,8 @@ public:
     ProcessResult process(cv::Mat& frame, const LensConfig* config);
     IrisResult detectOnly(const uint8_t* frame_data, int width, int height,
                           FrameFormat format);
+    IrisResult detectOnlyWithRotation(const uint8_t* frame_data, int width, int height,
+                                       FrameFormat format, int rotation_degrees);
     bool renderOnly(uint8_t* frame_data, int width, int height,
                     FrameFormat format, const IrisResult& iris_result,
                     const LensConfig& config);
@@ -579,6 +581,133 @@ IrisResult FrameProcessor::Impl::detectOnly(const uint8_t* frame_data,
     return result;
 }
 
+IrisResult FrameProcessor::Impl::detectOnlyWithRotation(const uint8_t* frame_data,
+                                                         int width, int height,
+                                                         FrameFormat format,
+                                                         int rotation_degrees) {
+    IrisResult result;
+    result.detected = false;
+
+#ifdef IRIS_SDK_HAS_OPENCV
+    if (!initialized_ || frame_data == nullptr || width <= 0 || height <= 0) {
+        return result;
+    }
+
+    // 포맷 변환 (BGR)
+    if (!convertToWorkingFormat(frame_data, width, height, format, work_buffer_)) {
+        return result;
+    }
+
+    // RGB로 변환
+    cv::cvtColor(work_buffer_, rgb_buffer_, cv::COLOR_BGR2RGB);
+
+    // 회전 적용
+    cv::Mat rotated_rgb;
+    int rotated_width = width;
+    int rotated_height = height;
+
+    switch (rotation_degrees) {
+        case 90:
+            cv::rotate(rgb_buffer_, rotated_rgb, cv::ROTATE_90_CLOCKWISE);
+            rotated_width = height;
+            rotated_height = width;
+            break;
+        case 180:
+            cv::rotate(rgb_buffer_, rotated_rgb, cv::ROTATE_180);
+            break;
+        case 270:
+            cv::rotate(rgb_buffer_, rotated_rgb, cv::ROTATE_90_COUNTERCLOCKWISE);
+            rotated_width = height;
+            rotated_height = width;
+            break;
+        default:
+            rotated_rgb = rgb_buffer_;  // 회전 없음
+            break;
+    }
+
+    // 회전된 이미지로 검출 수행
+    result = detector_->detect(rotated_rgb.data, rotated_rgb.cols,
+                                rotated_rgb.rows, FrameFormat::RGB);
+
+    // 검출 성공 시 좌표를 원본 프레임 기준으로 역변환
+    if (result.detected) {
+        auto transformCoord = [rotation_degrees](float& x, float& y) {
+            float new_x, new_y;
+            switch (rotation_degrees) {
+                case 90:
+                    // (x, y) -> (y, 1-x) 역변환: (x, y) -> (1-y, x)
+                    new_x = 1.0f - y;
+                    new_y = x;
+                    break;
+                case 180:
+                    new_x = 1.0f - x;
+                    new_y = 1.0f - y;
+                    break;
+                case 270:
+                    // (x, y) -> (1-y, x) 역변환: (x, y) -> (y, 1-x)
+                    new_x = y;
+                    new_y = 1.0f - x;
+                    break;
+                default:
+                    return;  // 회전 없음
+            }
+            x = new_x;
+            y = new_y;
+        };
+
+        // 왼쪽 홍채 좌표 변환 (5개 랜드마크)
+        for (int i = 0; i < 5; ++i) {
+            transformCoord(result.left_iris[i].x, result.left_iris[i].y);
+        }
+
+        // 오른쪽 홍채 좌표 변환 (5개 랜드마크)
+        for (int i = 0; i < 5; ++i) {
+            transformCoord(result.right_iris[i].x, result.right_iris[i].y);
+        }
+
+        // 얼굴 영역 좌표 변환
+        float face_x = result.face_rect.x;
+        float face_y = result.face_rect.y;
+        float face_w = result.face_rect.width;
+        float face_h = result.face_rect.height;
+
+        switch (rotation_degrees) {
+            case 90:
+                result.face_rect.x = 1.0f - face_y - face_h;
+                result.face_rect.y = face_x;
+                result.face_rect.width = face_h;
+                result.face_rect.height = face_w;
+                break;
+            case 180:
+                result.face_rect.x = 1.0f - face_x - face_w;
+                result.face_rect.y = 1.0f - face_y - face_h;
+                break;
+            case 270:
+                result.face_rect.x = face_y;
+                result.face_rect.y = 1.0f - face_x - face_w;
+                result.face_rect.width = face_h;
+                result.face_rect.height = face_w;
+                break;
+            default:
+                break;
+        }
+
+        // 프레임 크기를 원본 크기로 설정
+        result.frame_width = width;
+        result.frame_height = height;
+
+        // Face Mesh 좌표 변환 (478개 랜드마크)
+        if (result.face_mesh_valid) {
+            for (int i = 0; i < 478; ++i) {
+                transformCoord(result.face_mesh[i].x, result.face_mesh[i].y);
+            }
+        }
+    }
+#endif
+
+    return result;
+}
+
 bool FrameProcessor::Impl::renderOnly(uint8_t* frame_data,
                                        int width, int height,
                                        FrameFormat format,
@@ -727,6 +856,18 @@ IrisResult FrameProcessor::detectOnly(const uint8_t* frame_data,
         return result;
     }
     return impl_->detectOnly(frame_data, width, height, format);
+}
+
+IrisResult FrameProcessor::detectOnlyWithRotation(const uint8_t* frame_data,
+                                                   int width, int height,
+                                                   FrameFormat format,
+                                                   int rotation_degrees) {
+    if (!impl_) {
+        IrisResult result;
+        result.detected = false;
+        return result;
+    }
+    return impl_->detectOnlyWithRotation(frame_data, width, height, format, rotation_degrees);
 }
 
 bool FrameProcessor::renderOnly(uint8_t* frame_data,
