@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IrisLensSDK Demo - Launcher Icon Foreground
+    간단한 눈 모양 아이콘 (벡터 드로어블)
+    @version 1.0.0
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 배경 원 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54m-30,0a30,30 0,1 1,60 0a30,30 0,1 1,-60 0"/>
+
+    <!-- 외부 눈 윤곽 -->
+    <path
+        android:fillColor="#6200EE"
+        android:pathData="M54,38c-12,0 -22,7 -27,16c5,9 15,16 27,16s22,-7 27,-16c-5,-9 -15,-16 -27,-16z"/>
+
+    <!-- 홍채 (외부) -->
+    <path
+        android:fillColor="#03DAC5"
+        android:pathData="M54,54m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"/>
+
+    <!-- 동공 -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M54,54m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0"/>
+
+    <!-- 하이라이트 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M51,50m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+
+</vector>

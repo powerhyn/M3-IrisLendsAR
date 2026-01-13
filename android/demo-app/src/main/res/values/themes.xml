@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IrisLensSDK Android - Demo App Themes
+
+    테마 설정
+    @version 1.0.0
+-->
+<resources>
+    <!-- 메인 테마 -->
+    <style name="Theme.IrisLensSDKDemo" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- 기본 색상 -->
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+
+        <!-- 보조 색상 -->
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorOnSecondary">@android:color/black</item>
+
+        <!-- 상태바 -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+
+        <!-- 전체 화면 -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

@@ -10,7 +10,7 @@
 # @author IrisLensSDK Team
 # @version 1.0.0
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.22.1)
 project(iris_jni VERSION 1.0.0 LANGUAGES CXX)
 
 # ==============================================================================
@@ -44,8 +44,12 @@ get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.."
 set(IRIS_SDK_CORE_DIR "${PROJECT_ROOT}/cpp")
 set(IRIS_SDK_INCLUDE_DIR "${IRIS_SDK_CORE_DIR}/include")
 
+# 공유 리소스 경로 (모델 파일 등)
+set(IRIS_SDK_SHARED_DIR "${PROJECT_ROOT}/shared")
+
 message(STATUS "IrisSDK JNI: Project root: ${PROJECT_ROOT}")
 message(STATUS "IrisSDK JNI: Core include dir: ${IRIS_SDK_INCLUDE_DIR}")
+message(STATUS "IrisSDK JNI: Shared dir: ${IRIS_SDK_SHARED_DIR}")
 
 # ==============================================================================
 # iris_sdk 코어 라이브러리 찾기
@@ -70,6 +74,11 @@ if(NOT IRIS_SDK_CORE_LIB)
     set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+    # Android에서는 TFLite FetchContent 비활성화 (빌드 시간 최적화)
+    # TFLite는 사전 빌드된 AAR로 제공되거나 별도로 통합
+    set(IRIS_SDK_FETCH_TFLITE OFF CACHE BOOL "" FORCE)
+    set(IRIS_SDK_USE_SYSTEM_TFLITE OFF CACHE BOOL "" FORCE)
 
     add_subdirectory("${IRIS_SDK_CORE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/iris_sdk_core")
     set(IRIS_SDK_CORE_TARGET iris_sdk)
@@ -206,5 +215,20 @@ message(STATUS "  Android ABI:    ${ANDROID_ABI}")
 message(STATUS "  Platform:       ${ANDROID_PLATFORM}")
 message(STATUS "  C++ Standard:   ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Core library:   ${IRIS_SDK_CORE_TARGET}")
+message(STATUS "  Project root:   ${PROJECT_ROOT}")
+message(STATUS "  NDK version:    ${ANDROID_NDK_REVISION}")
 message(STATUS "========================================")
 message(STATUS "")
+
+# ==============================================================================
+# 에셋 복사 (모델 파일 등)
+# ==============================================================================
+
+# 모델 파일을 assets 디렉토리로 복사하는 커스텀 타겟
+# Gradle에서 preBuild 태스크로 실행 권장
+set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets")
+
+# assets 디렉토리가 없으면 생성
+file(MAKE_DIRECTORY "${ASSETS_DIR}")
+
+message(STATUS "IrisSDK JNI: Assets directory: ${ASSETS_DIR}")

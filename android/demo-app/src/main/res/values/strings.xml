@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IrisLensSDK Android - Demo App Strings
+
+    문자열 리소스
+    @version 1.0.0
+-->
+<resources>
+    <string name="app_name">IrisLens Demo</string>
+
+    <!-- 상태 메시지 -->
+    <string name="status_initializing">Initializing...</string>
+    <string name="status_ready">Ready</string>
+    <string name="status_processing">Processing...</string>
+    <string name="status_error">Error</string>
+
+    <!-- 버튼 -->
+    <string name="btn_lens">Lens</string>
+    <string name="btn_capture">Capture</string>
+    <string name="btn_settings">Settings</string>
+
+    <!-- 권한 -->
+    <string name="permission_camera_rationale">Camera permission is required for AR lens fitting</string>
+    <string name="permission_denied">Permission denied. Some features may not work.</string>
+
+    <!-- 에러 메시지 -->
+    <string name="error_sdk_init">Failed to initialize SDK</string>
+    <string name="error_camera_init">Failed to initialize camera</string>
+    <string name="error_no_face">No face detected</string>
+</resources>

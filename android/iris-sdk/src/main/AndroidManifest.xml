@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IrisLensSDK Android - Library Manifest
+
+    SDK 라이브러리 매니페스트
+    - 최소 권한 선언 (카메라 접근용)
+    - 라이브러리 모듈 설정
+
+    @version 1.0.0
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        카메라 기능 선언
+        - 카메라가 필수인 경우 required="true"
+        - 카메라 없이도 일부 기능 사용 가능하면 required="false"
+    -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.camera.front"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
+    <!--
+        OpenGL ES 3.0 (렌더링용)
+        - 대부분의 최신 기기에서 지원
+    -->
+    <uses-feature
+        android:glEsVersion="0x00030000"
+        android:required="false" />
+
+    <!--
+        권한 선언
+        - 실제 권한 요청은 호스트 앱에서 처리
+        - 라이브러리는 필요한 권한만 선언
+    -->
+
+    <!-- 카메라 권한 (AR 기능용) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!--
+        참고: 다음 권한은 호스트 앱에서 선택적으로 추가
+        - INTERNET: 원격 렌즈 데이터 다운로드 (선택)
+        - WRITE_EXTERNAL_STORAGE: 결과 이미지 저장 (선택)
+    -->
+
+    <application>
+        <!--
+            네이티브 라이브러리 정보
+            - JNI 바인딩 라이브러리
+        -->
+        <meta-data
+            android:name="com.irislenssdk.NATIVE_LIBRARY"
+            android:value="iris_jni" />
+
+        <!--
+            SDK 버전 메타데이터
+        -->
+        <meta-data
+            android:name="com.irislenssdk.VERSION"
+            android:value="1.0.0" />
+
+    </application>
+
+</manifest>

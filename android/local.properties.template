@@ -1,0 +1,45 @@
+# IrisLensSDK Android - Local Properties Template
+#
+# 이 파일을 `local.properties`로 복사한 후 환경에 맞게 수정하세요.
+# local.properties 파일은 .gitignore에 포함되어야 합니다.
+#
+# @version 1.0.0
+
+# =============================================================================
+# Android SDK 경로 (필수)
+# =============================================================================
+# macOS 기본 경로
+sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
+
+# Windows 기본 경로
+# sdk.dir=C\:\\Users\\YOUR_USERNAME\\AppData\\Local\\Android\\Sdk
+
+# Linux 기본 경로
+# sdk.dir=/home/YOUR_USERNAME/Android/Sdk
+
+# =============================================================================
+# Android NDK 경로 (선택적 - Android Studio에서 자동 감지)
+# =============================================================================
+# 특정 NDK 버전을 사용하려면 아래 설정을 활성화하세요
+# ndk.dir=/Users/YOUR_USERNAME/Library/Android/sdk/ndk/26.1.10909125
+
+# =============================================================================
+# CMake 경로 (선택적 - Android Studio에서 자동 감지)
+# =============================================================================
+# 특정 CMake 버전을 사용하려면 아래 설정을 활성화하세요
+# cmake.dir=/Users/YOUR_USERNAME/Library/Android/sdk/cmake/3.22.1
+
+# =============================================================================
+# 빌드 최적화 (선택적)
+# =============================================================================
+# 병렬 빌드 스레드 수 (CPU 코어 수에 맞게 조정)
+# org.gradle.workers.max=4
+
+# =============================================================================
+# 서명 설정 (릴리스 빌드용 - 선택적)
+# =============================================================================
+# 릴리스 APK 서명에 필요한 키스토어 정보
+# storeFile=path/to/keystore.jks
+# storePassword=your_store_password
+# keyAlias=your_key_alias
+# keyPassword=your_key_password

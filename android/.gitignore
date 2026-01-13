@@ -1,0 +1,111 @@
+# IrisLensSDK Android - .gitignore
+#
+# Android 프로젝트 Git 무시 파일
+#
+# @version 1.0.0
+
+# =============================================================================
+# Gradle
+# =============================================================================
+.gradle/
+build/
+**/build/
+
+# Gradle Wrapper (JAR 파일은 버전 관리에 포함할 수도 있음)
+# 여기서는 제외하고 프로젝트에서 `gradle wrapper` 실행으로 생성
+gradle/wrapper/gradle-wrapper.jar
+
+# =============================================================================
+# Local Properties
+# =============================================================================
+local.properties
+
+# =============================================================================
+# IDE
+# =============================================================================
+# Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+.idea/*.xml
+!.idea/codeStyles/
+!.idea/runConfigurations/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+nbactions.xml
+nb-configuration.xml
+
+# =============================================================================
+# Android
+# =============================================================================
+# Native libraries (빌드 시 생성)
+**/jniLibs/
+*.so
+
+# Generated files
+**/generated/
+**/intermediates/
+**/outputs/
+
+# APK files
+*.apk
+*.ap_
+
+# AAR files (릴리스 배포용은 별도 관리)
+*.aar
+
+# Signing files (키스토어)
+*.jks
+*.keystore
+
+# =============================================================================
+# CMake / NDK
+# =============================================================================
+.cxx/
+.externalNativeBuild/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# =============================================================================
+# Misc
+# =============================================================================
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Test outputs
+test-results/
+connected-test-results/
+
+# Coverage
+coverage/
+jacoco/
