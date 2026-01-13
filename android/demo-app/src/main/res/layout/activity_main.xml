@@ -29,9 +29,9 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- 렌즈 오버레이 뷰 -->
-    <View
-        android:id="@+id/lensOverlay"
+    <!-- 렌즈 오버레이 뷰 (홍채 검출 결과 시각화) -->
+    <com.irislenssdk.demo.camera.OverlayView
+        android:id="@+id/overlayView"
         android:layout_width="0dp"
         android:layout_height="0dp"
         app:layout_constraintBottom_toBottomOf="@id/cameraPreview"
