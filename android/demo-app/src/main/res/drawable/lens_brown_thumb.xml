@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Brown 렌즈 썸네일 (placeholder) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:type="radial"
+        android:gradientRadius="28dp"
+        android:centerColor="#A1887F"
+        android:endColor="#5D4037" />
+    <stroke
+        android:width="2dp"
+        android:color="#3E2723" />
+</shape>

@@ -4,8 +4,9 @@
 
     메인 액티비티 레이아웃
     - CameraX PreviewView
-    - 상태 표시 텍스트
-    - 컨트롤 버튼
+    - 렌즈 선택 UI
+    - 투명도/크기 조절 슬라이더
+    - 캡처/카메라 전환 버튼
 
     @version 1.0.0
 -->
@@ -23,12 +24,12 @@
         android:id="@+id/cameraPreview"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/controlsContainer"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- 렌즈 오버레이 뷰 (TODO: P1-W6에서 커스텀 뷰로 구현) -->
+    <!-- 렌즈 오버레이 뷰 -->
     <View
         android:id="@+id/lensOverlay"
         android:layout_width="0dp"
@@ -38,81 +39,354 @@
         app:layout_constraintStart_toStartOf="@id/cameraPreview"
         app:layout_constraintTop_toTopOf="@id/cameraPreview" />
 
-    <!-- 상태 표시 텍스트 -->
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:background="#80000000"
-        android:padding="8dp"
-        android:textColor="@android:color/white"
-        android:textSize="14sp"
-        android:gravity="center"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        tools:text="Initializing..." />
-
-    <!-- FPS 표시 -->
-    <TextView
-        android:id="@+id/fpsText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:background="#80000000"
-        android:padding="8dp"
-        android:textColor="@android:color/white"
-        android:textSize="12sp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        tools:text="FPS: --" />
-
-    <!-- 하단 컨트롤 영역 -->
+    <!-- 상단 정보 바 -->
     <LinearLayout
-        android:id="@+id/controlsLayout"
+        android:id="@+id/topInfoBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="32dp"
-        android:gravity="center"
         android:orientation="horizontal"
-        android:padding="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
+        android:padding="12dp"
+        android:gravity="center_vertical"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- 렌즈 선택 버튼 (TODO: P1-W6에서 구현) -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/lensSelectButton"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+        <!-- 상태 표시 텍스트 -->
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="#80000000"
+            android:padding="8dp"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            tools:text="Initializing..." />
+
+        <!-- FPS 표시 -->
+        <TextView
+            android:id="@+id/fpsText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="16dp"
-            android:text="Lens"
-            android:textColor="@android:color/white" />
+            android:layout_marginStart="8dp"
+            android:background="#80000000"
+            android:padding="8dp"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            tools:text="FPS: --" />
 
-        <!-- 캡처 버튼 -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/captureButton"
-            style="@style/Widget.Material3.Button"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            app:cornerRadius="36dp"
-            app:icon="@android:drawable/ic_menu_camera"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp"
-            app:iconSize="32dp" />
-
-        <!-- 설정 버튼 (TODO: P1-W6에서 구현) -->
-        <com.google.android.material.button.MaterialButton
+        <!-- 설정 버튼 -->
+        <ImageButton
             android:id="@+id/settingsButton"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/circle_button_bg"
+            android:src="@android:drawable/ic_menu_preferences"
+            android:contentDescription="@string/btn_settings"
+            android:tint="@android:color/white" />
+    </LinearLayout>
+
+    <!-- 하단 컨트롤 컨테이너 -->
+    <LinearLayout
+        android:id="@+id/controlsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#CC000000"
+        android:paddingTop="16dp"
+        android:paddingBottom="24dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- 렌즈 선택 영역 -->
+        <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
-            android:text="Settings"
-            android:textColor="@android:color/white" />
+            android:layout_marginBottom="8dp"
+            android:text="@string/label_select_lens"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <HorizontalScrollView
+            android:id="@+id/lensScrollView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:paddingHorizontal="8dp">
+
+            <LinearLayout
+                android:id="@+id/lensContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingVertical="8dp">
+
+                <!-- 렌즈 1: Blue -->
+                <LinearLayout
+                    android:id="@+id/lensBlue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/lens_item_selector">
+
+                    <ImageView
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:src="@drawable/lens_blue_thumb"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@string/lens_blue" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/lens_blue"
+                        android:textColor="@android:color/white"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <!-- 렌즈 2: Green -->
+                <LinearLayout
+                    android:id="@+id/lensGreen"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/lens_item_selector">
+
+                    <ImageView
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:src="@drawable/lens_green_thumb"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@string/lens_green" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/lens_green"
+                        android:textColor="@android:color/white"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <!-- 렌즈 3: Brown -->
+                <LinearLayout
+                    android:id="@+id/lensBrown"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/lens_item_selector">
+
+                    <ImageView
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:src="@drawable/lens_brown_thumb"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@string/lens_brown" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/lens_brown"
+                        android:textColor="@android:color/white"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <!-- 렌즈 4: Gray -->
+                <LinearLayout
+                    android:id="@+id/lensGray"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/lens_item_selector">
+
+                    <ImageView
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:src="@drawable/lens_gray_thumb"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@string/lens_gray" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/lens_gray"
+                        android:textColor="@android:color/white"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <!-- Off: 렌즈 없음 -->
+                <LinearLayout
+                    android:id="@+id/lensOff"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/lens_item_selector">
+
+                    <ImageView
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:src="@drawable/lens_off_thumb"
+                        android:scaleType="centerCrop"
+                        android:contentDescription="@string/lens_off" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/lens_off"
+                        android:textColor="@android:color/white"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- 슬라이더 영역 -->
+        <LinearLayout
+            android:id="@+id/slidersContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:layout_marginTop="12dp">
+
+            <!-- 투명도 슬라이더 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="60dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_opacity"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.slider.Slider
+                    android:id="@+id/opacitySlider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:valueFrom="0.0"
+                    android:valueTo="1.0"
+                    android:value="0.8"
+                    android:stepSize="0.05"
+                    app:trackColorActive="@color/purple_500"
+                    app:trackColorInactive="#40FFFFFF"
+                    app:thumbColor="@color/purple_500" />
+
+                <TextView
+                    android:id="@+id/opacityValue"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:text="80%"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:gravity="end" />
+            </LinearLayout>
+
+            <!-- 크기 슬라이더 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="60dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_scale"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.slider.Slider
+                    android:id="@+id/scaleSlider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:valueFrom="0.5"
+                    android:valueTo="1.5"
+                    android:value="1.0"
+                    android:stepSize="0.05"
+                    app:trackColorActive="@color/purple_500"
+                    app:trackColorInactive="#40FFFFFF"
+                    app:thumbColor="@color/purple_500" />
+
+                <TextView
+                    android:id="@+id/scaleValue"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:text="100%"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:gravity="end" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 하단 버튼 영역 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="16dp"
+            android:paddingHorizontal="24dp">
+
+            <!-- 카메라 전환 버튼 -->
+            <ImageButton
+                android:id="@+id/switchCameraButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/circle_button_bg"
+                android:src="@drawable/ic_switch_camera"
+                android:contentDescription="@string/btn_switch_camera"
+                android:tint="@android:color/white" />
+
+            <!-- 캡처 버튼 -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/captureButton"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_marginHorizontal="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="36dp"
+                app:icon="@android:drawable/ic_menu_camera"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="32dp" />
+
+            <!-- 갤러리/저장 버튼 -->
+            <ImageButton
+                android:id="@+id/galleryButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/circle_button_bg"
+                android:src="@android:drawable/ic_menu_gallery"
+                android:contentDescription="@string/btn_gallery"
+                android:tint="@android:color/white" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
