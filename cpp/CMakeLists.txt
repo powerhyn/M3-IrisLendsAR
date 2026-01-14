@@ -157,8 +157,62 @@ option(IRIS_SDK_FETCH_TFLITE "Download and build TFLite via FetchContent (slow, 
 
 set(TFLITE_FOUND FALSE)
 
+# 0. Android: Pre-built TFLite 라이브러리 사용 (Bazel 빌드 결과물)
+if(ANDROID AND NOT TFLITE_FOUND)
+    set(TFLITE_PREBUILT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tflite")
+    set(TFLITE_PREBUILT_LIB "${TFLITE_PREBUILT_DIR}/android/${ANDROID_ABI}/libtensorflowlite.so")
+    set(TFLITE_PREBUILT_INCLUDE "${TFLITE_PREBUILT_DIR}/include")
+
+    if(EXISTS "${TFLITE_PREBUILT_LIB}" AND EXISTS "${TFLITE_PREBUILT_INCLUDE}/tensorflow/lite/interpreter.h")
+        message(STATUS "Found pre-built TensorFlow Lite for Android ${ANDROID_ABI}")
+        message(STATUS "  - Library: ${TFLITE_PREBUILT_LIB}")
+        message(STATUS "  - Headers: ${TFLITE_PREBUILT_INCLUDE}")
+
+        # TFLite imported target 생성
+        add_library(tflite_prebuilt SHARED IMPORTED)
+        set_target_properties(tflite_prebuilt PROPERTIES
+            IMPORTED_LOCATION "${TFLITE_PREBUILT_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${TFLITE_PREBUILT_INCLUDE}"
+        )
+
+        target_link_libraries(iris_sdk PRIVATE tflite_prebuilt)
+        target_include_directories(iris_sdk PRIVATE "${TFLITE_PREBUILT_INCLUDE}")
+        target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_HAS_TFLITE)
+        set(TFLITE_FOUND TRUE CACHE BOOL "TensorFlow Lite found and configured" FORCE)
+
+        # GPU Delegate 라이브러리 확인 및 링크
+        set(TFLITE_GPU_DELEGATE_LIB "${TFLITE_PREBUILT_DIR}/android/${ANDROID_ABI}/libtensorflowlite_gpu_delegate.so")
+        if(EXISTS "${TFLITE_GPU_DELEGATE_LIB}")
+            message(STATUS "Found pre-built TFLite GPU Delegate for Android ${ANDROID_ABI}")
+            message(STATUS "  - GPU Library: ${TFLITE_GPU_DELEGATE_LIB}")
+
+            add_library(tflite_gpu_delegate SHARED IMPORTED)
+            set_target_properties(tflite_gpu_delegate PROPERTIES
+                IMPORTED_LOCATION "${TFLITE_GPU_DELEGATE_LIB}"
+            )
+
+            target_link_libraries(iris_sdk PRIVATE tflite_gpu_delegate)
+            target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_HAS_GPU_DELEGATE)
+
+            # EGL, GLESv2 링크 (Android GPU delegate 필수 의존성)
+            find_library(EGL_LIB EGL)
+            find_library(GLES_LIB GLESv2)
+            if(EGL_LIB AND GLES_LIB)
+                target_link_libraries(iris_sdk PRIVATE ${EGL_LIB} ${GLES_LIB})
+                message(STATUS "  - Linked EGL and GLESv2 for GPU delegate")
+            endif()
+        else()
+            message(STATUS "GPU Delegate not found (CPU only mode)")
+            message(STATUS "  Expected: ${TFLITE_GPU_DELEGATE_LIB}")
+        endif()
+    else()
+        message(STATUS "Pre-built TFLite not found for Android ${ANDROID_ABI}")
+        message(STATUS "  Expected: ${TFLITE_PREBUILT_LIB}")
+    endif()
+endif()
+
 # 1. 먼저 시스템에 설치된 TFLite 확인 (옵션이 켜져있을 때)
-if(IRIS_SDK_USE_SYSTEM_TFLITE)
+if(NOT TFLITE_FOUND AND IRIS_SDK_USE_SYSTEM_TFLITE)
     # pkg-config로 TFLite 찾기 시도
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)

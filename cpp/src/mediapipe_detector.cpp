@@ -20,6 +20,15 @@
 #include "tensorflow/lite/model.h"
 #endif
 
+// TFLite GPU Delegate (Android 전용)
+// 컴파일 시 IRIS_SDK_HAS_GPU_DELEGATE 매크로로 활성화
+#if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_GPU_DELEGATE) && defined(__ANDROID__)
+#include "tensorflow/lite/delegates/gpu/delegate.h"
+#define IRIS_SDK_GPU_ENABLED 1
+#else
+#define IRIS_SDK_GPU_ENABLED 0
+#endif
+
 // OpenCV 헤더 (조건부 컴파일)
 #ifdef IRIS_SDK_HAS_OPENCV
 #include <opencv2/core.hpp>
@@ -128,6 +137,19 @@ public:
     int num_threads = 4;           ///< TFLite 추론 스레드 수
     bool use_tracking = true;      ///< 추적 모드 활성화 여부
     float tracking_iou_threshold = 0.5f;  ///< 추적 유지 IoU 임계값
+
+    // ========================================
+    // GPU 가속 설정 (Android 전용)
+    // ========================================
+    bool gpu_enabled = false;      ///< GPU 사용 요청 여부
+    bool gpu_active = false;       ///< 실제 GPU 사용 중 여부
+
+#if IRIS_SDK_GPU_ENABLED
+    // GPU delegate 포인터 (수동 해제 필요)
+    TfLiteDelegate* gpu_delegate_face_detection = nullptr;
+    TfLiteDelegate* gpu_delegate_face_landmark = nullptr;
+    TfLiteDelegate* gpu_delegate_iris_landmark = nullptr;
+#endif
 
     // ========================================
     // 모델 버전 (V1: 192x192, V2: 256x256)
@@ -390,11 +412,13 @@ public:
      * @param model_file 모델 파일 경로
      * @param model 모델 포인터 (출력)
      * @param interpreter 인터프리터 포인터 (출력)
+     * @param out_gpu_delegate GPU delegate 포인터 (출력, GPU 사용 시)
      * @return 성공 여부
      */
     bool loadModel(const std::string& model_file,
                    std::unique_ptr<tflite::FlatBufferModel>& model,
-                   std::unique_ptr<tflite::Interpreter>& interpreter) {
+                   std::unique_ptr<tflite::Interpreter>& interpreter,
+                   [[maybe_unused]] TfLiteDelegate** out_gpu_delegate = nullptr) {
         // 모델 파일 로드
         model = tflite::FlatBufferModel::BuildFromFile(model_file.c_str());
         if (!model) {
@@ -417,8 +441,57 @@ public:
             return false;
         }
 
-        // 추가 스레드 설정 (런타임 변경 가능)
+        // ========================================
+        // GPU Delegate 적용 (Android 전용)
+        // ========================================
+#if IRIS_SDK_GPU_ENABLED
+        if (gpu_enabled && out_gpu_delegate != nullptr) {
+            // GPU delegate 옵션 설정
+            TfLiteGpuDelegateOptionsV2 gpu_options = TfLiteGpuDelegateOptionsV2Default();
+
+            // 최소 지연 시간 우선 (실시간 처리용)
+            gpu_options.inference_priority1 = TFLITE_GPU_INFERENCE_PRIORITY_MIN_LATENCY;
+            gpu_options.inference_priority2 = TFLITE_GPU_INFERENCE_PRIORITY_AUTO;
+            gpu_options.inference_priority3 = TFLITE_GPU_INFERENCE_PRIORITY_AUTO;
+
+            // 정밀도 설정: FP16 허용 (성능 향상)
+            gpu_options.inference_preference = TFLITE_GPU_INFERENCE_PREFERENCE_FAST_SINGLE_ANSWER;
+
+            // GPU delegate 생성
+            TfLiteDelegate* delegate = TfLiteGpuDelegateV2Create(&gpu_options);
+            if (delegate != nullptr) {
+                // GPU delegate 적용 시도
+                TfLiteStatus status = interpreter->ModifyGraphWithDelegate(delegate);
+                if (status == kTfLiteOk) {
+                    *out_gpu_delegate = delegate;
+                    // GPU 활성화 성공
+                    std::fprintf(stderr, "[IrisSDK] GPU delegate activated for model: %s\n",
+                                 model_file.c_str());
+                } else {
+                    // GPU delegate 적용 실패 - 해제 후 CPU 폴백
+                    std::fprintf(stderr, "[IrisSDK] GPU delegate failed, falling back to CPU: %s\n",
+                                 model_file.c_str());
+                    TfLiteGpuDelegateV2Delete(delegate);
+                    *out_gpu_delegate = nullptr;
+                }
+            } else {
+                std::fprintf(stderr, "[IrisSDK] Failed to create GPU delegate, using CPU: %s\n",
+                             model_file.c_str());
+            }
+        }
+#endif  // IRIS_SDK_GPU_ENABLED
+
+        // CPU 폴백: GPU 미사용 또는 GPU 실패 시
+#if IRIS_SDK_GPU_ENABLED
+        bool gpu_applied = (out_gpu_delegate != nullptr && *out_gpu_delegate != nullptr);
+        if (!gpu_applied) {
+            // CPU 스레드 설정 (GPU 미사용 시에만)
+            interpreter->SetNumThreads(num_threads);
+        }
+#else
+        // GPU 미지원 빌드: 항상 CPU 사용
         interpreter->SetNumThreads(num_threads);
+#endif
 
         // 텐서 할당
         if (interpreter->AllocateTensors() != kTfLiteOk) {
@@ -436,11 +509,25 @@ public:
     bool loadAllModels(const std::string& base_path) {
         std::filesystem::path base(base_path);
 
+        // GPU 상태 초기화
+        gpu_active = false;
+        int gpu_success_count = 0;
+
         // Face Detection 모델 로드
         std::string face_detection_path = (base / REQUIRED_MODELS[0]).string();
+#if IRIS_SDK_GPU_ENABLED
+        TfLiteDelegate** gpu_delegate_ptr = gpu_enabled ? &gpu_delegate_face_detection : nullptr;
+        if (!loadModel(face_detection_path, face_detection_model, face_detection_interpreter, gpu_delegate_ptr)) {
+            return false;
+        }
+        if (gpu_delegate_face_detection != nullptr) {
+            gpu_success_count++;
+        }
+#else
         if (!loadModel(face_detection_path, face_detection_model, face_detection_interpreter)) {
             return false;
         }
+#endif
 
         // Face Detection 텐서 인덱스 설정
         if (face_detection_interpreter->inputs().empty() ||
@@ -466,6 +553,27 @@ public:
         std::string face_landmark_v2_path = (base / "face_landmark_v2.tflite").string();
         std::string face_landmark_v1_path = (base / REQUIRED_MODELS[1]).string();
 
+#if IRIS_SDK_GPU_ENABLED
+        TfLiteDelegate** fl_gpu_ptr = gpu_enabled ? &gpu_delegate_face_landmark : nullptr;
+        if (std::filesystem::exists(face_landmark_v2_path) &&
+            loadModel(face_landmark_v2_path, face_landmark_model, face_landmark_interpreter, fl_gpu_ptr)) {
+            // V2 모델 로드 성공
+            model_version = 2;
+            std::fprintf(stderr, "[INFO] Face Landmark V2 model loaded (256x256, 478 landmarks)\n");
+            if (gpu_delegate_face_landmark != nullptr) {
+                gpu_success_count++;
+            }
+        } else if (loadModel(face_landmark_v1_path, face_landmark_model, face_landmark_interpreter, fl_gpu_ptr)) {
+            // V1 모델로 폴백
+            model_version = 1;
+            std::fprintf(stderr, "[INFO] Face Landmark V1 model loaded (192x192, 468 landmarks)\n");
+            if (gpu_delegate_face_landmark != nullptr) {
+                gpu_success_count++;
+            }
+        } else {
+            return false;
+        }
+#else
         if (std::filesystem::exists(face_landmark_v2_path) &&
             loadModel(face_landmark_v2_path, face_landmark_model, face_landmark_interpreter)) {
             // V2 모델 로드 성공
@@ -478,6 +586,7 @@ public:
         } else {
             return false;
         }
+#endif
 
         // Face Landmark 텐서 인덱스 설정
         if (face_landmark_interpreter->inputs().empty() ||
@@ -493,9 +602,19 @@ public:
         // ========================================
         if (model_version == 1) {
             std::string iris_landmark_path = (base / REQUIRED_MODELS[2]).string();
+#if IRIS_SDK_GPU_ENABLED
+            TfLiteDelegate** il_gpu_ptr = gpu_enabled ? &gpu_delegate_iris_landmark : nullptr;
+            if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter, il_gpu_ptr)) {
+                return false;
+            }
+            if (gpu_delegate_iris_landmark != nullptr) {
+                gpu_success_count++;
+            }
+#else
             if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter)) {
                 return false;
             }
+#endif
 
             // Iris Landmark 텐서 인덱스 설정
             if (iris_landmark_interpreter->inputs().empty() ||
@@ -513,13 +632,54 @@ public:
             std::fprintf(stderr, "[INFO] V2 model: iris_landmark model not required (embedded in face_landmark)\n");
         }
 
+        // ========================================
+        // GPU 활성화 상태 최종 확인
+        // 최소 1개 이상의 모델에서 GPU 사용 시 활성화로 간주
+        // ========================================
+#if IRIS_SDK_GPU_ENABLED
+        if (gpu_enabled && gpu_success_count > 0) {
+            gpu_active = true;
+            std::fprintf(stderr, "[IrisSDK] GPU acceleration enabled (%d/%d models)\n",
+                         gpu_success_count, (model_version == 1) ? 3 : 2);
+        } else if (gpu_enabled) {
+            std::fprintf(stderr, "[IrisSDK] GPU requested but all models using CPU fallback\n");
+        }
+#else
+        (void)gpu_success_count;  // 미사용 경고 방지
+#endif
+
         return true;
+    }
+
+    /**
+     * @brief GPU delegate 리소스 해제
+     */
+    void releaseGpuDelegates() {
+#if IRIS_SDK_GPU_ENABLED
+        if (gpu_delegate_face_detection != nullptr) {
+            TfLiteGpuDelegateV2Delete(gpu_delegate_face_detection);
+            gpu_delegate_face_detection = nullptr;
+        }
+        if (gpu_delegate_face_landmark != nullptr) {
+            TfLiteGpuDelegateV2Delete(gpu_delegate_face_landmark);
+            gpu_delegate_face_landmark = nullptr;
+        }
+        if (gpu_delegate_iris_landmark != nullptr) {
+            TfLiteGpuDelegateV2Delete(gpu_delegate_iris_landmark);
+            gpu_delegate_iris_landmark = nullptr;
+        }
+        gpu_active = false;
+#endif
     }
 
     /**
      * @brief 모든 TFLite 리소스 해제
      */
     void releaseAllModels() {
+        // 인터프리터 해제 전에 GPU delegate 해제
+        // (delegate는 interpreter보다 먼저 해제해야 함)
+        releaseGpuDelegates();
+
         face_detection_interpreter.reset();
         face_landmark_interpreter.reset();
         iris_landmark_interpreter.reset();
@@ -2408,6 +2568,27 @@ void MediaPipeDetector::setNumFaces(int num_faces) {
 void MediaPipeDetector::setNumThreads(int num_threads) {
     // 최소 1개 이상, 최대 16개
     impl_->num_threads = std::clamp(num_threads, 1, 16);
+}
+
+void MediaPipeDetector::setGpuEnabled(bool enable) {
+    // 초기화 전에만 설정 가능
+    if (impl_->initialized) {
+        std::fprintf(stderr, "[IrisSDK] Warning: setGpuEnabled() called after initialization, ignored\n");
+        return;
+    }
+    impl_->gpu_enabled = enable;
+}
+
+bool MediaPipeDetector::isGpuAvailable() const {
+#if IRIS_SDK_GPU_ENABLED
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool MediaPipeDetector::isUsingGpu() const {
+    return impl_->gpu_active;
 }
 
 void MediaPipeDetector::setTrackingEnabled(bool enable) {

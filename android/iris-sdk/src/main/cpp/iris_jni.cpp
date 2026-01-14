@@ -61,6 +61,8 @@ bool JniCache::init(JNIEnv* env) {
     irisResult_timestampMs = env->GetFieldID(irisResultClass, "timestampMs", "J");
     irisResult_frameWidth = env->GetFieldID(irisResultClass, "frameWidth", "I");
     irisResult_frameHeight = env->GetFieldID(irisResultClass, "frameHeight", "I");
+    irisResult_faceMeshValid = env->GetFieldID(irisResultClass, "faceMeshValid", "Z");
+    irisResult_faceMesh = env->GetFieldID(irisResultClass, "faceMesh", "[F");
 
     // 필드 ID 검증
     if (!irisResult_detected || !irisResult_leftDetected || !irisResult_rightDetected ||
@@ -70,7 +72,7 @@ bool JniCache::init(JNIEnv* env) {
         !irisResult_faceRectX || !irisResult_faceRectY || !irisResult_faceRectWidth ||
         !irisResult_faceRectHeight || !irisResult_facePitch || !irisResult_faceYaw ||
         !irisResult_faceRoll || !irisResult_timestampMs || !irisResult_frameWidth ||
-        !irisResult_frameHeight) {
+        !irisResult_frameHeight || !irisResult_faceMeshValid || !irisResult_faceMesh) {
         LOGE("Failed to get IrisResult field IDs");
         return false;
     }
@@ -161,6 +163,35 @@ bool copyResultToJava(JNIEnv* env, const IrisResult& src, jobject dest) {
     env->SetLongField(dest, g_jniCache.irisResult_timestampMs, src.timestamp_ms);
     env->SetIntField(dest, g_jniCache.irisResult_frameWidth, src.frame_width);
     env->SetIntField(dest, g_jniCache.irisResult_frameHeight, src.frame_height);
+
+    // Face Mesh 데이터 복사
+    env->SetBooleanField(dest, g_jniCache.irisResult_faceMeshValid, src.face_mesh_valid);
+
+    if (src.face_mesh_valid) {
+        // Java float[] 배열 가져오기
+        jfloatArray faceMeshArray = static_cast<jfloatArray>(
+            env->GetObjectField(dest, g_jniCache.irisResult_faceMesh));
+
+        if (faceMeshArray) {
+            constexpr int LANDMARK_COUNT = 478;
+            constexpr int ARRAY_SIZE = LANDMARK_COUNT * 3;  // x, y, z for each landmark
+
+            // 배열 크기 확인
+            jsize arrayLen = env->GetArrayLength(faceMeshArray);
+            if (arrayLen >= ARRAY_SIZE) {
+                // 임시 버퍼에 데이터 복사
+                float tempBuffer[ARRAY_SIZE];
+                for (int i = 0; i < LANDMARK_COUNT; ++i) {
+                    tempBuffer[i * 3] = src.face_mesh[i].x;
+                    tempBuffer[i * 3 + 1] = src.face_mesh[i].y;
+                    tempBuffer[i * 3 + 2] = src.face_mesh[i].z;
+                }
+
+                // Java 배열로 복사
+                env->SetFloatArrayRegion(faceMeshArray, 0, ARRAY_SIZE, tempBuffer);
+            }
+        }
+    }
 
     return !checkAndLogException(env);
 }

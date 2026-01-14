@@ -339,6 +339,8 @@ struct JniCache {
     jfieldID irisResult_timestampMs = nullptr;
     jfieldID irisResult_frameWidth = nullptr;
     jfieldID irisResult_frameHeight = nullptr;
+    jfieldID irisResult_faceMeshValid = nullptr;
+    jfieldID irisResult_faceMesh = nullptr;
 
     // LensConfig 클래스
     jclass lensConfigClass = nullptr;

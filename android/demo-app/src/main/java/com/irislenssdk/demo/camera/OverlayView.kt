@@ -40,9 +40,13 @@ class OverlayView @JvmOverloads constructor(
         private const val COLOR_FACE_RECT = 0xFF00FFFF.toInt()    // Cyan
         private const val COLOR_DEBUG_TEXT = 0xFFFFFFFF.toInt()   // White
         private const val COLOR_DEBUG_BG = 0x80000000.toInt()     // Black 50%
+        private const val COLOR_FACE_MESH_LINE = 0x8000FF00.toInt()  // Green 50%
+        private const val COLOR_FACE_MESH_POINT = 0xFFFFFF00.toInt() // Yellow
 
         // 디버그 원 크기
         private const val CENTER_DOT_RADIUS = 6f
+        private const val MESH_POINT_RADIUS = 2f
+        private const val MESH_LINE_WIDTH = 1f
     }
 
     // 검출 결과
@@ -60,6 +64,9 @@ class OverlayView @JvmOverloads constructor(
 
     // 디버그 모드
     var debugMode: Boolean = false
+
+    // Face Mesh 표시 모드
+    var showFaceMesh: Boolean = false
 
     // Paint 객체들 (재사용)
     private val irisPaint = Paint().apply {
@@ -91,6 +98,19 @@ class OverlayView @JvmOverloads constructor(
     private val debugBgPaint = Paint().apply {
         color = COLOR_DEBUG_BG
         style = Paint.Style.FILL
+    }
+
+    private val meshLinePaint = Paint().apply {
+        color = COLOR_FACE_MESH_LINE
+        style = Paint.Style.STROKE
+        strokeWidth = MESH_LINE_WIDTH
+        isAntiAlias = true
+    }
+
+    private val meshPointPaint = Paint().apply {
+        color = COLOR_FACE_MESH_POINT
+        style = Paint.Style.FILL
+        isAntiAlias = true
     }
 
     // 임시 RectF (재사용)
@@ -154,6 +174,11 @@ class OverlayView @JvmOverloads constructor(
                 scaleY,
                 "R"
             )
+        }
+
+        // Face Mesh 표시
+        if (showFaceMesh && result.faceMeshValid && result.faceMesh != null) {
+            drawFaceMesh(canvas, result, scaleX, scaleY)
         }
 
         // 디버그 모드: 얼굴 영역 및 정보 표시
@@ -248,6 +273,135 @@ class OverlayView @JvmOverloads constructor(
         for (line in textLines) {
             canvas.drawText(line, 20f, y, debugTextPaint)
             y += lineHeight
+        }
+    }
+
+    /**
+     * Face Mesh 그리기
+     */
+    private fun drawFaceMesh(
+        canvas: Canvas,
+        result: IrisResult,
+        scaleX: Float,
+        scaleY: Float
+    ) {
+        val mesh = result.faceMesh ?: return
+        val landmarkCount = IrisResult.FACE_MESH_LANDMARK_COUNT
+
+        // 모든 랜드마크 점 그리기
+        for (i in 0 until landmarkCount) {
+            val x = mesh[i * 3]      // 정규화된 x (0.0 ~ 1.0)
+            val y = mesh[i * 3 + 1]  // 정규화된 y (0.0 ~ 1.0)
+
+            // 화면 좌표로 변환
+            var screenX = x * imageWidth * scaleX
+            val screenY = y * imageHeight * scaleY
+
+            // 미러링 (전면 카메라)
+            if (isMirror) {
+                screenX = width - screenX
+            }
+
+            canvas.drawCircle(screenX, screenY, MESH_POINT_RADIUS, meshPointPaint)
+        }
+
+        // 주요 연결선 그리기 (얼굴 윤곽, 눈, 입술, 눈썹)
+        drawFaceContour(canvas, mesh, scaleX, scaleY)
+        drawEyeContours(canvas, mesh, scaleX, scaleY)
+        drawLipsContour(canvas, mesh, scaleX, scaleY)
+    }
+
+    /**
+     * 얼굴 윤곽선 그리기
+     */
+    private fun drawFaceContour(
+        canvas: Canvas,
+        mesh: FloatArray,
+        scaleX: Float,
+        scaleY: Float
+    ) {
+        // 얼굴 윤곽 인덱스 (MediaPipe Face Mesh 기준)
+        val faceOvalIndices = intArrayOf(
+            10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+            397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+            172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10
+        )
+        drawConnectedLandmarks(canvas, mesh, faceOvalIndices, scaleX, scaleY)
+    }
+
+    /**
+     * 눈 윤곽선 그리기
+     */
+    private fun drawEyeContours(
+        canvas: Canvas,
+        mesh: FloatArray,
+        scaleX: Float,
+        scaleY: Float
+    ) {
+        // 왼쪽 눈 (화면 기준 오른쪽)
+        val leftEyeIndices = intArrayOf(
+            362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387,
+            386, 385, 384, 398, 362
+        )
+        drawConnectedLandmarks(canvas, mesh, leftEyeIndices, scaleX, scaleY)
+
+        // 오른쪽 눈 (화면 기준 왼쪽)
+        val rightEyeIndices = intArrayOf(
+            33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158,
+            159, 160, 161, 246, 33
+        )
+        drawConnectedLandmarks(canvas, mesh, rightEyeIndices, scaleX, scaleY)
+    }
+
+    /**
+     * 입술 윤곽선 그리기
+     */
+    private fun drawLipsContour(
+        canvas: Canvas,
+        mesh: FloatArray,
+        scaleX: Float,
+        scaleY: Float
+    ) {
+        // 외곽 입술
+        val outerLipsIndices = intArrayOf(
+            61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409,
+            270, 269, 267, 0, 37, 39, 40, 185, 61
+        )
+        drawConnectedLandmarks(canvas, mesh, outerLipsIndices, scaleX, scaleY)
+    }
+
+    /**
+     * 연결된 랜드마크 그리기
+     */
+    private fun drawConnectedLandmarks(
+        canvas: Canvas,
+        mesh: FloatArray,
+        indices: IntArray,
+        scaleX: Float,
+        scaleY: Float
+    ) {
+        if (indices.size < 2) return
+
+        for (i in 0 until indices.size - 1) {
+            val idx1 = indices[i]
+            val idx2 = indices[i + 1]
+
+            val x1 = mesh[idx1 * 3]
+            val y1 = mesh[idx1 * 3 + 1]
+            val x2 = mesh[idx2 * 3]
+            val y2 = mesh[idx2 * 3 + 1]
+
+            var screenX1 = x1 * imageWidth * scaleX
+            val screenY1 = y1 * imageHeight * scaleY
+            var screenX2 = x2 * imageWidth * scaleX
+            val screenY2 = y2 * imageHeight * scaleY
+
+            if (isMirror) {
+                screenX1 = width - screenX1
+                screenX2 = width - screenX2
+            }
+
+            canvas.drawLine(screenX1, screenY1, screenX2, screenY2, meshLinePaint)
         }
     }
 }

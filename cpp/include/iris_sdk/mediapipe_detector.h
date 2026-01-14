@@ -111,6 +111,39 @@ public:
     void setNumThreads(int num_threads);
 
     /**
+     * @brief GPU 가속 사용 여부 설정
+     *
+     * Android에서만 지원 (OpenGL ES 3.1+ 필요).
+     * GPU 초기화 실패 시 자동으로 CPU 폴백.
+     * 초기화 전에 호출해야 효과적임.
+     * 기본값: false
+     *
+     * @param enable GPU 사용 여부
+     */
+    void setGpuEnabled(bool enable);
+
+    /**
+     * @brief GPU 가속 사용 가능 여부 확인
+     *
+     * 컴파일 시점과 런타임 모두에서 GPU delegate가
+     * 사용 가능한지 확인함.
+     *
+     * @return GPU 사용 가능 여부
+     */
+    bool isGpuAvailable() const;
+
+    /**
+     * @brief 현재 GPU 사용 상태 확인
+     *
+     * 실제로 GPU delegate가 활성화되어 있는지 반환.
+     * setGpuEnabled(true)를 호출해도 GPU 초기화가
+     * 실패하면 false를 반환함.
+     *
+     * @return GPU 사용 중 여부
+     */
+    bool isUsingGpu() const;
+
+    /**
      * @brief 추적 모드 활성화/비활성화
      *
      * 추적 모드 활성화 시 연속 프레임에서 Face Detection을 스킵하여

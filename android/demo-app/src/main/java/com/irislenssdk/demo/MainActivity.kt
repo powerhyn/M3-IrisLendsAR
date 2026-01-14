@@ -25,6 +25,12 @@ import androidx.core.content.ContextCompat
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
+import com.irislenssdk.demo.benchmark.BenchmarkCallback
+import com.irislenssdk.demo.benchmark.BenchmarkManager
+import com.irislenssdk.demo.benchmark.BenchmarkResult
+import com.irislenssdk.demo.benchmark.BenchmarkState
+import com.irislenssdk.demo.benchmark.MemoryInfo
+import com.irislenssdk.demo.benchmark.PerformanceStats
 import com.irislenssdk.demo.camera.AnalysisResult
 import com.irislenssdk.demo.camera.CameraManager
 import com.irislenssdk.demo.camera.FrameAnalyzer
@@ -69,6 +75,13 @@ class MainActivity : AppCompatActivity() {
     // 마지막 검출 결과
     private var lastIrisResult: IrisResult? = null
 
+    // 벤치마크 관리자
+    private lateinit var benchmarkManager: BenchmarkManager
+    private var isBenchmarkRunning = false
+
+    // 벤치마크 설정
+    private val benchmarkDurationMs = 60_000L  // 1분 벤치마크
+
     // 권한 요청 런처
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -99,6 +112,9 @@ class MainActivity : AppCompatActivity() {
         // View Binding 초기화
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // 벤치마크 관리자 초기화
+        benchmarkManager = BenchmarkManager(this)
 
         // UI 설정
         setupUI()
@@ -131,6 +147,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         // 리소스 해제
+        benchmarkManager.release()
         releaseCamera()
         releaseSDK()
     }
@@ -281,8 +298,19 @@ class MainActivity : AppCompatActivity() {
      * 프레임 분석 결과 처리
      */
     private fun onFrameAnalyzed(result: AnalysisResult) {
+        // 벤치마크 데이터 수집
+        if (isBenchmarkRunning) {
+            benchmarkManager.onFrameProcessed(result.processingTimeMs)
+        }
+
         // FPS 업데이트
-        binding.fpsText.text = "FPS: %.1f".format(result.fps)
+        val fpsText = if (isBenchmarkRunning) {
+            val stats = benchmarkManager.performanceTracker.getStats()
+            "FPS: %.1f | Lat: %.0fms".format(stats.fps, stats.avgLatencyMs)
+        } else {
+            "FPS: %.1f".format(result.fps)
+        }
+        binding.fpsText.text = fpsText
 
         // 검출 결과 저장
         lastIrisResult = result.result
@@ -304,7 +332,12 @@ class MainActivity : AppCompatActivity() {
             result.result.detected -> {
                 val leftStr = if (result.result.leftDetected) "L" else "-"
                 val rightStr = if (result.result.rightDetected) "R" else "-"
-                "Tracking: $leftStr $rightStr (${result.processingTimeMs}ms)"
+                if (isBenchmarkRunning) {
+                    val mem = benchmarkManager.memoryMonitor.getMemoryInfo()
+                    "Tracking: $leftStr $rightStr | PSS: ${mem.totalPssMB}MB"
+                } else {
+                    "Tracking: $leftStr $rightStr (${result.processingTimeMs}ms)"
+                }
             }
             else -> getString(R.string.status_no_face)
         }
@@ -428,9 +461,9 @@ class MainActivity : AppCompatActivity() {
             switchCamera()
         }
 
-        // 갤러리 버튼
+        // 벤치마크 버튼 (기존 갤러리 버튼)
         binding.galleryButton.setOnClickListener {
-            openGallery()
+            toggleBenchmark()
         }
 
         // 설정 버튼
@@ -468,27 +501,105 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 갤러리 열기
+     * 벤치마크 시작/종료 토글
      */
-    private fun openGallery() {
-        Log.d(TAG, "Opening gallery...")
+    private fun toggleBenchmark() {
+        if (isBenchmarkRunning) {
+            // 벤치마크 종료
+            benchmarkManager.stop()
+        } else {
+            // 벤치마크 시작
+            Log.i(TAG, "Starting benchmark for ${benchmarkDurationMs}ms")
 
-        // TODO: 구현
-        // - 저장된 이미지 목록 표시
+            benchmarkManager.start(benchmarkDurationMs, object : BenchmarkCallback {
+                override fun onBenchmarkStarted() {
+                    runOnUiThread {
+                        isBenchmarkRunning = true
+                        binding.galleryButton.alpha = 0.5f  // 시각적 피드백
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Benchmark started (${benchmarkDurationMs / 1000}s)",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
 
-        Toast.makeText(this, "Gallery (TODO)", Toast.LENGTH_SHORT).show()
+                override fun onBenchmarkProgress(
+                    elapsedMs: Long,
+                    stats: PerformanceStats,
+                    memory: MemoryInfo
+                ) {
+                    // 진행 상황 로깅 (매 초)
+                    Log.d(TAG, "Benchmark: ${elapsedMs/1000}s | " +
+                            "FPS: %.1f | Lat: %.1fms | PSS: ${memory.totalPssMB}MB"
+                                .format(stats.fps, stats.avgLatencyMs))
+                }
+
+                override fun onBenchmarkCompleted(result: BenchmarkResult) {
+                    runOnUiThread {
+                        isBenchmarkRunning = false
+                        binding.galleryButton.alpha = 1.0f
+
+                        // 결과 로깅
+                        Log.i(TAG, "Benchmark completed!")
+                        Log.i(TAG, "Duration: ${result.testDurationMs}ms")
+                        Log.i(TAG, "FPS: ${result.performance.fps}")
+                        Log.i(TAG, "Avg Latency: ${result.performance.avgLatencyMs}ms")
+                        Log.i(TAG, "P95 Latency: ${result.performance.p95LatencyMs}ms")
+                        Log.i(TAG, "Drop Rate: ${result.performance.dropRate * 100}%")
+                        Log.i(TAG, "Memory PSS: ${result.memory.totalPssMB}MB")
+
+                        // 마크다운 리포트 생성
+                        val report = benchmarkManager.generateMarkdownReport()
+                        Log.i(TAG, "\n$report")
+
+                        // CSV 내보내기
+                        val csvFile = benchmarkManager.exportToCsv()
+                        csvFile?.let {
+                            Log.i(TAG, "CSV exported to: ${it.absolutePath}")
+                        }
+
+                        // 결과 요약 토스트
+                        val passCount = listOf(
+                            result.performance.fps >= 30,
+                            result.performance.avgLatencyMs <= 33,
+                            result.memory.totalPssMB <= 100
+                        ).count { it }
+
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Benchmark done! FPS: %.1f, Lat: %.0fms, Mem: ${result.memory.totalPssMB}MB ($passCount/3 passed)"
+                                .format(result.performance.fps, result.performance.avgLatencyMs),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+
+                override fun onBenchmarkError(error: String) {
+                    runOnUiThread {
+                        isBenchmarkRunning = false
+                        binding.galleryButton.alpha = 1.0f
+                        Toast.makeText(this@MainActivity, "Benchmark error: $error", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
+        }
     }
 
     /**
-     * 설정 화면 열기
+     * 설정 화면 열기 (현재는 Face Mesh 토글)
      */
     private fun openSettings() {
-        Log.d(TAG, "Opening settings...")
+        // Face Mesh 표시 토글
+        binding.overlayView.showFaceMesh = !binding.overlayView.showFaceMesh
 
-        // TODO: 구현
-        // - 설정 다이얼로그 또는 화면
+        Toast.makeText(
+            this,
+            "Face Mesh: ${if (binding.overlayView.showFaceMesh) "ON" else "OFF"}",
+            Toast.LENGTH_SHORT
+        ).show()
 
-        Toast.makeText(this, "Settings (TODO)", Toast.LENGTH_SHORT).show()
+        Log.d(TAG, "Face Mesh: ${binding.overlayView.showFaceMesh}")
     }
 
     // ==========================================================================

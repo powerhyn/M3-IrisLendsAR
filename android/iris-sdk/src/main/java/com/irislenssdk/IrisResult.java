@@ -161,6 +161,28 @@ public class IrisResult {
     public float faceRoll;
 
     // ========================================================================
+    // Face Mesh (디버그/시각화용)
+    // ========================================================================
+
+    /**
+     * Face Mesh 랜드마크 개수 (MediaPipe 표준).
+     */
+    public static final int FACE_MESH_LANDMARK_COUNT = 478;
+
+    /**
+     * Face Mesh 유효 여부.
+     * true이면 faceMesh 배열에 유효한 데이터가 있습니다.
+     */
+    public boolean faceMeshValid;
+
+    /**
+     * Face Mesh 랜드마크 좌표 (정규화, 0.0 ~ 1.0).
+     * 478개 랜드마크 × 3 좌표 (x, y, z) = 1434개 float.
+     * 인덱스: [i*3] = x, [i*3+1] = y, [i*3+2] = z (i = 0~477)
+     */
+    public float[] faceMesh;
+
+    // ========================================================================
     // 프레임 정보
     // ========================================================================
 
@@ -222,6 +244,11 @@ public class IrisResult {
         facePitch = 0.0f;
         faceYaw = 0.0f;
         faceRoll = 0.0f;
+
+        faceMeshValid = false;
+        if (faceMesh == null) {
+            faceMesh = new float[FACE_MESH_LANDMARK_COUNT * 3];
+        }
 
         timestampMs = 0;
         frameWidth = 0;

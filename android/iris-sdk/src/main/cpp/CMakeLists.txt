@@ -75,8 +75,9 @@ if(NOT IRIS_SDK_CORE_LIB)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-    # TFLite 활성화 - FetchContent로 빌드 (첫 빌드 시 시간 소요)
-    set(IRIS_SDK_FETCH_TFLITE ON CACHE BOOL "" FORCE)
+    # TFLite 설정 - Pre-built 라이브러리 사용 (Bazel 빌드 결과물)
+    # cpp/third_party/tflite/android/${ANDROID_ABI}/libtensorflowlite.so
+    set(IRIS_SDK_FETCH_TFLITE OFF CACHE BOOL "" FORCE)
     set(IRIS_SDK_USE_SYSTEM_TFLITE OFF CACHE BOOL "" FORCE)
 
     # OpenCV Android SDK 경로 설정 (add_subdirectory 전에 설정 필수)

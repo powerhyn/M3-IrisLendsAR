@@ -131,9 +131,16 @@ class CameraManager(
             .build()
             .also { analysis ->
                 analysis.setAnalyzer(analysisExecutor) { imageProxy ->
-                    // 이미지 크기 업데이트
-                    imageWidth = imageProxy.width
-                    imageHeight = imageProxy.height
+                    // 이미지 크기 업데이트 (디스플레이 방향 기준)
+                    // 회전이 90° 또는 270°인 경우 가로/세로 교환
+                    val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                    if (rotationDegrees == 90 || rotationDegrees == 270) {
+                        imageWidth = imageProxy.height
+                        imageHeight = imageProxy.width
+                    } else {
+                        imageWidth = imageProxy.width
+                        imageHeight = imageProxy.height
+                    }
 
                     // 콜백 호출
                     onFrameAnalyzed(imageProxy)

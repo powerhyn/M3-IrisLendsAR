@@ -156,13 +156,15 @@ P1-Wx-xx_작업명.md
 
 | 태스크 | 문서 | 설명 | 상태 |
 |--------|------|------|------|
-| P1-W5-01 | [P1-W5-01_jni_wrapper.md](P1-W5-01_jni_wrapper.md) | JNI 래퍼 구현 | ⏳ |
-| P1-W5-02 | [P1-W5-02_kotlin_sdk.md](P1-W5-02_kotlin_sdk.md) | Kotlin SDK 클래스 | ⏳ |
-| P1-W5-03 | [P1-W5-03_gradle_cmake.md](P1-W5-03_gradle_cmake.md) | Gradle/CMake 통합 | ⏳ |
-| P1-W5-04 | [P1-W5-04_aar_build.md](P1-W5-04_aar_build.md) | AAR 빌드 설정 | ⏳ |
-| P1-W6-01 | [P1-W6-01_demo_app_ui.md](P1-W6-01_demo_app_ui.md) | 데모 앱 UI | ⏳ |
-| P1-W6-02 | [P1-W6-02_camerax_integration.md](P1-W6-02_camerax_integration.md) | CameraX 연동 | ⏳ |
-| P1-W6-03 | [P1-W6-03_device_performance.md](P1-W6-03_device_performance.md) | 실기기 성능 테스트 | ⏳ |
+| P1-W5-01 | [P1-W5-01_jni_wrapper.md](P1-W5-01_jni_wrapper.md) | JNI 래퍼 구현 | ✅ |
+| P1-W5-02 | [P1-W5-02_kotlin_sdk.md](P1-W5-02_kotlin_sdk.md) | Kotlin SDK 클래스 | ✅ |
+| P1-W5-03 | [P1-W5-03_gradle_cmake.md](P1-W5-03_gradle_cmake.md) | Gradle/CMake 통합 | ✅ |
+| P1-W5-04 | [P1-W5-04_aar_build.md](P1-W5-04_aar_build.md) | AAR 빌드 설정 | ✅ |
+| P1-W5-05 | - | 모델 에셋 통합 | ✅ |
+| P1-W5-06 | [P1-W5-06_tflite_android_integration.md](P1-W5-06_tflite_android_integration.md) | TFLite Android 통합 | ✅ |
+| P1-W6-01 | [P1-W6-01_demo_app_ui.md](P1-W6-01_demo_app_ui.md) | 데모 앱 UI | ✅ |
+| P1-W6-02 | [P1-W6-02_camerax_integration.md](P1-W6-02_camerax_integration.md) | CameraX 연동 | ✅ |
+| P1-W6-03 | [P1-W6-03_device_performance.md](P1-W6-03_device_performance.md) | 실기기 성능 테스트 | 🔄 |
 | P1-W6-04 | [P1-W6-04_final_validation.md](P1-W6-04_final_validation.md) | 최종 검증 및 문서화 | ⏳ |
 
 ---
@@ -196,13 +198,15 @@ P1-Wx-xx_작업명.md
 - [x] 웹캠 실시간 처리 30fps 달성 ✅ (avg 5.07ms/frame, 197fps capable)
 
 ### M4: Android MVP (Week 5-6)
-- [ ] P1-W5-01: JNI 래퍼 구현
-- [ ] P1-W5-02: Kotlin SDK 클래스
-- [ ] P1-W5-03: Gradle/CMake 통합
-- [ ] P1-W5-04: AAR 빌드 설정
-- [ ] P1-W6-01: 데모 앱 UI
-- [ ] P1-W6-02: CameraX 연동
-- [ ] P1-W6-03: 실기기 성능 테스트
+- [x] P1-W5-01: JNI 래퍼 구현 ✅
+- [x] P1-W5-02: Kotlin SDK 클래스 ✅
+- [x] P1-W5-03: Gradle/CMake 통합 ✅
+- [x] P1-W5-04: AAR 빌드 설정 ✅
+- [x] P1-W5-05: 모델 에셋 통합 ✅
+- [x] P1-W5-06: TFLite Android 통합 ✅ (Bazel 빌드, Face Mesh 시각화)
+- [x] P1-W6-01: 데모 앱 UI ✅
+- [x] P1-W6-02: CameraX 연동 ✅ (검출 동작, 270° 회전 보정)
+- [ ] P1-W6-03: 실기기 성능 테스트 🔄 (GPU 가속 추가 예정)
 - [ ] P1-W6-04: 최종 검증 및 문서화
 
 ---

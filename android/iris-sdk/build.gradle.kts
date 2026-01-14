@@ -30,9 +30,10 @@ android {
 
         // NDK 빌드 설정
         ndk {
-            // 지원 ABI (ARM64, ARMv7)
+            // 지원 ABI
+            // NOTE: armeabi-v7a는 TFLite pre-built 라이브러리 빌드 후 추가 가능
             // x86, x86_64는 에뮬레이터 전용으로 선택적 추가 가능
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
 
         // CMake 설정
