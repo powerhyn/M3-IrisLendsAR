@@ -34,6 +34,9 @@ thread_local char g_last_error[512] = {0};
 /// 전역 상태 뮤텍스
 std::mutex g_mutex;
 
+/// GPU 가속 요청 플래그 (init 전에 설정)
+bool g_gpu_request = false;
+
 /**
  * @brief 마지막 에러 메시지 설정
  */
@@ -287,6 +290,11 @@ IrisSdkError iris_sdk_init(const char* model_path) {
         manager.shutdown();
         set_last_error("Failed to create FrameProcessor - internal error");
         return IRIS_SDK_UNKNOWN;
+    }
+
+    // GPU 가속 설정 적용 (init 전에 setGpuEnabled() 호출한 경우)
+    if (g_gpu_request) {
+        g_processor->setGpuEnabled(true);
     }
 
     if (!g_processor->initialize(model_path)) {
@@ -763,6 +771,45 @@ void iris_sdk_free_result(IrisResult* result) {
     // 현재 IrisResult는 순수 POD 타입이므로 동적 할당이 없습니다.
     // 구조체를 0으로 초기화합니다.
     std::memset(result, 0, sizeof(IrisResult));
+}
+
+// ============================================================================
+// GPU 가속 함수 구현
+// ============================================================================
+
+void iris_sdk_set_gpu_enabled(bool enable) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    // 이미 초기화된 경우 경고
+    if (g_processor && g_processor->isInitialized()) {
+        set_last_error("setGpuEnabled() must be called before init()");
+        return;
+    }
+
+    g_gpu_request = enable;
+
+    // FrameProcessor가 이미 생성되어 있으면 설정 전달
+    if (g_processor) {
+        g_processor->setGpuEnabled(enable);
+    }
+}
+
+bool iris_sdk_is_gpu_available(void) {
+#if defined(IRIS_SDK_HAS_GPU_DELEGATE) && defined(__ANDROID__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool iris_sdk_is_using_gpu(void) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (!g_processor || !g_processor->isInitialized()) {
+        return false;
+    }
+
+    return g_processor->isUsingGpu();
 }
 
 }  // extern "C"

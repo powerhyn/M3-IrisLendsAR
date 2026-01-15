@@ -419,6 +419,46 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_config(const char* key, const char* va
 IRIS_SDK_EXPORT void iris_sdk_default_lens_config(IrisLensConfig* config);
 
 // ============================================================================
+// GPU 가속 API
+// ============================================================================
+
+/**
+ * @brief GPU 가속 사용 여부 설정
+ *
+ * TFLite GPU Delegate를 사용할지 여부를 설정합니다.
+ * 반드시 iris_sdk_init() 호출 전에 설정해야 합니다.
+ *
+ * @param enable true면 GPU 가속 시도, false면 CPU만 사용
+ *
+ * @note GPU delegate 사용 조건:
+ *       - Android: OpenGL ES 3.1 이상 지원 기기
+ *       - iOS: Metal 지원 기기 (현재 미지원)
+ * @note init() 후 호출 시 설정이 무시됩니다.
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_gpu_enabled(bool enable);
+
+/**
+ * @brief GPU 가속 사용 가능 여부 확인
+ *
+ * SDK가 GPU delegate와 함께 빌드되었는지 확인합니다.
+ * 컴파일 시점에 결정됩니다.
+ *
+ * @return true면 GPU delegate 라이브러리가 포함됨, false면 CPU만 사용 가능
+ */
+IRIS_SDK_EXPORT bool iris_sdk_is_gpu_available(void);
+
+/**
+ * @brief 현재 GPU 사용 상태 확인
+ *
+ * 런타임에 실제로 GPU delegate가 활성화되어 있는지 확인합니다.
+ *
+ * @return true면 GPU 사용 중, false면 CPU 사용 중
+ *
+ * @note init() 호출 후에만 정확한 값을 반환합니다.
+ */
+IRIS_SDK_EXPORT bool iris_sdk_is_using_gpu(void);
+
+// ============================================================================
 // 정보 함수
 // ============================================================================
 

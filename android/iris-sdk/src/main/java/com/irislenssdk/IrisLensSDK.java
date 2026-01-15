@@ -380,6 +380,62 @@ public final class IrisLensSDK {
     }
 
     // ========================================================================
+    // GPU 가속 API
+    // ========================================================================
+
+    /**
+     * GPU 가속 사용 여부를 설정합니다.
+     *
+     * <p>반드시 init() 호출 전에 설정해야 합니다.
+     * init() 이후에 호출하면 설정이 무시됩니다.</p>
+     *
+     * <p>GPU 가속이 가능한 조건:
+     * <ul>
+     *   <li>Android: OpenGL ES 3.1 이상 지원 기기</li>
+     *   <li>SDK가 GPU delegate와 함께 빌드됨</li>
+     * </ul></p>
+     *
+     * @param enable true면 GPU 가속 시도, false면 CPU만 사용
+     */
+    public static void setGpuEnabled(boolean enable) {
+        if (!sLibraryLoaded) {
+            Log.w(TAG, "setGpuEnabled: library not loaded");
+            return;
+        }
+        nativeSetGpuEnabled(enable);
+    }
+
+    /**
+     * GPU 가속 사용 가능 여부를 확인합니다.
+     *
+     * <p>SDK가 GPU delegate와 함께 빌드되었는지 확인합니다.
+     * 컴파일 시점에 결정됩니다.</p>
+     *
+     * @return true면 GPU delegate 라이브러리가 포함됨, false면 CPU만 사용 가능
+     */
+    public static boolean isGpuAvailable() {
+        if (!sLibraryLoaded) {
+            return false;
+        }
+        return nativeIsGpuAvailable();
+    }
+
+    /**
+     * 현재 GPU 사용 상태를 확인합니다.
+     *
+     * <p>런타임에 실제로 GPU delegate가 활성화되어 있는지 확인합니다.
+     * init() 호출 후에만 정확한 값을 반환합니다.</p>
+     *
+     * @return true면 GPU 사용 중, false면 CPU 사용 중
+     */
+    public static boolean isUsingGpu() {
+        if (!sLibraryLoaded) {
+            return false;
+        }
+        return nativeIsUsingGpu();
+    }
+
+    // ========================================================================
     // 정보 API
     // ========================================================================
 
@@ -530,6 +586,11 @@ public final class IrisLensSDK {
                                             int format, LensConfig config, IrisResult result);
 
     private static native int nativeSetConfig(String key, String value);
+
+    // GPU 가속 API
+    private static native void nativeSetGpuEnabled(boolean enable);
+    private static native boolean nativeIsGpuAvailable();
+    private static native boolean nativeIsUsingGpu();
 
     private static native String nativeGetVersion();
     private static native String nativeGetBuildInfo();

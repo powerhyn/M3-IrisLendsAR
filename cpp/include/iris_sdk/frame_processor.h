@@ -261,6 +261,26 @@ public:
     void setFaceTracking(bool enable);
 
     // ========================================
+    // GPU 가속
+    // ========================================
+
+    /**
+     * @brief GPU 가속 사용 여부 설정
+     *
+     * 반드시 initialize() 호출 전에 설정해야 합니다.
+     *
+     * @param enable true면 GPU 가속 시도, false면 CPU만 사용
+     */
+    void setGpuEnabled(bool enable);
+
+    /**
+     * @brief 현재 GPU 사용 상태 확인
+     *
+     * @return true면 GPU 사용 중, false면 CPU 사용 중
+     */
+    bool isUsingGpu() const noexcept;
+
+    // ========================================
     // 통계
     // ========================================
 

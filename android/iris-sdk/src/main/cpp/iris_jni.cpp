@@ -757,4 +757,59 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetConfig(
     return static_cast<jint>(result);
 }
 
+// ============================================================================
+// GPU 가속 API
+// ============================================================================
+
+/**
+ * @brief GPU 가속 사용 여부 설정
+ *
+ * init() 호출 전에 설정해야 합니다.
+ *
+ * Java: native void nativeSetGpuEnabled(boolean enable);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetGpuEnabled(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jboolean enable) {
+
+    LOGD("nativeSetGpuEnabled: %s", enable ? "true" : "false");
+    iris_sdk_set_gpu_enabled(enable == JNI_TRUE);
+}
+
+/**
+ * @brief GPU 가속 사용 가능 여부 확인
+ *
+ * SDK가 GPU delegate와 함께 빌드되었는지 확인합니다.
+ *
+ * Java: native boolean nativeIsGpuAvailable();
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeIsGpuAvailable(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    bool available = iris_sdk_is_gpu_available();
+    LOGD("nativeIsGpuAvailable: %s", available ? "true" : "false");
+    return available ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * @brief 현재 GPU 사용 상태 확인
+ *
+ * 런타임에 실제로 GPU delegate가 활성화되어 있는지 확인합니다.
+ *
+ * Java: native boolean nativeIsUsingGpu();
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeIsUsingGpu(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    bool using_gpu = iris_sdk_is_using_gpu();
+    LOGD("nativeIsUsingGpu: %s", using_gpu ? "true" : "false");
+    return using_gpu ? JNI_TRUE : JNI_FALSE;
+}
+
 }  // extern "C"
