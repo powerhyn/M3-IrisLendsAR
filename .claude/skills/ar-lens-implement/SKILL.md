@@ -60,7 +60,7 @@ Parse sections:
 - Follow C++17 standards
 - RAII, thread-safety, const-correctness
 - Create header + implementation files
-- With cpp-pro agent
+- With @agent-systems-programming:cpp-pro agent
 
 [3/6] 🧪 Test Generation
 Execute: /unit-testing:test-generate "{MODULE_NAME}"

@@ -38,7 +38,10 @@
       "Bash(./bin/test_lens_renderer:*)",
       "Bash(./bin/test_lens_renderer_integration:*)",
       "Bash(./bin/test_frame_processor:*)",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "Skill(code-review-ai:ai-review)",
+      "Bash(echo:*)",
+      "Bash(grep:*)"
     ]
   },
   "enabledPlugins": {
