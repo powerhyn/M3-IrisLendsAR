@@ -114,6 +114,11 @@ private:
     double last_processing_time_ms_ = 0.0;
     std::deque<double> processing_times_;
     static constexpr size_t MAX_FPS_SAMPLES = 30;
+
+    // 결과 캐싱 (깜빡임 방지)
+    IrisResult cached_result_;
+    int cache_miss_count_{0};
+    static constexpr int MAX_CACHE_MISS = 3;  // 3프레임까지 캐시 사용
 };
 
 // ============================================================================
@@ -585,6 +590,19 @@ IrisResult FrameProcessor::Impl::detectOnly(const uint8_t* frame_data,
     result = inference_thread_->detectSync(rgb_buffer_.data, rgb_buffer_.cols,
                                             rgb_buffer_.rows,
                                             static_cast<int>(FrameFormat::RGB));
+
+    // 캐싱 로직 (깜빡임 방지)
+    if (result.detected) {
+        // 검출 성공: 캐시 갱신
+        cached_result_ = result;
+        cache_miss_count_ = 0;
+    } else {
+        // 검출 실패: 캐시에서 반환 (최대 MAX_CACHE_MISS 프레임까지)
+        cache_miss_count_++;
+        if (cache_miss_count_ <= MAX_CACHE_MISS && cached_result_.detected) {
+            result = cached_result_;
+        }
+    }
 #endif
 
     return result;
@@ -634,6 +652,19 @@ IrisResult FrameProcessor::Impl::detectOnlyWithRotation(const uint8_t* frame_dat
     result = inference_thread_->detectSync(rotated_rgb.data, rotated_rgb.cols,
                                             rotated_rgb.rows,
                                             static_cast<int>(FrameFormat::RGB));
+
+    // 캐싱 로직 (깜빡임 방지)
+    if (result.detected) {
+        // 검출 성공: 캐시 갱신
+        cached_result_ = result;
+        cache_miss_count_ = 0;
+    } else {
+        // 검출 실패: 캐시에서 반환 (최대 MAX_CACHE_MISS 프레임까지)
+        cache_miss_count_++;
+        if (cache_miss_count_ <= MAX_CACHE_MISS && cached_result_.detected) {
+            result = cached_result_;
+        }
+    }
 
 #endif
 

@@ -5,6 +5,8 @@
  * TFLite GPU delegate는 초기화된 스레드에서만 Invoke() 가능.
  * 이 클래스는 전용 스레드에서 TFLite 초기화와 추론을 수행하여
  * GPU 가속을 안전하게 사용할 수 있게 합니다.
+ *
+ * 최적화: 단일 슬롯 패턴으로 동기화 오버헤드 최소화
  */
 
 #pragma once
@@ -14,10 +16,8 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include "export.h"
@@ -29,40 +29,33 @@ namespace iris_sdk {
 class MediaPipeDetector;
 
 /**
- * @brief 프레임 요청 구조체
- * @note 동기 호출 시 포인터 사용 (복사 오버헤드 제거)
+ * @brief 스레드 상태 열거형
+ *
+ * 단일 원자적 변수로 스레드 상태를 관리합니다.
  */
-struct FrameRequest {
-    const uint8_t* data = nullptr;  ///< 프레임 데이터 포인터 (동기 호출 시 유효)
-    int width = 0;                  ///< 프레임 너비
-    int height = 0;                 ///< 프레임 높이
-    int format = 0;                 ///< FrameFormat enum 값
-    uint64_t request_id = 0;        ///< 요청 ID
+enum class ThreadState : int {
+    Stopped = 0,     ///< 스레드 정지됨
+    Starting = 1,    ///< 초기화 중
+    Idle = 2,        ///< 요청 대기 중
+    Processing = 3,  ///< 추론 실행 중
+    ResultReady = 4, ///< 결과 준비됨
+    Stopping = 5     ///< 종료 중
 };
 
 /**
- * @brief 검출 결과 구조체
- */
-struct DetectionResult {
-    IrisResult iris_result;      ///< 홍채 검출 결과
-    uint64_t request_id = 0;     ///< 요청 ID
-    bool success = false;        ///< 성공 여부
-};
-
-/**
- * @brief 전용 추론 스레드 클래스
+ * @brief 전용 추론 스레드 클래스 (최적화 버전)
  *
  * TFLite 인터프리터와 GPU delegate를 전용 스레드에서 관리합니다.
- * 이를 통해 GPU delegate의 스레드 제약 문제를 해결합니다.
+ * 단일 슬롯 패턴으로 동기화 오버헤드를 최소화합니다.
  *
  * 동작 원리:
  * 1. start() 호출 시 전용 스레드 생성
  * 2. 스레드 내에서 MediaPipeDetector 초기화 (GPU delegate 포함)
- * 3. detectSync() 호출 시 프레임을 큐에 넣고 결과 대기
+ * 3. detectSync() 호출 시 단일 슬롯에 데이터 설정 후 결과 대기
  * 4. 스레드 내에서 검출 수행 후 결과 반환
  * 5. stop() 호출 시 스레드 종료
  *
- * @note 스레드 안전함 - 여러 스레드에서 detectSync() 호출 가능
+ * @note 단일 호출자용 - 동시에 하나의 detectSync() 호출만 지원
  */
 class IRIS_SDK_EXPORT InferenceThread {
 public:
@@ -168,7 +161,7 @@ private:
      *
      * 스레드 내에서 실행되며, 다음을 수행:
      * 1. MediaPipeDetector 초기화
-     * 2. 프레임 큐에서 요청 수신
+     * 2. 단일 슬롯에서 요청 수신
      * 3. 검출 수행
      * 4. 결과 저장
      */
@@ -179,38 +172,38 @@ private:
      */
     IrisResult submitAndWait(const uint8_t* data, int width, int height, int format);
 
-    // 스레드 관리
+    // ========================================
+    // 스레드 상태 (단일 원자적 변수)
+    // ========================================
     std::thread thread_;
-    std::atomic<bool> running_{false};
-    std::atomic<bool> initialized_{false};
-    std::atomic<bool> init_success_{false};
+    std::atomic<ThreadState> state_{ThreadState::Stopped};
 
     // GPU 상태
     std::atomic<bool> gpu_active_{false};
     std::atomic<int> model_version_{0};
     std::atomic<int> landmark_count_{0};
 
-    // 프레임 큐 (입력)
-    std::mutex queue_mutex_;
-    std::condition_variable queue_cv_;
-    std::queue<FrameRequest> frame_queue_;
+    // ========================================
+    // 단일 슬롯 패턴 (동기화)
+    // ========================================
+    std::mutex slot_mutex_;
+    std::condition_variable slot_cv_;
 
-    // 결과 저장
-    std::mutex result_mutex_;
-    std::condition_variable result_cv_;
-    std::unordered_map<uint64_t, DetectionResult> results_;
+    // 입력 슬롯 (slot_mutex_로 보호)
+    const uint8_t* pending_data_{nullptr};
+    int pending_width_{0};
+    int pending_height_{0};
+    int pending_format_{0};
 
-    // 요청 ID 생성
-    std::atomic<uint64_t> next_request_id_{1};
+    // 출력 슬롯 (slot_mutex_로 보호)
+    IrisResult pending_result_;
 
-    // 검출기 (스레드 내부에서만 접근)
+    // ========================================
+    // 검출기 및 설정
+    // ========================================
     std::unique_ptr<MediaPipeDetector> detector_;
     std::string model_path_;
     bool gpu_enabled_{false};
-
-    // 초기화 동기화
-    std::mutex init_mutex_;
-    std::condition_variable init_cv_;
 
     // 마지막 랜드마크 데이터 (스레드 간 공유)
     mutable std::mutex landmark_mutex_;
