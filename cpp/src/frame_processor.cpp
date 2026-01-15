@@ -7,7 +7,7 @@
  */
 
 #include "iris_sdk/frame_processor.h"
-#include "iris_sdk/mediapipe_detector.h"
+#include "iris_sdk/inference_thread.h"
 #include "iris_sdk/lens_renderer.h"
 
 #include <chrono>
@@ -61,6 +61,8 @@ public:
     // 설정
     void setMinConfidence(float min_confidence);
     void setFaceTracking(bool enable);
+    void setGpuEnabled(bool enable);
+    bool isUsingGpu() const noexcept;
 
     // 통계
     double getLastProcessingTimeMs() const noexcept { return last_processing_time_ms_; }
@@ -68,13 +70,13 @@ public:
 
     // 디버그용 Face Mesh 접근
     int getFaceLandmarkCount() const {
-        return detector_ ? detector_->getFaceLandmarkCount() : 0;
+        return inference_thread_ ? inference_thread_->getFaceLandmarkCount() : 0;
     }
     bool getFaceLandmarks(float* out_landmarks) const {
-        return detector_ ? detector_->getFaceLandmarks(out_landmarks) : false;
+        return inference_thread_ ? inference_thread_->getFaceLandmarks(out_landmarks) : false;
     }
     int getModelVersion() const {
-        return detector_ ? detector_->getModelVersion() : 0;
+        return inference_thread_ ? inference_thread_->getModelVersion() : 0;
     }
 
 private:
@@ -95,13 +97,14 @@ private:
 
     // 멤버 변수
     bool initialized_ = false;
-    std::unique_ptr<MediaPipeDetector> detector_;
+    std::unique_ptr<InferenceThread> inference_thread_;
     std::unique_ptr<LensRenderer> renderer_;
     DetectorType detector_type_ = DetectorType::MediaPipe;
 
     // 설정
     float min_confidence_ = 0.5f;
     bool face_tracking_ = true;
+    bool gpu_enabled_ = false;
 
     // 버퍼 재사용 (메모리 할당 최소화)
     cv::Mat work_buffer_;
@@ -128,10 +131,10 @@ bool FrameProcessor::Impl::initialize(const std::string& model_path,
 
     detector_type_ = detector_type;
 
-    // 검출기 생성 및 초기화
+    // 검출기 타입 체크
     switch (detector_type) {
         case DetectorType::MediaPipe:
-            detector_ = std::make_unique<MediaPipeDetector>();
+            // InferenceThread가 내부적으로 MediaPipeDetector 사용
             break;
         case DetectorType::EyeOnly:
         case DetectorType::Hybrid:
@@ -141,16 +144,19 @@ bool FrameProcessor::Impl::initialize(const std::string& model_path,
             return false;
     }
 
-    if (!detector_->initialize(model_path)) {
-        detector_.reset();
+    // InferenceThread 생성 및 시작
+    // GPU delegate는 전용 스레드 내에서 초기화되어 스레드 제약 문제 해결
+    inference_thread_ = std::make_unique<InferenceThread>();
+    if (!inference_thread_->start(model_path, gpu_enabled_)) {
+        inference_thread_.reset();
         return false;
     }
 
     // 렌더러 생성 및 초기화
     renderer_ = std::make_unique<LensRenderer>();
     if (!renderer_->initialize()) {
-        detector_->release();
-        detector_.reset();
+        inference_thread_->stop();
+        inference_thread_.reset();
         renderer_.reset();
         return false;
     }
@@ -165,9 +171,9 @@ void FrameProcessor::Impl::release() {
         renderer_->release();
         renderer_.reset();
     }
-    if (detector_) {
-        detector_->release();
-        detector_.reset();
+    if (inference_thread_) {
+        inference_thread_->stop();
+        inference_thread_.reset();
     }
     work_buffer_.release();
     rgb_buffer_.release();
@@ -428,9 +434,10 @@ ProcessResult FrameProcessor::Impl::process(uint8_t* frame_data,
     auto detect_start = std::chrono::high_resolution_clock::now();
     cv::cvtColor(work_buffer_, rgb_buffer_, cv::COLOR_BGR2RGB);
 
-    // 검출 수행
-    result.iris_result = detector_->detect(
-        rgb_buffer_.data, rgb_buffer_.cols, rgb_buffer_.rows, FrameFormat::RGB);
+    // 검출 수행 (전용 스레드에서 실행)
+    result.iris_result = inference_thread_->detectSync(
+        rgb_buffer_.data, rgb_buffer_.cols, rgb_buffer_.rows,
+        static_cast<int>(FrameFormat::RGB));
     auto detect_end = std::chrono::high_resolution_clock::now();
     result.detection_time_ms = std::chrono::duration<float, std::milli>(
         detect_end - detect_start).count();
@@ -509,9 +516,10 @@ ProcessResult FrameProcessor::Impl::process(cv::Mat& frame,
     auto detect_start = std::chrono::high_resolution_clock::now();
     cv::cvtColor(work_buffer_, rgb_buffer_, cv::COLOR_BGR2RGB);
 
-    // 검출 수행
-    result.iris_result = detector_->detect(
-        rgb_buffer_.data, rgb_buffer_.cols, rgb_buffer_.rows, FrameFormat::RGB);
+    // 검출 수행 (전용 스레드에서 실행)
+    result.iris_result = inference_thread_->detectSync(
+        rgb_buffer_.data, rgb_buffer_.cols, rgb_buffer_.rows,
+        static_cast<int>(FrameFormat::RGB));
     auto detect_end = std::chrono::high_resolution_clock::now();
     result.detection_time_ms = std::chrono::duration<float, std::milli>(
         detect_end - detect_start).count();
@@ -572,10 +580,11 @@ IrisResult FrameProcessor::Impl::detectOnly(const uint8_t* frame_data,
         return result;
     }
 
-    // RGB로 변환 후 검출
+    // RGB로 변환 후 검출 (전용 스레드에서 실행)
     cv::cvtColor(work_buffer_, rgb_buffer_, cv::COLOR_BGR2RGB);
-    result = detector_->detect(rgb_buffer_.data, rgb_buffer_.cols,
-                                rgb_buffer_.rows, FrameFormat::RGB);
+    result = inference_thread_->detectSync(rgb_buffer_.data, rgb_buffer_.cols,
+                                            rgb_buffer_.rows,
+                                            static_cast<int>(FrameFormat::RGB));
 #endif
 
     return result;
@@ -619,11 +628,12 @@ IrisResult FrameProcessor::Impl::detectOnlyWithRotation(const uint8_t* frame_dat
             break;
     }
 
-    // 회전된 이미지로 검출 수행
+    // 회전된 이미지로 검출 수행 (전용 스레드에서 실행)
     // NOTE: 좌표는 회전된 (디스플레이) 공간 기준으로 반환됨
     // CameraX 프리뷰가 이미 회전되어 표시되므로 역변환 불필요
-    result = detector_->detect(rotated_rgb.data, rotated_rgb.cols,
-                                rotated_rgb.rows, FrameFormat::RGB);
+    result = inference_thread_->detectSync(rotated_rgb.data, rotated_rgb.cols,
+                                            rotated_rgb.rows,
+                                            static_cast<int>(FrameFormat::RGB));
 
 #endif
 
@@ -667,15 +677,23 @@ bool FrameProcessor::Impl::renderOnly(uint8_t* frame_data,
 
 void FrameProcessor::Impl::setMinConfidence(float min_confidence) {
     min_confidence_ = std::clamp(min_confidence, 0.0f, 1.0f);
-    // detector에 전달
-    if (detector_) {
-        detector_->setMinDetectionConfidence(min_confidence_);
-    }
+    // NOTE: InferenceThread 사용 시 동적 설정 변경 미지원
+    // 초기화 전에만 설정 가능
 }
 
 void FrameProcessor::Impl::setFaceTracking(bool enable) {
     face_tracking_ = enable;
-    // TODO: detector에 전달
+    // NOTE: InferenceThread 사용 시 동적 설정 변경 미지원
+}
+
+void FrameProcessor::Impl::setGpuEnabled(bool enable) {
+    gpu_enabled_ = enable;
+    // 초기화 전에만 설정 가능
+    // InferenceThread::start() 시 gpu_enabled_ 플래그가 전달됨
+}
+
+bool FrameProcessor::Impl::isUsingGpu() const noexcept {
+    return inference_thread_ ? inference_thread_->isGpuActive() : false;
 }
 
 // ============================================================================
@@ -807,6 +825,14 @@ void FrameProcessor::setMinConfidence(float min_confidence) {
 
 void FrameProcessor::setFaceTracking(bool enable) {
     if (impl_) impl_->setFaceTracking(enable);
+}
+
+void FrameProcessor::setGpuEnabled(bool enable) {
+    if (impl_) impl_->setGpuEnabled(enable);
+}
+
+bool FrameProcessor::isUsingGpu() const noexcept {
+    return impl_ ? impl_->isUsingGpu() : false;
 }
 
 double FrameProcessor::getLastProcessingTimeMs() const noexcept {

@@ -185,6 +185,15 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Initializing IrisLensSDK...")
             Log.d(TAG, "Library loaded: ${IrisLensSDK.isLibraryLoaded()}")
 
+            // GPU 가속 활성화 요청 (init 전에 호출!)
+            // InferenceThread를 통해 전용 스레드에서 GPU delegate 초기화/실행
+            val gpuAvailable = IrisLensSDK.isGpuAvailable()
+            Log.i(TAG, "GPU available: $gpuAvailable")
+            if (gpuAvailable) {
+                IrisLensSDK.setGpuEnabled(true)
+                Log.i(TAG, "GPU acceleration requested")
+            }
+
             // SDK 초기화 (정적 메서드 사용)
             val error = IrisLensSDK.init(this)
 
@@ -192,14 +201,17 @@ class MainActivity : AppCompatActivity() {
                 isSDKInitialized = true
                 val version = IrisLensSDK.getVersion()
                 val isReady = IrisLensSDK.isReady()
+                val gpuActive = IrisLensSDK.isUsingGpu()
                 Log.i(TAG, "SDK Version: $version")
                 Log.i(TAG, "SDK Ready: $isReady")
+                Log.i(TAG, "GPU Active: $gpuActive")
                 Log.d(TAG, "IrisLensSDK initialized successfully")
 
+                val gpuStatus = if (gpuActive) "GPU" else "CPU"
                 if (isReady) {
-                    updateStatus("SDK Ready\n$version")
+                    updateStatus("SDK Ready ($gpuStatus)\n$version")
                 } else {
-                    updateStatus("SDK Loaded (Detection not ready)\n$version")
+                    updateStatus("SDK Loaded ($gpuStatus)\n$version")
                 }
             } else {
                 val errorStr = IrisLensSDK.errorToString(error)
