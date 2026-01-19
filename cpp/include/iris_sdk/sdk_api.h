@@ -458,6 +458,33 @@ IRIS_SDK_EXPORT bool iris_sdk_is_gpu_available(void);
  */
 IRIS_SDK_EXPORT bool iris_sdk_is_using_gpu(void);
 
+// ============================================================================
+// 신뢰도 설정 (Confidence Settings)
+// ============================================================================
+
+/**
+ * @brief 얼굴 검출 최소 신뢰도 설정
+ *
+ * 얼굴 검출 결과의 최소 신뢰도. 이 값 이하면 검출되지 않은 것으로 처리.
+ *
+ * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0), 기본값 0.3
+ *
+ * @note init() 전에 설정하는 것이 권장됩니다.
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_min_detection_confidence(float min_confidence);
+
+/**
+ * @brief 랜드마크 추적 최소 신뢰도 설정
+ *
+ * 랜드마크 추적 결과의 최소 신뢰도.
+ * 이 값 이하면 추적 실패로 간주하고 다시 Face Detection 수행.
+ *
+ * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0), 기본값 0.5
+ *
+ * @note init() 전에 설정하는 것이 권장됩니다.
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_min_tracking_confidence(float min_confidence);
+
 /**
  * @brief 얼굴 존재 최소 신뢰도 설정
  *

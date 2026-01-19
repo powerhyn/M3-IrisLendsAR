@@ -623,7 +623,8 @@ class MainActivity : AppCompatActivity() {
     private fun openSettings() {
         val options = arrayOf(
             "Face Mesh 표시: ${if (binding.overlayView.showFaceMesh) "ON" else "OFF"}",
-            "Debug 모드: ${if (binding.overlayView.debugMode) "ON" else "OFF"}"
+            "Debug 모드: ${if (binding.overlayView.debugMode) "ON" else "OFF"}",
+            "신뢰도 설정..."
         )
 
         androidx.appcompat.app.AlertDialog.Builder(this)
@@ -646,9 +647,126 @@ class MainActivity : AppCompatActivity() {
                             Toast.LENGTH_SHORT
                         ).show()
                     }
+                    2 -> openConfidenceSettings()
                 }
             }
             .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    // 신뢰도 설정값 저장
+    private var detectionConfidence = 0.3f
+    private var trackingConfidence = 0.5f
+    private var presenceConfidence = 0.5f
+
+    /**
+     * 신뢰도 설정 다이얼로그 열기
+     */
+    private fun openConfidenceSettings() {
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(48, 32, 48, 16)
+        }
+
+        // Detection Confidence 슬라이더
+        val detectionLabel = android.widget.TextView(this).apply {
+            text = "검출 신뢰도 (Detection): ${String.format("%.1f", detectionConfidence)}"
+        }
+        val detectionSeekBar = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = (detectionConfidence * 100).toInt()
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    detectionConfidence = progress / 100f
+                    detectionLabel.text = "검출 신뢰도 (Detection): ${String.format("%.1f", detectionConfidence)}"
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                    IrisLensSDK.setMinDetectionConfidence(detectionConfidence)
+                    Log.d(TAG, "Detection confidence: $detectionConfidence")
+                }
+            })
+        }
+
+        // Tracking Confidence 슬라이더
+        val trackingLabel = android.widget.TextView(this).apply {
+            text = "추적 신뢰도 (Tracking): ${String.format("%.1f", trackingConfidence)}"
+        }
+        val trackingSeekBar = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = (trackingConfidence * 100).toInt()
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    trackingConfidence = progress / 100f
+                    trackingLabel.text = "추적 신뢰도 (Tracking): ${String.format("%.1f", trackingConfidence)}"
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                    IrisLensSDK.setMinTrackingConfidence(trackingConfidence)
+                    Log.d(TAG, "Tracking confidence: $trackingConfidence")
+                }
+            })
+        }
+
+        // Presence Confidence 슬라이더
+        val presenceLabel = android.widget.TextView(this).apply {
+            text = "존재 신뢰도 (Presence): ${String.format("%.1f", presenceConfidence)}"
+        }
+        val presenceSeekBar = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = (presenceConfidence * 100).toInt()
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    presenceConfidence = progress / 100f
+                    presenceLabel.text = "존재 신뢰도 (Presence): ${String.format("%.1f", presenceConfidence)}"
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                    IrisLensSDK.setMinPresenceConfidence(presenceConfidence)
+                    Log.d(TAG, "Presence confidence: $presenceConfidence")
+                }
+            })
+        }
+
+        // 레이아웃에 추가
+        layout.addView(detectionLabel)
+        layout.addView(detectionSeekBar)
+        layout.addView(android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 24
+            )
+        })
+        layout.addView(trackingLabel)
+        layout.addView(trackingSeekBar)
+        layout.addView(android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 24
+            )
+        })
+        layout.addView(presenceLabel)
+        layout.addView(presenceSeekBar)
+
+        // 설명 추가
+        val description = android.widget.TextView(this).apply {
+            text = "\n• Detection: 얼굴 검출 민감도\n• Tracking: 랜드마크 추적 신뢰도\n• Presence: 추적 캐시 재사용 임계값"
+            setTextColor(android.graphics.Color.GRAY)
+            textSize = 12f
+        }
+        layout.addView(description)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("신뢰도 설정")
+            .setView(layout)
+            .setPositiveButton("확인", null)
+            .setNeutralButton("기본값 복원") { _, _ ->
+                detectionConfidence = 0.3f
+                trackingConfidence = 0.5f
+                presenceConfidence = 0.5f
+                IrisLensSDK.setMinDetectionConfidence(detectionConfidence)
+                IrisLensSDK.setMinTrackingConfidence(trackingConfidence)
+                IrisLensSDK.setMinPresenceConfidence(presenceConfidence)
+                Toast.makeText(this, "기본값으로 복원됨", Toast.LENGTH_SHORT).show()
+            }
             .show()
     }
 

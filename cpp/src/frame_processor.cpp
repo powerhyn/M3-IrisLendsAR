@@ -61,6 +61,8 @@ public:
 
     // 설정
     void setMinConfidence(float min_confidence);
+    void setMinDetectionConfidence(float min_confidence);
+    void setMinTrackingConfidence(float min_confidence);
     void setFaceTracking(bool enable);
     void setMinPresenceConfidence(float min_confidence);
     void setGpuEnabled(bool enable);
@@ -121,8 +123,10 @@ private:
 
     // 설정
     float min_confidence_ = 0.5f;
+    float min_detection_confidence_ = 0.3f;  // 얼굴 검출 최소 신뢰도
+    float min_tracking_confidence_ = 0.5f;   // 랜드마크 추적 최소 신뢰도
+    float min_presence_confidence_ = 0.5f;   // 추적 캐시 유효성 임계값
     bool face_tracking_ = true;
-    float min_presence_confidence_ = 0.5f;  // 추적 캐시 유효성 임계값
     bool gpu_enabled_ = false;
 
     // 버퍼 재사용 (메모리 할당 최소화)
@@ -774,6 +778,24 @@ void FrameProcessor::Impl::setMinConfidence(float min_confidence) {
     // 초기화 전에만 설정 가능
 }
 
+void FrameProcessor::Impl::setMinDetectionConfidence(float min_confidence) {
+    min_detection_confidence_ = std::clamp(min_confidence, 0.0f, 1.0f);
+    // 직접 호출 모드에서는 MediaPipeDetector에 전달
+    if (!use_inference_thread_ && direct_detector_) {
+        direct_detector_->setMinDetectionConfidence(min_detection_confidence_);
+    }
+    // NOTE: InferenceThread 사용 시 초기화 전에만 설정 가능
+}
+
+void FrameProcessor::Impl::setMinTrackingConfidence(float min_confidence) {
+    min_tracking_confidence_ = std::clamp(min_confidence, 0.0f, 1.0f);
+    // 직접 호출 모드에서는 MediaPipeDetector에 전달
+    if (!use_inference_thread_ && direct_detector_) {
+        direct_detector_->setMinTrackingConfidence(min_tracking_confidence_);
+    }
+    // NOTE: InferenceThread 사용 시 초기화 전에만 설정 가능
+}
+
 void FrameProcessor::Impl::setFaceTracking(bool enable) {
     face_tracking_ = enable;
     // NOTE: InferenceThread 사용 시 동적 설정 변경 미지원
@@ -939,6 +961,14 @@ bool FrameProcessor::renderOnly(uint8_t* frame_data,
 
 void FrameProcessor::setMinConfidence(float min_confidence) {
     if (impl_) impl_->setMinConfidence(min_confidence);
+}
+
+void FrameProcessor::setMinDetectionConfidence(float min_confidence) {
+    if (impl_) impl_->setMinDetectionConfidence(min_confidence);
+}
+
+void FrameProcessor::setMinTrackingConfidence(float min_confidence) {
+    if (impl_) impl_->setMinTrackingConfidence(min_confidence);
 }
 
 void FrameProcessor::setFaceTracking(bool enable) {

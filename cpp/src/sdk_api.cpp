@@ -849,10 +849,25 @@ bool iris_sdk_is_using_gpu(void) {
     return g_processor->isUsingGpu();
 }
 
+void iris_sdk_set_min_detection_confidence(float min_confidence) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (g_processor) {
+        g_processor->setMinDetectionConfidence(min_confidence);
+    }
+}
+
+void iris_sdk_set_min_tracking_confidence(float min_confidence) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (g_processor) {
+        g_processor->setMinTrackingConfidence(min_confidence);
+    }
+}
+
 void iris_sdk_set_min_presence_confidence(float min_confidence) {
     std::lock_guard<std::mutex> lock(g_mutex);
 
-    // FrameProcessor가 생성되어 있으면 설정 전달
     if (g_processor) {
         g_processor->setMinPresenceConfidence(min_confidence);
     }

@@ -247,11 +247,32 @@ public:
     // ========================================
 
     /**
-     * @brief 검출 신뢰도 임계값 설정
+     * @brief 검출 신뢰도 임계값 설정 (deprecated, use setMinDetectionConfidence)
      *
      * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0)
      */
     void setMinConfidence(float min_confidence);
+
+    /**
+     * @brief 얼굴 검출 최소 신뢰도 설정
+     *
+     * 얼굴 검출 결과의 최소 신뢰도. 이 값 이하면 검출되지 않은 것으로 처리.
+     * 기본값: 0.3
+     *
+     * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0)
+     */
+    void setMinDetectionConfidence(float min_confidence);
+
+    /**
+     * @brief 랜드마크 추적 최소 신뢰도 설정
+     *
+     * 랜드마크 추적 결과의 최소 신뢰도.
+     * 이 값 이하면 추적 실패로 간주하고 다시 Face Detection 수행.
+     * 기본값: 0.5
+     *
+     * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0)
+     */
+    void setMinTrackingConfidence(float min_confidence);
 
     /**
      * @brief 얼굴 추적 활성화/비활성화

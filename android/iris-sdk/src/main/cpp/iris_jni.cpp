@@ -813,6 +813,41 @@ Java_com_irislenssdk_IrisLensSDK_nativeIsUsingGpu(
 }
 
 /**
+ * @brief 얼굴 검출 최소 신뢰도 설정
+ *
+ * 얼굴 검출 결과의 최소 신뢰도. 이 값 이하면 검출되지 않은 것으로 처리.
+ *
+ * Java: native void nativeSetMinDetectionConfidence(float minConfidence);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetMinDetectionConfidence(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jfloat minConfidence) {
+
+    LOGD("nativeSetMinDetectionConfidence: %.2f", minConfidence);
+    iris_sdk_set_min_detection_confidence(minConfidence);
+}
+
+/**
+ * @brief 랜드마크 추적 최소 신뢰도 설정
+ *
+ * 랜드마크 추적 결과의 최소 신뢰도.
+ * 이 값 이하면 추적 실패로 간주하고 다시 Face Detection 수행.
+ *
+ * Java: native void nativeSetMinTrackingConfidence(float minConfidence);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetMinTrackingConfidence(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jfloat minConfidence) {
+
+    LOGD("nativeSetMinTrackingConfidence: %.2f", minConfidence);
+    iris_sdk_set_min_tracking_confidence(minConfidence);
+}
+
+/**
  * @brief 얼굴 존재 최소 신뢰도 설정
  *
  * 추적 모드에서 이전 프레임 결과를 재사용할지 판단하는 임계값.
