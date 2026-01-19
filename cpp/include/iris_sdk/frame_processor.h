@@ -280,6 +280,24 @@ public:
      */
     bool isUsingGpu() const noexcept;
 
+    /**
+     * @brief InferenceThread 사용 여부 설정 (벤치마크용)
+     *
+     * 반드시 initialize() 호출 전에 설정해야 합니다.
+     * false로 설정하면 전용 스레드 없이 직접 호출합니다.
+     * GPU 가속은 InferenceThread 사용 시에만 지원됩니다.
+     *
+     * @param enable true면 InferenceThread 사용 (기본값), false면 직접 호출
+     */
+    void setUseInferenceThread(bool enable);
+
+    /**
+     * @brief 현재 InferenceThread 사용 상태 확인
+     *
+     * @return true면 InferenceThread 사용, false면 직접 호출
+     */
+    bool isUsingInferenceThread() const noexcept;
+
     // ========================================
     // 통계
     // ========================================

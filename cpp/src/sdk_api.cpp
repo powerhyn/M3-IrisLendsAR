@@ -19,6 +19,19 @@
 #include <stdexcept>
 #include <string>
 
+// Android 로그 매크로
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "IrisSDK-API"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...) ((void)0)
+#define LOGW(...) ((void)0)
+#define LOGE(...) ((void)0)
+#endif
+
 // ============================================================================
 // 내부 전역 변수 (익명 네임스페이스)
 // ============================================================================
@@ -36,6 +49,9 @@ std::mutex g_mutex;
 
 /// GPU 가속 요청 플래그 (init 전에 설정)
 bool g_gpu_request = false;
+
+/// InferenceThread 사용 여부 요청 플래그 (init 전에 설정)
+bool g_use_inference_thread_request = true;  // 기본값: InferenceThread 사용
 
 /**
  * @brief 마지막 에러 메시지 설정
@@ -284,18 +300,26 @@ IrisSdkError iris_sdk_init(const char* model_path) {
         return IRIS_SDK_MODEL_LOAD_FAILED;
     }
 
-    // FrameProcessor 생성
-    g_processor = manager.createFrameProcessor();
+    // FrameProcessor 직접 생성 (createFrameProcessor()는 내부에서 initialize()를 호출하므로 사용 안함)
+    g_processor = std::make_unique<iris_sdk::FrameProcessor>();
     if (!g_processor) {
         manager.shutdown();
         set_last_error("Failed to create FrameProcessor - internal error");
         return IRIS_SDK_UNKNOWN;
     }
 
+    // InferenceThread 사용 여부 설정 적용 (init 전에 setUseInferenceThread() 호출한 경우)
+    LOGI("iris_sdk_init: applying g_use_inference_thread_request=%s",
+         g_use_inference_thread_request ? "true" : "false");
+    g_processor->setUseInferenceThread(g_use_inference_thread_request);
+
     // GPU 가속 설정 적용 (init 전에 setGpuEnabled() 호출한 경우)
     if (g_gpu_request) {
         g_processor->setGpuEnabled(true);
     }
+
+    LOGI("iris_sdk_init: calling g_processor->initialize() with useInferenceThread=%s",
+         g_processor->isUsingInferenceThread() ? "true" : "false");
 
     if (!g_processor->initialize(model_path)) {
         g_processor.reset();
@@ -341,13 +365,26 @@ IrisSdkError iris_sdk_init_with_config(const IrisSdkConfig* config) {
         return IRIS_SDK_MODEL_LOAD_FAILED;
     }
 
-    // FrameProcessor 생성
-    g_processor = manager.createFrameProcessor();
+    // FrameProcessor 직접 생성 (createFrameProcessor()는 내부에서 initialize()를 호출하므로 사용 안함)
+    g_processor = std::make_unique<iris_sdk::FrameProcessor>();
     if (!g_processor) {
         manager.shutdown();
         set_last_error("Failed to create FrameProcessor - internal error");
         return IRIS_SDK_UNKNOWN;
     }
+
+    // InferenceThread 사용 여부 설정 적용
+    LOGI("iris_sdk_init_with_config: applying g_use_inference_thread_request=%s",
+         g_use_inference_thread_request ? "true" : "false");
+    g_processor->setUseInferenceThread(g_use_inference_thread_request);
+
+    // GPU 가속 설정 적용
+    if (g_gpu_request) {
+        g_processor->setGpuEnabled(true);
+    }
+
+    LOGI("iris_sdk_init_with_config: calling g_processor->initialize() with useInferenceThread=%s",
+         g_processor->isUsingInferenceThread() ? "true" : "false");
 
     if (!g_processor->initialize(config->model_path)) {
         g_processor.reset();
@@ -810,6 +847,35 @@ bool iris_sdk_is_using_gpu(void) {
     }
 
     return g_processor->isUsingGpu();
+}
+
+void iris_sdk_set_use_inference_thread(bool enable) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    LOGI("iris_sdk_set_use_inference_thread: %s (current g_use_inference_thread_request=%s)",
+         enable ? "true" : "false",
+         g_use_inference_thread_request ? "true" : "false");
+
+    // 이미 초기화된 경우 경고
+    if (g_processor && g_processor->isInitialized()) {
+        set_last_error("setUseInferenceThread() must be called before init()");
+        LOGW("setUseInferenceThread called after init - ignored");
+        return;
+    }
+
+    // 전역 플래그 설정 (init()에서 적용됨)
+    g_use_inference_thread_request = enable;
+    LOGI("g_use_inference_thread_request set to: %s", enable ? "true" : "false");
+}
+
+bool iris_sdk_is_using_inference_thread(void) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (!g_processor || !g_processor->isInitialized()) {
+        return g_use_inference_thread_request;  // 설정된 요청 값 반환
+    }
+
+    return g_processor->isUsingInferenceThread();
 }
 
 }  // extern "C"

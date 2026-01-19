@@ -435,6 +435,35 @@ public final class IrisLensSDK {
         return nativeIsUsingGpu();
     }
 
+    /**
+     * InferenceThread 사용 여부를 설정합니다. (벤치마크용)
+     *
+     * <p>반드시 {@link #init(Context, String)} 호출 전에 설정해야 합니다.
+     * false로 설정하면 전용 스레드 없이 직접 호출합니다.
+     * GPU 가속은 InferenceThread 사용 시에만 지원됩니다.</p>
+     *
+     * @param enable true면 InferenceThread 사용 (기본값), false면 직접 호출
+     */
+    public static void setUseInferenceThread(boolean enable) {
+        if (!sLibraryLoaded) {
+            Log.w(TAG, "setUseInferenceThread: library not loaded");
+            return;
+        }
+        nativeSetUseInferenceThread(enable);
+    }
+
+    /**
+     * InferenceThread 사용 상태를 확인합니다.
+     *
+     * @return true면 InferenceThread 사용, false면 직접 호출
+     */
+    public static boolean isUsingInferenceThread() {
+        if (!sLibraryLoaded) {
+            return true;  // 기본값
+        }
+        return nativeIsUsingInferenceThread();
+    }
+
     // ========================================================================
     // 정보 API
     // ========================================================================
@@ -591,6 +620,10 @@ public final class IrisLensSDK {
     private static native void nativeSetGpuEnabled(boolean enable);
     private static native boolean nativeIsGpuAvailable();
     private static native boolean nativeIsUsingGpu();
+
+    // InferenceThread 설정 API (벤치마크용)
+    private static native void nativeSetUseInferenceThread(boolean enable);
+    private static native boolean nativeIsUsingInferenceThread();
 
     private static native String nativeGetVersion();
     private static native String nativeGetBuildInfo();
