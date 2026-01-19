@@ -12,7 +12,6 @@
 package com.irislenssdk.demo
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
@@ -619,12 +618,38 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 설정 화면 열기 (MediaPipe 벤치마크 화면으로 이동)
+     * 설정 다이얼로그 열기
      */
     private fun openSettings() {
-        // MediaPipe 벤치마크 액티비티로 이동
-        val intent = Intent(this, MediaPipeBenchmarkActivity::class.java)
-        startActivity(intent)
+        val options = arrayOf(
+            "Face Mesh 표시: ${if (binding.overlayView.showFaceMesh) "ON" else "OFF"}",
+            "Debug 모드: ${if (binding.overlayView.debugMode) "ON" else "OFF"}"
+        )
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("디스플레이 설정")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        binding.overlayView.showFaceMesh = !binding.overlayView.showFaceMesh
+                        Toast.makeText(
+                            this,
+                            "Face Mesh: ${if (binding.overlayView.showFaceMesh) "ON" else "OFF"}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    1 -> {
+                        binding.overlayView.debugMode = !binding.overlayView.debugMode
+                        Toast.makeText(
+                            this,
+                            "Debug mode: ${if (binding.overlayView.debugMode) "ON" else "OFF"}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .show()
     }
 
     /**
