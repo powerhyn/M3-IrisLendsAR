@@ -1,6 +1,8 @@
 /**
  * @file inference_thread.cpp
- * @brief 전용 추론 스레드 클래스 구현
+ * @brief 전용 추론 스레드 클래스 구현 (최적화 버전)
+ *
+ * 단일 슬롯 패턴으로 동기화 오버헤드 최소화
  */
 
 #include "iris_sdk/inference_thread.h"
@@ -27,15 +29,20 @@ InferenceThread::~InferenceThread() {
 
 bool InferenceThread::start(const std::string& model_path, bool gpu_enabled) {
     // 이미 실행 중이면 중지
-    if (running_) {
-        stop();
+    ThreadState expected = ThreadState::Stopped;
+    if (!state_.compare_exchange_strong(expected, ThreadState::Starting)) {
+        // 이미 다른 상태인 경우
+        if (state_ != ThreadState::Stopped) {
+            stop();
+            expected = ThreadState::Stopped;
+            if (!state_.compare_exchange_strong(expected, ThreadState::Starting)) {
+                return false;
+            }
+        }
     }
 
     model_path_ = model_path;
     gpu_enabled_ = gpu_enabled;
-    running_ = true;
-    initialized_ = false;
-    init_success_ = false;
 
     // 스레드 시작
     thread_ = std::thread(&InferenceThread::threadLoop, this);
@@ -45,18 +52,16 @@ bool InferenceThread::start(const std::string& model_path, bool gpu_enabled) {
 }
 
 void InferenceThread::stop() {
-    if (!running_) {
+    ThreadState current = state_.load();
+    if (current == ThreadState::Stopped) {
         return;
     }
 
     // 중지 요청
-    running_ = false;
+    state_ = ThreadState::Stopping;
 
     // 대기 중인 스레드 깨우기
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        queue_cv_.notify_all();
-    }
+    slot_cv_.notify_one();
 
     // 스레드 종료 대기
     if (thread_.joinable()) {
@@ -64,45 +69,50 @@ void InferenceThread::stop() {
     }
 
     // 상태 초기화
-    initialized_ = false;
-    init_success_ = false;
+    state_ = ThreadState::Stopped;
     gpu_active_ = false;
 
-    // 큐 비우기
+    // 슬롯 초기화
     {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        while (!frame_queue_.empty()) {
-            frame_queue_.pop();
-        }
-    }
-
-    // 결과 비우기
-    {
-        std::lock_guard<std::mutex> lock(result_mutex_);
-        results_.clear();
+        std::lock_guard<std::mutex> lock(slot_mutex_);
+        pending_data_ = nullptr;
+        pending_width_ = 0;
+        pending_height_ = 0;
+        pending_format_ = 0;
+        pending_result_ = IrisResult{};
     }
 }
 
 bool InferenceThread::isRunning() const noexcept {
-    return running_ && initialized_ && init_success_;
+    ThreadState current = state_.load();
+    return current == ThreadState::Idle ||
+           current == ThreadState::Processing ||
+           current == ThreadState::ResultReady;
 }
 
 bool InferenceThread::waitForInitialization(int timeout_ms) {
-    std::unique_lock<std::mutex> lock(init_mutex_);
+    using namespace std::chrono;
+    auto deadline = steady_clock::now() + milliseconds(timeout_ms);
 
-    if (timeout_ms <= 0) {
-        init_cv_.wait(lock, [this] { return initialized_.load(); });
-    } else {
-        bool result = init_cv_.wait_for(lock,
-            std::chrono::milliseconds(timeout_ms),
-            [this] { return initialized_.load(); });
-        if (!result) {
-            std::fprintf(stderr, "[InferenceThread] Initialization timeout\n");
+    while (steady_clock::now() < deadline) {
+        ThreadState current = state_.load();
+
+        // 초기화 완료 (Idle 또는 Stopped)
+        if (current == ThreadState::Idle) {
+            return true;
+        }
+
+        // 초기화 실패
+        if (current == ThreadState::Stopped || current == ThreadState::Stopping) {
             return false;
         }
+
+        // Starting 상태면 대기
+        std::this_thread::sleep_for(milliseconds(10));
     }
 
-    return init_success_;
+    std::fprintf(stderr, "[InferenceThread] Initialization timeout\n");
+    return false;
 }
 
 // ============================================================================
@@ -117,52 +127,51 @@ IrisResult InferenceThread::submitAndWait(const uint8_t* data, int width, int he
     IrisResult empty_result;
     empty_result.detected = false;
 
-    // 스레드가 실행 중인지 확인
-    if (!isRunning() || data == nullptr || width <= 0 || height <= 0) {
+    // 유효성 검사
+    if (data == nullptr || width <= 0 || height <= 0) {
         return empty_result;
     }
 
-    // 요청 ID 생성
-    uint64_t request_id = next_request_id_++;
-
-    // 요청 생성 (동기 호출이므로 포인터만 전달 - 복사 오버헤드 제거)
-    FrameRequest request;
-    request.request_id = request_id;
-    request.data = data;  // 포인터만 저장 (호출자가 결과 대기하므로 안전)
-    request.width = width;
-    request.height = height;
-    request.format = format;
-
-    // 큐에 요청 추가
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        frame_queue_.push(std::move(request));
+    // 스레드 상태 확인 및 Processing으로 전환
+    ThreadState expected = ThreadState::Idle;
+    if (!state_.compare_exchange_strong(expected, ThreadState::Processing)) {
+        // Idle 상태가 아니면 실패
+        return empty_result;
     }
-    queue_cv_.notify_one();
+
+    // 입력 데이터 설정
+    {
+        std::lock_guard<std::mutex> lock(slot_mutex_);
+        pending_data_ = data;
+        pending_width_ = width;
+        pending_height_ = height;
+        pending_format_ = format;
+    }
+
+    // 워커 스레드 깨우기
+    slot_cv_.notify_one();
 
     // 결과 대기
     {
-        std::unique_lock<std::mutex> lock(result_mutex_);
-        bool found = result_cv_.wait_for(lock, std::chrono::seconds(5), [this, request_id] {
-            return results_.find(request_id) != results_.end();
+        std::unique_lock<std::mutex> lock(slot_mutex_);
+        bool success = slot_cv_.wait_for(lock, std::chrono::seconds(5), [this] {
+            ThreadState s = state_.load();
+            return s == ThreadState::ResultReady ||
+                   s == ThreadState::Stopped ||
+                   s == ThreadState::Stopping;
         });
 
-        if (!found) {
-            std::fprintf(stderr, "[InferenceThread] Detection timeout for request %llu\n",
-                         static_cast<unsigned long long>(request_id));
+        if (!success || state_ != ThreadState::ResultReady) {
+            std::fprintf(stderr, "[InferenceThread] Detection timeout or thread stopped\n");
+            state_ = ThreadState::Idle;  // 복구
             return empty_result;
         }
 
-        // 결과 추출 및 제거
-        auto it = results_.find(request_id);
-        if (it != results_.end()) {
-            IrisResult result = it->second.iris_result;
-            results_.erase(it);
-            return result;
-        }
+        // 결과 복사 후 상태 Idle로 전환
+        IrisResult result = pending_result_;
+        state_ = ThreadState::Idle;
+        return result;
     }
-
-    return empty_result;
 }
 
 // ============================================================================
@@ -221,55 +230,50 @@ void InferenceThread::threadLoop() {
 
         std::fprintf(stderr, "[InferenceThread] Detector initialized: GPU=%s, Version=%d\n",
                      gpu_active_.load() ? "true" : "false", model_version_.load());
+
+        // 초기화 성공 - Idle로 전환
+        state_ = ThreadState::Idle;
     } else {
         std::fprintf(stderr, "[InferenceThread] Detector initialization failed\n");
-    }
-
-    // 초기화 완료 알림
-    {
-        std::lock_guard<std::mutex> lock(init_mutex_);
-        init_success_ = init_result;
-        initialized_ = true;
-    }
-    init_cv_.notify_all();
-
-    if (!init_result) {
-        running_ = false;
+        state_ = ThreadState::Stopped;
         return;
     }
 
     // ========================================
-    // 2. 메인 루프 - 프레임 처리
+    // 2. 메인 루프 - 단일 슬롯 패턴
     // ========================================
-    while (running_) {
-        FrameRequest request;
+    while (state_ != ThreadState::Stopping && state_ != ThreadState::Stopped) {
+        const uint8_t* data;
+        int width, height, format;
 
-        // 큐에서 요청 가져오기
+        // 요청 대기
         {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] {
-                return !frame_queue_.empty() || !running_;
+            std::unique_lock<std::mutex> lock(slot_mutex_);
+            slot_cv_.wait(lock, [this] {
+                ThreadState s = state_.load();
+                return s == ThreadState::Processing ||
+                       s == ThreadState::Stopping ||
+                       s == ThreadState::Stopped;
             });
 
-            if (!running_) {
+            ThreadState current = state_.load();
+            if (current == ThreadState::Stopping || current == ThreadState::Stopped) {
                 break;
             }
 
-            if (frame_queue_.empty()) {
-                continue;
-            }
-
-            request = std::move(frame_queue_.front());
-            frame_queue_.pop();
+            // 입력 데이터 복사 (포인터만)
+            data = pending_data_;
+            width = pending_width_;
+            height = pending_height_;
+            format = pending_format_;
         }
 
-        // 검출 수행 (GPU delegate와 동일 스레드에서)
-        // NOTE: 회전 처리는 FrameProcessor에서 수행 후 전달됨
+        // 검출 수행 (락 없이 - GPU delegate와 동일 스레드에서)
         IrisResult result = detector_->detect(
-            request.data,  // 이미 포인터
-            request.width,
-            request.height,
-            static_cast<FrameFormat>(request.format));
+            data,
+            width,
+            height,
+            static_cast<FrameFormat>(format));
 
         // 랜드마크 데이터 저장 (디버그용)
         if (result.detected) {
@@ -281,16 +285,13 @@ void InferenceThread::threadLoop() {
             }
         }
 
-        // 결과 저장
+        // 결과 저장 및 상태 전환
         {
-            std::lock_guard<std::mutex> lock(result_mutex_);
-            DetectionResult det_result;
-            det_result.iris_result = result;
-            det_result.request_id = request.request_id;
-            det_result.success = true;
-            results_[request.request_id] = det_result;
+            std::lock_guard<std::mutex> lock(slot_mutex_);
+            pending_result_ = result;
+            state_ = ThreadState::ResultReady;
         }
-        result_cv_.notify_all();
+        slot_cv_.notify_one();  // notify_all() → notify_one()
     }
 
     // ========================================
@@ -298,6 +299,7 @@ void InferenceThread::threadLoop() {
     // ========================================
     std::fprintf(stderr, "[InferenceThread] Thread stopping, releasing detector\n");
     detector_.reset();
+    state_ = ThreadState::Stopped;
     std::fprintf(stderr, "[InferenceThread] Thread stopped\n");
 }
 

@@ -812,4 +812,38 @@ Java_com_irislenssdk_IrisLensSDK_nativeIsUsingGpu(
     return using_gpu ? JNI_TRUE : JNI_FALSE;
 }
 
+/**
+ * @brief InferenceThread 사용 여부 설정 (벤치마크용)
+ *
+ * init() 호출 전에 설정해야 합니다.
+ * false로 설정하면 전용 스레드 없이 직접 호출합니다.
+ * GPU 가속은 InferenceThread 사용 시에만 지원됩니다.
+ *
+ * Java: native void nativeSetUseInferenceThread(boolean enable);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetUseInferenceThread(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jboolean enable) {
+
+    LOGD("nativeSetUseInferenceThread: %s", enable ? "true" : "false");
+    iris_sdk_set_use_inference_thread(enable == JNI_TRUE);
+}
+
+/**
+ * @brief InferenceThread 사용 상태 확인
+ *
+ * Java: native boolean nativeIsUsingInferenceThread();
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeIsUsingInferenceThread(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    bool using_inference_thread = iris_sdk_is_using_inference_thread();
+    LOGD("nativeIsUsingInferenceThread: %s", using_inference_thread ? "true" : "false");
+    return using_inference_thread ? JNI_TRUE : JNI_FALSE;
+}
+
 }  // extern "C"

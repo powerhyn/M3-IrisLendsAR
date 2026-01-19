@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.irislenssdk.demo.BuildConfig
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -92,6 +93,10 @@ class BenchmarkManager(private val context: Context) {
     // 샘플 데이터
     private val performanceSamples = mutableListOf<PerformanceStats>()
     private val memorySamples = mutableListOf<MemoryInfo>()
+
+    // SDK 모드 정보
+    private var inferenceThreadEnabled = true  // 기본값: InferenceThread 사용
+    private var customModeTag: String? = null  // 커스텀 모드 태그 (MediaPipe 등)
 
     /**
      * 벤치마크 시작
@@ -176,6 +181,23 @@ class BenchmarkManager(private val context: Context) {
     }
 
     /**
+     * InferenceThread 모드 설정
+     */
+    fun setInferenceThreadEnabled(enabled: Boolean) {
+        inferenceThreadEnabled = enabled
+    }
+
+    /**
+     * 커스텀 모드 태그 설정 (MediaPipe 등 외부 SDK 벤치마크용)
+     *
+     * @param tag 파일명에 사용할 모드 태그 (예: "mediapipe_cpu", "mediapipe_gpu")
+     *            null이면 기본 thread/direct 로직 사용
+     */
+    fun setCustomModeTag(tag: String?) {
+        customModeTag = tag
+    }
+
+    /**
      * 샘플링 시작
      */
     private fun startSampling() {
@@ -229,20 +251,27 @@ class BenchmarkManager(private val context: Context) {
 
     /**
      * CSV 파일로 내보내기
+     *
+     * 파일명 형식: benchmark_[mode]_b[buildNumber]_[timestamp].csv
+     * - mode: "thread" (InferenceThread 사용) 또는 "direct" (직접 호출)
+     * - buildNumber: 앱 versionCode (빌드마다 증가시켜 구분)
      */
     fun exportToCsv(): File? {
         if (performanceSamples.isEmpty()) return null
 
         val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
-        val fileName = "benchmark_${dateFormat.format(Date())}.csv"
+        // 커스텀 모드 태그가 있으면 사용, 없으면 기본 thread/direct 로직 사용
+        val modeTag = customModeTag ?: if (inferenceThreadEnabled) "thread" else "direct"
+        val buildNumber = BuildConfig.VERSION_CODE
+        val fileName = "benchmark_${modeTag}_b${buildNumber}_${dateFormat.format(Date())}.csv"
         val file = File(context.getExternalFilesDir(null), fileName)
 
         try {
             file.bufferedWriter().use { writer ->
-                // 헤더
+                // 헤더 (빌드 정보 컬럼 추가)
                 writer.write("timestamp,fps,avgLatencyMs,minLatencyMs,maxLatencyMs,p95LatencyMs,")
                 writer.write("p99LatencyMs,totalFrames,droppedFrames,dropRate,")
-                writer.write("totalPssMB,nativeHeapMB,jvmUsedMB,gpuEnabled")
+                writer.write("totalPssMB,nativeHeapMB,jvmUsedMB,gpuEnabled,inferenceThread,buildNumber,appVersion")
                 writer.newLine()
 
                 // 데이터
@@ -256,12 +285,13 @@ class BenchmarkManager(private val context: Context) {
                     writer.write("${perf.maxLatencyMs},${perf.p95LatencyMs},${perf.p99LatencyMs},")
                     writer.write("${perf.totalFrames},${perf.droppedFrames},${perf.dropRate},")
                     writer.write("${mem.totalPssMB},${mem.nativeHeapMB},${mem.jvmUsedMB},")
-                    writer.write("${perf.gpuEnabled}")
+                    writer.write("${perf.gpuEnabled},${inferenceThreadEnabled},")
+                    writer.write("${BuildConfig.VERSION_CODE},${BuildConfig.VERSION_NAME}")
                     writer.newLine()
                 }
             }
 
-            Log.i(TAG, "Exported to: ${file.absolutePath}")
+            Log.i(TAG, "Exported to: ${file.absolutePath} (mode: $modeTag)")
             return file
 
         } catch (e: Exception) {
@@ -284,10 +314,12 @@ class BenchmarkManager(private val context: Context) {
             appendLine()
             appendLine("## Test Environment")
             appendLine("- **Date**: ${dateFormat.format(Date())}")
+            appendLine("- **App Version**: ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
             appendLine("- **Device**: ${deviceInfo.manufacturer} ${deviceInfo.model}")
             appendLine("- **Android Version**: ${deviceInfo.androidVersion} (SDK ${deviceInfo.sdkVersion})")
             appendLine("- **CPU ABI**: ${deviceInfo.cpuAbi}")
             appendLine("- **GPU Mode**: ${if (stats.gpuEnabled) "Enabled" else "CPU Only"}")
+            appendLine("- **Inference Mode**: ${if (inferenceThreadEnabled) "InferenceThread" else "Direct Call"}")
             appendLine()
             appendLine("## Performance Results")
             appendLine()

@@ -19,7 +19,7 @@ android {
         applicationId = "com.irislenssdk.demo"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
+        versionCode = 14
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -64,11 +64,25 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // APK 파일명에 빌드 번호 포함
+    applicationVariants.all {
+        val variant = this
+        variant.outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val versionCode = variant.versionCode
+            val buildType = variant.buildType.name
+            output.outputFileName = "demo-app-${buildType}-b${versionCode}.apk"
+        }
+    }
 }
 
 dependencies {
     // IrisLensSDK (로컬 모듈)
     implementation(project(":iris-sdk"))
+
+    // MediaPipe Tasks Vision (Face Landmarker for benchmark comparison)
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
 
     // AndroidX Core
     implementation("androidx.core:core-ktx:1.12.0")

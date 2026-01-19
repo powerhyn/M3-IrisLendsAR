@@ -12,6 +12,7 @@
 package com.irislenssdk.demo
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
@@ -185,10 +186,19 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Initializing IrisLensSDK...")
             Log.d(TAG, "Library loaded: ${IrisLensSDK.isLibraryLoaded()}")
 
+            // ===== 벤치마크 테스트: 직접 호출 모드 (InferenceThread 우회) =====
+            // false: InferenceThread 없이 직접 MediaPipeDetector 호출 (CPU only)
+            // true: InferenceThread 사용 (기본값, GPU 지원)
+            val useInferenceThread = true  // 벤치마크 테스트용: true로 설정 (Thread 모드)
+            IrisLensSDK.setUseInferenceThread(useInferenceThread)
+            Log.i(TAG, "InferenceThread mode: ${if (useInferenceThread) "enabled" else "disabled (direct call)"}")
+
             // GPU 가속 활성화 요청 (init 전에 호출!)
             // InferenceThread를 통해 전용 스레드에서 GPU delegate 초기화/실행
-            val gpuAvailable = IrisLensSDK.isGpuAvailable()
-            Log.i(TAG, "GPU available: $gpuAvailable")
+            // NOTE: 직접 호출 모드에서는 GPU 지원 안됨 (스레드 제약)
+            val enableGpu = false  // 벤치마크: GPU OFF로 Thread vs Direct 비교
+            val gpuAvailable = IrisLensSDK.isGpuAvailable() && useInferenceThread && enableGpu
+            Log.i(TAG, "GPU available: $gpuAvailable (enableGpu=$enableGpu)")
             if (gpuAvailable) {
                 IrisLensSDK.setGpuEnabled(true)
                 Log.i(TAG, "GPU acceleration requested")
@@ -202,16 +212,19 @@ class MainActivity : AppCompatActivity() {
                 val version = IrisLensSDK.getVersion()
                 val isReady = IrisLensSDK.isReady()
                 val gpuActive = IrisLensSDK.isUsingGpu()
+                val usingInferenceThread = IrisLensSDK.isUsingInferenceThread()
                 Log.i(TAG, "SDK Version: $version")
                 Log.i(TAG, "SDK Ready: $isReady")
                 Log.i(TAG, "GPU Active: $gpuActive")
+                Log.i(TAG, "InferenceThread Active: $usingInferenceThread")
                 Log.d(TAG, "IrisLensSDK initialized successfully")
 
                 val gpuStatus = if (gpuActive) "GPU" else "CPU"
+                val threadMode = if (usingInferenceThread) "Thread" else "Direct"
                 if (isReady) {
-                    updateStatus("SDK Ready ($gpuStatus)\n$version")
+                    updateStatus("SDK Ready ($gpuStatus/$threadMode)\n$version")
                 } else {
-                    updateStatus("SDK Loaded ($gpuStatus)\n$version")
+                    updateStatus("SDK Loaded ($gpuStatus/$threadMode)\n$version")
                 }
             } else {
                 val errorStr = IrisLensSDK.errorToString(error)
@@ -368,9 +381,10 @@ class MainActivity : AppCompatActivity() {
         binding.statusText.text = getString(R.string.status_initializing)
         binding.fpsText.text = "FPS: --"
 
-        // 디버그 모드 (설정 버튼 롱클릭으로 토글)
+        // 디버그 모드 (설정 버튼 롱클릭으로 토글 - Debug + Face Mesh)
         binding.settingsButton.setOnLongClickListener {
             binding.overlayView.debugMode = !binding.overlayView.debugMode
+            binding.overlayView.showFaceMesh = binding.overlayView.debugMode
             Toast.makeText(
                 this,
                 "Debug mode: ${if (binding.overlayView.debugMode) "ON" else "OFF"}",
@@ -523,6 +537,12 @@ class MainActivity : AppCompatActivity() {
             // 벤치마크 시작
             Log.i(TAG, "Starting benchmark for ${benchmarkDurationMs}ms")
 
+            // 모드 정보 설정 (CSV/리포트에 기록)
+            val usingInferenceThread = IrisLensSDK.isUsingInferenceThread()
+            benchmarkManager.setInferenceThreadEnabled(usingInferenceThread)
+            benchmarkManager.setGpuEnabled(IrisLensSDK.isUsingGpu())
+            Log.i(TAG, "Benchmark mode: inferenceThread=$usingInferenceThread, gpu=${IrisLensSDK.isUsingGpu()}")
+
             benchmarkManager.start(benchmarkDurationMs, object : BenchmarkCallback {
                 override fun onBenchmarkStarted() {
                     runOnUiThread {
@@ -599,10 +619,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 설정 화면 열기 (현재는 Face Mesh 토글)
+     * 설정 화면 열기 (MediaPipe 벤치마크 화면으로 이동)
      */
     private fun openSettings() {
-        // Face Mesh 표시 토글
+        // MediaPipe 벤치마크 액티비티로 이동
+        val intent = Intent(this, MediaPipeBenchmarkActivity::class.java)
+        startActivity(intent)
+    }
+
+    /**
+     * Face Mesh 표시 토글 (Long press debug mode에서 제공)
+     */
+    private fun toggleFaceMesh() {
         binding.overlayView.showFaceMesh = !binding.overlayView.showFaceMesh
 
         Toast.makeText(

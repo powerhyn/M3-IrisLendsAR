@@ -458,6 +458,26 @@ IRIS_SDK_EXPORT bool iris_sdk_is_gpu_available(void);
  */
 IRIS_SDK_EXPORT bool iris_sdk_is_using_gpu(void);
 
+/**
+ * @brief InferenceThread 사용 여부 설정 (벤치마크용)
+ *
+ * 반드시 iris_sdk_init() 호출 전에 설정해야 합니다.
+ * false로 설정하면 전용 스레드 없이 직접 호출합니다.
+ * GPU 가속은 InferenceThread 사용 시에만 지원됩니다.
+ *
+ * @param enable true면 InferenceThread 사용 (기본값), false면 직접 호출
+ *
+ * @note 벤치마크 용도로 사용됩니다.
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_use_inference_thread(bool enable);
+
+/**
+ * @brief 현재 InferenceThread 사용 상태 확인
+ *
+ * @return true면 InferenceThread 사용, false면 직접 호출
+ */
+IRIS_SDK_EXPORT bool iris_sdk_is_using_inference_thread(void);
+
 // ============================================================================
 // 정보 함수
 // ============================================================================
