@@ -436,6 +436,23 @@ public final class IrisLensSDK {
     }
 
     /**
+     * 얼굴 존재 최소 신뢰도를 설정합니다.
+     *
+     * <p>추적 모드에서 이전 프레임 결과를 재사용할지 판단하는 임계값입니다.
+     * 이전 프레임의 confidence가 이 값 이상이어야 Face Detection을 스킵합니다.
+     * 이 값 미만이면 캐시를 무효화하고 다시 Face Detection을 수행합니다.</p>
+     *
+     * @param minConfidence 최소 신뢰도 (0.0 ~ 1.0), 기본값 0.5
+     */
+    public static void setMinPresenceConfidence(float minConfidence) {
+        if (!sLibraryLoaded) {
+            Log.w(TAG, "setMinPresenceConfidence: library not loaded");
+            return;
+        }
+        nativeSetMinPresenceConfidence(minConfidence);
+    }
+
+    /**
      * InferenceThread 사용 여부를 설정합니다. (벤치마크용)
      *
      * <p>반드시 {@link #init(Context, String)} 호출 전에 설정해야 합니다.
@@ -620,6 +637,9 @@ public final class IrisLensSDK {
     private static native void nativeSetGpuEnabled(boolean enable);
     private static native boolean nativeIsGpuAvailable();
     private static native boolean nativeIsUsingGpu();
+
+    // 추적 신뢰도 설정 API
+    private static native void nativeSetMinPresenceConfidence(float minConfidence);
 
     // InferenceThread 설정 API (벤치마크용)
     private static native void nativeSetUseInferenceThread(boolean enable);

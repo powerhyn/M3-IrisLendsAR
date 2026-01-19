@@ -86,9 +86,26 @@ public:
 
     /**
      * @brief 추적 최소 신뢰도 설정
+     *
+     * 랜드마크 추적 결과의 최소 신뢰도.
+     * 이 값 이하면 추적 실패로 간주하고 다시 Face Detection 수행.
+     * 기본값: 0.5
+     *
      * @param confidence 신뢰도 (0.0 ~ 1.0)
      */
     void setMinTrackingConfidence(float confidence);
+
+    /**
+     * @brief 얼굴 존재 최소 신뢰도 설정
+     *
+     * 추적 모드에서 이전 프레임 결과를 재사용할지 판단하는 임계값.
+     * 이전 프레임의 confidence가 이 값 이상이어야 Face Detection을 스킵.
+     * 이 값 이하면 캐시를 무효화하고 다시 Face Detection 수행.
+     * 기본값: 0.5
+     *
+     * @param confidence 신뢰도 (0.0 ~ 1.0)
+     */
+    void setMinPresenceConfidence(float confidence);
 
     /**
      * @brief 검출할 최대 얼굴 수 설정

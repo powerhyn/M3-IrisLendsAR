@@ -459,6 +459,19 @@ IRIS_SDK_EXPORT bool iris_sdk_is_gpu_available(void);
 IRIS_SDK_EXPORT bool iris_sdk_is_using_gpu(void);
 
 /**
+ * @brief 얼굴 존재 최소 신뢰도 설정
+ *
+ * 추적 모드에서 이전 프레임 결과를 재사용할지 판단하는 임계값.
+ * 이전 프레임의 confidence가 이 값 이상이어야 Face Detection을 스킵.
+ * 이 값 미만이면 캐시를 무효화하고 다시 Face Detection 수행.
+ *
+ * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0), 기본값 0.5
+ *
+ * @note init() 전에 설정하는 것이 권장됩니다.
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_min_presence_confidence(float min_confidence);
+
+/**
  * @brief InferenceThread 사용 여부 설정 (벤치마크용)
  *
  * 반드시 iris_sdk_init() 호출 전에 설정해야 합니다.

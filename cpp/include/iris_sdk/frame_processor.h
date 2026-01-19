@@ -260,6 +260,16 @@ public:
      */
     void setFaceTracking(bool enable);
 
+    /**
+     * @brief 얼굴 존재 최소 신뢰도 설정
+     *
+     * 추적 모드에서 이전 프레임 결과를 재사용할지 판단하는 임계값.
+     * 이전 프레임의 confidence가 이 값 이상이어야 Face Detection 스킵.
+     *
+     * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0), 기본값 0.5
+     */
+    void setMinPresenceConfidence(float min_confidence);
+
     // ========================================
     // GPU 가속
     // ========================================

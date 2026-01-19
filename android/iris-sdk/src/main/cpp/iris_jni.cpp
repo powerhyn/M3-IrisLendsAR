@@ -813,6 +813,24 @@ Java_com_irislenssdk_IrisLensSDK_nativeIsUsingGpu(
 }
 
 /**
+ * @brief 얼굴 존재 최소 신뢰도 설정
+ *
+ * 추적 모드에서 이전 프레임 결과를 재사용할지 판단하는 임계값.
+ * 이전 프레임의 confidence가 이 값 이상이어야 Face Detection을 스킵.
+ *
+ * Java: native void nativeSetMinPresenceConfidence(float minConfidence);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetMinPresenceConfidence(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jfloat minConfidence) {
+
+    LOGD("nativeSetMinPresenceConfidence: %.2f", minConfidence);
+    iris_sdk_set_min_presence_confidence(minConfidence);
+}
+
+/**
  * @brief InferenceThread 사용 여부 설정 (벤치마크용)
  *
  * init() 호출 전에 설정해야 합니다.

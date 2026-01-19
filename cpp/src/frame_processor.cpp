@@ -62,6 +62,7 @@ public:
     // 설정
     void setMinConfidence(float min_confidence);
     void setFaceTracking(bool enable);
+    void setMinPresenceConfidence(float min_confidence);
     void setGpuEnabled(bool enable);
     bool isUsingGpu() const noexcept;
     void setUseInferenceThread(bool enable);
@@ -121,6 +122,7 @@ private:
     // 설정
     float min_confidence_ = 0.5f;
     bool face_tracking_ = true;
+    float min_presence_confidence_ = 0.5f;  // 추적 캐시 유효성 임계값
     bool gpu_enabled_ = false;
 
     // 버퍼 재사용 (메모리 할당 최소화)
@@ -777,6 +779,15 @@ void FrameProcessor::Impl::setFaceTracking(bool enable) {
     // NOTE: InferenceThread 사용 시 동적 설정 변경 미지원
 }
 
+void FrameProcessor::Impl::setMinPresenceConfidence(float min_confidence) {
+    min_presence_confidence_ = std::clamp(min_confidence, 0.0f, 1.0f);
+    // 직접 호출 모드에서는 MediaPipeDetector에 전달
+    if (!use_inference_thread_ && direct_detector_) {
+        direct_detector_->setMinPresenceConfidence(min_presence_confidence_);
+    }
+    // NOTE: InferenceThread 사용 시 초기화 전에만 설정 가능
+}
+
 void FrameProcessor::Impl::setGpuEnabled(bool enable) {
     gpu_enabled_ = enable;
     // 초기화 전에만 설정 가능
@@ -932,6 +943,10 @@ void FrameProcessor::setMinConfidence(float min_confidence) {
 
 void FrameProcessor::setFaceTracking(bool enable) {
     if (impl_) impl_->setFaceTracking(enable);
+}
+
+void FrameProcessor::setMinPresenceConfidence(float min_confidence) {
+    if (impl_) impl_->setMinPresenceConfidence(min_confidence);
 }
 
 void FrameProcessor::setGpuEnabled(bool enable) {

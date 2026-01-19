@@ -128,7 +128,8 @@ public:
 
     // MediaPipe 설정
     float min_detection_confidence = 0.3f;  // 기본값 낮춤 (더 많은 후보 검출)
-    float min_tracking_confidence = 0.5f;
+    float min_tracking_confidence = 0.5f;   // 랜드마크 추적 최소 신뢰도
+    float min_presence_confidence = 0.5f;   // 추적 모드에서 캐시 재사용 판단 임계값
     int num_faces = 1;
 
     // ========================================
@@ -1914,7 +1915,13 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     // [옵션 2] 원본 face_rect 저장용 변수
     Rect original_face_rect{};
 
-    if (impl_->use_tracking && impl_->has_prev_result && impl_->prev_result.detected) {
+    // 추적 모드 조건: 이전 결과가 있고, 검출 성공했고, confidence가 임계값 이상일 때만 스킵
+    const bool tracking_valid = impl_->use_tracking
+                                && impl_->has_prev_result
+                                && impl_->prev_result.detected
+                                && impl_->prev_result.confidence >= impl_->min_presence_confidence;
+
+    if (tracking_valid) {
         // 원본 face_rect는 그대로 유지 (저장 및 시각화용)
         original_face_rect = impl_->prev_face_rect;
 
@@ -1926,6 +1933,9 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         face_rect.height = std::min(1.0f - face_rect.y, face_rect.height * 1.2f);
         face_confidence = impl_->prev_result.confidence;
         skip_face_detection = true;
+    } else if (impl_->has_prev_result && impl_->prev_result.confidence < impl_->min_presence_confidence) {
+        // confidence가 임계값 미만이면 캐시 무효화 (재검출 필요)
+        impl_->resetTrackingCache();
     }
 
     // =========================================================
@@ -2554,6 +2564,10 @@ void MediaPipeDetector::setMinDetectionConfidence(float confidence) {
 
 void MediaPipeDetector::setMinTrackingConfidence(float confidence) {
     impl_->min_tracking_confidence = std::clamp(confidence, 0.0f, 1.0f);
+}
+
+void MediaPipeDetector::setMinPresenceConfidence(float confidence) {
+    impl_->min_presence_confidence = std::clamp(confidence, 0.0f, 1.0f);
 }
 
 void MediaPipeDetector::setNumFaces(int num_faces) {
