@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    렌즈 플레이스홀더 아이콘
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 외곽 원 -->
+    <path
+        android:pathData="M12,12m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"
+        android:strokeWidth="1.5"
+        android:strokeColor="#40FFFFFF"
+        android:fillColor="#20FFFFFF"/>
+
+    <!-- 내부 원 (홍채) -->
+    <path
+        android:pathData="M12,12m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0"
+        android:strokeWidth="1"
+        android:strokeColor="#40FFFFFF"
+        android:fillColor="#10FFFFFF"/>
+
+    <!-- 동공 -->
+    <path
+        android:pathData="M12,12m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"
+        android:fillColor="#40FFFFFF"/>
+
+</vector>

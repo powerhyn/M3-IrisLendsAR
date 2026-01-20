@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IrisLensSDK Android - Lens Item Layout
+
+    렌즈 선택 RecyclerView 아이템 레이아웃
+
+    @version 1.0.0
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/lensContainer"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="8dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:background="?attr/selectableItemBackgroundBorderless">
+
+    <ImageView
+        android:id="@+id/lensImage"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:padding="4dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="@string/lens_thumbnail"
+        tools:src="@drawable/ic_lens_placeholder" />
+
+    <TextView
+        android:id="@+id/lensName"
+        android:layout_width="72dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="center"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textColor="@android:color/white"
+        android:textSize="10sp"
+        tools:text="Bonbon Gray" />
+
+</LinearLayout>
