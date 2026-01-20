@@ -25,6 +25,74 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Benchmark Panel -->
+    <LinearLayout
+        android:id="@+id/benchmarkPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:background="#CC000000"
+        android:visibility="gone"
+        android:layout_gravity="top">
+
+        <TextView
+            android:id="@+id/benchmarkStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Benchmark: Ready"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/benchmarkFps"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="FPS: --"
+            android:textColor="#00FF00"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/benchmarkLatency"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Latency: -- ms"
+            android:textColor="#FFFF00"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/benchmarkMemory"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Memory: -- MB"
+            android:textColor="#00FFFF"
+            android:textSize="14sp" />
+
+        <ProgressBar
+            android:id="@+id/benchmarkProgress"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="8dp"
+            android:max="100"
+            android:progress="0" />
+
+    </LinearLayout>
+
+    <!-- Benchmark Button -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/benchmarkFab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="16dp"
+        android:src="@android:drawable/ic_media_play"
+        android:contentDescription="Start Benchmark"
+        app:backgroundTint="#FF5722"
+        app:tint="#FFFFFF" />
+
     <com.google.mediapipe.examples.facelandmarker.OverlayView
         android:id="@+id/overlay"
         android:layout_width="match_parent"
