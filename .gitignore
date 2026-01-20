@@ -97,3 +97,6 @@ cpp/third_party/tflite/include/
 android/.kotlin/
 
 docs/tensorflow-lite-2.16.1
+
+# Demo app test outputs (screenshots, benchmarks)
+docs/demo_app/
