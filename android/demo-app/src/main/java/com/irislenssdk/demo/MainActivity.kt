@@ -7,7 +7,7 @@
  * - 렌즈 오버레이 표시
  * - 렌즈 선택 및 설정 조절
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 package com.irislenssdk.demo
 
@@ -17,24 +17,29 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
 import com.irislenssdk.demo.benchmark.BenchmarkCallback
 import com.irislenssdk.demo.benchmark.BenchmarkManager
 import com.irislenssdk.demo.benchmark.BenchmarkResult
-import com.irislenssdk.demo.benchmark.BenchmarkState
 import com.irislenssdk.demo.benchmark.MemoryInfo
 import com.irislenssdk.demo.benchmark.PerformanceStats
 import com.irislenssdk.demo.camera.AnalysisResult
 import com.irislenssdk.demo.camera.CameraManager
 import com.irislenssdk.demo.camera.FrameAnalyzer
 import com.irislenssdk.demo.databinding.ActivityMainBinding
+import com.irislenssdk.demo.lens.LensAdapter
+import com.irislenssdk.demo.lens.LensData
+import com.irislenssdk.demo.lens.LensManager
+import com.irislenssdk.demo.lens.NoLens
+import kotlinx.coroutines.launch
 
 /**
  * 데모 앱 메인 액티비티
@@ -54,14 +59,14 @@ class MainActivity : AppCompatActivity() {
     // SDK 초기화 상태
     private var isSDKInitialized: Boolean = false
 
-    // 현재 선택된 렌즈
-    private var currentLensId: String = "off"
-
     // 렌즈 설정
     private val lensConfig = LensConfig()
 
-    // 렌즈 뷰 맵
-    private val lensViews = mutableMapOf<String, View>()
+    // 렌즈 관리자
+    private lateinit var lensManager: LensManager
+
+    // 렌즈 어댑터
+    private lateinit var lensAdapter: LensAdapter
 
     // CameraX 관리자
     private var cameraManager: CameraManager? = null
@@ -116,6 +121,9 @@ class MainActivity : AppCompatActivity() {
         // 벤치마크 관리자 초기화
         benchmarkManager = BenchmarkManager(this)
 
+        // 렌즈 관리자 초기화
+        lensManager = LensManager(this)
+
         // UI 설정
         setupUI()
         setupLensSelector()
@@ -148,6 +156,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         // 리소스 해제
         benchmarkManager.release()
+        lensManager.release()
         releaseCamera()
         releaseSDK()
     }
@@ -394,48 +403,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 렌즈 선택기 설정
+     * 렌즈 선택기 설정 (RecyclerView 기반)
      */
     private fun setupLensSelector() {
-        // 렌즈 뷰 맵 초기화
-        lensViews["blue"] = binding.lensBlue
-        lensViews["green"] = binding.lensGreen
-        lensViews["brown"] = binding.lensBrown
-        lensViews["gray"] = binding.lensGray
-        lensViews["off"] = binding.lensOff
-
-        // 각 렌즈에 클릭 리스너 설정
-        lensViews.forEach { (lensId, view) ->
-            view.setOnClickListener {
-                selectLens(lensId)
-            }
+        // 어댑터 초기화
+        lensAdapter = LensAdapter { lens ->
+            onLensSelected(lens)
         }
 
-        // 초기 선택 (Off)
-        selectLens("off")
+        // RecyclerView 설정
+        binding.lensRecyclerView.apply {
+            layoutManager = LinearLayoutManager(
+                this@MainActivity,
+                LinearLayoutManager.HORIZONTAL,
+                false
+            )
+            adapter = lensAdapter
+            setHasFixedSize(false)
+        }
+
+        // 렌즈 목록 로드
+        lifecycleScope.launch {
+            val lenses = lensManager.loadLensesFromAssets()
+            lensAdapter.submitList(lenses)
+            Log.i(TAG, "Loaded ${lenses.size} lenses")
+
+            // 기본 선택: "없음"
+            lensManager.clearLens()
+        }
+
+        // 렌즈 변경 리스너
+        lensManager.onLensChangedListener = { lens ->
+            if (lens != null && lens.id != NoLens.ID) {
+                // 렌즈 텍스처 설정
+                binding.overlayView.setLensTexture(lens.texture)
+                binding.overlayView.showLens = true
+            } else {
+                // 렌즈 없음
+                binding.overlayView.setLensTexture(null)
+                binding.overlayView.showLens = false
+            }
+        }
     }
 
     /**
-     * 렌즈 선택
+     * 렌즈 선택 처리
      */
-    private fun selectLens(lensId: String) {
-        // 이전 선택 해제
-        lensViews[currentLensId]?.isSelected = false
+    private fun onLensSelected(lens: LensData) {
+        Log.d(TAG, "Lens selected: ${lens.name} (${lens.id})")
 
-        // 새 선택 적용
-        currentLensId = lensId
-        lensViews[currentLensId]?.isSelected = true
-
-        Log.d(TAG, "Selected lens: $lensId")
-
-        // SDK에 렌즈 적용
-        applyLensSettings()
+        // LensManager를 통해 선택
+        lensManager.selectLens(lens)
 
         // 사용자 피드백
-        if (lensId != "off") {
+        if (lens.id != NoLens.ID) {
             Toast.makeText(
                 this,
-                "${lensId.replaceFirstChar { it.uppercase() }} lens selected",
+                "${lens.name} 선택됨",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -508,7 +532,7 @@ class MainActivity : AppCompatActivity() {
         // OverlayView에 설정 업데이트
         binding.overlayView.setLensConfig(lensConfig)
 
-        Log.d(TAG, "Applying lens: $currentLensId, opacity: ${lensConfig.opacity}, scale: ${lensConfig.scale}")
+        Log.d(TAG, "Applying lens settings: opacity=${lensConfig.opacity}, scale=${lensConfig.scale}")
     }
 
     /**
@@ -621,14 +645,24 @@ class MainActivity : AppCompatActivity() {
      * 설정 다이얼로그 열기
      */
     private fun openSettings() {
+        // 빌드 정보 가져오기
+        val versionName = packageManager.getPackageInfo(packageName, 0).versionName
+        val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            packageManager.getPackageInfo(packageName, 0).longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0).versionCode.toLong()
+        }
+
         val options = arrayOf(
             "Face Mesh 표시: ${if (binding.overlayView.showFaceMesh) "ON" else "OFF"}",
             "Debug 모드: ${if (binding.overlayView.debugMode) "ON" else "OFF"}",
+            "렌즈 표시: ${if (binding.overlayView.showLens) "ON" else "OFF"}",
             "신뢰도 설정..."
         )
 
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("디스플레이 설정")
+            .setTitle("디스플레이 설정 (v$versionName build $versionCode)")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> {
@@ -647,7 +681,15 @@ class MainActivity : AppCompatActivity() {
                             Toast.LENGTH_SHORT
                         ).show()
                     }
-                    2 -> openConfidenceSettings()
+                    2 -> {
+                        binding.overlayView.showLens = !binding.overlayView.showLens
+                        Toast.makeText(
+                            this,
+                            "렌즈 표시: ${if (binding.overlayView.showLens) "ON" else "OFF"}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    3 -> openConfidenceSettings()
                 }
             }
             .setNegativeButton("닫기", null)

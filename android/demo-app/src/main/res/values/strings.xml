@@ -27,6 +27,8 @@
     <string name="lens_brown">Brown</string>
     <string name="lens_gray">Gray</string>
     <string name="lens_off">Off</string>
+    <string name="lens_thumbnail">Lens thumbnail</string>
+    <string name="lens_none">없음</string>
 
     <!-- 버튼 -->
     <string name="btn_lens">Lens</string>
