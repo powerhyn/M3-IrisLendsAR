@@ -136,7 +136,7 @@ public:
     // 성능 최적화: 설정
     // ========================================
     int num_threads = 4;           ///< TFLite 추론 스레드 수
-    bool use_tracking = false;     ///< 추적 모드 활성화 여부 (ISS-002 진단: 임시 비활성화)
+    bool use_tracking = true;      ///< 추적 모드 활성화 여부
     float tracking_iou_threshold = 0.5f;  ///< 추적 유지 IoU 임계값
 
     // ========================================
@@ -2653,6 +2653,32 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                 }
             }
             // Face Mesh 기반 새 face_rect 저장 (다음 프레임 추적용)
+            // 디버그: 주요 랜드마크 좌표 확인
+            static bool landmark_debug_printed = false;
+            if (!landmark_debug_printed && calc_count > 0) {
+                // 주요 랜드마크: 10(이마상단), 152(턱끝), 234(왼쪽귀), 454(오른쪽귀)
+                std::fprintf(stderr, "[DEBUG] Face Mesh bounding box calculation:\n");
+                std::fprintf(stderr, "  calc_count: %d\n", calc_count);
+                std::fprintf(stderr, "  min: (%.4f, %.4f), max: (%.4f, %.4f)\n", min_x, min_y, max_x, max_y);
+                if (calc_count > 10) {
+                    std::fprintf(stderr, "  LM[10] (forehead): (%.4f, %.4f)\n",
+                                result.face_mesh[10].x, result.face_mesh[10].y);
+                }
+                if (calc_count > 152) {
+                    std::fprintf(stderr, "  LM[152] (chin): (%.4f, %.4f)\n",
+                                result.face_mesh[152].x, result.face_mesh[152].y);
+                }
+                if (calc_count > 234) {
+                    std::fprintf(stderr, "  LM[234] (left ear): (%.4f, %.4f)\n",
+                                result.face_mesh[234].x, result.face_mesh[234].y);
+                }
+                if (calc_count > 454) {
+                    std::fprintf(stderr, "  LM[454] (right ear): (%.4f, %.4f)\n",
+                                result.face_mesh[454].x, result.face_mesh[454].y);
+                }
+                landmark_debug_printed = true;
+            }
+
             impl_->prev_face_rect.x = min_x;
             impl_->prev_face_rect.y = min_y;
             impl_->prev_face_rect.width = max_x - min_x;
