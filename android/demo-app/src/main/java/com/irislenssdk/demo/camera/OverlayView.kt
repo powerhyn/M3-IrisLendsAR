@@ -529,6 +529,9 @@ class OverlayView @JvmOverloads constructor(
         // 정수로 양자화하여 캐시 키로 사용
         val lensSize = rawLensSize.toInt().coerceAtLeast(1)
 
+        // DEBUG: 실제 렌더링 크기 로깅
+        Log.d(TAG, "Lens render size: radius=$radius, scaleFactor=$scaleFactor, lensSize=$lensSize (diameter=${lensSize*2})")
+
         // 미러링 (전면 카메라)
         if (isMirror) {
             cx = width - cx

@@ -150,8 +150,8 @@ public class LensConfig {
      * 모든 필드를 기본값으로 설정합니다.
      */
     public void setDefaults() {
-        opacity = 0.7f;
-        scale = 1.0f;
+        opacity = 0.4f;
+        scale = 0.9f;
         offsetX = 0.0f;
         offsetY = 0.0f;
         blendMode = BLEND_NORMAL;

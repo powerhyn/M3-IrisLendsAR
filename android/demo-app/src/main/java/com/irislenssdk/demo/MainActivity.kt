@@ -350,10 +350,40 @@ class MainActivity : AppCompatActivity() {
 
         // 오버레이 뷰 업데이트
         val cm = cameraManager ?: return
+
+        // ===== 좌표 디버그 로그 =====
+        if (result.result.detected) {
+            Log.d(TAG, """
+                === 좌표 디버그 ===
+                CameraManager: ${cm.imageWidth} x ${cm.imageHeight}
+                IrisResult.frame: ${result.result.frameWidth} x ${result.result.frameHeight}
+                SDK 좌표 (정규화 0~1):
+                  - leftIrisX: ${result.result.leftIrisX}
+                  - leftIrisY: ${result.result.leftIrisY}
+                  - faceMesh[0]: x=${result.result.faceMesh?.getOrNull(0)}, y=${result.result.faceMesh?.getOrNull(1)}
+                  - faceMesh[1]: x=${result.result.faceMesh?.getOrNull(3)}, y=${result.result.faceMesh?.getOrNull(4)}
+                OverlayView: ${binding.overlayView.width} x ${binding.overlayView.height}
+                isMirror: ${cm.isFrontCamera}
+            """.trimIndent())
+        }
+
+        // SDK가 반환하는 frameWidth/Height 사용 (회전 후 이미지 크기)
+        // CameraManager의 값과 일치해야 하지만, SDK 값이 더 정확함
+
+        // DEBUG: Face Rect 값 출력
+        if (result.result.faceRectWidth > 0) {
+            Log.d(TAG, """
+                [Face Rect Debug]
+                frameSize: ${result.result.frameWidth} x ${result.result.frameHeight}
+                faceRect: x=${result.result.faceRectX}, y=${result.result.faceRectY}, w=${result.result.faceRectWidth}, h=${result.result.faceRectHeight}
+                overlayView: ${binding.overlayView.width} x ${binding.overlayView.height}
+            """.trimIndent())
+        }
+
         binding.overlayView.setIrisResult(
             result.result,
-            cm.imageWidth,
-            cm.imageHeight,
+            result.result.frameWidth,
+            result.result.frameHeight,
             cm.isFrontCamera
         )
         binding.overlayView.setLensConfig(lensConfig)
@@ -469,9 +499,13 @@ class MainActivity : AppCompatActivity() {
      * 슬라이더 설정
      */
     private fun setupSliders() {
-        // 초기값 설정
-        lensConfig.opacity = 0.8f
-        lensConfig.scale = 1.0f
+        // 초기값 설정 (LensConfig 기본값과 동일하게 유지)
+        lensConfig.opacity = 0.4f  // 40%
+        lensConfig.scale = 0.9f    // 90%
+
+        // 슬라이더 초기 위치 설정
+        binding.opacitySlider.value = lensConfig.opacity
+        binding.scaleSlider.value = lensConfig.scale
 
         // 투명도 슬라이더
         binding.opacitySlider.addOnChangeListener { _, value, fromUser ->
@@ -656,6 +690,7 @@ class MainActivity : AppCompatActivity() {
 
         val options = arrayOf(
             "Face Mesh 표시: ${if (binding.overlayView.showFaceMesh) "ON" else "OFF"}",
+            "Face Rect 표시: ${if (binding.overlayView.showFaceRect) "ON" else "OFF"}",
             "Debug 모드: ${if (binding.overlayView.debugMode) "ON" else "OFF"}",
             "렌즈 표시: ${if (binding.overlayView.showLens) "ON" else "OFF"}",
             "신뢰도 설정..."
@@ -674,6 +709,14 @@ class MainActivity : AppCompatActivity() {
                         ).show()
                     }
                     1 -> {
+                        binding.overlayView.showFaceRect = !binding.overlayView.showFaceRect
+                        Toast.makeText(
+                            this,
+                            "Face Rect: ${if (binding.overlayView.showFaceRect) "ON" else "OFF"}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    2 -> {
                         binding.overlayView.debugMode = !binding.overlayView.debugMode
                         Toast.makeText(
                             this,
@@ -681,7 +724,7 @@ class MainActivity : AppCompatActivity() {
                             Toast.LENGTH_SHORT
                         ).show()
                     }
-                    2 -> {
+                    3 -> {
                         binding.overlayView.showLens = !binding.overlayView.showLens
                         Toast.makeText(
                             this,
@@ -689,7 +732,7 @@ class MainActivity : AppCompatActivity() {
                             Toast.LENGTH_SHORT
                         ).show()
                     }
-                    3 -> openConfidenceSettings()
+                    4 -> openConfidenceSettings()
                 }
             }
             .setNegativeButton("닫기", null)
@@ -840,3 +883,5 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
+
+
