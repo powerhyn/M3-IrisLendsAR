@@ -74,6 +74,10 @@ class OverlayView @JvmOverloads constructor(
         // 이 값 이하의 radius 변화는 노이즈로 간주하여 무시
         private const val RADIUS_CHANGE_THRESHOLD = 0.5f
 
+        // 스케일된 렌즈 비트맵 캐시 무효화 임계값 (픽셀 단위)
+        // 이 값 이상 크기가 변할 때만 새 비트맵 생성 (꿀렁거림 방지)
+        private const val LENS_CACHE_THRESHOLD = 4
+
         // 최소 렌더링 신뢰도 임계값 (False Positive 방지)
         // 이 값 미만의 신뢰도를 가진 검출 결과는 렌더링하지 않음
         // 허공/천장 감지 문제 해결을 위해 추가
@@ -140,6 +144,13 @@ class OverlayView @JvmOverloads constructor(
     private val leftEyePath = Path()
     private val rightEyePath = Path()
     private var eyeClippingEnabled: Boolean = true  // 눈 영역 클리핑 활성화 여부
+
+    // === 스케일된 렌즈 비트맵 캐시 (꿀렁거림 방지) ===
+    // 매 프레임 새로 스케일링하지 않고 캐시된 비트맵 재사용
+    private var cachedLeftLensBitmap: Bitmap? = null
+    private var cachedRightLensBitmap: Bitmap? = null
+    private var cachedLeftLensSize: Int = 0
+    private var cachedRightLensSize: Int = 0
 
     // Face Mesh 표시 모드
     var showFaceMesh: Boolean = false
@@ -284,9 +295,20 @@ class OverlayView @JvmOverloads constructor(
 
     /**
      * 렌즈 텍스처 설정
+     *
+     * 텍스처 변경 시 캐시된 스케일 비트맵 무효화
      */
     fun setLensTexture(texture: Bitmap?) {
         this.lensTexture = texture
+
+        // 텍스처 변경 시 캐시 무효화
+        cachedLeftLensBitmap?.recycle()
+        cachedLeftLensBitmap = null
+        cachedLeftLensSize = 0
+        cachedRightLensBitmap?.recycle()
+        cachedRightLensBitmap = null
+        cachedRightLensSize = 0
+
         invalidate()
     }
 
@@ -359,7 +381,8 @@ class OverlayView @JvmOverloads constructor(
                     filteredLeftRadius,
                     scaleFactor,
                     offsetX,
-                    offsetY
+                    offsetY,
+                    isLeft = true
                 )
                 if (canClipLeft) {
                     canvas.restore()
@@ -380,7 +403,8 @@ class OverlayView @JvmOverloads constructor(
                     filteredRightRadius,
                     scaleFactor,
                     offsetX,
-                    offsetY
+                    offsetY,
+                    isLeft = false
                 )
                 if (canClipRight) {
                     canvas.restore()
@@ -436,7 +460,53 @@ class OverlayView @JvmOverloads constructor(
     }
 
     /**
-     * 렌즈 텍스처 그리기
+     * 캐시된 스케일 비트맵 가져오기 또는 생성
+     *
+     * 스케일 변화가 임계값 미만이면 캐시된 비트맵을 재사용하여 꿀렁거림 방지.
+     * 크기가 의미있게 변할 때만 새 비트맵을 생성.
+     *
+     * @param targetSize 목표 렌즈 크기 (반지름, 픽셀)
+     * @param isLeft 왼쪽 눈 여부 (true: 왼쪽, false: 오른쪽)
+     * @return 스케일된 비트맵 (없으면 null)
+     */
+    private fun getScaledLensBitmap(targetSize: Int, isLeft: Boolean): Bitmap? {
+        val texture = lensTexture ?: return null
+
+        val cachedBitmap = if (isLeft) cachedLeftLensBitmap else cachedRightLensBitmap
+        val cachedSize = if (isLeft) cachedLeftLensSize else cachedRightLensSize
+
+        // 캐시 유효성 검사: 크기 차이가 임계값 미만이면 캐시 재사용
+        if (cachedBitmap != null && !cachedBitmap.isRecycled
+            && abs(targetSize - cachedSize) < LENS_CACHE_THRESHOLD) {
+            return cachedBitmap
+        }
+
+        // 새 스케일 비트맵 생성
+        val diameter = (targetSize * 2).coerceAtLeast(1)
+        val newBitmap = Bitmap.createScaledBitmap(texture, diameter, diameter, true)
+
+        // 캐시 업데이트
+        if (isLeft) {
+            cachedLeftLensBitmap?.recycle()  // 이전 비트맵 해제
+            cachedLeftLensBitmap = newBitmap
+            cachedLeftLensSize = targetSize
+        } else {
+            cachedRightLensBitmap?.recycle()
+            cachedRightLensBitmap = newBitmap
+            cachedRightLensSize = targetSize
+        }
+
+        Log.d(TAG, "Created new scaled lens bitmap: size=$diameter, isLeft=$isLeft")
+        return newBitmap
+    }
+
+    /**
+     * 렌즈 텍스처 그리기 (캐시된 스케일 비트맵 사용)
+     *
+     * 매 프레임 새로 스케일링하지 않고 캐시된 비트맵을 재사용하여
+     * 스케일 꿀렁거림 방지.
+     *
+     * @param isLeft 왼쪽 눈 여부 (캐시 구분용)
      */
     private fun drawLensTexture(
         canvas: Canvas,
@@ -445,10 +515,9 @@ class OverlayView @JvmOverloads constructor(
         radius: Float,
         scaleFactor: Float,
         offsetX: Float,
-        offsetY: Float
+        offsetY: Float,
+        isLeft: Boolean
     ) {
-        val texture = lensTexture ?: return
-
         // 정규화 좌표 → 화면 좌표 변환 (MediaPipe 공식 예제 방식)
         var cx = normalizedX * imageWidth * scaleFactor + offsetX
         val cy = normalizedY * imageHeight * scaleFactor + offsetY
@@ -457,36 +526,28 @@ class OverlayView @JvmOverloads constructor(
         // radius는 픽셀 단위이므로 scaleFactor로 스케일
         val rawLensSize = radius * scaleFactor * LENS_SCALE_FACTOR * lensConfig.scale
 
-        // 양자화 적용 (미세한 크기 변화로 인한 자글거림 방지)
-        // 2픽셀 단위로 반올림하여 매 프레임 동일한 스케일 유지
-        val lensSize = ((rawLensSize / LENS_SIZE_QUANTIZATION_STEP + 0.5f).toInt() * LENS_SIZE_QUANTIZATION_STEP)
+        // 정수로 양자화하여 캐시 키로 사용
+        val lensSize = rawLensSize.toInt().coerceAtLeast(1)
 
         // 미러링 (전면 카메라)
         if (isMirror) {
             cx = width - cx
         }
 
-        // 렌즈 위치 (중심점 기준)
-        lensDestRect.set(
-            cx - lensSize,
-            cy - lensSize,
-            cx + lensSize,
-            cy + lensSize
-        )
+        // 캐시된 스케일 비트맵 가져오기 (없거나 크기 변경 시 새로 생성)
+        val scaledBitmap = getScaledLensBitmap(lensSize, isLeft) ?: return
 
         // 투명도 설정
         lensPaint.alpha = (255 * lensConfig.opacity).toInt()
 
-        // 매트릭스 설정 (텍스처 → 화면)
-        lensMatrix.reset()
-        lensMatrix.setRectToRect(
-            RectF(0f, 0f, texture.width.toFloat(), texture.height.toFloat()),
-            lensDestRect,
-            Matrix.ScaleToFit.FILL
+        // 캐시된 비트맵 그리기 (Matrix 스케일링 없음 - 이미 스케일됨)
+        // 비트맵 중심을 cx, cy에 맞추기 위해 lensSize만큼 오프셋
+        canvas.drawBitmap(
+            scaledBitmap,
+            cx - lensSize,
+            cy - lensSize,
+            lensPaint
         )
-
-        // 렌즈 텍스처 그리기
-        canvas.drawBitmap(texture, lensMatrix, lensPaint)
     }
 
     /**
@@ -819,6 +880,21 @@ class OverlayView @JvmOverloads constructor(
 
             canvas.drawLine(screenX1, screenY1, screenX2, screenY2, meshLinePaint)
         }
+    }
+
+    /**
+     * 뷰가 윈도우에서 분리될 때 캐시된 비트맵 해제
+     */
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+
+        // 캐시된 스케일 비트맵 해제
+        cachedLeftLensBitmap?.recycle()
+        cachedLeftLensBitmap = null
+        cachedRightLensBitmap?.recycle()
+        cachedRightLensBitmap = null
+
+        Log.d(TAG, "Cached lens bitmaps released")
     }
 }
 
