@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    렌즈 "없음" 아이콘
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 외곽 원 -->
+    <path
+        android:pathData="M12,12m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"
+        android:strokeWidth="1.5"
+        android:strokeColor="#80FFFFFF"
+        android:fillColor="@android:color/transparent"/>
+
+    <!-- X 표시 -->
+    <path
+        android:pathData="M8,8L16,16M16,8L8,16"
+        android:strokeWidth="2"
+        android:strokeColor="#80FFFFFF"
+        android:strokeLineCap="round"/>
+
+</vector>

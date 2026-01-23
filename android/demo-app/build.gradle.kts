@@ -19,8 +19,8 @@ android {
         applicationId = "com.irislenssdk.demo"
         minSdk = 24
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.0.0"
+        versionCode = 47
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

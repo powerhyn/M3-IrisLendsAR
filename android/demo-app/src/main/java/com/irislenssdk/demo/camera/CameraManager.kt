@@ -12,7 +12,7 @@ package com.irislenssdk.demo.camera
 
 import android.content.Context
 import android.util.Log
-import android.util.Size
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -38,11 +38,11 @@ class CameraManager(
     companion object {
         private const val TAG = "CameraManager"
 
-        // 프리뷰 해상도 (16:9)
-        private val PREVIEW_SIZE = Size(1280, 720)
-
-        // 분석용 해상도 (성능 최적화)
-        private val ANALYSIS_SIZE = Size(640, 480)
+        // Preview와 ImageAnalysis가 같은 비율을 사용해야 FOV(시야각)가 일치함
+        // 16:9 비율 사용 (대부분의 기기에서 지원)
+        // NOTE: setTargetResolution()은 "요청"일 뿐, 기기가 지원하지 않으면 다른 해상도 반환
+        // setTargetAspectRatio()를 사용하면 비율만 고정하고 해상도는 기기가 최적으로 선택
+        private const val TARGET_ASPECT_RATIO = AspectRatio.RATIO_16_9
     }
 
     // CameraX 컴포넌트
@@ -62,10 +62,10 @@ class CameraManager(
     var isRunning: Boolean = false
         private set
 
-    // 이미지 크기 (분석용)
-    var imageWidth: Int = ANALYSIS_SIZE.width
+    // 이미지 크기 (분석용) - 실제 값은 카메라 시작 시 imageProxy에서 동적으로 설정됨
+    var imageWidth: Int = 640
         private set
-    var imageHeight: Int = ANALYSIS_SIZE.height
+    var imageHeight: Int = 360
         private set
 
     /**
@@ -115,17 +115,17 @@ class CameraManager(
             .requireLensFacing(lensFacing)
             .build()
 
-        // 프리뷰 설정
+        // 프리뷰 설정 (비율만 고정, 해상도는 기기가 최적으로 선택)
         preview = Preview.Builder()
-            .setTargetResolution(PREVIEW_SIZE)
+            .setTargetAspectRatio(TARGET_ASPECT_RATIO)
             .build()
             .also { preview ->
                 preview.setSurfaceProvider(previewView.surfaceProvider)
             }
 
-        // 이미지 분석 설정
+        // 이미지 분석 설정 (Preview와 동일한 비율로 FOV 일치)
         imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(ANALYSIS_SIZE)
+            .setTargetAspectRatio(TARGET_ASPECT_RATIO)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
@@ -151,7 +151,10 @@ class CameraManager(
             // 기존 바인딩 해제
             cameraProvider.unbindAll()
 
-            // 새 바인딩
+            // ISS-001 수정: ViewPort 사용하지 않음
+            // ViewPort는 레이아웃 완료 전에 생성되면 잘못된 aspect ratio를 가질 수 있음
+            // Preview와 ImageAnalysis가 같은 TARGET_ASPECT_RATIO(16:9)를 사용하고,
+            // OverlayView가 동일한 fillCenter 스케일링을 적용하므로 좌표가 일치함
             camera = cameraProvider.bindToLifecycle(
                 lifecycleOwner,
                 cameraSelector,
@@ -159,7 +162,7 @@ class CameraManager(
                 imageAnalysis
             )
 
-            Log.d(TAG, "Camera use cases bound: ${if (isFrontCamera) "Front" else "Back"}")
+            Log.d(TAG, "Camera use cases bound (without ViewPort): ${if (isFrontCamera) "Front" else "Back"}")
 
         } catch (e: Exception) {
             Log.e(TAG, "Camera binding failed", e)

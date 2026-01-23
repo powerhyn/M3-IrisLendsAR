@@ -183,7 +183,20 @@ public:
     // ========================================
     IrisResult prev_result;
     bool has_prev_result = false;
-    Rect prev_face_rect;       ///< 이전 프레임 얼굴 영역
+    Rect prev_face_rect;              ///< 이전 프레임 얼굴 영역 (추적용, Face Mesh로 업데이트됨)
+    Rect prev_face_detection_rect;    ///< Face Detection 원본 결과 (시각화용)
+
+    // ========================================
+    // ISS-001 수정: Letterbox 전처리 파라미터
+    // Face Detection 입력 이미지 전처리 시 aspect ratio 보존을 위해
+    // letterbox (패딩) 방식을 사용하고, 이 정보를 저장하여
+    // 모델 출력 좌표를 원본 이미지 좌표로 역변환할 때 사용
+    // ========================================
+    float letterbox_scale = 1.0f;     ///< 스케일 팩터 (원본 → 타겟)
+    float letterbox_pad_x = 0.0f;     ///< X축 패딩 (정규화된 값, 0-1)
+    float letterbox_pad_y = 0.0f;     ///< Y축 패딩 (정규화된 값, 0-1)
+    int letterbox_orig_width = 0;     ///< 원본 이미지 너비 (역변환용)
+    int letterbox_orig_height = 0;    ///< 원본 이미지 높이 (역변환용)
 #endif
 
 #ifdef IRIS_SDK_HAS_TFLITE
@@ -318,6 +331,7 @@ public:
         has_prev_result = false;
         prev_result = IrisResult{};
         prev_face_rect = Rect{};
+        prev_face_detection_rect = Rect{};
     }
 
     /**
@@ -798,13 +812,60 @@ public:
             return false;  // 미지원 포맷
         }
 
-        // 리사이즈 (resized_buffer 재사용)
-        if (rgb_buffer.cols != target_width || rgb_buffer.rows != target_height) {
-            cv::resize(rgb_buffer, resized_buffer, cv::Size(target_width, target_height),
-                      0, 0, cv::INTER_LINEAR);
-        } else {
-            resized_buffer = rgb_buffer;
+        // ============================================================
+        // ISS-001 수정: Letterbox 전처리 (Aspect Ratio 보존)
+        // 원본 이미지의 종횡비를 유지하면서 타겟 크기에 맞춤
+        // 빈 공간은 검은색(0)으로 패딩
+        // ============================================================
+        int src_width = rgb_buffer.cols;
+        int src_height = rgb_buffer.rows;
+
+        // 스케일 팩터 계산: 타겟에 맞추면서 aspect ratio 보존
+        float scale_x = static_cast<float>(target_width) / src_width;
+        float scale_y = static_cast<float>(target_height) / src_height;
+        float scale = std::min(scale_x, scale_y);  // 더 작은 쪽에 맞춤
+
+        // 스케일된 이미지 크기
+        int scaled_width = static_cast<int>(src_width * scale);
+        int scaled_height = static_cast<int>(src_height * scale);
+
+        // 패딩 계산 (중앙 정렬)
+        int pad_x = (target_width - scaled_width) / 2;
+        int pad_y = (target_height - scaled_height) / 2;
+
+        // Letterbox 파라미터 저장 (좌표 역변환용)
+        letterbox_scale = scale;
+        letterbox_pad_x = static_cast<float>(pad_x) / target_width;   // 정규화된 패딩
+        letterbox_pad_y = static_cast<float>(pad_y) / target_height;
+        letterbox_orig_width = src_width;
+        letterbox_orig_height = src_height;
+
+        // 디버그 출력 (최초 1회)
+        static bool letterbox_debug_printed = false;
+        if (!letterbox_debug_printed) {
+            std::fprintf(stderr, "[DEBUG] ISS-001 Letterbox preprocessing:\n");
+            std::fprintf(stderr, "  Original: %dx%d, Target: %dx%d\n",
+                        src_width, src_height, target_width, target_height);
+            std::fprintf(stderr, "  Scale: %.4f (scale_x=%.4f, scale_y=%.4f)\n",
+                        scale, scale_x, scale_y);
+            std::fprintf(stderr, "  Scaled: %dx%d, Padding: (%d, %d)\n",
+                        scaled_width, scaled_height, pad_x, pad_y);
+            std::fprintf(stderr, "  Normalized padding: (%.4f, %.4f)\n",
+                        letterbox_pad_x, letterbox_pad_y);
+            letterbox_debug_printed = true;
         }
+
+        // 이미지 리사이즈 (aspect ratio 유지)
+        cv::Mat scaled_buffer;
+        cv::resize(rgb_buffer, scaled_buffer, cv::Size(scaled_width, scaled_height),
+                  0, 0, cv::INTER_LINEAR);
+
+        // Letterbox 이미지 생성 (검은색 배경)
+        resized_buffer = cv::Mat::zeros(target_height, target_width, CV_8UC3);
+
+        // 중앙에 스케일된 이미지 복사
+        cv::Rect roi(pad_x, pad_y, scaled_width, scaled_height);
+        scaled_buffer.copyTo(resized_buffer(roi));
 
         // ============================================================
         // 성능 최적화: OpenCV SIMD 연산으로 정규화
@@ -1434,15 +1495,46 @@ public:
         float h_scale = boxes_data[best_idx * 16 + 2];
         float w_scale = boxes_data[best_idx * 16 + 3];
 
-        // 정규화된 좌표로 디코딩
+        // 정규화된 좌표로 디코딩 (Letterbox 공간)
         // 오프셋은 입력 크기에 상대적인 값
         float input_size_f = static_cast<float>(FACE_DETECTION_INPUT_WIDTH);
-        float cx = anchor.x_center + xc_offset / input_size_f;
-        float cy = anchor.y_center + yc_offset / input_size_f;
-        float w = w_scale / input_size_f;
-        float h = h_scale / input_size_f;
+        float cx_letterbox = anchor.x_center + xc_offset / input_size_f;
+        float cy_letterbox = anchor.y_center + yc_offset / input_size_f;
+        float w_letterbox = w_scale / input_size_f;
+        float h_letterbox = h_scale / input_size_f;
 
-        // 최종 바운딩 박스 (정규화 좌표 0~1)
+        // ============================================================
+        // ISS-001 수정: Letterbox → 원본 이미지 좌표 역변환
+        // Letterbox 공간의 좌표를 원본 이미지의 정규화 좌표로 변환
+        // ============================================================
+        // 콘텐츠 영역 스케일 (letterbox 내에서 실제 이미지가 차지하는 비율)
+        float content_scale_x = 1.0f - 2.0f * letterbox_pad_x;
+        float content_scale_y = 1.0f - 2.0f * letterbox_pad_y;
+
+        // 0으로 나누기 방지
+        if (content_scale_x < 0.001f) content_scale_x = 1.0f;
+        if (content_scale_y < 0.001f) content_scale_y = 1.0f;
+
+        // 역변환: letterbox 좌표 → 원본 이미지 좌표
+        float cx = (cx_letterbox - letterbox_pad_x) / content_scale_x;
+        float cy = (cy_letterbox - letterbox_pad_y) / content_scale_y;
+        float w = w_letterbox / content_scale_x;
+        float h = h_letterbox / content_scale_y;
+
+        // 디버그 출력 (최초 1회)
+        static bool letterbox_inverse_debug = false;
+        if (!letterbox_inverse_debug) {
+            std::fprintf(stderr, "[DEBUG] ISS-001 Letterbox inverse transform:\n");
+            std::fprintf(stderr, "  Letterbox coords: cx=%.4f, cy=%.4f, w=%.4f, h=%.4f\n",
+                        cx_letterbox, cy_letterbox, w_letterbox, h_letterbox);
+            std::fprintf(stderr, "  Content scale: x=%.4f, y=%.4f\n",
+                        content_scale_x, content_scale_y);
+            std::fprintf(stderr, "  Original coords: cx=%.4f, cy=%.4f, w=%.4f, h=%.4f\n",
+                        cx, cy, w, h);
+            letterbox_inverse_debug = true;
+        }
+
+        // 최종 바운딩 박스 (원본 이미지 정규화 좌표 0~1)
         face_rect.x = std::clamp(cx - w / 2.0f, 0.0f, 1.0f);
         face_rect.y = std::clamp(cy - h / 2.0f, 0.0f, 1.0f);
         face_rect.width = std::clamp(w, 0.0f, 1.0f - face_rect.x);
@@ -1912,9 +2004,6 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     Rect face_rect{};
     float face_confidence = 0.0f;
 
-    // [옵션 2] 원본 face_rect 저장용 변수
-    Rect original_face_rect{};
-
     // 추적 모드 조건: 이전 결과가 있고, 검출 성공했고, confidence가 임계값 이상일 때만 스킵
     const bool tracking_valid = impl_->use_tracking
                                 && impl_->has_prev_result
@@ -1922,10 +2011,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                                 && impl_->prev_result.confidence >= impl_->min_presence_confidence;
 
     if (tracking_valid) {
-        // 원본 face_rect는 그대로 유지 (저장 및 시각화용)
-        original_face_rect = impl_->prev_face_rect;
-
-        // 크롭용으로만 확장된 영역 사용 (face_rect는 임시 확장)
+        // 크롭용으로 확장된 영역 사용 (prev_face_rect는 Face Mesh로 업데이트됨)
         face_rect = impl_->prev_face_rect;
         face_rect.x = std::max(0.0f, face_rect.x - face_rect.width * 0.1f);
         face_rect.y = std::max(0.0f, face_rect.y - face_rect.height * 0.1f);
@@ -1988,11 +2074,14 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                         face_rect.x, face_rect.y, face_rect.width, face_rect.height, face_confidence);
             facedet_ok_printed = true;
         }
+
+        // 새 검출 시 원본 face_rect를 별도 캐시에 저장 (시각화용)
+        impl_->prev_face_detection_rect = face_rect;
     }
 
-    // [옵션 2] 시각화용은 확장된 face_rect 사용 (크롭 영역 표시)
-    // prev_face_rect 저장은 원본으로 하여 누적 방지 (아래 캐시 업데이트 참조)
-    result.face_rect = face_rect;
+    // 시각화용은 Face Mesh 기반 추적 영역 사용 (얼굴 따라 움직임)
+    // prev_face_rect는 Face Mesh 결과로 매 프레임 업데이트됨
+    result.face_rect = impl_->prev_face_rect;
 
     // =========================================================
     // 2. RGB 이미지 변환 (한 번만 수행, 이후 재사용)
@@ -2188,6 +2277,29 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         coord_type_printed = true;
     }
 
+    // ISS-002 수정: crop_scale_y를 actual_face_crop.height 직접 사용
+    // 이전 코드: crop_scale_y = actual_face_crop.width * img_aspect_ratio
+    // 문제: 경계 클램핑으로 비정사각형 크롭 시 잘못된 Y 스케일 계산
+    //
+    // Face Mesh 모델 출력 좌표 (local_x, local_y)는 256x256 정사각형 입력 기준 0-1 범위
+    // 이를 원본 이미지의 정규화 좌표로 변환:
+    //   final_x = actual_face_crop.x + local_x * actual_face_crop.width
+    //   final_y = actual_face_crop.y + local_y * actual_face_crop.height
+    //
+    // actual_face_crop.width/height는 실제 크롭 영역의 정규화된 크기이므로
+    // 정사각형 여부와 관계없이 정확한 좌표 변환이 가능
+    float crop_scale_x = actual_face_crop.width;
+    float crop_scale_y = actual_face_crop.height;  // ISS-002: 직접 height 사용
+
+    static bool aspect_fix_debug = false;
+    if (!aspect_fix_debug) {
+        std::fprintf(stderr, "[DEBUG] ISS-002 Coordinate transform:\n");
+        std::fprintf(stderr, "  image size: %dx%d\n", width, height);
+        std::fprintf(stderr, "  crop_scale_x: %.4f (actual_face_crop.width)\n", crop_scale_x);
+        std::fprintf(stderr, "  crop_scale_y: %.4f (actual_face_crop.height)\n", crop_scale_y);
+        aspect_fix_debug = true;
+    }
+
     for (int i = 0; i < fl_landmark_count; ++i) {
         float local_x, local_y;
 
@@ -2204,9 +2316,9 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         }
         // z 좌표는 변환 없이 유지
 
-        // 실제 크롭 영역 내 좌표를 전체 이미지 좌표로 변환
-        impl_->face_landmarks_buffer[i * 3 + 0] = actual_face_crop.x + local_x * actual_face_crop.width;
-        impl_->face_landmarks_buffer[i * 3 + 1] = actual_face_crop.y + local_y * actual_face_crop.height;
+        // 실제 크롭 영역 내 좌표를 전체 이미지 좌표로 변환 (aspect ratio 보정 적용)
+        impl_->face_landmarks_buffer[i * 3 + 0] = actual_face_crop.x + local_x * crop_scale_x;
+        impl_->face_landmarks_buffer[i * 3 + 1] = actual_face_crop.y + local_y * crop_scale_y;
     }
 
     // 변환 후 좌표 범위 디버그
@@ -2385,6 +2497,12 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                 // 크롭 좌표를 원본 이미지 좌표로 변환
                 // runIrisLandmark()는 항상 인덱스 0-4에 5개 홍채 랜드마크를 저장
                 // Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
+
+                // ISS-002 수정: eye_crop_scale_y를 left_eye_crop.height 직접 사용
+                // 이전 코드: eye_crop_scale_y = left_eye_crop.width * (width / height)
+                float eye_crop_scale_x = left_eye_crop.width;
+                float eye_crop_scale_y = left_eye_crop.height;  // ISS-002: 직접 height 사용
+
                 for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
                     // 픽셀 좌표 → 정규화 좌표 (0-1)
                     float local_x = impl_->left_iris_landmarks_buffer[i * 3 + 0] /
@@ -2393,9 +2511,9 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                                     static_cast<float>(IRIS_LANDMARK_INPUT_HEIGHT);
                     float local_z = impl_->left_iris_landmarks_buffer[i * 3 + 2];
 
-                    // 크롭 영역 내 좌표를 원본 이미지 좌표로 변환
-                    result.left_iris[i].x = left_eye_crop.x + local_x * left_eye_crop.width;
-                    result.left_iris[i].y = left_eye_crop.y + local_y * left_eye_crop.height;
+                    // 크롭 영역 내 좌표를 원본 이미지 좌표로 변환 (aspect ratio 보정 적용)
+                    result.left_iris[i].x = left_eye_crop.x + local_x * eye_crop_scale_x;
+                    result.left_iris[i].y = left_eye_crop.y + local_y * eye_crop_scale_y;
                     result.left_iris[i].z = local_z;
                     result.left_iris[i].visibility = 1.0f;
                 }
@@ -2430,6 +2548,12 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                 // Iris Landmark 모델은 64x64 픽셀 좌표를 출력하므로 정규화 필요
                 //
                 // 오른쪽 눈은 수평 반전되어 입력되었으므로 출력 좌표도 역반전 필요
+
+                // ISS-002 수정: eye_crop_scale_y를 right_eye_crop.height 직접 사용
+                // 이전 코드: eye_crop_scale_y = right_eye_crop.width * (width / height)
+                float eye_crop_scale_x = right_eye_crop.width;
+                float eye_crop_scale_y = right_eye_crop.height;  // ISS-002: 직접 height 사용
+
                 for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
                     // 픽셀 좌표 → 정규화 좌표 (0-1)
                     float local_x = impl_->right_iris_landmarks_buffer[i * 3 + 0] /
@@ -2444,8 +2568,9 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                     // ========================================
                     local_x = 1.0f - local_x;
 
-                    result.right_iris[i].x = right_eye_crop.x + local_x * right_eye_crop.width;
-                    result.right_iris[i].y = right_eye_crop.y + local_y * right_eye_crop.height;
+                    // 크롭 영역 내 좌표를 원본 이미지 좌표로 변환 (aspect ratio 보정 적용)
+                    result.right_iris[i].x = right_eye_crop.x + local_x * eye_crop_scale_x;
+                    result.right_iris[i].y = right_eye_crop.y + local_y * eye_crop_scale_y;
                     result.right_iris[i].z = local_z;
                     result.right_iris[i].visibility = 1.0f;
                 }
@@ -2483,14 +2608,24 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     result.face_rotation[1] = 0.0f;  // yaw
     result.face_rotation[2] = 0.0f;  // roll
 
-    // Face Mesh 복사 (478개 랜드마크, 시각화/디버그용)
+    // Face Mesh 복사 (V1: 468개, V2: 478개 랜드마크, 시각화/디버그용)
+    // ISS-002 Fix: 모델 버전에 맞는 랜드마크 개수 사용 (버퍼 오버플로우 방지)
     if (result.detected && !impl_->face_landmarks_buffer.empty()) {
         result.face_mesh_valid = true;
-        for (int i = 0; i < IrisResult::FACE_MESH_LANDMARK_COUNT; ++i) {
+        // fl_landmark_count는 모델 버전에 따라 468 또는 478
+        int copy_count = std::min(fl_landmark_count, static_cast<int>(IrisResult::FACE_MESH_LANDMARK_COUNT));
+        for (int i = 0; i < copy_count; ++i) {
             result.face_mesh[i].x = impl_->face_landmarks_buffer[i * 3 + 0];
             result.face_mesh[i].y = impl_->face_landmarks_buffer[i * 3 + 1];
             result.face_mesh[i].z = impl_->face_landmarks_buffer[i * 3 + 2];
             result.face_mesh[i].visibility = 1.0f;
+        }
+        // V1 모델 사용 시 나머지 랜드마크는 invalid로 표시
+        for (int i = copy_count; i < IrisResult::FACE_MESH_LANDMARK_COUNT; ++i) {
+            result.face_mesh[i].x = -1.0f;
+            result.face_mesh[i].y = -1.0f;
+            result.face_mesh[i].z = -1.0f;
+            result.face_mesh[i].visibility = 0.0f;
         }
     } else {
         result.face_mesh_valid = false;
@@ -2503,9 +2638,12 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         impl_->prev_result = result;
 
         // Face Mesh 결과에서 새로운 face_rect 계산 (움직임 추적)
+        // ISS-002 Fix: 모델 버전에 맞는 랜드마크 개수 사용 (버퍼 오버플로우 방지)
         if (result.face_mesh_valid) {
             float min_x = 1.0f, min_y = 1.0f, max_x = 0.0f, max_y = 0.0f;
-            for (int i = 0; i < IrisResult::FACE_MESH_LANDMARK_COUNT; ++i) {
+            // fl_landmark_count는 모델 버전에 따라 468 또는 478
+            int calc_count = std::min(fl_landmark_count, static_cast<int>(IrisResult::FACE_MESH_LANDMARK_COUNT));
+            for (int i = 0; i < calc_count; ++i) {
                 const auto& lm = result.face_mesh[i];
                 if (lm.x >= 0 && lm.x <= 1 && lm.y >= 0 && lm.y <= 1) {
                     min_x = std::min(min_x, lm.x);
@@ -2515,18 +2653,50 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                 }
             }
             // Face Mesh 기반 새 face_rect 저장 (다음 프레임 추적용)
+            // 디버그: 주요 랜드마크 좌표 확인
+            static bool landmark_debug_printed = false;
+            if (!landmark_debug_printed && calc_count > 0) {
+                // 주요 랜드마크: 10(이마상단), 152(턱끝), 234(왼쪽귀), 454(오른쪽귀)
+                std::fprintf(stderr, "[DEBUG] Face Mesh bounding box calculation:\n");
+                std::fprintf(stderr, "  calc_count: %d\n", calc_count);
+                std::fprintf(stderr, "  min: (%.4f, %.4f), max: (%.4f, %.4f)\n", min_x, min_y, max_x, max_y);
+                if (calc_count > 10) {
+                    std::fprintf(stderr, "  LM[10] (forehead): (%.4f, %.4f)\n",
+                                result.face_mesh[10].x, result.face_mesh[10].y);
+                }
+                if (calc_count > 152) {
+                    std::fprintf(stderr, "  LM[152] (chin): (%.4f, %.4f)\n",
+                                result.face_mesh[152].x, result.face_mesh[152].y);
+                }
+                if (calc_count > 234) {
+                    std::fprintf(stderr, "  LM[234] (left ear): (%.4f, %.4f)\n",
+                                result.face_mesh[234].x, result.face_mesh[234].y);
+                }
+                if (calc_count > 454) {
+                    std::fprintf(stderr, "  LM[454] (right ear): (%.4f, %.4f)\n",
+                                result.face_mesh[454].x, result.face_mesh[454].y);
+                }
+                landmark_debug_printed = true;
+            }
+
             impl_->prev_face_rect.x = min_x;
             impl_->prev_face_rect.y = min_y;
             impl_->prev_face_rect.width = max_x - min_x;
             impl_->prev_face_rect.height = max_y - min_y;
         } else {
-            // Face Mesh 없으면 기존 방식
-            if (original_face_rect.width > 0) {
-                impl_->prev_face_rect = original_face_rect;
+            // Face Mesh 없으면 기존 방식 (Face Detection 결과 사용)
+            if (impl_->prev_face_detection_rect.width > 0) {
+                impl_->prev_face_rect = impl_->prev_face_detection_rect;
             } else {
                 impl_->prev_face_rect = face_rect;
             }
         }
+
+        // ✅ ISS-001 Fix: Face Mesh 처리 후 result.face_rect 업데이트
+        // 이전에는 Face Mesh 처리 전에만 설정되어 1프레임 지연 발생
+        // PerfectLib의 SetFrameInfo() 패턴처럼 현재 프레임 결과를 즉시 반영
+        result.face_rect = impl_->prev_face_rect;
+
         impl_->has_prev_result = true;
     } else {
         // 검출 실패 시 추적 캐시 무효화

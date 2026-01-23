@@ -36,10 +36,13 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- 카메라 프리뷰 -->
+    <!-- scaleType="fillCenter": 이미지가 뷰를 채우고 중앙 정렬 (넘치는 부분 잘림) -->
+    <!-- OverlayView 좌표 변환에서 동일한 로직(max scale + center offset) 사용 -->
     <androidx.camera.view.PreviewView
         android:id="@+id/cameraPreview"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        app:scaleType="fillCenter"
         app:layout_constraintBottom_toTopOf="@id/controlsContainer"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -127,152 +130,14 @@
             android:textSize="12sp"
             android:textStyle="bold" />
 
-        <HorizontalScrollView
-            android:id="@+id/lensScrollView"
+        <!-- 렌즈 선택 RecyclerView -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/lensRecyclerView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:paddingHorizontal="8dp">
-
-            <LinearLayout
-                android:id="@+id/lensContainer"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingVertical="8dp">
-
-                <!-- 렌즈 1: Blue -->
-                <LinearLayout
-                    android:id="@+id/lensBlue"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:background="@drawable/lens_item_selector">
-
-                    <ImageView
-                        android:layout_width="56dp"
-                        android:layout_height="56dp"
-                        android:src="@drawable/lens_blue_thumb"
-                        android:scaleType="centerCrop"
-                        android:contentDescription="@string/lens_blue" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/lens_blue"
-                        android:textColor="@android:color/white"
-                        android:textSize="10sp" />
-                </LinearLayout>
-
-                <!-- 렌즈 2: Green -->
-                <LinearLayout
-                    android:id="@+id/lensGreen"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:background="@drawable/lens_item_selector">
-
-                    <ImageView
-                        android:layout_width="56dp"
-                        android:layout_height="56dp"
-                        android:src="@drawable/lens_green_thumb"
-                        android:scaleType="centerCrop"
-                        android:contentDescription="@string/lens_green" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/lens_green"
-                        android:textColor="@android:color/white"
-                        android:textSize="10sp" />
-                </LinearLayout>
-
-                <!-- 렌즈 3: Brown -->
-                <LinearLayout
-                    android:id="@+id/lensBrown"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:background="@drawable/lens_item_selector">
-
-                    <ImageView
-                        android:layout_width="56dp"
-                        android:layout_height="56dp"
-                        android:src="@drawable/lens_brown_thumb"
-                        android:scaleType="centerCrop"
-                        android:contentDescription="@string/lens_brown" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/lens_brown"
-                        android:textColor="@android:color/white"
-                        android:textSize="10sp" />
-                </LinearLayout>
-
-                <!-- 렌즈 4: Gray -->
-                <LinearLayout
-                    android:id="@+id/lensGray"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:background="@drawable/lens_item_selector">
-
-                    <ImageView
-                        android:layout_width="56dp"
-                        android:layout_height="56dp"
-                        android:src="@drawable/lens_gray_thumb"
-                        android:scaleType="centerCrop"
-                        android:contentDescription="@string/lens_gray" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/lens_gray"
-                        android:textColor="@android:color/white"
-                        android:textSize="10sp" />
-                </LinearLayout>
-
-                <!-- Off: 렌즈 없음 -->
-                <LinearLayout
-                    android:id="@+id/lensOff"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:background="@drawable/lens_item_selector">
-
-                    <ImageView
-                        android:layout_width="56dp"
-                        android:layout_height="56dp"
-                        android:src="@drawable/lens_off_thumb"
-                        android:scaleType="centerCrop"
-                        android:contentDescription="@string/lens_off" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/lens_off"
-                        android:textColor="@android:color/white"
-                        android:textSize="10sp" />
-                </LinearLayout>
-
-            </LinearLayout>
-        </HorizontalScrollView>
+            android:clipToPadding="false"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="8dp" />
 
         <!-- 슬라이더 영역 -->
         <LinearLayout

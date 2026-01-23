@@ -44,6 +44,12 @@ import com.google.mediapipe.examples.facelandmarker.FaceLandmarkerHelper
 import com.google.mediapipe.examples.facelandmarker.MainViewModel
 import com.google.mediapipe.examples.facelandmarker.R
 import com.google.mediapipe.examples.facelandmarker.databinding.FragmentCameraBinding
+import com.google.mediapipe.examples.facelandmarker.benchmark.BenchmarkCallback
+import com.google.mediapipe.examples.facelandmarker.benchmark.BenchmarkManager
+import com.google.mediapipe.examples.facelandmarker.benchmark.BenchmarkResult
+import com.google.mediapipe.examples.facelandmarker.benchmark.BenchmarkState
+import com.google.mediapipe.examples.facelandmarker.benchmark.MemoryInfo
+import com.google.mediapipe.examples.facelandmarker.benchmark.PerformanceStats
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import java.util.Locale
 import java.util.Optional
@@ -78,6 +84,10 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
     /** Blocking ML operations are performed using this executor */
     private lateinit var backgroundExecutor: ExecutorService
+
+    // Benchmark
+    private var benchmarkManager: BenchmarkManager? = null
+    private val BENCHMARK_DURATION_MS = 30_000L  // 30초
 
     override fun onResume() {
         super.onResume()
@@ -115,6 +125,10 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     override fun onDestroyView() {
         _fragmentCameraBinding = null
         super.onDestroyView()
+
+        // Release benchmark
+        benchmarkManager?.release()
+        benchmarkManager = null
 
         // Shut down our background executor
         backgroundExecutor.shutdown()
@@ -168,6 +182,92 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
 
         // Attach listeners to UI control widgets
         initBottomSheetControls()
+
+        // Initialize benchmark
+        benchmarkManager = BenchmarkManager(requireContext())
+        initBenchmarkControls()
+    }
+
+    private fun initBenchmarkControls() {
+        fragmentCameraBinding.benchmarkFab.setOnClickListener {
+            val manager = benchmarkManager ?: return@setOnClickListener
+
+            when (manager.getState()) {
+                BenchmarkState.IDLE, BenchmarkState.COMPLETED -> {
+                    startBenchmark()
+                }
+                BenchmarkState.RUNNING -> {
+                    stopBenchmark()
+                }
+                else -> {}
+            }
+        }
+    }
+
+    private fun startBenchmark() {
+        val manager = benchmarkManager ?: return
+
+        // GPU 모드 설정
+        manager.setGpuEnabled(faceLandmarkerHelper.currentDelegate == FaceLandmarkerHelper.DELEGATE_GPU)
+
+        // UI 표시
+        fragmentCameraBinding.benchmarkPanel.visibility = View.VISIBLE
+        fragmentCameraBinding.benchmarkFab.setImageResource(android.R.drawable.ic_media_pause)
+        fragmentCameraBinding.benchmarkStatus.text = "Benchmark: Running..."
+
+        manager.start(BENCHMARK_DURATION_MS, object : BenchmarkCallback {
+            override fun onBenchmarkStarted() {
+                Log.i(TAG, "Benchmark started")
+            }
+
+            override fun onBenchmarkProgress(elapsedMs: Long, stats: PerformanceStats, memory: MemoryInfo) {
+                activity?.runOnUiThread {
+                    val progress = ((elapsedMs.toFloat() / BENCHMARK_DURATION_MS) * 100).toInt()
+                    fragmentCameraBinding.benchmarkProgress.progress = progress
+                    fragmentCameraBinding.benchmarkFps.text = "FPS: %.1f".format(stats.fps)
+                    fragmentCameraBinding.benchmarkLatency.text = "Latency: %.0f ms (P95: ${stats.p95LatencyMs}ms)".format(stats.avgLatencyMs)
+                    fragmentCameraBinding.benchmarkMemory.text = "Memory: ${memory.totalPssMB} MB"
+                    fragmentCameraBinding.benchmarkStatus.text = "Benchmark: ${elapsedMs / 1000}s / ${BENCHMARK_DURATION_MS / 1000}s"
+                }
+            }
+
+            override fun onBenchmarkCompleted(result: BenchmarkResult) {
+                activity?.runOnUiThread {
+                    fragmentCameraBinding.benchmarkFab.setImageResource(android.R.drawable.ic_media_play)
+                    fragmentCameraBinding.benchmarkStatus.text = "Benchmark: Complete!"
+                    fragmentCameraBinding.benchmarkProgress.progress = 100
+
+                    // CSV 내보내기
+                    val csvFile = manager.exportToCsv()
+                    val message = if (csvFile != null) {
+                        "Saved: ${csvFile.name}\nFPS: %.1f, Latency: %.0fms".format(
+                            result.performance.fps, result.performance.avgLatencyMs
+                        )
+                    } else {
+                        "Export failed"
+                    }
+                    Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
+
+                    // 3초 후 패널 숨김
+                    fragmentCameraBinding.benchmarkPanel.postDelayed({
+                        fragmentCameraBinding.benchmarkPanel.visibility = View.GONE
+                    }, 3000)
+                }
+            }
+
+            override fun onBenchmarkError(error: String) {
+                activity?.runOnUiThread {
+                    Toast.makeText(requireContext(), "Benchmark error: $error", Toast.LENGTH_SHORT).show()
+                    fragmentCameraBinding.benchmarkPanel.visibility = View.GONE
+                    fragmentCameraBinding.benchmarkFab.setImageResource(android.R.drawable.ic_media_play)
+                }
+            }
+        })
+    }
+
+    private fun stopBenchmark() {
+        benchmarkManager?.stop()
+        fragmentCameraBinding.benchmarkFab.setImageResource(android.R.drawable.ic_media_play)
     }
 
     private fun initBottomSheetControls() {
@@ -391,6 +491,9 @@ class CameraFragment : Fragment(), FaceLandmarkerHelper.LandmarkerListener {
     override fun onResults(
         resultBundle: FaceLandmarkerHelper.ResultBundle
     ) {
+        // Feed benchmark with inference time
+        benchmarkManager?.onFrameProcessed(resultBundle.inferenceTime)
+
         activity?.runOnUiThread {
             if (_fragmentCameraBinding != null) {
                 if (fragmentCameraBinding.recyclerviewResults.scrollState != SCROLL_STATE_DRAGGING) {
