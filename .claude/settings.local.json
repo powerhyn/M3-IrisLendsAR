@@ -41,10 +41,23 @@
       "WebFetch(domain:ai.google.dev)",
       "Skill(code-review-ai:ai-review)",
       "Bash(echo:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(adb install:*)"
     ]
   },
   "enabledPlugins": {
-    "systems-programming@claude-code-workflows": true
+    "systems-programming@claude-code-workflows": true,
+    "code-review-ai@claude-code-workflows": true,
+    "c4-architecture@claude-code-workflows": true,
+    "code-documentation@claude-code-workflows": true,
+    "application-performance@claude-code-workflows": true,
+    "dependency-management@claude-code-workflows": true,
+    "cicd-automation@claude-code-workflows": true,
+    "debugging-toolkit@claude-code-workflows": true,
+    "unit-testing@claude-code-workflows": true,
+    "machine-learning-ops@claude-code-workflows": true,
+    "agent-orchestration@claude-code-workflows": true,
+    "multi-platform-apps@claude-code-workflows": true,
+    "comprehensive-review@claude-code-workflows": true
   }
 }
