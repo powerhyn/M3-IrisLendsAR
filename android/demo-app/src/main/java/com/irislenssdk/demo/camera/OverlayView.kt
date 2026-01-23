@@ -16,14 +16,18 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.sqrt
 
 /**
  * 홍채 오버레이 뷰
@@ -60,7 +64,8 @@ class OverlayView @JvmOverloads constructor(
         // 스무딩 설정 (부드러운 추적)
         // 0.0 = 변화 없음, 1.0 = 즉시 반영
         // 낮은 값 = 더 부드러운 추적, 높은 값 = 즉각 반응
-        private const val SMOOTHING_FACTOR = 0.25f
+        // ISS-002: 0.25 → 0.7로 증가 (빠른 반응)
+        private const val SMOOTHING_FACTOR = 0.7f
 
         // 렌즈 크기 양자화 단위 (픽셀) - 자글거림 방지
         private const val LENS_SIZE_QUANTIZATION_STEP = 2f
@@ -73,6 +78,21 @@ class OverlayView @JvmOverloads constructor(
         // 이 값 미만의 신뢰도를 가진 검출 결과는 렌더링하지 않음
         // 허공/천장 감지 문제 해결을 위해 추가
         private const val MIN_RENDER_CONFIDENCE = 0.5f
+
+        // One Euro Filter 파라미터
+        private const val ONE_EURO_MIN_CUTOFF = 1.0f   // 최소 컷오프 주파수 (낮을수록 부드러움)
+        private const val ONE_EURO_BETA = 0.007f       // 속도 계수 (높을수록 빠른 움직임에 민감)
+        private const val ONE_EURO_D_CUTOFF = 1.0f     // 미분 컷오프 주파수
+
+        // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)
+        // 왼쪽 눈 (화면상 오른쪽) - 시계방향 순서
+        private val LEFT_EYE_CONTOUR_INDICES = intArrayOf(
+            33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7
+        )
+        // 오른쪽 눈 (화면상 왼쪽) - 시계방향 순서
+        private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(
+            362, 398, 384, 385, 386, 387, 388, 466, 263, 249, 390, 373, 374, 380, 381, 382
+        )
     }
 
     // 검출 결과
@@ -94,17 +114,38 @@ class OverlayView @JvmOverloads constructor(
     // 디버그 모드
     var debugMode: Boolean = false
 
-    // === 스무딩용 변수 (부드러운 추적) ===
-    private var smoothedLeftX: Float = 0f
-    private var smoothedLeftY: Float = 0f
-    private var smoothedLeftRadius: Float = 0f
-    private var smoothedRightX: Float = 0f
-    private var smoothedRightY: Float = 0f
-    private var smoothedRightRadius: Float = 0f
-    private var isFirstFrame: Boolean = true
+    // === One Euro Filter를 사용한 스무딩 (깜빡임/흔들거림 방지) ===
+    private val leftXFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
+    private val leftYFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
+    private val leftRadiusFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA * 0.5f, ONE_EURO_D_CUTOFF)
+    private val rightXFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
+    private val rightYFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
+    private val rightRadiusFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA * 0.5f, ONE_EURO_D_CUTOFF)
+
+    // 필터링된 결과값
+    private var filteredLeftX: Float = 0f
+    private var filteredLeftY: Float = 0f
+    private var filteredLeftRadius: Float = 0f
+    private var filteredRightX: Float = 0f
+    private var filteredRightY: Float = 0f
+    private var filteredRightRadius: Float = 0f
+    private var lastTimestamp: Long = 0L
+
+    // 각 눈이 한 번이라도 검출되었는지 추적 (깜빡임 방지)
+    // 한 번 검출되면 이후 검출 실패 시에도 마지막 위치에 렌즈 유지
+    private var hasLeftEverDetected: Boolean = false
+    private var hasRightEverDetected: Boolean = false
+
+    // 눈 영역 클리핑용 Path
+    private val leftEyePath = Path()
+    private val rightEyePath = Path()
+    private var eyeClippingEnabled: Boolean = true  // 눈 영역 클리핑 활성화 여부
 
     // Face Mesh 표시 모드
     var showFaceMesh: Boolean = false
+
+    // 얼굴 검출 영역 표시 (Face Detection 결과)
+    var showFaceRect: Boolean = false
 
     // 렌즈 표시 여부
     var showLens: Boolean = true
@@ -177,7 +218,11 @@ class OverlayView @JvmOverloads constructor(
     private val lensMatrix = Matrix()
 
     /**
-     * 홍채 검출 결과 설정 (스무딩 적용)
+     * 홍채 검출 결과 설정 (One Euro Filter 적용)
+     *
+     * One Euro Filter는 속도에 따라 적응적으로 스무딩 강도를 조절:
+     * - 느린 움직임: 강한 스무딩 (떨림 제거)
+     * - 빠른 움직임: 약한 스무딩 (반응성 유지)
      *
      * @param result 검출 결과
      * @param width 분석 이미지 너비
@@ -190,51 +235,43 @@ class OverlayView @JvmOverloads constructor(
         this.imageHeight = height
         this.isMirror = mirror
 
-        // 스무딩 적용 (부드러운 추적)
+        val currentTime = System.currentTimeMillis()
+
+        // One Euro Filter를 사용한 스무딩
         result?.let {
             if (it.detected) {
-                if (isFirstFrame) {
-                    // 첫 프레임: 즉시 반영
-                    smoothedLeftX = it.leftIrisX
-                    smoothedLeftY = it.leftIrisY
-                    smoothedLeftRadius = it.leftRadius
-                    smoothedRightX = it.rightIrisX
-                    smoothedRightY = it.rightIrisY
-                    smoothedRightRadius = it.rightRadius
-                    isFirstFrame = false
-                } else {
-                    // 이후 프레임: EMA(지수이동평균) 스무딩
-                    if (it.leftDetected) {
-                        smoothedLeftX = lerp(smoothedLeftX, it.leftIrisX, SMOOTHING_FACTOR)
-                        smoothedLeftY = lerp(smoothedLeftY, it.leftIrisY, SMOOTHING_FACTOR)
-                        // Radius는 임계값 이상 변화시에만 업데이트 (자글거림 방지)
-                        if (kotlin.math.abs(it.leftRadius - smoothedLeftRadius) > RADIUS_CHANGE_THRESHOLD) {
-                            smoothedLeftRadius = lerp(smoothedLeftRadius, it.leftRadius, SMOOTHING_FACTOR)
-                        }
-                    }
-                    if (it.rightDetected) {
-                        smoothedRightX = lerp(smoothedRightX, it.rightIrisX, SMOOTHING_FACTOR)
-                        smoothedRightY = lerp(smoothedRightY, it.rightIrisY, SMOOTHING_FACTOR)
-                        // Radius는 임계값 이상 변화시에만 업데이트 (자글거림 방지)
-                        if (kotlin.math.abs(it.rightRadius - smoothedRightRadius) > RADIUS_CHANGE_THRESHOLD) {
-                            smoothedRightRadius = lerp(smoothedRightRadius, it.rightRadius, SMOOTHING_FACTOR)
-                        }
-                    }
+                // 왼쪽 눈 필터링
+                if (it.leftDetected) {
+                    hasLeftEverDetected = true
+                    filteredLeftX = leftXFilter.filter(it.leftIrisX, currentTime)
+                    filteredLeftY = leftYFilter.filter(it.leftIrisY, currentTime)
+                    filteredLeftRadius = leftRadiusFilter.filter(it.leftRadius, currentTime)
                 }
+                // 검출 실패 시 마지막 필터링 값 유지 (깜빡임 방지)
+
+                // 오른쪽 눈 필터링
+                if (it.rightDetected) {
+                    hasRightEverDetected = true
+                    filteredRightX = rightXFilter.filter(it.rightIrisX, currentTime)
+                    filteredRightY = rightYFilter.filter(it.rightIrisY, currentTime)
+                    filteredRightRadius = rightRadiusFilter.filter(it.rightRadius, currentTime)
+                }
+                // 검출 실패 시 마지막 필터링 값 유지 (깜빡임 방지)
+
+                lastTimestamp = currentTime
             }
-        } ?: run {
-            // 검출 실패 시 스무딩 초기화
-            isFirstFrame = true
         }
+        // result가 null이어도 필터 상태 유지 (마지막 위치에 렌즈 유지)
 
         invalidate()
     }
 
     /**
-     * 선형 보간 (Linear Interpolation)
+     * 눈 영역 클리핑 활성화/비활성화
      */
-    private fun lerp(start: Float, end: Float, factor: Float): Float {
-        return start + (end - start) * factor
+    fun setEyeClippingEnabled(enabled: Boolean) {
+        eyeClippingEnabled = enabled
+        invalidate()
     }
 
     /**
@@ -263,8 +300,17 @@ class OverlayView @JvmOverloads constructor(
         // 낮은 신뢰도의 검출 결과는 허공/천장 오인식일 가능성이 높음
         if (result.confidence < MIN_RENDER_CONFIDENCE) return
 
+        // DEBUG: 좌표 변환 값 로깅 (ISS-001 디버깅)
+        Log.d(TAG, "=== ISS-001 DEBUG ===")
+        Log.d(TAG, "SDK imageSize: ${imageWidth}x${imageHeight}")
+        Log.d(TAG, "SDK frameSize: ${result.frameWidth}x${result.frameHeight}")
+        Log.d(TAG, "View size: ${width}x${height}")
+        Log.d(TAG, "imageAspect: ${imageWidth.toFloat()/imageHeight}, viewAspect: ${width.toFloat()/height}")
+
         // 좌표 변환 계산 (MediaPipe 공식 예제 방식)
-        // PreviewView가 FILL_START 모드이므로 max 사용하여 이미지가 뷰를 채우도록 함
+        // PreviewView가 FILL_CENTER 모드이므로:
+        // 1. max() 사용: 이미지가 뷰를 완전히 채움 (넘치는 부분 잘림)
+        // 2. offset 계산: 중앙 정렬 (잘리는 부분이 양쪽에 균등하게 분배)
         val scaleFactor = max(width.toFloat() / imageWidth, height.toFloat() / imageHeight)
 
         // 스케일된 이미지 크기
@@ -275,41 +321,81 @@ class OverlayView @JvmOverloads constructor(
         val offsetX = (width - scaledImageWidth) / 2f
         val offsetY = (height - scaledImageHeight) / 2f
 
+        // DEBUG: 변환 파라미터 로깅 (ISS-001 디버깅)
+        Log.d(TAG, "scaleFactor: $scaleFactor, scaledImage: ${scaledImageWidth}x${scaledImageHeight}")
+        Log.d(TAG, "offset: ($offsetX, $offsetY)")
+        if (result.faceMeshValid && result.faceMesh != null) {
+            // 첫 번째 랜드마크 좌표 확인 (코 끝 - 인덱스 1)
+            val mesh = result.faceMesh!!
+            val x0 = mesh[1 * 3]
+            val y0 = mesh[1 * 3 + 1]
+            Log.d(TAG, "Landmark[1] normalized: ($x0, $y0)")
+            val screenX = x0 * imageWidth * scaleFactor + offsetX
+            val screenY = y0 * imageHeight * scaleFactor + offsetY
+            Log.d(TAG, "Landmark[1] screen: ($screenX, $screenY)")
+        }
+        Log.d(TAG, "=====================")
+
         // 렌즈 텍스처 렌더링 (스무딩된 값 사용)
+        // 렌즈 텍스처 렌더링 (One Euro Filter 적용된 값 사용)
+        // 깜빡임 방지: 한 번 검출된 눈은 검출 실패 시에도 마지막 위치에 렌즈 유지
         if (showLens && lensTexture != null) {
-            if (result.leftDetected && lensConfig.applyLeft) {
+            // 눈 영역 클리핑을 위한 Path 생성
+            val mesh = result.faceMesh
+            val canClipLeft = eyeClippingEnabled && mesh != null && result.faceMeshValid
+            val canClipRight = canClipLeft
+
+            if (hasLeftEverDetected && lensConfig.applyLeft && filteredLeftRadius > 0) {
+                if (canClipLeft) {
+                    // 왼쪽 눈 영역으로 클리핑하여 렌즈 렌더링
+                    buildEyePath(leftEyePath, mesh!!, LEFT_EYE_CONTOUR_INDICES, scaleFactor, offsetX, offsetY)
+                    canvas.save()
+                    canvas.clipPath(leftEyePath)
+                }
                 drawLensTexture(
                     canvas,
-                    smoothedLeftX,
-                    smoothedLeftY,
-                    smoothedLeftRadius,
+                    filteredLeftX,
+                    filteredLeftY,
+                    filteredLeftRadius,
                     scaleFactor,
                     offsetX,
                     offsetY
                 )
+                if (canClipLeft) {
+                    canvas.restore()
+                }
             }
 
-            if (result.rightDetected && lensConfig.applyRight) {
+            if (hasRightEverDetected && lensConfig.applyRight && filteredRightRadius > 0) {
+                if (canClipRight) {
+                    // 오른쪽 눈 영역으로 클리핑하여 렌즈 렌더링
+                    buildEyePath(rightEyePath, mesh!!, RIGHT_EYE_CONTOUR_INDICES, scaleFactor, offsetX, offsetY)
+                    canvas.save()
+                    canvas.clipPath(rightEyePath)
+                }
                 drawLensTexture(
                     canvas,
-                    smoothedRightX,
-                    smoothedRightY,
-                    smoothedRightRadius,
+                    filteredRightX,
+                    filteredRightY,
+                    filteredRightRadius,
                     scaleFactor,
                     offsetX,
                     offsetY
                 )
+                if (canClipRight) {
+                    canvas.restore()
+                }
             }
         }
 
-        // 디버그 모드에서만 홍채 마커 표시 (스무딩된 값 사용)
+        // 디버그 모드에서만 홍채 마커 표시 (필터링된 값 사용)
         if (debugMode) {
             if (result.leftDetected && lensConfig.applyLeft) {
                 drawIrisMarker(
                     canvas,
-                    smoothedLeftX,
-                    smoothedLeftY,
-                    smoothedLeftRadius,
+                    filteredLeftX,
+                    filteredLeftY,
+                    filteredLeftRadius,
                     scaleFactor,
                     offsetX,
                     offsetY,
@@ -320,9 +406,9 @@ class OverlayView @JvmOverloads constructor(
             if (result.rightDetected && lensConfig.applyRight) {
                 drawIrisMarker(
                     canvas,
-                    smoothedRightX,
-                    smoothedRightY,
-                    smoothedRightRadius,
+                    filteredRightX,
+                    filteredRightY,
+                    filteredRightRadius,
                     scaleFactor,
                     offsetX,
                     offsetY,
@@ -336,6 +422,11 @@ class OverlayView @JvmOverloads constructor(
         if (showFaceMesh && result.faceMeshValid && result.faceMesh != null
             && result.confidence >= MIN_RENDER_CONFIDENCE) {
             drawFaceMesh(canvas, result, scaleFactor, offsetX, offsetY)
+        }
+
+        // 얼굴 검출 영역 표시 (Face Detection 결과)
+        if (showFaceRect) {
+            drawFaceRect(canvas, result, scaleFactor, offsetX, offsetY)
         }
 
         // 디버그 모드: 얼굴 영역 및 정보 표시
@@ -399,6 +490,61 @@ class OverlayView @JvmOverloads constructor(
     }
 
     /**
+     * 눈 영역 Path 생성 (클리핑용)
+     *
+     * Face Mesh 랜드마크에서 눈 윤곽을 추출하여 Path로 변환.
+     * 이 Path를 clipPath()에 사용하여 눈꺼풀 위로 렌즈가 보이지 않도록 처리.
+     *
+     * @param path 결과를 저장할 Path 객체
+     * @param mesh Face Mesh 랜드마크 배열
+     * @param indices 눈 윤곽 랜드마크 인덱스 배열
+     * @param scaleFactor 스케일 팩터
+     * @param offsetX X 오프셋
+     * @param offsetY Y 오프셋
+     */
+    private fun buildEyePath(
+        path: Path,
+        mesh: FloatArray,
+        indices: IntArray,
+        scaleFactor: Float,
+        offsetX: Float,
+        offsetY: Float
+    ) {
+        path.reset()
+
+        if (indices.isEmpty()) return
+
+        var firstX = 0f
+        var firstY = 0f
+
+        for ((i, idx) in indices.withIndex()) {
+            // 랜드마크 좌표 추출 (정규화 좌표 0.0~1.0)
+            val x = mesh[idx * 3].coerceIn(0f, 1f)
+            val y = mesh[idx * 3 + 1].coerceIn(0f, 1f)
+
+            // 화면 좌표로 변환
+            var screenX = x * imageWidth * scaleFactor + offsetX
+            val screenY = y * imageHeight * scaleFactor + offsetY
+
+            // 미러링 (전면 카메라)
+            if (isMirror) {
+                screenX = width - screenX
+            }
+
+            if (i == 0) {
+                path.moveTo(screenX, screenY)
+                firstX = screenX
+                firstY = screenY
+            } else {
+                path.lineTo(screenX, screenY)
+            }
+        }
+
+        // Path 닫기
+        path.close()
+    }
+
+    /**
      * 홍채 마커 그리기 (디버그용)
      */
     private fun drawIrisMarker(
@@ -433,6 +579,54 @@ class OverlayView @JvmOverloads constructor(
     }
 
     /**
+     * 얼굴 검출 영역 그리기 (Face Detection crop 영역)
+     */
+    private fun drawFaceRect(
+        canvas: Canvas,
+        result: IrisResult,
+        scaleFactor: Float,
+        offsetX: Float,
+        offsetY: Float
+    ) {
+        // faceRectX/Y/Width/Height는 정규화 좌표 (0.0 ~ 1.0)
+        if (result.faceRectWidth > 0 && result.faceRectHeight > 0) {
+            // 정규화 좌표 → 화면 좌표 변환
+            var left = result.faceRectX * imageWidth * scaleFactor + offsetX
+            val top = result.faceRectY * imageHeight * scaleFactor + offsetY
+            var right = (result.faceRectX + result.faceRectWidth) * imageWidth * scaleFactor + offsetX
+            val bottom = (result.faceRectY + result.faceRectHeight) * imageHeight * scaleFactor + offsetY
+
+            // 미러링 (전면 카메라)
+            if (isMirror) {
+                val tempLeft = width - right
+                right = width - left
+                left = tempLeft
+            }
+
+            tempRect.set(left, top, right, bottom)
+
+            // 두꺼운 노란색 사각형으로 표시
+            faceRectPaint.color = 0xFFFFFF00.toInt()  // Yellow
+            faceRectPaint.strokeWidth = 4f
+            canvas.drawRect(tempRect, faceRectPaint)
+
+            // crop 영역 정보 텍스트 표시
+            debugTextPaint.textSize = 24f
+            debugTextPaint.color = 0xFFFFFF00.toInt()
+            val infoText = "Face: (%.2f,%.2f) %.2fx%.2f".format(
+                result.faceRectX, result.faceRectY,
+                result.faceRectWidth, result.faceRectHeight
+            )
+            canvas.drawText(infoText, left, top - 10, debugTextPaint)
+
+            // 색상 복원
+            faceRectPaint.color = COLOR_FACE_RECT
+            faceRectPaint.strokeWidth = 2f
+            debugTextPaint.color = COLOR_DEBUG_TEXT
+        }
+    }
+
+    /**
      * 디버그 정보 그리기
      */
     private fun drawDebugInfo(
@@ -442,12 +636,13 @@ class OverlayView @JvmOverloads constructor(
         offsetX: Float,
         offsetY: Float
     ) {
-        // 얼굴 바운딩 박스 (faceRectX/Y는 픽셀 좌표)
+        // 얼굴 바운딩 박스 (faceRectX/Y는 정규화 좌표 0.0~1.0)
+        // ISS-002 수정: imageWidth/Height 곱셈 추가 (정규화 좌표 → 화면 좌표)
         if (result.faceRectWidth > 0 && result.faceRectHeight > 0) {
-            var left = result.faceRectX * scaleFactor + offsetX
-            val top = result.faceRectY * scaleFactor + offsetY
-            var right = (result.faceRectX + result.faceRectWidth) * scaleFactor + offsetX
-            val bottom = (result.faceRectY + result.faceRectHeight) * scaleFactor + offsetY
+            var left = result.faceRectX * imageWidth * scaleFactor + offsetX
+            val top = result.faceRectY * imageHeight * scaleFactor + offsetY
+            var right = (result.faceRectX + result.faceRectWidth) * imageWidth * scaleFactor + offsetX
+            val bottom = (result.faceRectY + result.faceRectHeight) * imageHeight * scaleFactor + offsetY
 
             if (isMirror) {
                 val tempLeft = width - right
@@ -504,8 +699,9 @@ class OverlayView @JvmOverloads constructor(
 
         // 모든 랜드마크 점 그리기
         for (i in 0 until landmarkCount) {
-            val x = mesh[i * 3]      // 정규화된 x (0.0 ~ 1.0)
-            val y = mesh[i * 3 + 1]  // 정규화된 y (0.0 ~ 1.0)
+            // 정규화된 좌표 (0.0 ~ 1.0)에 클램핑 적용 (방어적 처리)
+            val x = mesh[i * 3].coerceIn(0f, 1f)
+            val y = mesh[i * 3 + 1].coerceIn(0f, 1f)
 
             // 화면 좌표로 변환 (MediaPipe 공식 예제 방식)
             var screenX = x * imageWidth * scaleFactor + offsetX
@@ -604,10 +800,11 @@ class OverlayView @JvmOverloads constructor(
             val idx1 = indices[i]
             val idx2 = indices[i + 1]
 
-            val x1 = mesh[idx1 * 3]
-            val y1 = mesh[idx1 * 3 + 1]
-            val x2 = mesh[idx2 * 3]
-            val y2 = mesh[idx2 * 3 + 1]
+            // 정규화된 좌표에 클램핑 적용 (방어적 처리)
+            val x1 = mesh[idx1 * 3].coerceIn(0f, 1f)
+            val y1 = mesh[idx1 * 3 + 1].coerceIn(0f, 1f)
+            val x2 = mesh[idx2 * 3].coerceIn(0f, 1f)
+            val y2 = mesh[idx2 * 3 + 1].coerceIn(0f, 1f)
 
             // 화면 좌표로 변환 (MediaPipe 공식 예제 방식)
             var screenX1 = x1 * imageWidth * scaleFactor + offsetX
@@ -622,5 +819,87 @@ class OverlayView @JvmOverloads constructor(
 
             canvas.drawLine(screenX1, screenY1, screenX2, screenY2, meshLinePaint)
         }
+    }
+}
+
+/**
+ * One Euro Filter - 적응형 노이즈 필터링
+ *
+ * 느린 움직임에는 강한 스무딩, 빠른 움직임에는 빠른 반응을 제공하는 필터.
+ * 깜빡임과 흔들거림을 효과적으로 제거하면서 반응성 유지.
+ *
+ * @param minCutoff 최소 컷오프 주파수 (낮을수록 부드러움)
+ * @param beta 속도 계수 (높을수록 빠른 움직임에 민감)
+ * @param dCutoff 미분 컷오프 주파수
+ *
+ * 참조: https://cristal.univ-lille.fr/~casiez/1euro/
+ */
+class OneEuroFilter(
+    private val minCutoff: Float = 1.0f,
+    private val beta: Float = 0.007f,
+    private val dCutoff: Float = 1.0f
+) {
+    private var x: Float = 0f
+    private var dx: Float = 0f
+    private var lastTime: Long = 0L
+    private var initialized: Boolean = false
+
+    /**
+     * 새로운 값을 필터링
+     * @param value 입력 값
+     * @param timestamp 타임스탬프 (밀리초)
+     * @return 필터링된 값
+     */
+    fun filter(value: Float, timestamp: Long): Float {
+        if (!initialized) {
+            x = value
+            dx = 0f
+            lastTime = timestamp
+            initialized = true
+            return value
+        }
+
+        // 시간 간격 계산 (초 단위)
+        val dt = ((timestamp - lastTime).coerceAtLeast(1L)) / 1000f
+        lastTime = timestamp
+
+        // 속도 추정 (미분 필터링)
+        val edx = (value - x) / dt
+        dx = lowPassFilter(edx, dx, alpha(dCutoff, dt))
+
+        // 적응형 컷오프 주파수 계산
+        val cutoff = minCutoff + beta * abs(dx)
+
+        // 위치 필터링
+        x = lowPassFilter(value, x, alpha(cutoff, dt))
+
+        return x
+    }
+
+    /**
+     * 필터 초기화 (검출 실패 후 재검출 시)
+     */
+    fun reset() {
+        initialized = false
+    }
+
+    /**
+     * 현재 필터링된 값 반환
+     */
+    fun getValue(): Float = x
+
+    /**
+     * 저역 통과 필터
+     */
+    private fun lowPassFilter(x: Float, prevX: Float, alpha: Float): Float {
+        return alpha * x + (1f - alpha) * prevX
+    }
+
+    /**
+     * 알파 값 계산 (컷오프 주파수 기반)
+     */
+    private fun alpha(cutoff: Float, dt: Float): Float {
+        val tau = 1f / (2f * Math.PI.toFloat() * cutoff)
+        return 1f / (1f + tau / dt)
     }
 }
