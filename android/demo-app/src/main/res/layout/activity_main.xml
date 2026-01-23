@@ -36,10 +36,13 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- 카메라 프리뷰 -->
+    <!-- scaleType="fillCenter": 이미지가 뷰를 채우고 중앙 정렬 (넘치는 부분 잘림) -->
+    <!-- OverlayView 좌표 변환에서 동일한 로직(max scale + center offset) 사용 -->
     <androidx.camera.view.PreviewView
         android:id="@+id/cameraPreview"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        app:scaleType="fillCenter"
         app:layout_constraintBottom_toTopOf="@id/controlsContainer"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
