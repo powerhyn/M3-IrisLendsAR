@@ -763,6 +763,75 @@ const char* iris_sdk_get_config(const char* key);
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 6.4 좌표 변환 세부사항 (2025-01-21 추가)
+
+#### Aspect Ratio 보정
+
+Face Landmark 모델은 **정사각형 입력** (192x192 또는 256x256)을 사용합니다.
+비정사각형 이미지에서 얼굴 영역을 crop할 때 다음과 같은 보정이 필요합니다.
+
+**문제 상황**:
+```
+원본 이미지: 1080 × 1920 (세로 모드)
+픽셀 정사각형 crop: 600 × 600
+
+정규화 좌표로 변환 시:
+  width  = 600 / 1080 = 0.5556
+  height = 600 / 1920 = 0.3125
+  → 정규화 좌표계에서는 직사각형!
+
+좌표 변환 시 X/Y 스케일이 달라져 왜곡 발생
+```
+
+**해결 방법** (mediapipe_detector.cpp):
+```cpp
+// Aspect ratio 보정 계산
+float img_aspect_ratio = static_cast<float>(width) / height;
+float crop_scale_x = actual_face_crop.width;
+float crop_scale_y = actual_face_crop.width * img_aspect_ratio;
+
+// 좌표 변환 (동일한 스케일 적용)
+final_x = actual_face_crop.x + local_x * crop_scale_x;
+final_y = actual_face_crop.y + local_y * crop_scale_y;
+```
+
+#### 좌표 흐름 다이어그램
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          좌표 변환 파이프라인                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. 모델 출력                                                                │
+│     local_x, local_y: 0.0~1.0 (정사각형 crop 기준)                          │
+│                    ↓                                                        │
+│  2. Aspect Ratio 보정                                                        │
+│     crop_scale_y = crop_scale_x × (img_width / img_height)                 │
+│                    ↓                                                        │
+│  3. 전체 이미지 좌표                                                          │
+│     final_x, final_y: 0.0~1.0 (전체 이미지 기준)                            │
+│                    ↓                                                        │
+│  4. JNI → Android                                                           │
+│     IrisResult로 전달 (정규화 좌표 그대로)                                    │
+│                    ↓                                                        │
+│  5. OverlayView 렌더링                                                       │
+│     screenX = normalizedX × imageWidth × scaleFactor + offsetX              │
+│     screenY = normalizedY × imageHeight × scaleFactor + offsetY             │
+│     if (isMirror) screenX = viewWidth - screenX                             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 관련 파일
+
+| 파일 | 역할 | 라인 |
+|------|------|------|
+| `cpp/src/mediapipe_detector.cpp` | C++ 좌표 변환 (aspect ratio 보정) | 2190-2227 |
+| `android/.../OverlayView.kt` | Android 화면 좌표 변환 | 371-386 |
+| `android/.../CameraManager.kt` | ViewPort 설정 (FOV 일치) | 154-183 |
+
+**참고 문서**: `docs/PIPELINE_ANALYSIS.md`
+
 ---
 
 ## 7. 플랫폼별 바인딩
@@ -1022,3 +1091,4 @@ private:
 |------|------|----------|
 | 1.0 | 2025-01-07 | 초안 작성 |
 | 2.0 | 2025-01-07 | 모노레포 구조 반영, 상세 설계 추가 |
+| 2.1 | 2025-01-21 | 섹션 6.4 좌표 변환 세부사항 추가 (aspect ratio 보정) |
