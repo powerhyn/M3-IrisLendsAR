@@ -127,7 +127,7 @@ public:
     std::string model_path;
 
     // MediaPipe 설정
-    float min_detection_confidence = 0.3f;  // 기본값 낮춤 (더 많은 후보 검출)
+    float min_detection_confidence = 0.5f;  // 공식 기본값 (불안정한 랜드마크 제외)
     float min_tracking_confidence = 0.5f;   // 랜드마크 추적 최소 신뢰도
     float min_presence_confidence = 0.5f;   // 추적 모드에서 캐시 재사용 판단 임계값
     int num_faces = 1;

@@ -56,6 +56,18 @@ class OverlayView @JvmOverloads constructor(
         private const val CENTER_DOT_RADIUS = 6f
         private const val MESH_POINT_RADIUS = 2f
         private const val MESH_LINE_WIDTH = 1f
+        private const val IRIS_POINT_RADIUS = 5f  // 홍채 포인트는 더 크게
+
+        // 홍채 랜드마크 색상
+        private const val COLOR_IRIS_LANDMARK = 0xFFFF00FF.toInt()  // Magenta
+
+        // MediaPipe Face Mesh with Iris 랜드마크 인덱스
+        // 왼쪽 홍채 (화면상 오른쪽): 중심 468, 경계 469-472
+        private const val LEFT_IRIS_CENTER = 468
+        private val LEFT_IRIS_POINTS = intArrayOf(469, 470, 471, 472)
+        // 오른쪽 홍채 (화면상 왼쪽): 중심 473, 경계 474-477
+        private const val RIGHT_IRIS_CENTER = 473
+        private val RIGHT_IRIS_POINTS = intArrayOf(474, 475, 476, 477)
 
         // 렌즈 렌더링 설정
         // 홍채 반지름 대비 렌즈 크기 배율 (1.0 = 홍채 크기와 동일)
@@ -83,9 +95,14 @@ class OverlayView @JvmOverloads constructor(
         // 허공/천장 감지 문제 해결을 위해 추가
         private const val MIN_RENDER_CONFIDENCE = 0.5f
 
+        // 검출 실패 시 렌즈 유지 시간 (밀리초)
+        // 이 시간 동안 얼굴 인식이 실패해도 마지막 유효한 위치에 렌즈 유지
+        // 깜빡임 방지를 위한 임계값
+        private const val DETECTION_TIMEOUT_MS = 1000L  // 1초
+
         // One Euro Filter 파라미터
         private const val ONE_EURO_MIN_CUTOFF = 1.0f   // 최소 컷오프 주파수 (낮을수록 부드러움)
-        private const val ONE_EURO_BETA = 0.007f       // 속도 계수 (높을수록 빠른 움직임에 민감)
+        private const val ONE_EURO_BETA = 0.05f        // 속도 계수 (높을수록 빠른 움직임에 민감) - 눈 감김 추적 개선
         private const val ONE_EURO_D_CUTOFF = 1.0f     // 미분 컷오프 주파수
 
         // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)
@@ -139,6 +156,12 @@ class OverlayView @JvmOverloads constructor(
     // 한 번 검출되면 이후 검출 실패 시에도 마지막 위치에 렌즈 유지
     private var hasLeftEverDetected: Boolean = false
     private var hasRightEverDetected: Boolean = false
+
+    // 마지막 유효한 검출 시간 (렌즈 유지 타임아웃용)
+    private var lastValidDetectionTime: Long = 0L
+
+    // 마지막 유효한 검출 결과 캐시 (렌더링 유지용)
+    private var cachedValidResult: IrisResult? = null
 
     // 눈 영역 클리핑용 Path
     private val leftEyePath = Path()
@@ -206,6 +229,13 @@ class OverlayView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
+    // 홍채 랜드마크용 Paint (마젠타 - 눈에 잘 띄도록)
+    private val irisLandmarkPaint = Paint().apply {
+        color = COLOR_IRIS_LANDMARK
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
     // 렌즈 렌더링용 Paint
     private val lensPaint = Paint().apply {
         isAntiAlias = true
@@ -250,7 +280,11 @@ class OverlayView @JvmOverloads constructor(
 
         // One Euro Filter를 사용한 스무딩
         result?.let {
-            if (it.detected) {
+            if (it.detected && it.confidence >= MIN_RENDER_CONFIDENCE) {
+                // 유효한 검출 - 타임스탬프 및 캐시 업데이트
+                lastValidDetectionTime = currentTime
+                cachedValidResult = it
+
                 // 왼쪽 눈 필터링
                 if (it.leftDetected) {
                     hasLeftEverDetected = true
@@ -271,8 +305,9 @@ class OverlayView @JvmOverloads constructor(
 
                 lastTimestamp = currentTime
             }
+            // 검출 실패 시에도 필터 상태 유지 (마지막 위치에 렌즈 유지)
         }
-        // result가 null이어도 필터 상태 유지 (마지막 위치에 렌즈 유지)
+        // result가 null이어도 필터 상태 유지 (타임아웃 전까지 마지막 위치에 렌즈 유지)
 
         invalidate()
     }
@@ -315,17 +350,37 @@ class OverlayView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val result = irisResult ?: return
-        if (!result.detected) return
+        val currentTime = System.currentTimeMillis()
+        val timeSinceLastValid = currentTime - lastValidDetectionTime
 
-        // 신뢰도 검증 (False Positive 방지)
-        // 낮은 신뢰도의 검출 결과는 허공/천장 오인식일 가능성이 높음
-        if (result.confidence < MIN_RENDER_CONFIDENCE) return
+        // 현재 결과 또는 캐시된 유효 결과 사용
+        val result = irisResult
+        val cachedResult = cachedValidResult
+
+        // 유효한 검출이 있는지 확인
+        val hasValidDetection = result != null && result.detected &&
+            result.confidence >= MIN_RENDER_CONFIDENCE
+
+        // 렌더링 조건:
+        // 1. 현재 유효한 검출이 있거나
+        // 2. 타임아웃 내에 유효한 검출이 있었고 캐시된 결과가 있고 한 번이라도 눈이 검출된 적 있음
+        val shouldRender = hasValidDetection ||
+            (timeSinceLastValid < DETECTION_TIMEOUT_MS && cachedResult != null && (hasLeftEverDetected || hasRightEverDetected))
+
+        if (!shouldRender) return
+
+        // 렌더링에 사용할 결과 선택
+        val renderResult = if (hasValidDetection) result!! else cachedResult!!
+
+        // 타임아웃 상태 로깅 (디버깅용)
+        if (!hasValidDetection && timeSinceLastValid < DETECTION_TIMEOUT_MS) {
+            Log.d(TAG, "Using cached result (${timeSinceLastValid}ms since last valid detection)")
+        }
 
         // DEBUG: 좌표 변환 값 로깅 (ISS-001 디버깅)
         Log.d(TAG, "=== ISS-001 DEBUG ===")
         Log.d(TAG, "SDK imageSize: ${imageWidth}x${imageHeight}")
-        Log.d(TAG, "SDK frameSize: ${result.frameWidth}x${result.frameHeight}")
+        Log.d(TAG, "SDK frameSize: ${renderResult.frameWidth}x${renderResult.frameHeight}")
         Log.d(TAG, "View size: ${width}x${height}")
         Log.d(TAG, "imageAspect: ${imageWidth.toFloat()/imageHeight}, viewAspect: ${width.toFloat()/height}")
 
@@ -346,9 +401,9 @@ class OverlayView @JvmOverloads constructor(
         // DEBUG: 변환 파라미터 로깅 (ISS-001 디버깅)
         Log.d(TAG, "scaleFactor: $scaleFactor, scaledImage: ${scaledImageWidth}x${scaledImageHeight}")
         Log.d(TAG, "offset: ($offsetX, $offsetY)")
-        if (result.faceMeshValid && result.faceMesh != null) {
+        if (renderResult.faceMeshValid && renderResult.faceMesh != null) {
             // 첫 번째 랜드마크 좌표 확인 (코 끝 - 인덱스 1)
-            val mesh = result.faceMesh!!
+            val mesh = renderResult.faceMesh!!
             val x0 = mesh[1 * 3]
             val y0 = mesh[1 * 3 + 1]
             Log.d(TAG, "Landmark[1] normalized: ($x0, $y0)")
@@ -363,8 +418,8 @@ class OverlayView @JvmOverloads constructor(
         // 깜빡임 방지: 한 번 검출된 눈은 검출 실패 시에도 마지막 위치에 렌즈 유지
         if (showLens && lensTexture != null) {
             // 눈 영역 클리핑을 위한 Path 생성
-            val mesh = result.faceMesh
-            val canClipLeft = eyeClippingEnabled && mesh != null && result.faceMeshValid
+            val mesh = renderResult.faceMesh
+            val canClipLeft = eyeClippingEnabled && mesh != null && renderResult.faceMeshValid
             val canClipRight = canClipLeft
 
             if (hasLeftEverDetected && lensConfig.applyLeft && filteredLeftRadius > 0) {
@@ -414,7 +469,7 @@ class OverlayView @JvmOverloads constructor(
 
         // 디버그 모드에서만 홍채 마커 표시 (필터링된 값 사용)
         if (debugMode) {
-            if (result.leftDetected && lensConfig.applyLeft) {
+            if (renderResult.leftDetected && lensConfig.applyLeft) {
                 drawIrisMarker(
                     canvas,
                     filteredLeftX,
@@ -427,7 +482,7 @@ class OverlayView @JvmOverloads constructor(
                 )
             }
 
-            if (result.rightDetected && lensConfig.applyRight) {
+            if (renderResult.rightDetected && lensConfig.applyRight) {
                 drawIrisMarker(
                     canvas,
                     filteredRightX,
@@ -443,19 +498,19 @@ class OverlayView @JvmOverloads constructor(
 
         // Face Mesh 표시 (충분한 신뢰도로 얼굴 감지 시에만)
         // 이중 검증: onDraw() 시작의 신뢰도 검증 + 여기서의 추가 검증 (방어적 프로그래밍)
-        if (showFaceMesh && result.faceMeshValid && result.faceMesh != null
-            && result.confidence >= MIN_RENDER_CONFIDENCE) {
-            drawFaceMesh(canvas, result, scaleFactor, offsetX, offsetY)
+        if (showFaceMesh && renderResult.faceMeshValid && renderResult.faceMesh != null
+            && renderResult.confidence >= MIN_RENDER_CONFIDENCE) {
+            drawFaceMesh(canvas, renderResult, scaleFactor, offsetX, offsetY)
         }
 
         // 얼굴 검출 영역 표시 (Face Detection 결과)
         if (showFaceRect) {
-            drawFaceRect(canvas, result, scaleFactor, offsetX, offsetY)
+            drawFaceRect(canvas, renderResult, scaleFactor, offsetX, offsetY)
         }
 
         // 디버그 모드: 얼굴 영역 및 정보 표시
         if (debugMode) {
-            drawDebugInfo(canvas, result, scaleFactor, offsetX, offsetY)
+            drawDebugInfo(canvas, renderResult, scaleFactor, offsetX, offsetY)
         }
     }
 
@@ -718,8 +773,17 @@ class OverlayView @JvmOverloads constructor(
             canvas.drawRect(tempRect, faceRectPaint)
         }
 
+        // 모델 버전 판별 (랜드마크 수로 구분)
+        val meshSize = result.faceMesh?.size?.div(3) ?: 0
+        val modelVersion = when {
+            meshSize >= 478 -> "V2 (478)"
+            meshSize >= 468 -> "V1 (468)"
+            else -> "N/A ($meshSize)"
+        }
+
         // 디버그 텍스트
         val debugInfo = buildString {
+            append("Model: $modelVersion\n")
             append("Confidence: %.2f\n".format(result.confidence))
             append("Left: (%.3f, %.3f) r=%.1f\n".format(
                 result.leftIrisX, result.leftIrisY, result.leftRadius))
@@ -783,6 +847,9 @@ class OverlayView @JvmOverloads constructor(
         drawFaceContour(canvas, mesh, scaleFactor, offsetX, offsetY)
         drawEyeContours(canvas, mesh, scaleFactor, offsetX, offsetY)
         drawLipsContour(canvas, mesh, scaleFactor, offsetX, offsetY)
+
+        // 홍채 랜드마크 그리기 (478개 랜드마크 모델인 경우)
+        drawIrisLandmarks(canvas, mesh, scaleFactor, offsetX, offsetY)
     }
 
     /**
@@ -845,6 +912,79 @@ class OverlayView @JvmOverloads constructor(
             270, 269, 267, 0, 37, 39, 40, 185, 61
         )
         drawConnectedLandmarks(canvas, mesh, outerLipsIndices, scaleFactor, offsetX, offsetY)
+    }
+
+    /**
+     * 홍채 랜드마크 그리기 (4포인트 + 중심)
+     *
+     * MediaPipe Face Mesh with Iris (478개 랜드마크)에서:
+     * - 왼쪽 홍채: 중심 468, 경계 469-472
+     * - 오른쪽 홍채: 중심 473, 경계 474-477
+     */
+    private fun drawIrisLandmarks(
+        canvas: Canvas,
+        mesh: FloatArray,
+        scaleFactor: Float,
+        offsetX: Float,
+        offsetY: Float
+    ) {
+        // 478개 랜드마크가 있는지 확인 (홍채 포함 모델)
+        val meshSize = mesh.size / 3
+        if (meshSize < 478) {
+            Log.d(TAG, "Mesh has only $meshSize landmarks, iris landmarks (478) not available")
+            return
+        }
+
+        // 왼쪽 홍채 중심 그리기
+        drawSingleIrisPoint(canvas, mesh, LEFT_IRIS_CENTER, scaleFactor, offsetX, offsetY, isCenter = true)
+
+        // 왼쪽 홍채 4포인트 그리기
+        for (idx in LEFT_IRIS_POINTS) {
+            drawSingleIrisPoint(canvas, mesh, idx, scaleFactor, offsetX, offsetY, isCenter = false)
+        }
+
+        // 오른쪽 홍채 중심 그리기
+        drawSingleIrisPoint(canvas, mesh, RIGHT_IRIS_CENTER, scaleFactor, offsetX, offsetY, isCenter = true)
+
+        // 오른쪽 홍채 4포인트 그리기
+        for (idx in RIGHT_IRIS_POINTS) {
+            drawSingleIrisPoint(canvas, mesh, idx, scaleFactor, offsetX, offsetY, isCenter = false)
+        }
+    }
+
+    /**
+     * 단일 홍채 포인트 그리기
+     *
+     * V1 모델(468개)은 홍채 랜드마크가 없어서 -1로 채워짐
+     * 이 경우 그리지 않음
+     */
+    private fun drawSingleIrisPoint(
+        canvas: Canvas,
+        mesh: FloatArray,
+        index: Int,
+        scaleFactor: Float,
+        offsetX: Float,
+        offsetY: Float,
+        isCenter: Boolean
+    ) {
+        val rawX = mesh[index * 3]
+        val rawY = mesh[index * 3 + 1]
+
+        // V1 모델 사용 시 홍채 랜드마크는 -1로 채워짐 - 스킵
+        if (rawX < 0f || rawY < 0f || rawX > 1f || rawY > 1f) {
+            return
+        }
+
+        var screenX = rawX * imageWidth * scaleFactor + offsetX
+        val screenY = rawY * imageHeight * scaleFactor + offsetY
+
+        if (isMirror) {
+            screenX = width - screenX
+        }
+
+        // 중심은 더 크게, 경계는 작게
+        val radius = if (isCenter) IRIS_POINT_RADIUS * 1.5f else IRIS_POINT_RADIUS
+        canvas.drawCircle(screenX, screenY, radius, irisLandmarkPaint)
     }
 
     /**
