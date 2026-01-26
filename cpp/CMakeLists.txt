@@ -53,6 +53,7 @@ set(IRIS_SDK_SOURCES
     src/inference_thread.cpp
     src/sdk_manager.cpp
     src/sdk_api.cpp
+    src/beauty_filter.cpp
 )
 
 set(IRIS_SDK_HEADERS

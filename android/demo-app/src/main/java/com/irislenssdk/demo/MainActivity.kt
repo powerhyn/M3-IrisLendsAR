@@ -17,12 +17,14 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.irislenssdk.BeautyFilterConfig
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
@@ -61,6 +63,9 @@ class MainActivity : AppCompatActivity() {
 
     // 렌즈 설정
     private val lensConfig = LensConfig()
+
+    // 뷰티 필터 설정
+    private val beautyConfig = BeautyFilterConfig()
 
     // 렌즈 관리자
     private lateinit var lensManager: LensManager
@@ -204,7 +209,7 @@ class MainActivity : AppCompatActivity() {
             // GPU 가속 활성화 요청 (init 전에 호출!)
             // InferenceThread를 통해 전용 스레드에서 GPU delegate 초기화/실행
             // NOTE: 직접 호출 모드에서는 GPU 지원 안됨 (스레드 제약)
-            val enableGpu = false  // 벤치마크: GPU OFF로 Thread vs Direct 비교
+            val enableGpu = true  // 성능 최적화: GPU 가속 활성화
             val gpuAvailable = IrisLensSDK.isGpuAvailable() && useInferenceThread && enableGpu
             Log.i(TAG, "GPU available: $gpuAvailable (enableGpu=$enableGpu)")
             if (gpuAvailable) {
@@ -234,6 +239,9 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     updateStatus("SDK Loaded ($gpuStatus/$threadMode)\n$version")
                 }
+
+                // 뷰티 필터 기본 설정 적용
+                initializeBeautyFilter()
             } else {
                 val errorStr = IrisLensSDK.errorToString(error)
                 val lastError = IrisLensSDK.getLastError()
@@ -267,6 +275,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 뷰티 필터 초기화
+     *
+     * 기본 설정으로 뷰티 필터를 활성화합니다.
+     * 현재 아키텍처에서는 OpenCV CPU 기반으로 동작합니다.
+     * 실제 프레임 렌더링은 Stage 2 (OpenGL)에서 구현 예정입니다.
+     */
+    private fun initializeBeautyFilter() {
+        try {
+            // 기본 설정 적용 (필터는 비활성화 상태로 시작)
+            beautyConfig.enabled = false  // 기본 비활성화 (성능 영향 고려)
+            beautyConfig.intensity = 0.5f
+            beautyConfig.smoothing = 0.5f
+            beautyConfig.brightness = 1.05f
+            beautyConfig.softFocus = 0.3f
+
+            val error = IrisLensSDK.setBeautyFilter(beautyConfig)
+            if (error == IrisLensSDK.OK) {
+                Log.i(TAG, "Beauty filter initialized: enabled=${beautyConfig.enabled}")
+            } else {
+                Log.w(TAG, "Beauty filter init failed: ${IrisLensSDK.errorToString(error)}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Beauty filter init exception", e)
+        }
+    }
+
     // ==========================================================================
     // Camera Setup
     // ==========================================================================
@@ -286,7 +321,13 @@ class MainActivity : AppCompatActivity() {
             mainHandler.post {
                 onFrameAnalyzed(result)
             }
+        }.apply {
+            // 뷰티 필터 초기 상태 동기화
+            beautyFilterEnabled = beautyConfig.enabled
         }
+
+        // OverlayView 초기 상태 동기화
+        binding.overlayView.showFilteredFrame = beautyConfig.enabled
 
         // 카메라 시작
         cameraManager?.startCamera(binding.cameraPreview) { imageProxy ->
@@ -380,11 +421,13 @@ class MainActivity : AppCompatActivity() {
             """.trimIndent())
         }
 
+        // 필터된 프레임과 함께 오버레이 뷰 업데이트
         binding.overlayView.setIrisResult(
             result.result,
             result.result.frameWidth,
             result.result.frameHeight,
-            cm.isFrontCamera
+            cm.isFrontCamera,
+            result.filteredFrame  // 뷰티 필터가 적용된 프레임
         )
         binding.overlayView.setLensConfig(lensConfig)
 
@@ -688,11 +731,14 @@ class MainActivity : AppCompatActivity() {
             packageManager.getPackageInfo(packageName, 0).versionCode.toLong()
         }
 
+        val beautyEnabled = IrisLensSDK.isBeautyFilterEnabled()
         val options = arrayOf(
             "Face Mesh 표시: ${if (binding.overlayView.showFaceMesh) "ON" else "OFF"}",
             "Face Rect 표시: ${if (binding.overlayView.showFaceRect) "ON" else "OFF"}",
             "Debug 모드: ${if (binding.overlayView.debugMode) "ON" else "OFF"}",
             "렌즈 표시: ${if (binding.overlayView.showLens) "ON" else "OFF"}",
+            "뷰티 필터: ${if (beautyEnabled) "ON" else "OFF"}",
+            "뷰티 필터 설정...",
             "신뢰도 설정..."
         )
 
@@ -732,10 +778,195 @@ class MainActivity : AppCompatActivity() {
                             Toast.LENGTH_SHORT
                         ).show()
                     }
-                    4 -> openConfidenceSettings()
+                    4 -> toggleBeautyFilter()
+                    5 -> openBeautyFilterSettings()
+                    6 -> openConfidenceSettings()
                 }
             }
             .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    /**
+     * 뷰티 필터 활성화 토글
+     *
+     * 필터 ON 시:
+     * - PreviewView 숨김 (원본 피드)
+     * - OverlayView에서 필터된 프레임을 배경으로 표시
+     *
+     * 필터 OFF 시:
+     * - PreviewView 표시 (원본 피드)
+     * - OverlayView는 렌즈만 오버레이
+     */
+    private fun toggleBeautyFilter() {
+        beautyConfig.enabled = !beautyConfig.enabled
+        val error = IrisLensSDK.setBeautyFilter(beautyConfig)
+
+        if (error == IrisLensSDK.OK) {
+            // FrameAnalyzer에 필터 활성화 상태 전달
+            frameAnalyzer?.beautyFilterEnabled = beautyConfig.enabled
+
+            // OverlayView 설정
+            binding.overlayView.showFilteredFrame = beautyConfig.enabled
+
+            // PreviewView 가시성 제어
+            // 필터 ON: PreviewView 숨김 → OverlayView가 필터된 프레임 배경 표시
+            // 필터 OFF: PreviewView 표시 → 원본 카메라 피드 직접 표시
+            binding.cameraPreview.visibility = if (beautyConfig.enabled) {
+                View.INVISIBLE
+            } else {
+                View.VISIBLE
+            }
+
+            Toast.makeText(
+                this,
+                "뷰티 필터: ${if (beautyConfig.enabled) "ON" else "OFF"}",
+                Toast.LENGTH_SHORT
+            ).show()
+            Log.d(TAG, "Beauty filter toggled: ${beautyConfig.enabled}, previewVisible=${!beautyConfig.enabled}")
+        } else {
+            Toast.makeText(
+                this,
+                "뷰티 필터 설정 실패",
+                Toast.LENGTH_SHORT
+            ).show()
+            Log.e(TAG, "Beauty filter toggle failed: ${IrisLensSDK.errorToString(error)}")
+        }
+    }
+
+    /**
+     * 뷰티 필터 설정 다이얼로그
+     */
+    private fun openBeautyFilterSettings() {
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(48, 32, 48, 16)
+        }
+
+        // 현재 설정 읽기
+        IrisLensSDK.getBeautyFilter(beautyConfig)
+
+        // Intensity 슬라이더
+        val intensityLabel = android.widget.TextView(this).apply {
+            text = "전체 강도 (Intensity): ${String.format("%.0f%%", beautyConfig.intensity * 100)}"
+        }
+        val intensitySeekBar = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = (beautyConfig.intensity * 100).toInt()
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    beautyConfig.intensity = progress / 100f
+                    intensityLabel.text = "전체 강도 (Intensity): ${progress}%"
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                    IrisLensSDK.setBeautyFilter(beautyConfig)
+                }
+            })
+        }
+
+        // Smoothing 슬라이더
+        val smoothingLabel = android.widget.TextView(this).apply {
+            text = "피부 스무딩 (Smoothing): ${String.format("%.0f%%", beautyConfig.smoothing * 100)}"
+        }
+        val smoothingSeekBar = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = (beautyConfig.smoothing * 100).toInt()
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    beautyConfig.smoothing = progress / 100f
+                    smoothingLabel.text = "피부 스무딩 (Smoothing): ${progress}%"
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                    IrisLensSDK.setBeautyFilter(beautyConfig)
+                }
+            })
+        }
+
+        // Brightness 슬라이더 (0-200%, 100% = 1.0)
+        val brightnessLabel = android.widget.TextView(this).apply {
+            text = "밝기 (Brightness): ${String.format("%.0f%%", beautyConfig.brightness * 100)}"
+        }
+        val brightnessSeekBar = android.widget.SeekBar(this).apply {
+            max = 200
+            progress = (beautyConfig.brightness * 100).toInt()
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    beautyConfig.brightness = progress / 100f
+                    brightnessLabel.text = "밝기 (Brightness): ${progress}%"
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                    IrisLensSDK.setBeautyFilter(beautyConfig)
+                }
+            })
+        }
+
+        // Soft Focus 슬라이더
+        val softFocusLabel = android.widget.TextView(this).apply {
+            text = "소프트 포커스 (Soft Focus): ${String.format("%.0f%%", beautyConfig.softFocus * 100)}"
+        }
+        val softFocusSeekBar = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = (beautyConfig.softFocus * 100).toInt()
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    beautyConfig.softFocus = progress / 100f
+                    softFocusLabel.text = "소프트 포커스 (Soft Focus): ${progress}%"
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                    IrisLensSDK.setBeautyFilter(beautyConfig)
+                }
+            })
+        }
+
+        // 레이아웃에 추가
+        layout.addView(intensityLabel)
+        layout.addView(intensitySeekBar)
+        layout.addView(android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 16
+            )
+        })
+        layout.addView(smoothingLabel)
+        layout.addView(smoothingSeekBar)
+        layout.addView(android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 16
+            )
+        })
+        layout.addView(brightnessLabel)
+        layout.addView(brightnessSeekBar)
+        layout.addView(android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 16
+            )
+        })
+        layout.addView(softFocusLabel)
+        layout.addView(softFocusSeekBar)
+
+        // 설명 추가
+        val description = android.widget.TextView(this).apply {
+            text = "\n• Intensity: 전체 효과 강도\n• Smoothing: 피부 스무딩 (Bilateral Filter)\n• Brightness: 밝기 조절 (100%=원본)\n• Soft Focus: 소프트 글로우 효과\n\n※ Stage 2 (OpenGL) 구현 후 화면에 적용됩니다."
+            setTextColor(android.graphics.Color.GRAY)
+            textSize = 12f
+        }
+        layout.addView(description)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("뷰티 필터 설정")
+            .setView(layout)
+            .setPositiveButton("확인", null)
+            .setNeutralButton("기본값 복원") { _, _ ->
+                beautyConfig.intensity = BeautyFilterConfig.DEFAULT_INTENSITY
+                beautyConfig.smoothing = BeautyFilterConfig.DEFAULT_SMOOTHING
+                beautyConfig.brightness = BeautyFilterConfig.DEFAULT_BRIGHTNESS
+                beautyConfig.softFocus = BeautyFilterConfig.DEFAULT_SOFT_FOCUS
+                IrisLensSDK.setBeautyFilter(beautyConfig)
+                Toast.makeText(this, "기본값으로 복원됨", Toast.LENGTH_SHORT).show()
+            }
             .show()
     }
 

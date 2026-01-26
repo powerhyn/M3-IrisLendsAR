@@ -161,7 +161,13 @@ class OverlayView @JvmOverloads constructor(
     private var lastValidDetectionTime: Long = 0L
 
     // 마지막 유효한 검출 결과 캐시 (렌더링 유지용)
-    private var cachedValidResult: IrisResult? = null
+    // 참조가 아닌 값 복사 (IrisResult가 재사용되므로)
+    private var cachedDetected: Boolean = false
+    private var cachedConfidence: Float = 0f
+    private var cachedLeftDetected: Boolean = false
+    private var cachedRightDetected: Boolean = false
+    private var cachedFaceMeshValid: Boolean = false
+    private var cachedFaceMesh: FloatArray? = null
 
     // 눈 영역 클리핑용 Path
     private val leftEyePath = Path()
@@ -183,6 +189,11 @@ class OverlayView @JvmOverloads constructor(
 
     // 렌즈 표시 여부
     var showLens: Boolean = true
+
+    // === 필터된 프레임 렌더링 ===
+    // 뷰티 필터가 적용된 프레임을 배경으로 표시
+    private var filteredFrame: Bitmap? = null
+    var showFilteredFrame: Boolean = false
 
     // Paint 객체들 (재사용)
     private val irisPaint = Paint().apply {
@@ -251,6 +262,12 @@ class OverlayView @JvmOverloads constructor(
         xfermode = PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
     }
 
+    // 필터된 프레임 렌더링용 Paint
+    private val framePaint = Paint().apply {
+        isAntiAlias = true
+        isFilterBitmap = true
+    }
+
     // 임시 RectF (재사용)
     private val tempRect = RectF()
     private val lensDestRect = RectF()
@@ -283,7 +300,21 @@ class OverlayView @JvmOverloads constructor(
             if (it.detected && it.confidence >= MIN_RENDER_CONFIDENCE) {
                 // 유효한 검출 - 타임스탬프 및 캐시 업데이트
                 lastValidDetectionTime = currentTime
-                cachedValidResult = it
+
+                // 값 복사 (IrisResult가 재사용되어 다음 프레임에서 reset()되므로)
+                cachedDetected = it.detected
+                cachedConfidence = it.confidence
+                cachedLeftDetected = it.leftDetected
+                cachedRightDetected = it.rightDetected
+                cachedFaceMeshValid = it.faceMeshValid
+                // FaceMesh 복사 (클리핑용)
+                it.faceMesh?.let { mesh ->
+                    if (cachedFaceMesh == null || cachedFaceMesh!!.size != mesh.size) {
+                        cachedFaceMesh = mesh.copyOf()
+                    } else {
+                        System.arraycopy(mesh, 0, cachedFaceMesh!!, 0, mesh.size)
+                    }
+                }
 
                 // 왼쪽 눈 필터링
                 if (it.leftDetected) {
@@ -310,6 +341,37 @@ class OverlayView @JvmOverloads constructor(
         // result가 null이어도 필터 상태 유지 (타임아웃 전까지 마지막 위치에 렌즈 유지)
 
         invalidate()
+    }
+
+    /**
+     * 필터된 프레임 설정
+     *
+     * 뷰티 필터가 적용된 프레임을 배경으로 표시하기 위해 설정합니다.
+     * 이전 프레임은 자동으로 recycled됩니다.
+     *
+     * @param bitmap 필터된 프레임 (null이면 표시 안함)
+     */
+    fun setFilteredFrame(bitmap: Bitmap?) {
+        // 이전 비트맵 해제 (새 비트맵과 다른 경우에만)
+        val oldFrame = filteredFrame
+        if (oldFrame != null && oldFrame != bitmap && !oldFrame.isRecycled) {
+            oldFrame.recycle()
+        }
+        filteredFrame = bitmap
+    }
+
+    /**
+     * 홍채 검출 결과와 필터된 프레임을 함께 설정
+     *
+     * @param result 검출 결과
+     * @param width 분석 이미지 너비
+     * @param height 분석 이미지 높이
+     * @param mirror 미러링 여부 (전면 카메라)
+     * @param filtered 필터된 프레임 (null이면 필터 미적용)
+     */
+    fun setIrisResult(result: IrisResult?, width: Int, height: Int, mirror: Boolean, filtered: Bitmap?) {
+        setFilteredFrame(filtered)
+        setIrisResult(result, width, height, mirror)
     }
 
     /**
@@ -350,37 +412,37 @@ class OverlayView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
+        // 필터된 프레임 배경 렌더링 (뷰티 필터 활성화 시)
+        if (showFilteredFrame) {
+            filteredFrame?.let { frame ->
+                if (!frame.isRecycled) {
+                    drawFilteredFrame(canvas, frame)
+                }
+            }
+        }
+
         val currentTime = System.currentTimeMillis()
         val timeSinceLastValid = currentTime - lastValidDetectionTime
 
-        // 현재 결과 또는 캐시된 유효 결과 사용
-        val result = irisResult
-        val cachedResult = cachedValidResult
-
-        // 유효한 검출이 있는지 확인
-        val hasValidDetection = result != null && result.detected &&
-            result.confidence >= MIN_RENDER_CONFIDENCE
+        // 캐시된 값 기반으로 유효한 검출 확인
+        val hasValidDetection = cachedDetected && cachedConfidence >= MIN_RENDER_CONFIDENCE
 
         // 렌더링 조건:
-        // 1. 현재 유효한 검출이 있거나
-        // 2. 타임아웃 내에 유효한 검출이 있었고 캐시된 결과가 있고 한 번이라도 눈이 검출된 적 있음
+        // 1. 유효한 검출이 있거나
+        // 2. 타임아웃 내에 유효한 검출이 있었고 한 번이라도 눈이 검출된 적 있음
         val shouldRender = hasValidDetection ||
-            (timeSinceLastValid < DETECTION_TIMEOUT_MS && cachedResult != null && (hasLeftEverDetected || hasRightEverDetected))
+            (timeSinceLastValid < DETECTION_TIMEOUT_MS && (hasLeftEverDetected || hasRightEverDetected))
 
         if (!shouldRender) return
 
-        // 렌더링에 사용할 결과 선택
-        val renderResult = if (hasValidDetection) result!! else cachedResult!!
-
         // 타임아웃 상태 로깅 (디버깅용)
         if (!hasValidDetection && timeSinceLastValid < DETECTION_TIMEOUT_MS) {
-            Log.d(TAG, "Using cached result (${timeSinceLastValid}ms since last valid detection)")
+            Log.d(TAG, "Using cached values (${timeSinceLastValid}ms since last valid detection)")
         }
 
         // DEBUG: 좌표 변환 값 로깅 (ISS-001 디버깅)
         Log.d(TAG, "=== ISS-001 DEBUG ===")
         Log.d(TAG, "SDK imageSize: ${imageWidth}x${imageHeight}")
-        Log.d(TAG, "SDK frameSize: ${renderResult.frameWidth}x${renderResult.frameHeight}")
         Log.d(TAG, "View size: ${width}x${height}")
         Log.d(TAG, "imageAspect: ${imageWidth.toFloat()/imageHeight}, viewAspect: ${width.toFloat()/height}")
 
@@ -401,9 +463,9 @@ class OverlayView @JvmOverloads constructor(
         // DEBUG: 변환 파라미터 로깅 (ISS-001 디버깅)
         Log.d(TAG, "scaleFactor: $scaleFactor, scaledImage: ${scaledImageWidth}x${scaledImageHeight}")
         Log.d(TAG, "offset: ($offsetX, $offsetY)")
-        if (renderResult.faceMeshValid && renderResult.faceMesh != null) {
+        if (cachedFaceMeshValid && cachedFaceMesh != null) {
             // 첫 번째 랜드마크 좌표 확인 (코 끝 - 인덱스 1)
-            val mesh = renderResult.faceMesh!!
+            val mesh = cachedFaceMesh!!
             val x0 = mesh[1 * 3]
             val y0 = mesh[1 * 3 + 1]
             Log.d(TAG, "Landmark[1] normalized: ($x0, $y0)")
@@ -417,13 +479,12 @@ class OverlayView @JvmOverloads constructor(
         // 렌즈 텍스처 렌더링 (One Euro Filter 적용된 값 사용)
         // 깜빡임 방지: 한 번 검출된 눈은 검출 실패 시에도 마지막 위치에 렌즈 유지
         if (showLens && lensTexture != null) {
-            // 눈 영역 클리핑을 위한 Path 생성
-            val mesh = renderResult.faceMesh
-            val canClipLeft = eyeClippingEnabled && mesh != null && renderResult.faceMeshValid
-            val canClipRight = canClipLeft
+            // 눈 영역 클리핑을 위한 Path 생성 (캐시된 FaceMesh 사용)
+            val mesh = cachedFaceMesh
+            val canClip = eyeClippingEnabled && mesh != null && cachedFaceMeshValid
 
             if (hasLeftEverDetected && lensConfig.applyLeft && filteredLeftRadius > 0) {
-                if (canClipLeft) {
+                if (canClip) {
                     // 왼쪽 눈 영역으로 클리핑하여 렌즈 렌더링
                     buildEyePath(leftEyePath, mesh!!, LEFT_EYE_CONTOUR_INDICES, scaleFactor, offsetX, offsetY)
                     canvas.save()
@@ -439,13 +500,13 @@ class OverlayView @JvmOverloads constructor(
                     offsetY,
                     isLeft = true
                 )
-                if (canClipLeft) {
+                if (canClip) {
                     canvas.restore()
                 }
             }
 
             if (hasRightEverDetected && lensConfig.applyRight && filteredRightRadius > 0) {
-                if (canClipRight) {
+                if (canClip) {
                     // 오른쪽 눈 영역으로 클리핑하여 렌즈 렌더링
                     buildEyePath(rightEyePath, mesh!!, RIGHT_EYE_CONTOUR_INDICES, scaleFactor, offsetX, offsetY)
                     canvas.save()
@@ -461,7 +522,7 @@ class OverlayView @JvmOverloads constructor(
                     offsetY,
                     isLeft = false
                 )
-                if (canClipRight) {
+                if (canClip) {
                     canvas.restore()
                 }
             }
@@ -469,7 +530,7 @@ class OverlayView @JvmOverloads constructor(
 
         // 디버그 모드에서만 홍채 마커 표시 (필터링된 값 사용)
         if (debugMode) {
-            if (renderResult.leftDetected && lensConfig.applyLeft) {
+            if (cachedLeftDetected && lensConfig.applyLeft) {
                 drawIrisMarker(
                     canvas,
                     filteredLeftX,
@@ -482,7 +543,7 @@ class OverlayView @JvmOverloads constructor(
                 )
             }
 
-            if (renderResult.rightDetected && lensConfig.applyRight) {
+            if (cachedRightDetected && lensConfig.applyRight) {
                 drawIrisMarker(
                     canvas,
                     filteredRightX,
@@ -496,22 +557,54 @@ class OverlayView @JvmOverloads constructor(
             }
         }
 
-        // Face Mesh 표시 (충분한 신뢰도로 얼굴 감지 시에만)
-        // 이중 검증: onDraw() 시작의 신뢰도 검증 + 여기서의 추가 검증 (방어적 프로그래밍)
-        if (showFaceMesh && renderResult.faceMeshValid && renderResult.faceMesh != null
-            && renderResult.confidence >= MIN_RENDER_CONFIDENCE) {
-            drawFaceMesh(canvas, renderResult, scaleFactor, offsetX, offsetY)
+        // Face Mesh 표시 (충분한 신뢰도로 얼굴 감지 시에만, 캐시된 값 사용)
+        if (showFaceMesh && cachedFaceMeshValid && cachedFaceMesh != null
+            && cachedConfidence >= MIN_RENDER_CONFIDENCE) {
+            drawFaceMeshCached(canvas, scaleFactor, offsetX, offsetY)
         }
 
-        // 얼굴 검출 영역 표시 (Face Detection 결과)
-        if (showFaceRect) {
-            drawFaceRect(canvas, renderResult, scaleFactor, offsetX, offsetY)
+        // 얼굴 검출 영역 및 디버그 정보는 원본 결과 필요 시 표시
+        // (캐시에 faceRect 정보 없으므로 현재 결과 사용)
+        val result = irisResult
+        if (result != null) {
+            if (showFaceRect) {
+                drawFaceRect(canvas, result, scaleFactor, offsetX, offsetY)
+            }
+            if (debugMode) {
+                drawDebugInfo(canvas, result, scaleFactor, offsetX, offsetY)
+            }
+        }
+    }
+
+    /**
+     * 필터된 프레임 배경 그리기
+     *
+     * PreviewView의 FILL_CENTER와 동일한 스케일링을 적용하여
+     * 뷰티 필터가 적용된 프레임을 배경으로 렌더링합니다.
+     *
+     * @param canvas 캔버스
+     * @param frame 필터된 프레임 비트맵
+     */
+    private fun drawFilteredFrame(canvas: Canvas, frame: Bitmap) {
+        // fillCenter 스케일링 계산 (PreviewView와 동일)
+        val scaleFactor = max(width.toFloat() / frame.width, height.toFloat() / frame.height)
+        val scaledWidth = frame.width * scaleFactor
+        val scaledHeight = frame.height * scaleFactor
+        val offsetX = (width - scaledWidth) / 2f
+        val offsetY = (height - scaledHeight) / 2f
+
+        canvas.save()
+
+        // 미러링 적용 (전면 카메라)
+        if (isMirror) {
+            canvas.scale(-1f, 1f, width / 2f, height / 2f)
         }
 
-        // 디버그 모드: 얼굴 영역 및 정보 표시
-        if (debugMode) {
-            drawDebugInfo(canvas, renderResult, scaleFactor, offsetX, offsetY)
-        }
+        // 프레임 그리기
+        tempRect.set(offsetX, offsetY, offsetX + scaledWidth, offsetY + scaledHeight)
+        canvas.drawBitmap(frame, null, tempRect, framePaint)
+
+        canvas.restore()
     }
 
     /**
@@ -813,7 +906,41 @@ class OverlayView @JvmOverloads constructor(
     }
 
     /**
-     * Face Mesh 그리기
+     * Face Mesh 그리기 (캐시된 FaceMesh 사용)
+     */
+    private fun drawFaceMeshCached(
+        canvas: Canvas,
+        scaleFactor: Float,
+        offsetX: Float,
+        offsetY: Float
+    ) {
+        val mesh = cachedFaceMesh ?: return
+        val landmarkCount = IrisResult.FACE_MESH_LANDMARK_COUNT
+
+        // 모든 랜드마크 점 그리기
+        for (i in 0 until landmarkCount) {
+            val x = mesh[i * 3].coerceIn(0f, 1f)
+            val y = mesh[i * 3 + 1].coerceIn(0f, 1f)
+
+            var screenX = x * imageWidth * scaleFactor + offsetX
+            val screenY = y * imageHeight * scaleFactor + offsetY
+
+            if (isMirror) {
+                screenX = width - screenX
+            }
+
+            canvas.drawCircle(screenX, screenY, MESH_POINT_RADIUS, meshPointPaint)
+        }
+
+        // 주요 연결선 그리기
+        drawFaceContour(canvas, mesh, scaleFactor, offsetX, offsetY)
+        drawEyeContours(canvas, mesh, scaleFactor, offsetX, offsetY)
+        drawLipsContour(canvas, mesh, scaleFactor, offsetX, offsetY)
+        drawIrisLandmarks(canvas, mesh, scaleFactor, offsetX, offsetY)
+    }
+
+    /**
+     * Face Mesh 그리기 (IrisResult 사용 - 레거시)
      */
     private fun drawFaceMesh(
         canvas: Canvas,
@@ -1036,6 +1163,10 @@ class OverlayView @JvmOverloads constructor(
         cachedLeftLensBitmap = null
         cachedRightLensBitmap?.recycle()
         cachedRightLensBitmap = null
+
+        // 필터된 프레임 해제
+        filteredFrame?.recycle()
+        filteredFrame = null
 
         Log.d(TAG, "Cached lens bitmaps released")
     }

@@ -514,6 +514,121 @@ public final class IrisLensSDK {
     }
 
     // ========================================================================
+    // 뷰티 필터 API
+    // ========================================================================
+
+    /**
+     * 기본 뷰티 필터 설정을 가져옵니다.
+     *
+     * @return 기본 설정이 적용된 BeautyFilterConfig
+     */
+    @NonNull
+    public static BeautyFilterConfig getDefaultBeautyConfig() {
+        BeautyFilterConfig config = new BeautyFilterConfig();
+        if (sLibraryLoaded) {
+            nativeDefaultBeautyConfig(config);
+        }
+        return config;
+    }
+
+    /**
+     * 뷰티 필터 설정을 적용합니다.
+     *
+     * <p>설정된 값은 이후 {@link #applyBeautyFilter} 호출 시 사용됩니다.</p>
+     *
+     * @param config 뷰티 필터 설정
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int setBeautyFilter(@NonNull BeautyFilterConfig config) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeSetBeautyFilter(config);
+    }
+
+    /**
+     * 현재 뷰티 필터 설정을 가져옵니다.
+     *
+     * @param config 설정을 받을 객체
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int getBeautyFilter(@NonNull BeautyFilterConfig config) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeGetBeautyFilter(config);
+    }
+
+    /**
+     * 뷰티 필터 활성화 여부를 확인합니다.
+     *
+     * @return true면 활성화됨
+     */
+    public static boolean isBeautyFilterEnabled() {
+        if (!sLibraryLoaded) {
+            return false;
+        }
+        return nativeIsBeautyFilterEnabled();
+    }
+
+    /**
+     * 프레임에 뷰티 필터를 적용합니다.
+     *
+     * <p>프레임 데이터는 in-place로 수정됩니다.
+     * 홍채 검출 후에 호출하는 것을 권장합니다 (검출 정확도 보존).</p>
+     *
+     * <p>사용 예:</p>
+     * <pre>{@code
+     * // 1. 홍채 검출 (원본 프레임)
+     * IrisResult result = new IrisResult();
+     * IrisLensSDK.detect(frameData, width, height, format, result);
+     *
+     * // 2. 뷰티 필터 적용 (프레임 수정)
+     * IrisLensSDK.applyBeautyFilter(frameData, width, height, format);
+     *
+     * // 3. 렌즈 렌더링 (필터 적용된 프레임)
+     * // ...
+     * }</pre>
+     *
+     * @param frameData 프레임 데이터 (수정됨)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 프레임 포맷 (FORMAT_* 상수)
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int applyBeautyFilter(@NonNull byte[] frameData, int width, int height, int format) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeApplyBeautyFilter(frameData, width, height, format);
+    }
+
+    /**
+     * NV21 데이터를 RGBA Bitmap으로 고속 변환합니다.
+     *
+     * <p>OpenCV를 사용한 직접 색공간 변환으로 Java JPEG 방식 대비 10배 이상 빠릅니다.</p>
+     * <ul>
+     *   <li>Java (YuvImage → JPEG → Bitmap): 50-100ms</li>
+     *   <li>JNI (OpenCV cvtColor): 5-10ms</li>
+     * </ul>
+     *
+     * <p>뷰티 필터 적용된 프레임을 화면에 표시할 때 사용합니다.</p>
+     *
+     * @param nv21Data NV21 포맷 바이트 배열
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param bitmap 출력 Bitmap (ARGB_8888, 크기는 width x height)
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int nv21ToRgba(@NonNull byte[] nv21Data, int width, int height,
+                                  @NonNull android.graphics.Bitmap bitmap) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeNv21ToRgba(nv21Data, width, height, bitmap);
+    }
+
+    // ========================================================================
     // 정보 API
     // ========================================================================
 
@@ -683,4 +798,14 @@ public final class IrisLensSDK {
     private static native String nativeGetBuildInfo();
     private static native String nativeGetLastError();
     private static native String nativeErrorToString(int errorCode);
+
+    // Beauty Filter API
+    private static native void nativeDefaultBeautyConfig(BeautyFilterConfig config);
+    private static native int nativeSetBeautyFilter(BeautyFilterConfig config);
+    private static native int nativeGetBeautyFilter(BeautyFilterConfig config);
+    private static native boolean nativeIsBeautyFilterEnabled();
+    private static native int nativeApplyBeautyFilter(byte[] frameData, int width, int height, int format);
+
+    // NV21 → RGBA 고속 변환 API
+    private static native int nativeNv21ToRgba(byte[] nv21Data, int width, int height, android.graphics.Bitmap bitmap);
 }

@@ -125,10 +125,23 @@ add_library(iris_jni SHARED
 # 타겟 설정
 # ==============================================================================
 
+# ==============================================================================
+# OpenCV 찾기 (NV21 → RGBA 변환용)
+# ==============================================================================
+
+if(ANDROID)
+    set(OpenCV_DIR "${PROJECT_ROOT}/cpp/third_party/opencv/android/sdk/native/jni")
+endif()
+
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+message(STATUS "IrisSDK JNI: OpenCV version: ${OpenCV_VERSION}")
+message(STATUS "IrisSDK JNI: OpenCV include dirs: ${OpenCV_INCLUDE_DIRS}")
+
 target_include_directories(iris_jni
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${IRIS_SDK_INCLUDE_DIR}
+        ${OpenCV_INCLUDE_DIRS}
 )
 
 # ==============================================================================
@@ -138,16 +151,23 @@ target_include_directories(iris_jni
 # Android 시스템 라이브러리 찾기
 find_library(ANDROID_LOG_LIB log)
 find_library(ANDROID_LIB android)
+find_library(ANDROID_JNIGRAPHICS_LIB jnigraphics)
 
 target_link_libraries(iris_jni
     PRIVATE
         ${IRIS_SDK_CORE_TARGET}
         ${ANDROID_LOG_LIB}
+        ${OpenCV_LIBS}
 )
 
-# android 라이브러리가 있으면 링크 (jnigraphics 등 사용 시 필요)
+# android 라이브러리가 있으면 링크
 if(ANDROID_LIB)
     target_link_libraries(iris_jni PRIVATE ${ANDROID_LIB})
+endif()
+
+# jnigraphics 라이브러리 링크 (AndroidBitmap API 사용)
+if(ANDROID_JNIGRAPHICS_LIB)
+    target_link_libraries(iris_jni PRIVATE ${ANDROID_JNIGRAPHICS_LIB})
 endif()
 
 # ==============================================================================

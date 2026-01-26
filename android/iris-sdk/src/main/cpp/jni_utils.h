@@ -22,6 +22,7 @@ struct IrisResult;
 struct IrisLensConfig;
 struct IrisLandmark;
 struct IrisRect;
+struct BeautyFilterConfig;
 
 // ============================================================================
 // Android 로깅 매크로
@@ -353,6 +354,14 @@ struct JniCache {
     jfieldID lensConfig_applyLeft = nullptr;
     jfieldID lensConfig_applyRight = nullptr;
 
+    // BeautyFilterConfig 클래스
+    jclass beautyConfigClass = nullptr;
+    jfieldID beautyConfig_enabled = nullptr;
+    jfieldID beautyConfig_intensity = nullptr;
+    jfieldID beautyConfig_smoothing = nullptr;
+    jfieldID beautyConfig_brightness = nullptr;
+    jfieldID beautyConfig_softFocus = nullptr;
+
     /**
      * @brief 캐시 초기화
      * @param env JNI 환경
@@ -370,7 +379,7 @@ struct JniCache {
      * @brief 초기화 여부 확인
      */
     [[nodiscard]] bool isInitialized() const noexcept {
-        return irisResultClass != nullptr && lensConfigClass != nullptr;
+        return irisResultClass != nullptr && lensConfigClass != nullptr && beautyConfigClass != nullptr;
     }
 };
 
@@ -402,6 +411,26 @@ bool copyResultToJava(JNIEnv* env, const IrisResult& src, jobject dest);
  * @return 성공 여부
  */
 bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest);
+
+/**
+ * @brief Java BeautyFilterConfig를 C++ BeautyFilterConfig로 변환
+ *
+ * @param env JNI 환경
+ * @param src Java BeautyFilterConfig 객체
+ * @param dest C++ BeautyFilterConfig 구조체
+ * @return 성공 여부
+ */
+bool copyBeautyConfigFromJava(JNIEnv* env, jobject src, BeautyFilterConfig& dest);
+
+/**
+ * @brief C++ BeautyFilterConfig를 Java BeautyFilterConfig 객체로 복사
+ *
+ * @param env JNI 환경
+ * @param src C++ BeautyFilterConfig 구조체
+ * @param dest Java BeautyFilterConfig 객체
+ * @return 성공 여부
+ */
+bool copyBeautyConfigToJava(JNIEnv* env, const BeautyFilterConfig& src, jobject dest);
 
 /**
  * @brief Java 예외 확인 및 로깅

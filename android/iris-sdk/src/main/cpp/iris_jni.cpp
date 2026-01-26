@@ -11,9 +11,14 @@
 
 #include "jni_utils.h"
 #include "iris_sdk/sdk_api.h"
+#include "iris_sdk/beauty_filter.h"
 
 #include <cstring>
 #include <mutex>
+
+// NV21 → RGBA 변환용
+#include <android/bitmap.h>
+#include <opencv2/imgproc.hpp>
 
 // ============================================================================
 // 전역 상태
@@ -104,6 +109,29 @@ bool JniCache::init(JNIEnv* env) {
         return false;
     }
 
+    // BeautyFilterConfig 클래스 찾기
+    jclass localBeautyConfigClass = env->FindClass("com/irislenssdk/BeautyFilterConfig");
+    if (!localBeautyConfigClass) {
+        LOGE("Failed to find BeautyFilterConfig class");
+        return false;
+    }
+    beautyConfigClass = static_cast<jclass>(env->NewGlobalRef(localBeautyConfigClass));
+    env->DeleteLocalRef(localBeautyConfigClass);
+
+    // BeautyFilterConfig 필드 ID 캐시
+    beautyConfig_enabled = env->GetFieldID(beautyConfigClass, "enabled", "Z");
+    beautyConfig_intensity = env->GetFieldID(beautyConfigClass, "intensity", "F");
+    beautyConfig_smoothing = env->GetFieldID(beautyConfigClass, "smoothing", "F");
+    beautyConfig_brightness = env->GetFieldID(beautyConfigClass, "brightness", "F");
+    beautyConfig_softFocus = env->GetFieldID(beautyConfigClass, "softFocus", "F");
+
+    // 필드 ID 검증
+    if (!beautyConfig_enabled || !beautyConfig_intensity || !beautyConfig_smoothing ||
+        !beautyConfig_brightness || !beautyConfig_softFocus) {
+        LOGE("Failed to get BeautyFilterConfig field IDs");
+        return false;
+    }
+
     LOGI("JNI cache initialized successfully");
     return true;
 }
@@ -118,6 +146,10 @@ void JniCache::destroy(JNIEnv* env) {
     if (lensConfigClass) {
         env->DeleteGlobalRef(lensConfigClass);
         lensConfigClass = nullptr;
+    }
+    if (beautyConfigClass) {
+        env->DeleteGlobalRef(beautyConfigClass);
+        beautyConfigClass = nullptr;
     }
 
     LOGI("JNI cache destroyed");
@@ -212,6 +244,38 @@ bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     dest.edge_feather = env->GetFloatField(src, g_jniCache.lensConfig_edgeFeather);
     dest.apply_left = env->GetBooleanField(src, g_jniCache.lensConfig_applyLeft);
     dest.apply_right = env->GetBooleanField(src, g_jniCache.lensConfig_applyRight);
+
+    return !checkAndLogException(env);
+}
+
+bool copyBeautyConfigFromJava(JNIEnv* env, jobject src, BeautyFilterConfig& dest) {
+    if (!env || !src) return false;
+    if (!g_jniCache.isInitialized()) {
+        LOGE("JNI cache not initialized");
+        return false;
+    }
+
+    dest.enabled = env->GetBooleanField(src, g_jniCache.beautyConfig_enabled);
+    dest.intensity = env->GetFloatField(src, g_jniCache.beautyConfig_intensity);
+    dest.smoothing = env->GetFloatField(src, g_jniCache.beautyConfig_smoothing);
+    dest.brightness = env->GetFloatField(src, g_jniCache.beautyConfig_brightness);
+    dest.softFocus = env->GetFloatField(src, g_jniCache.beautyConfig_softFocus);
+
+    return !checkAndLogException(env);
+}
+
+bool copyBeautyConfigToJava(JNIEnv* env, const BeautyFilterConfig& src, jobject dest) {
+    if (!env || !dest) return false;
+    if (!g_jniCache.isInitialized()) {
+        LOGE("JNI cache not initialized");
+        return false;
+    }
+
+    env->SetBooleanField(dest, g_jniCache.beautyConfig_enabled, src.enabled);
+    env->SetFloatField(dest, g_jniCache.beautyConfig_intensity, src.intensity);
+    env->SetFloatField(dest, g_jniCache.beautyConfig_smoothing, src.smoothing);
+    env->SetFloatField(dest, g_jniCache.beautyConfig_brightness, src.brightness);
+    env->SetFloatField(dest, g_jniCache.beautyConfig_softFocus, src.softFocus);
 
     return !checkAndLogException(env);
 }
@@ -897,6 +961,296 @@ Java_com_irislenssdk_IrisLensSDK_nativeIsUsingInferenceThread(
     bool using_inference_thread = iris_sdk_is_using_inference_thread();
     LOGD("nativeIsUsingInferenceThread: %s", using_inference_thread ? "true" : "false");
     return using_inference_thread ? JNI_TRUE : JNI_FALSE;
+}
+
+// ============================================================================
+// Beauty Filter API
+// ============================================================================
+
+/**
+ * @brief 기본 뷰티 필터 설정 가져오기
+ *
+ * 기본값으로 초기화된 BeautyFilterConfig를 Java 객체에 복사합니다.
+ *
+ * Java: native void nativeDefaultBeautyConfig(BeautyFilterConfig config);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeDefaultBeautyConfig(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jobject configObj) {
+
+    LOGD("nativeDefaultBeautyConfig called");
+
+    if (!configObj) {
+        LOGE("nativeDefaultBeautyConfig: configObj is null");
+        return;
+    }
+
+    // C API로 기본 설정 가져오기
+    BeautyFilterConfig nativeConfig = {};
+    iris_sdk_default_beauty_config(&nativeConfig);
+
+    // Java 객체로 복사
+    if (!copyBeautyConfigToJava(env, nativeConfig, configObj)) {
+        LOGE("Failed to copy default beauty config to Java object");
+    }
+}
+
+/**
+ * @brief 뷰티 필터 설정 적용
+ *
+ * Java 객체의 설정을 네이티브 뷰티 필터에 적용합니다.
+ *
+ * Java: native int nativeSetBeautyFilter(BeautyFilterConfig config);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetBeautyFilter(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jobject configObj) {
+
+    LOGD("nativeSetBeautyFilter called");
+
+    if (!configObj) {
+        LOGE("nativeSetBeautyFilter: configObj is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    // Java 객체에서 설정 복사
+    BeautyFilterConfig nativeConfig = {};
+    if (!copyBeautyConfigFromJava(env, configObj, nativeConfig)) {
+        LOGE("Failed to copy beauty config from Java object");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    LOGD("Setting beauty filter: enabled=%d, intensity=%.2f, smoothing=%.2f, brightness=%.2f, softFocus=%.2f",
+         nativeConfig.enabled, nativeConfig.intensity, nativeConfig.smoothing,
+         nativeConfig.brightness, nativeConfig.softFocus);
+
+    // C API 호출
+    IrisSdkError result = iris_sdk_set_beauty_filter(&nativeConfig);
+
+    if (result == IRIS_SDK_OK) {
+        LOGI("Beauty filter settings applied successfully");
+    } else {
+        LOGE("Failed to set beauty filter: %d (%s)",
+             result, iris_sdk_error_to_string(result));
+    }
+
+    return static_cast<jint>(result);
+}
+
+/**
+ * @brief 현재 뷰티 필터 설정 가져오기
+ *
+ * 현재 적용된 뷰티 필터 설정을 Java 객체로 반환합니다.
+ *
+ * Java: native int nativeGetBeautyFilter(BeautyFilterConfig config);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetBeautyFilter(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jobject configObj) {
+
+    LOGD("nativeGetBeautyFilter called");
+
+    if (!configObj) {
+        LOGE("nativeGetBeautyFilter: configObj is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    // C API로 현재 설정 가져오기
+    BeautyFilterConfig nativeConfig = {};
+    IrisSdkError result = iris_sdk_get_beauty_filter(&nativeConfig);
+
+    if (result != IRIS_SDK_OK) {
+        LOGE("Failed to get beauty filter: %d (%s)",
+             result, iris_sdk_error_to_string(result));
+        return static_cast<jint>(result);
+    }
+
+    // Java 객체로 복사
+    if (!copyBeautyConfigToJava(env, nativeConfig, configObj)) {
+        LOGE("Failed to copy beauty config to Java object");
+        return static_cast<jint>(IRIS_SDK_UNKNOWN);
+    }
+
+    LOGD("Got beauty filter: enabled=%d, intensity=%.2f, smoothing=%.2f, brightness=%.2f, softFocus=%.2f",
+         nativeConfig.enabled, nativeConfig.intensity, nativeConfig.smoothing,
+         nativeConfig.brightness, nativeConfig.softFocus);
+
+    return static_cast<jint>(IRIS_SDK_OK);
+}
+
+/**
+ * @brief 뷰티 필터 활성화 여부 확인
+ *
+ * Java: native boolean nativeIsBeautyFilterEnabled();
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeIsBeautyFilterEnabled(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    bool enabled = iris_sdk_is_beauty_filter_enabled();
+    LOGD("nativeIsBeautyFilterEnabled: %s", enabled ? "true" : "false");
+    return enabled ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * @brief 프레임에 뷰티 필터 적용
+ *
+ * 현재 설정된 뷰티 필터를 프레임에 적용합니다.
+ * 프레임 데이터는 in-place로 수정됩니다.
+ *
+ * Java: native int nativeApplyBeautyFilter(byte[] frameData, int width, int height, int format);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyFilter(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jbyteArray frameData,
+    jint width,
+    jint height,
+    jint format) {
+
+    LOGV("nativeApplyBeautyFilter called: %dx%d, format=%d", width, height, format);
+
+    // 파라미터 검증
+    if (!frameData) {
+        LOGE("nativeApplyBeautyFilter: frameData is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+    if (width <= 0 || height <= 0) {
+        LOGE("nativeApplyBeautyFilter: invalid dimensions %dx%d", width, height);
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // RAII로 바이트 배열 접근 (쓰기 가능 - mode=0: 변경사항 복사)
+    ScopedByteArray frame(env, frameData, 0);
+    if (!frame.valid()) {
+        LOGE("nativeApplyBeautyFilter: failed to get frame data");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // 버퍼 크기 검증
+    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
+        LOGE("nativeApplyBeautyFilter: frame buffer size mismatch");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // C API 호출
+    IrisSdkError error = iris_sdk_apply_beauty_filter(
+        frame.data(),
+        static_cast<int>(width),
+        static_cast<int>(height),
+        static_cast<IrisFrameFormat>(format));
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("Apply beauty filter failed: %d (%s)", error, iris_sdk_error_to_string(error));
+    }
+
+    return static_cast<jint>(error);
+}
+
+// ============================================================================
+// NV21 → RGBA 고속 변환 API
+// ============================================================================
+
+/**
+ * @brief NV21 데이터를 RGBA Bitmap으로 고속 변환
+ *
+ * OpenCV를 사용한 직접 색공간 변환으로 Java JPEG 방식 대비 10배 이상 빠름.
+ * - Java (YuvImage → JPEG → Bitmap): 50-100ms
+ * - JNI (OpenCV cvtColor): 5-10ms
+ *
+ * Java: native int nativeNv21ToRgba(byte[] nv21Data, int width, int height, Bitmap bitmap);
+ *
+ * @param nv21Data NV21 포맷 바이트 배열
+ * @param width 프레임 너비
+ * @param height 프레임 높이
+ * @param bitmap 출력 Bitmap (ARGB_8888, 크기는 width x height)
+ * @return 에러 코드 (0 = 성공)
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeNv21ToRgba(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jbyteArray nv21Data,
+    jint width,
+    jint height,
+    jobject bitmap) {
+
+    LOGV("nativeNv21ToRgba called: %dx%d", width, height);
+
+    // 파라미터 검증
+    if (!nv21Data) {
+        LOGE("nativeNv21ToRgba: nv21Data is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+    if (!bitmap) {
+        LOGE("nativeNv21ToRgba: bitmap is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+    if (width <= 0 || height <= 0) {
+        LOGE("nativeNv21ToRgba: invalid dimensions %dx%d", width, height);
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // RAII로 바이트 배열 접근 (읽기 전용)
+    ScopedByteArray nv21(env, nv21Data, JNI_ABORT);
+    if (!nv21.valid()) {
+        LOGE("nativeNv21ToRgba: failed to get nv21 data");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // NV21 버퍼 크기 검증 (Y + UV = width * height * 1.5)
+    jsize expectedSize = width * height * 3 / 2;
+    if (nv21.size() < expectedSize) {
+        LOGE("nativeNv21ToRgba: buffer size mismatch. Expected %d, got %d",
+             expectedSize, nv21.size());
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // Bitmap 픽셀 버퍼 잠금
+    AndroidBitmapInfo bitmapInfo;
+    if (AndroidBitmap_getInfo(env, bitmap, &bitmapInfo) != ANDROID_BITMAP_RESULT_SUCCESS) {
+        LOGE("nativeNv21ToRgba: failed to get bitmap info");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // Bitmap 포맷 및 크기 검증
+    if (bitmapInfo.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+        LOGE("nativeNv21ToRgba: bitmap format must be ARGB_8888, got %d", bitmapInfo.format);
+        return static_cast<jint>(IRIS_SDK_INVALID_FORMAT);
+    }
+    if (bitmapInfo.width != static_cast<uint32_t>(width) ||
+        bitmapInfo.height != static_cast<uint32_t>(height)) {
+        LOGE("nativeNv21ToRgba: bitmap size mismatch. Expected %dx%d, got %dx%d",
+             width, height, bitmapInfo.width, bitmapInfo.height);
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    void* bitmapPixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &bitmapPixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
+        LOGE("nativeNv21ToRgba: failed to lock bitmap pixels");
+        return static_cast<jint>(IRIS_SDK_UNKNOWN);
+    }
+
+    // OpenCV Mat으로 래핑 (복사 없음)
+    cv::Mat nv21Mat(height + height / 2, width, CV_8UC1, const_cast<uint8_t*>(nv21.data()));
+    cv::Mat rgbaMat(height, width, CV_8UC4, bitmapPixels, bitmapInfo.stride);
+
+    // NV21 → RGBA 변환 (OpenCV 고속 변환)
+    cv::cvtColor(nv21Mat, rgbaMat, cv::COLOR_YUV2RGBA_NV21);
+
+    // Bitmap 픽셀 버퍼 해제
+    AndroidBitmap_unlockPixels(env, bitmap);
+
+    LOGV("nativeNv21ToRgba completed successfully");
+    return static_cast<jint>(IRIS_SDK_OK);
 }
 
 }  // extern "C"
