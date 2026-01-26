@@ -337,7 +337,123 @@ val screenY = normalizedY * imageHeight * scaleFactor * aspectRatio + offsetY
 
 ---
 
-## 7. 참고: 주요 상수
+## 7. Face Landmark 모델 V1 vs V2 비교
+
+### 7.1 개요
+
+MediaPipe는 두 가지 버전의 Face Landmark 모델을 제공합니다.
+
+| 항목 | V1 모델 | V2 모델 |
+|------|---------|---------|
+| **파일명** | `face_landmark.tflite` | `face_landmark_v2.tflite` |
+| **입력 크기** | 192 × 192 | 256 × 256 |
+| **랜드마크 수** | 468개 | 478개 |
+| **홍채 포함** | ❌ 별도 모델 필요 | ✅ 내장 |
+| **파일 크기** | ~1.2MB | ~2.5MB |
+| **추론 시간** | 빠름 | 약간 느림 |
+
+### 7.2 랜드마크 인덱스 구조
+
+#### V1 모델 (468개)
+```
+인덱스 0-467: 얼굴 랜드마크
+  - 0-16: 턱 윤곽 (17개)
+  - 17-21: 왼쪽 눈썹 (5개)
+  - 22-26: 오른쪽 눈썹 (5개)
+  - 27-35: 코 (9개)
+  - 36-47: 눈 (12개)
+  - 48-67: 입술 외곽 (20개)
+  - 68-467: 나머지 얼굴 메쉬
+```
+
+#### V2 모델 (478개)
+```
+인덱스 0-467: V1과 동일한 얼굴 랜드마크
+인덱스 468-477: 홍채 랜드마크 (추가됨)
+
+  왼쪽 홍채 (화면상 오른쪽):
+  - 468: 홍채 중심
+  - 469: 홍채 상단 (12시 방향)
+  - 470: 홍채 우측 (3시 방향)
+  - 471: 홍채 하단 (6시 방향)
+  - 472: 홍채 좌측 (9시 방향)
+
+  오른쪽 홍채 (화면상 왼쪽):
+  - 473: 홍채 중심
+  - 474: 홍채 상단 (12시 방향)
+  - 475: 홍채 우측 (3시 방향)
+  - 476: 홍채 하단 (6시 방향)
+  - 477: 홍채 좌측 (9시 방향)
+```
+
+### 7.3 파이프라인 차이
+
+#### V1 파이프라인 (3단계)
+```
+Face Detection → Face Landmark (468) → Iris Landmark (별도 모델)
+                      ↓                        ↓
+              얼굴 메쉬 출력             홍채 5포인트 출력
+```
+- 눈 영역을 별도로 crop하여 Iris Landmark 모델 실행 필요
+- 추가 좌표 변환 필요 (눈 crop → 전체 이미지)
+
+#### V2 파이프라인 (2단계)
+```
+Face Detection → Face Landmark V2 (478)
+                        ↓
+              얼굴 메쉬 + 홍채 포인트 통합 출력
+```
+- Iris Landmark 모델 실행 불필요
+- 단일 모델에서 홍채까지 출력
+- 좌표 변환 단순화
+
+### 7.4 성능 비교
+
+| 항목 | V1 | V2 | 비고 |
+|------|-----|-----|------|
+| 모델 로드 시간 | 빠름 | 보통 | V2가 파일 크기 큼 |
+| 추론 시간 (Face) | ~15ms | ~20ms | 입력 크기 차이 |
+| 추론 시간 (Iris) | +~10ms | 0ms | V2는 내장 |
+| **총 시간** | ~25ms | ~20ms | **V2가 더 빠름** |
+| 메모리 사용량 | 낮음 | 중간 | 단일 모델 |
+| 홍채 정확도 | 높음 | 보통 | V1 전용 모델이 더 정밀 |
+
+### 7.5 권장 사용 시나리오
+
+| 시나리오 | 권장 모델 | 이유 |
+|----------|-----------|------|
+| **AR 렌즈 피팅** | V2 | 단순한 파이프라인, 충분한 정확도 |
+| **정밀 홍채 추적** | V1 | 전용 Iris 모델의 높은 정확도 |
+| **저사양 디바이스** | V1 | 낮은 메모리 사용량 |
+| **빠른 개발** | V2 | 단순한 구현 |
+
+### 7.6 IrisLensSDK 구현
+
+현재 SDK는 **V2 우선, V1 폴백** 전략 사용:
+
+```cpp
+// cpp/src/mediapipe_detector.cpp (라인 568-604)
+
+// 1. V2 모델 먼저 시도
+if (std::filesystem::exists(face_landmark_v2_path) &&
+    loadModel(face_landmark_v2_path, ...)) {
+    model_version = 2;
+    // V2: 478 랜드마크, 홍채 내장
+}
+// 2. V1 모델로 폴백
+else if (loadModel(face_landmark_v1_path, ...)) {
+    model_version = 1;
+    // V1: 468 랜드마크, Iris 모델 별도 로드
+}
+```
+
+V1 모델 사용 시:
+- 홍채 랜드마크(468-477)는 `-1.0`으로 채워짐
+- OverlayView에서 유효하지 않은 좌표 스킵 처리
+
+---
+
+## 8. 참고: 주요 상수
 
 ```cpp
 // Face Detection
@@ -354,7 +470,7 @@ FACE_LANDMARK_V2_INPUT_WIDTH = 256
 FACE_LANDMARK_V2_INPUT_HEIGHT = 256
 FACE_LANDMARK_V2_COUNT = 478
 
-// Iris Landmark
+// Iris Landmark (V1 전용)
 IRIS_LANDMARK_INPUT_WIDTH = 64
 IRIS_LANDMARK_INPUT_HEIGHT = 64
 IRIS_LANDMARK_COUNT = 5
@@ -365,7 +481,7 @@ FACE_CROP_MARGIN = 0.25 (25%)
 
 ---
 
-## 8. 관련 파일
+## 9. 관련 파일
 
 | 파일 | 역할 |
 |------|------|
@@ -373,8 +489,11 @@ FACE_CROP_MARGIN = 0.25 (25%)
 | `android/.../OverlayView.kt` | Android 렌더링 |
 | `android/.../CameraManager.kt` | 카메라 + SDK 연동 |
 | `cpp/include/iris_sdk/types.h` | 데이터 구조 정의 |
+| `shared/models/face_landmark.tflite` | V1 모델 (468 랜드마크) |
+| `shared/models/face_landmark_v2.tflite` | V2 모델 (478 랜드마크, 홍채 내장) |
+| `shared/models/iris_landmark.tflite` | Iris 모델 (V1 전용) |
 
 ---
 
 *문서 작성일: 2025-01-21*
-*최종 수정일: 2025-01-21 (aspect ratio 보정 적용 반영)*
+*최종 수정일: 2025-01-26 (V1 vs V2 모델 비교 섹션 추가)*

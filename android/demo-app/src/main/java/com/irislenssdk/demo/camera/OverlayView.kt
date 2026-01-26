@@ -773,8 +773,17 @@ class OverlayView @JvmOverloads constructor(
             canvas.drawRect(tempRect, faceRectPaint)
         }
 
+        // 모델 버전 판별 (랜드마크 수로 구분)
+        val meshSize = result.faceMesh?.size?.div(3) ?: 0
+        val modelVersion = when {
+            meshSize >= 478 -> "V2 (478)"
+            meshSize >= 468 -> "V1 (468)"
+            else -> "N/A ($meshSize)"
+        }
+
         // 디버그 텍스트
         val debugInfo = buildString {
+            append("Model: $modelVersion\n")
             append("Confidence: %.2f\n".format(result.confidence))
             append("Left: (%.3f, %.3f) r=%.1f\n".format(
                 result.leftIrisX, result.leftIrisY, result.leftRadius))
@@ -945,6 +954,9 @@ class OverlayView @JvmOverloads constructor(
 
     /**
      * 단일 홍채 포인트 그리기
+     *
+     * V1 모델(468개)은 홍채 랜드마크가 없어서 -1로 채워짐
+     * 이 경우 그리지 않음
      */
     private fun drawSingleIrisPoint(
         canvas: Canvas,
@@ -955,11 +967,16 @@ class OverlayView @JvmOverloads constructor(
         offsetY: Float,
         isCenter: Boolean
     ) {
-        val x = mesh[index * 3].coerceIn(0f, 1f)
-        val y = mesh[index * 3 + 1].coerceIn(0f, 1f)
+        val rawX = mesh[index * 3]
+        val rawY = mesh[index * 3 + 1]
 
-        var screenX = x * imageWidth * scaleFactor + offsetX
-        val screenY = y * imageHeight * scaleFactor + offsetY
+        // V1 모델 사용 시 홍채 랜드마크는 -1로 채워짐 - 스킵
+        if (rawX < 0f || rawY < 0f || rawX > 1f || rawY > 1f) {
+            return
+        }
+
+        var screenX = rawX * imageWidth * scaleFactor + offsetX
+        val screenY = rawY * imageHeight * scaleFactor + offsetY
 
         if (isMirror) {
             screenX = width - screenX
