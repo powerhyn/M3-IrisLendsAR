@@ -28,8 +28,8 @@ namespace {
     /// 최대 프레임 크기 (메모리 보호)
     constexpr int MAX_FRAME_SIZE = 8192;
 
-    /// Bilateral Filter 최대 diameter
-    constexpr int MAX_BILATERAL_DIAMETER = 15;
+    /// Bilateral Filter 최대 diameter (현재 고정값 사용으로 미사용)
+    // constexpr int MAX_BILATERAL_DIAMETER = 15;
 
     /// Gaussian Blur 최대 커널 크기
     constexpr int MAX_BLUR_KERNEL_SIZE = 31;
@@ -334,27 +334,26 @@ private:
     }
 
     /**
-     * @brief 피부 스무딩 적용 (Bilateral Filter)
+     * @brief 피부 스무딩 적용 (Bilateral Filter - 성능 최적화 버전)
      *
      * Bilateral Filter는 에지를 보존하면서 노이즈를 제거하여
      * 피부를 자연스럽게 스무딩합니다.
+     *
+     * 성능 최적화: diameter 5 고정, sigma 값 감소
      */
     void applySkinSmoothing(cv::Mat& image, float strength) {
-        // diameter: strength에 따라 5~15
-        int diameter = static_cast<int>(5 + strength * 10);
-        diameter = std::min(diameter, MAX_BILATERAL_DIAMETER);
-        if (diameter % 2 == 0) {
-            diameter += 1;  // 홀수로 만들기
-        }
+        // 성능 최적화: diameter 5 고정 (기존: 5~15)
+        // bilateral filter는 O(d^2)이므로 diameter가 클수록 급격히 느려짐
+        constexpr int diameter = 5;
 
-        // sigma 값: strength에 따라 조절
-        double sigma_color = 50.0 + strength * 100.0;  // 50~150
-        double sigma_space = 50.0 + strength * 100.0;
+        // sigma 값: strength에 따라 조절 (기존보다 감소)
+        double sigma_color = 30.0 + strength * 50.0;  // 30~80 (기존: 50~150)
+        double sigma_space = 30.0 + strength * 50.0;
 
         cv::bilateralFilter(image, smooth_buffer_, diameter, sigma_color, sigma_space);
 
         // 원본과 블렌딩하여 자연스럽게
-        float blend_alpha = strength * 0.8f;  // 최대 80%까지만 적용
+        float blend_alpha = strength * 0.7f;  // 최대 70%까지만 적용
         cv::addWeighted(smooth_buffer_, blend_alpha, image, 1.0f - blend_alpha, 0, image);
     }
 

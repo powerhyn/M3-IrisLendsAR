@@ -49,15 +49,19 @@ class FrameAnalyzer(
     companion object {
         private const val TAG = "FrameAnalyzer"
 
-        // 분석 간격 (약 30fps)
-        private const val MIN_INTERVAL_MS = 33L
+        // 분석 간격 (약 60fps 목표)
+        private const val MIN_INTERVAL_MS = 16L
 
         // FPS 계산 윈도우
         private const val FPS_WINDOW_SIZE = 10
 
         // 뷰티 필터 렌더링용 다운스케일 비율 (1 = 원본, 2 = 1/2, 4 = 1/4)
         // 높을수록 빠르지만 품질 저하
-        private const val BEAUTY_DOWNSCALE_FACTOR = 2
+        private const val BEAUTY_DOWNSCALE_FACTOR = 2  // 품질 개선: 3 → 2
+
+        // 프레임 스킵 (필터 적용 빈도: 1 = 매 프레임, 2 = 2프레임마다, 3 = 3프레임마다)
+        // 60fps 검출 기준 → 2 = 30fps 필터, 3 = 20fps 필터
+        private const val BEAUTY_FILTER_FRAME_SKIP = 2  // 부드러움 개선: 3 → 2
     }
 
     // NV21 버퍼 (재사용)
@@ -68,6 +72,10 @@ class FrameAnalyzer(
 
     // 뷰티 필터 활성화 플래그
     var beautyFilterEnabled: Boolean = false
+
+    // 프레임 스킵 카운터 (뷰티 필터 적용 빈도 조절)
+    private var beautyFrameCounter = 0
+    private var cachedFilteredBitmap: Bitmap? = null
 
     // JNI 변환용 RGBA Bitmap (재사용)
     private var rgbaBitmap: Bitmap? = null
@@ -150,19 +158,35 @@ class FrameAnalyzer(
                 processingTimes.removeFirst()
             }
 
-            // 뷰티 필터 적용 (활성화된 경우)
+            // 뷰티 필터 적용 (활성화된 경우, 프레임 스킵 적용)
             var filteredBitmap: Bitmap? = null
             if (beautyFilterEnabled && IrisLensSDK.isBeautyFilterEnabled()) {
-                // 프레임에 뷰티 필터 적용 (in-place 수정)
-                val filterError = IrisLensSDK.applyBeautyFilter(
-                    nv21, width, height, IrisLensSDK.FORMAT_NV21
-                )
-                if (filterError == IrisLensSDK.OK) {
-                    // NV21 → Bitmap 변환
-                    filteredBitmap = nv21ToBitmap(nv21, width, height, rotationDegrees)
+                beautyFrameCounter++
+
+                // 프레임 스킵: N프레임마다 필터 적용, 나머지는 캐시 사용
+                if (beautyFrameCounter % BEAUTY_FILTER_FRAME_SKIP == 0) {
+                    // 프레임에 뷰티 필터 적용 (in-place 수정)
+                    val filterError = IrisLensSDK.applyBeautyFilter(
+                        nv21, width, height, IrisLensSDK.FORMAT_NV21
+                    )
+                    if (filterError == IrisLensSDK.OK) {
+                        // NV21 → Bitmap 변환 후 캐시
+                        cachedFilteredBitmap?.recycle()
+                        cachedFilteredBitmap = nv21ToBitmap(nv21, width, height, rotationDegrees)
+                        filteredBitmap = cachedFilteredBitmap
+                    } else {
+                        Log.w(TAG, "Beauty filter error: ${IrisLensSDK.errorToString(filterError)}")
+                        filteredBitmap = cachedFilteredBitmap  // 캐시 사용
+                    }
                 } else {
-                    Log.w(TAG, "Beauty filter error: ${IrisLensSDK.errorToString(filterError)}")
+                    // 캐시된 비트맵 재사용 (프레임 스킵)
+                    filteredBitmap = cachedFilteredBitmap
                 }
+            } else {
+                // 필터 비활성화 시 캐시 정리
+                cachedFilteredBitmap?.recycle()
+                cachedFilteredBitmap = null
+                beautyFrameCounter = 0
             }
 
             // 결과 전달

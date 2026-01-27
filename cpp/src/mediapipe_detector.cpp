@@ -35,6 +35,9 @@
 #include <opencv2/imgproc.hpp>
 #endif
 
+// One-Euro Filter (지터링 방지)
+#include "iris_sdk/one_euro_filter.h"
+
 namespace iris_sdk {
 
 // ============================================================
@@ -185,6 +188,15 @@ public:
     bool has_prev_result = false;
     Rect prev_face_rect;              ///< 이전 프레임 얼굴 영역 (추적용, Face Mesh로 업데이트됨)
     Rect prev_face_detection_rect;    ///< Face Detection 원본 결과 (시각화용)
+
+    // ========================================
+    // One-Euro Filter: 지터링 방지
+    // min_cutoff: 높을수록 반응 빠름 (1.5 → 5.0)
+    // beta: 높을수록 빠른 움직임에 민감 (0.05 → 0.3)
+    // ========================================
+    IrisOneEuroFilter left_iris_filter{5.0f, 0.3f};   ///< 왼쪽 홍채 필터 (빠른 반응)
+    IrisOneEuroFilter right_iris_filter{5.0f, 0.3f};  ///< 오른쪽 홍채 필터 (빠른 반응)
+    bool use_one_euro_filter = false;  ///< 필터 비활성화 (최대 반응 테스트)
 
     // ========================================
     // ISS-001 수정: Letterbox 전처리 파라미터
@@ -2586,6 +2598,46 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                     right_result_debug = true;
                 }
             }
+        }
+    }
+
+    // =========================================================
+    // 5.5. One-Euro Filter 적용 (지터링 방지)
+    // =========================================================
+    if (impl_->use_one_euro_filter) {
+        // 왼쪽 홍채 필터링
+        if (result.left_detected) {
+            float x = result.left_iris[0].x;
+            float y = result.left_iris[0].y;
+            float r = result.left_radius;
+            impl_->left_iris_filter.filter(x, y, r);
+            // 중심점만 필터링 (나머지 랜드마크는 상대 위치 유지)
+            float dx = x - result.left_iris[0].x;
+            float dy = y - result.left_iris[0].y;
+            for (int i = 0; i < 5; ++i) {
+                result.left_iris[i].x += dx;
+                result.left_iris[i].y += dy;
+            }
+            result.left_radius = r;
+        } else {
+            impl_->left_iris_filter.reset();
+        }
+
+        // 오른쪽 홍채 필터링
+        if (result.right_detected) {
+            float x = result.right_iris[0].x;
+            float y = result.right_iris[0].y;
+            float r = result.right_radius;
+            impl_->right_iris_filter.filter(x, y, r);
+            float dx = x - result.right_iris[0].x;
+            float dy = y - result.right_iris[0].y;
+            for (int i = 0; i < 5; ++i) {
+                result.right_iris[i].x += dx;
+                result.right_iris[i].y += dy;
+            }
+            result.right_radius = r;
+        } else {
+            impl_->right_iris_filter.reset();
         }
     }
 

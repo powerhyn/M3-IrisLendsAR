@@ -209,7 +209,7 @@ class MainActivity : AppCompatActivity() {
             // GPU 가속 활성화 요청 (init 전에 호출!)
             // InferenceThread를 통해 전용 스레드에서 GPU delegate 초기화/실행
             // NOTE: 직접 호출 모드에서는 GPU 지원 안됨 (스레드 제약)
-            val enableGpu = true  // 성능 최적화: GPU 가속 활성화
+            val enableGpu = false  // GPU delegate 호환성 문제로 비활성화
             val gpuAvailable = IrisLensSDK.isGpuAvailable() && useInferenceThread && enableGpu
             Log.i(TAG, "GPU available: $gpuAvailable (enableGpu=$enableGpu)")
             if (gpuAvailable) {

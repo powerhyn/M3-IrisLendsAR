@@ -98,11 +98,14 @@ class OverlayView @JvmOverloads constructor(
         // 검출 실패 시 렌즈 유지 시간 (밀리초)
         // 이 시간 동안 얼굴 인식이 실패해도 마지막 유효한 위치에 렌즈 유지
         // 깜빡임 방지를 위한 임계값
-        private const val DETECTION_TIMEOUT_MS = 1000L  // 1초
+        private const val DETECTION_TIMEOUT_MS = 1000L  // 1초 (mesh, debug info 등)
+        private const val LENS_PERSISTENCE_TIMEOUT_MS = 2000L  // 2초 (렌즈 전용 - 더 긴 유지)
 
-        // One Euro Filter 파라미터
-        private const val ONE_EURO_MIN_CUTOFF = 1.0f   // 최소 컷오프 주파수 (낮을수록 부드러움)
-        private const val ONE_EURO_BETA = 0.05f        // 속도 계수 (높을수록 빠른 움직임에 민감) - 눈 감김 추적 개선
+        // One Euro Filter 파라미터 (빠른 반응 + 약간의 지터 방지)
+        // min_cutoff: 높을수록 반응 빠름 (15.0 = 빠른 반응 + 약간 스무딩)
+        // beta: 높을수록 빠른 움직임에 민감 (0.5 = 좋은 반응성)
+        private const val ONE_EURO_MIN_CUTOFF = 15.0f  // 빠른 반응 + 약간 스무딩
+        private const val ONE_EURO_BETA = 0.5f         // 빠른 반응 유지
         private const val ONE_EURO_D_CUTOFF = 1.0f     // 미분 컷오프 주파수
 
         // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)
@@ -297,9 +300,14 @@ class OverlayView @JvmOverloads constructor(
 
         // One Euro Filter를 사용한 스무딩
         result?.let {
-            if (it.detected && it.confidence >= MIN_RENDER_CONFIDENCE) {
-                // 유효한 검출 - 타임스탬프 및 캐시 업데이트
+            // 깜빡임 방지: 홍채가 검출되면 타임아웃 리셋 (confidence와 무관)
+            // confidence 체크는 좌표 업데이트에만 적용
+            val hasAnyIrisDetection = it.detected && (it.leftDetected || it.rightDetected)
+
+            if (hasAnyIrisDetection) {
+                // 홍채 검출됨 - 타임아웃 리셋 (렌즈 유지)
                 lastValidDetectionTime = currentTime
+                lastTimestamp = currentTime
 
                 // 값 복사 (IrisResult가 재사용되어 다음 프레임에서 reset()되므로)
                 cachedDetected = it.detected
@@ -307,6 +315,7 @@ class OverlayView @JvmOverloads constructor(
                 cachedLeftDetected = it.leftDetected
                 cachedRightDetected = it.rightDetected
                 cachedFaceMeshValid = it.faceMeshValid
+
                 // FaceMesh 복사 (클리핑용)
                 it.faceMesh?.let { mesh ->
                     if (cachedFaceMesh == null || cachedFaceMesh!!.size != mesh.size) {
@@ -316,27 +325,36 @@ class OverlayView @JvmOverloads constructor(
                     }
                 }
 
+                // 좌표 업데이트는 충분한 confidence가 있을 때만
+                // (낮은 confidence에서는 좌표가 부정확할 수 있음)
+                // 단, 첫 검출(radius=0)에서는 confidence 무관하게 업데이트 (렌즈 표시 위해)
+                val hasGoodConfidence = it.confidence >= MIN_RENDER_CONFIDENCE
+
                 // 왼쪽 눈 필터링
                 if (it.leftDetected) {
                     hasLeftEverDetected = true
-                    filteredLeftX = leftXFilter.filter(it.leftIrisX, currentTime)
-                    filteredLeftY = leftYFilter.filter(it.leftIrisY, currentTime)
-                    filteredLeftRadius = leftRadiusFilter.filter(it.leftRadius, currentTime)
+                    // 첫 검출이거나 confidence가 충분하면 업데이트
+                    if (hasGoodConfidence || filteredLeftRadius == 0f) {
+                        filteredLeftX = leftXFilter.filter(it.leftIrisX, currentTime)
+                        filteredLeftY = leftYFilter.filter(it.leftIrisY, currentTime)
+                        filteredLeftRadius = leftRadiusFilter.filter(it.leftRadius, currentTime)
+                    }
+                    // confidence 낮으면 마지막 필터링 값 유지 (깜빡임 방지)
                 }
-                // 검출 실패 시 마지막 필터링 값 유지 (깜빡임 방지)
 
                 // 오른쪽 눈 필터링
                 if (it.rightDetected) {
                     hasRightEverDetected = true
-                    filteredRightX = rightXFilter.filter(it.rightIrisX, currentTime)
-                    filteredRightY = rightYFilter.filter(it.rightIrisY, currentTime)
-                    filteredRightRadius = rightRadiusFilter.filter(it.rightRadius, currentTime)
+                    // 첫 검출이거나 confidence가 충분하면 업데이트
+                    if (hasGoodConfidence || filteredRightRadius == 0f) {
+                        filteredRightX = rightXFilter.filter(it.rightIrisX, currentTime)
+                        filteredRightY = rightYFilter.filter(it.rightIrisY, currentTime)
+                        filteredRightRadius = rightRadiusFilter.filter(it.rightRadius, currentTime)
+                    }
+                    // confidence 낮으면 마지막 필터링 값 유지 (깜빡임 방지)
                 }
-                // 검출 실패 시 마지막 필터링 값 유지 (깜빡임 방지)
-
-                lastTimestamp = currentTime
             }
-            // 검출 실패 시에도 필터 상태 유지 (마지막 위치에 렌즈 유지)
+            // 홍채 검출 실패 시에도 필터 상태 유지 (타임아웃 전까지 마지막 위치에 렌즈 유지)
         }
         // result가 null이어도 필터 상태 유지 (타임아웃 전까지 마지막 위치에 렌즈 유지)
 
@@ -427,17 +445,22 @@ class OverlayView @JvmOverloads constructor(
         // 캐시된 값 기반으로 유효한 검출 확인
         val hasValidDetection = cachedDetected && cachedConfidence >= MIN_RENDER_CONFIDENCE
 
-        // 렌더링 조건:
-        // 1. 유효한 검출이 있거나
-        // 2. 타임아웃 내에 유효한 검출이 있었고 한 번이라도 눈이 검출된 적 있음
-        val shouldRender = hasValidDetection ||
+        // [중요] 렌즈는 별도의 긴 타임아웃 사용 (깜빡임 방지)
+        // 렌즈 렌더링 조건: 유효한 필터 좌표가 있고 렌즈 타임아웃 내
+        val shouldRenderLens = (hasLeftEverDetected || hasRightEverDetected) &&
+            (filteredLeftRadius > 0 || filteredRightRadius > 0) &&
+            timeSinceLastValid < LENS_PERSISTENCE_TIMEOUT_MS
+
+        // Mesh/Debug 렌더링 조건 (기존 로직 유지)
+        val shouldRenderMeshAndDebug = hasValidDetection ||
             (timeSinceLastValid < DETECTION_TIMEOUT_MS && (hasLeftEverDetected || hasRightEverDetected))
 
-        if (!shouldRender) return
+        // 렌즈도 Mesh도 렌더링할 것이 없으면 리턴
+        if (!shouldRenderLens && !shouldRenderMeshAndDebug) return
 
         // 타임아웃 상태 로깅 (디버깅용)
-        if (!hasValidDetection && timeSinceLastValid < DETECTION_TIMEOUT_MS) {
-            Log.d(TAG, "Using cached values (${timeSinceLastValid}ms since last valid detection)")
+        if (!hasValidDetection && timeSinceLastValid < LENS_PERSISTENCE_TIMEOUT_MS) {
+            Log.d(TAG, "Lens persistence mode (${timeSinceLastValid}ms since last valid detection)")
         }
 
         // DEBUG: 좌표 변환 값 로깅 (ISS-001 디버깅)
@@ -475,10 +498,9 @@ class OverlayView @JvmOverloads constructor(
         }
         Log.d(TAG, "=====================")
 
-        // 렌즈 텍스처 렌더링 (스무딩된 값 사용)
-        // 렌즈 텍스처 렌더링 (One Euro Filter 적용된 값 사용)
-        // 깜빡임 방지: 한 번 검출된 눈은 검출 실패 시에도 마지막 위치에 렌즈 유지
-        if (showLens && lensTexture != null) {
+        // 렌즈 텍스처 렌더링 (별도의 긴 타임아웃 적용)
+        // 깜빡임 방지: 검출 실패해도 3초간 마지막 위치에 렌즈 유지
+        if (shouldRenderLens && showLens && lensTexture != null) {
             // 눈 영역 클리핑을 위한 Path 생성 (캐시된 FaceMesh 사용)
             val mesh = cachedFaceMesh
             val canClip = eyeClippingEnabled && mesh != null && cachedFaceMeshValid
@@ -528,8 +550,8 @@ class OverlayView @JvmOverloads constructor(
             }
         }
 
-        // 디버그 모드에서만 홍채 마커 표시 (필터링된 값 사용)
-        if (debugMode) {
+        // 디버그 모드에서만 홍채 마커 표시 (필터링된 값 사용, 일반 타임아웃 적용)
+        if (shouldRenderMeshAndDebug && debugMode) {
             if (cachedLeftDetected && lensConfig.applyLeft) {
                 drawIrisMarker(
                     canvas,
@@ -558,7 +580,8 @@ class OverlayView @JvmOverloads constructor(
         }
 
         // Face Mesh 표시 (충분한 신뢰도로 얼굴 감지 시에만, 캐시된 값 사용)
-        if (showFaceMesh && cachedFaceMeshValid && cachedFaceMesh != null
+        // Mesh는 일반 타임아웃 적용 (렌즈보다 빠르게 사라짐)
+        if (shouldRenderMeshAndDebug && showFaceMesh && cachedFaceMeshValid && cachedFaceMesh != null
             && cachedConfidence >= MIN_RENDER_CONFIDENCE) {
             drawFaceMeshCached(canvas, scaleFactor, offsetX, offsetY)
         }
