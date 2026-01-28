@@ -517,3 +517,22 @@ target_link_libraries(test_gpu_beauty_backend PRIVATE
 )
 
 gtest_discover_tests(test_gpu_beauty_backend DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W2-02: FastGuidedFilter 테스트
+# ============================================================
+add_executable(test_fast_guided_filter test_fast_guided_filter.cpp)
+target_include_directories(test_fast_guided_filter PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_fast_guided_filter PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (FastGuidedFilter에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_fast_guided_filter PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_fast_guided_filter PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_fast_guided_filter DISCOVERY_TIMEOUT 120)

@@ -57,6 +57,7 @@ set(IRIS_SDK_SOURCES
     src/beauty_roi_manager.cpp
     src/beauty_processor.cpp
     src/cpu_beauty_backend.cpp
+    src/fast_guided_filter.cpp
     # GPU module
     src/gpu/render_context.cpp
     src/gpu/cpu_render_context.cpp
