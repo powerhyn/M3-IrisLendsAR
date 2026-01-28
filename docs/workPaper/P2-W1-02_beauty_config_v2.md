@@ -6,7 +6,7 @@
 |------|------|
 | **작업 ID** | P2-W1-02 |
 | **Phase** | Phase 1: 기반 구조 리팩토링 |
-| **상태** | ⏳ 대기 |
+| **상태** | ✅ 완료 |
 | **예상 기간** | 1일 |
 | **의존성** | P2-W1-01 (RenderContext) |
 | **담당** | systems-programming:cpp-pro |
@@ -354,16 +354,38 @@ TEST(BeautyFilterConfigV2, CAPI_DefaultConfig) {
 
 ## 4. 완료 기준
 
-- [ ] `BeautyFilterConfigV2` 구조체 정의
-- [ ] 필드별 기본값 및 범위 문서화
-- [ ] `fromV1()` / `toV1()` 변환 메서드
-- [ ] `isValid()` / `clamp()` 헬퍼 메서드
-- [ ] V2 C API 함수 선언 및 스텁 구현
-- [ ] Java `BeautyFilterConfigV2` 클래스
-- [ ] 단위 테스트 100% 통과
+- [x] `BeautyFilterConfigV2` 구조체 정의
+- [x] 필드별 기본값 및 범위 문서화
+- [x] `fromV1()` / `toV1()` 변환 메서드
+- [x] `isValid()` / `clamp()` 헬퍼 메서드
+- [x] V2 C API 함수 선언 및 스텁 구현
+- [x] Java `BeautyFilterConfigV2` 클래스
+- [x] 단위 테스트 100% 통과 (20개 테스트)
 
 ---
 
 ## 5. 다음 작업
 
 - **P2-W1-03**: BeautyROIManager 구현
+
+---
+
+## 6. 실행 내역
+
+### 2025-01-28: 구현 완료
+
+**구현된 파일**:
+- `cpp/include/iris_sdk/beauty_filter.h`: BeautyFilterConfigV2 구조체 및 BeautyFilterConfigV2Helper
+- `cpp/src/beauty_filter.cpp`: C API 함수 구현
+- `cpp/tests/test_beauty_config_v2.cpp`: 20개 단위 테스트
+- `android/iris-sdk/src/main/java/com/irislenssdk/BeautyFilterConfigV2.java`: Java 클래스
+
+**C API 함수**:
+- `iris_sdk_default_beauty_config_v2()`: 기본값 설정
+- `iris_sdk_set_beauty_filter_v2()`: 설정 적용
+- `iris_sdk_get_beauty_filter_v2()`: 현재 설정 조회
+- `iris_sdk_apply_beauty_filter_v2()`: 필터 적용
+- `iris_sdk_beauty_gpu_available()`: GPU 사용 가능 여부
+- `iris_sdk_beauty_using_gpu()`: 현재 GPU 사용 여부
+
+**테스트 결과**: 20/20 통과
