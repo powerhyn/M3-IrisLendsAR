@@ -415,3 +415,92 @@ elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
 endif()
 
 gtest_discover_tests(test_integration DISCOVERY_TIMEOUT 300)
+
+# ============================================================
+# P2-W1-01: RenderContext 테스트 (GPU 모듈)
+# ============================================================
+add_executable(test_render_context test_render_context.cpp)
+target_include_directories(test_render_context PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_render_context PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (CPURenderContext에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_render_context PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_render_context PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_render_context DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W1-02: BeautyFilterConfigV2 테스트
+# ============================================================
+add_executable(test_beauty_config_v2 test_beauty_config_v2.cpp)
+target_include_directories(test_beauty_config_v2 PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_beauty_config_v2 PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (BeautyFilter 구현에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_beauty_config_v2 PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_beauty_config_v2 PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_beauty_config_v2 DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W1-03: BeautyROIManager 테스트
+# ============================================================
+add_executable(test_beauty_roi_manager test_beauty_roi_manager.cpp)
+target_include_directories(test_beauty_roi_manager PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_beauty_roi_manager PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (마스크 생성에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_beauty_roi_manager PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_beauty_roi_manager PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_beauty_roi_manager DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W1-04: BeautyProcessor 테스트
+# ============================================================
+add_executable(test_beauty_processor test_beauty_processor.cpp)
+target_include_directories(test_beauty_processor PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_beauty_processor PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (CPUBeautyBackend에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_beauty_processor PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_beauty_processor PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_beauty_processor DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W4-01: GridMesh 테스트 (Face Warp)
+# ============================================================
+add_executable(test_grid_mesh test_grid_mesh.cpp)
+target_include_directories(test_grid_mesh PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_grid_mesh PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_grid_mesh DISCOVERY_TIMEOUT 60)

@@ -421,4 +421,102 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_filter(
     return BeautyFilter::getInstance().applyFilter(frame_data, width, height, format);
 }
 
+// ============================================================================
+// V2 C API 구현
+// ============================================================================
+
+/// V2 설정 저장소 (싱글톤 패턴)
+namespace {
+    BeautyFilterConfigV2 g_config_v2 = {};
+    std::mutex g_config_v2_mutex;
+    bool g_config_v2_initialized = false;
+
+    void ensureV2ConfigInitialized() {
+        if (!g_config_v2_initialized) {
+            g_config_v2 = iris_sdk::BeautyFilterConfigV2Helper::defaults();
+            g_config_v2_initialized = true;
+        }
+    }
+}
+
+IRIS_SDK_EXPORT void iris_sdk_default_beauty_config_v2(BeautyFilterConfigV2* config) {
+    if (config == nullptr) {
+        return;
+    }
+    *config = iris_sdk::BeautyFilterConfigV2Helper::defaults();
+}
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_beauty_filter_v2(const BeautyFilterConfigV2* config) {
+    if (config == nullptr) {
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    if (!iris_sdk::BeautyFilterConfigV2Helper::isValid(*config)) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+    g_config_v2 = *config;
+    g_config_v2_initialized = true;
+
+    // V1 API와 동기화 (기본 효과만)
+    BeautyFilterConfig v1 = iris_sdk::BeautyFilterConfigV2Helper::toV1(*config);
+    BeautyFilter::getInstance().setConfig(&v1);
+
+    return IRIS_SDK_OK;
+}
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_get_beauty_filter_v2(BeautyFilterConfigV2* config) {
+    if (config == nullptr) {
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+    ensureV2ConfigInitialized();
+    *config = g_config_v2;
+
+    return IRIS_SDK_OK;
+}
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_filter_v2(
+    uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format,
+    const IrisResult* iris_result) {
+
+    // 현재 구현: V1 필터 적용 (V2 고급 기능은 BeautyProcessor에서 처리 예정)
+    // Face Mesh 연동 및 ROI 기반 처리는 P2-W1-03, P2-W1-04에서 구현
+
+    (void)iris_result;  // 향후 BeautyROIManager에서 사용
+
+    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+    ensureV2ConfigInitialized();
+
+    if (!g_config_v2.enabled) {
+        return IRIS_SDK_OK;  // 비활성화 시 패스
+    }
+
+    // V1 필터 적용 (기본 피부 효과)
+    return BeautyFilter::getInstance().applyFilter(frame_data, width, height, format);
+}
+
+IRIS_SDK_EXPORT bool iris_sdk_beauty_gpu_available(void) {
+    // GPU 지원 여부 확인 (P2-W3-01에서 구현 예정)
+    // 현재는 항상 false 반환 (CPU 전용)
+#if defined(__ANDROID__) && defined(IRIS_SDK_HAS_GLES)
+    return true;  // Android에서 OpenGL ES 사용 가능
+#else
+    return false;  // Desktop은 CPU 전용
+#endif
+}
+
+IRIS_SDK_EXPORT bool iris_sdk_beauty_using_gpu(void) {
+    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+    ensureV2ConfigInitialized();
+
+    // GPU 사용 설정 && GPU 사용 가능 여부 확인
+    return g_config_v2.useGpu && iris_sdk_beauty_gpu_available();
+}
+
 }  /* extern "C" */

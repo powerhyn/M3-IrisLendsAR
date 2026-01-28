@@ -54,6 +54,14 @@ set(IRIS_SDK_SOURCES
     src/sdk_manager.cpp
     src/sdk_api.cpp
     src/beauty_filter.cpp
+    src/beauty_roi_manager.cpp
+    src/beauty_processor.cpp
+    src/cpu_beauty_backend.cpp
+    # GPU module
+    src/gpu/render_context.cpp
+    src/gpu/cpu_render_context.cpp
+    # Warp module
+    src/warp/grid_mesh.cpp
 )
 
 set(IRIS_SDK_HEADERS
@@ -65,7 +73,23 @@ set(IRIS_SDK_HEADERS
     # include/iris_sdk/sdk_manager.h
     # include/iris_sdk/sdk_api.h
     # include/iris_sdk.h
+    include/iris_sdk/beauty_roi_manager.h
+    # GPU module headers
+    include/iris_sdk/gpu/texture_handle.h
+    include/iris_sdk/gpu/render_context.h
+    include/iris_sdk/gpu/cpu_render_context.h
+    # Warp module headers
+    include/iris_sdk/warp/grid_mesh.h
 )
+
+# =============================================================================
+# GPU Module (Android GLES)
+# =============================================================================
+# Android 빌드 시 GLESRenderContext 추가
+if(ANDROID)
+    list(APPEND IRIS_SDK_SOURCES src/gpu/gles_render_context.cpp)
+    list(APPEND IRIS_SDK_HEADERS include/iris_sdk/gpu/gles_render_context.h)
+endif()
 
 # =============================================================================
 # Library Target
@@ -117,6 +141,14 @@ if(APPLE)
     target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_PLATFORM_MACOS)
 elseif(ANDROID)
     target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_PLATFORM_ANDROID)
+    # GPU 모듈을 위한 GLES 라이브러리 링크
+    find_library(EGL_LIBRARY EGL)
+    find_library(GLESV3_LIBRARY GLESv3)
+    if(EGL_LIBRARY AND GLESV3_LIBRARY)
+        target_link_libraries(iris_sdk PRIVATE ${EGL_LIBRARY} ${GLESV3_LIBRARY})
+        target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_HAS_GLES)
+        message(STATUS "OpenGL ES 3.x support enabled for GPU module")
+    endif()
 elseif(UNIX)
     target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_PLATFORM_LINUX)
 elseif(WIN32)

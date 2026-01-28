@@ -66,6 +66,12 @@ typedef enum IrisSdkError {
     /** @brief 텍스처 미로드 */
     IRIS_SDK_NO_TEXTURE = 401,
 
+    /* 기능 에러 (500-599) */
+    /** @brief 지원하지 않는 기능 */
+    IRIS_SDK_ERROR_NOT_SUPPORTED = 500,
+    /** @brief 초기화되지 않음 */
+    IRIS_SDK_ERROR_NOT_INITIALIZED = 501,
+
     /** @brief 알 수 없는 에러 */
     IRIS_SDK_UNKNOWN = 999
 } IrisSdkError;
