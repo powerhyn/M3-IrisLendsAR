@@ -504,3 +504,16 @@ target_link_libraries(test_grid_mesh PRIVATE
 )
 
 gtest_discover_tests(test_grid_mesh DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W3-01: GPUBeautyBackend 테스트
+# ============================================================
+add_executable(test_gpu_beauty_backend test_gpu_beauty_backend.cpp)
+target_include_directories(test_gpu_beauty_backend PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_gpu_beauty_backend PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_gpu_beauty_backend DISCOVERY_TIMEOUT 60)

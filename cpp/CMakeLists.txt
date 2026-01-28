@@ -60,6 +60,10 @@ set(IRIS_SDK_SOURCES
     # GPU module
     src/gpu/render_context.cpp
     src/gpu/cpu_render_context.cpp
+    src/gpu/shader_manager.cpp
+    src/gpu/texture_pool.cpp
+    src/gpu/gpu_beauty_backend.cpp
+    src/gpu/shader_sources.cpp
     # Warp module
     src/warp/grid_mesh.cpp
 )
@@ -78,6 +82,9 @@ set(IRIS_SDK_HEADERS
     include/iris_sdk/gpu/texture_handle.h
     include/iris_sdk/gpu/render_context.h
     include/iris_sdk/gpu/cpu_render_context.h
+    include/iris_sdk/gpu/shader_manager.h
+    include/iris_sdk/gpu/texture_pool.h
+    include/iris_sdk/gpu/gpu_beauty_backend.h
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
 )
