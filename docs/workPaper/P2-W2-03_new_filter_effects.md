@@ -6,8 +6,9 @@
 |------|------|
 | **작업 ID** | P2-W2-03 |
 | **Phase** | Phase 2: CPU 백엔드 개선 |
-| **상태** | ⏳ 대기 |
+| **상태** | ✅ 완료 |
 | **예상 기간** | 2일 |
+| **완료일** | 2026-01-28 |
 | **의존성** | P2-W2-01, P2-W2-02 |
 | **담당** | systems-programming:cpp-pro |
 
@@ -640,16 +641,47 @@ TEST(NewFilterEffects, FullPipeline_IntegrationTest) {
 
 ## 5. 완료 기준
 
-- [ ] 피부톤 화이트닝 구현 (LAB 기반)
-- [ ] 컬러 밸런스 조정 구현
-- [ ] 주름 제거 (Targeted Smoothing) 구현
-- [ ] Soft Focus V2 (Guided Filter 기반)
-- [ ] Brightness V2 (하이라이트 보호)
-- [ ] CPUBeautyBackend 통합
-- [ ] 단위 테스트 100% 통과
+- [x] 피부톤 화이트닝 구현 (LAB 기반)
+- [x] 컬러 밸런스 조정 구현
+- [x] 주름 제거 (Targeted Smoothing) 구현
+- [x] Soft Focus V2 (Guided Filter 기반)
+- [x] Brightness V2 (하이라이트 보호)
+- [x] CPUBeautyBackend 통합
+- [x] 단위 테스트 100% 통과 (14개 테스트)
 
 ---
 
 ## 6. 다음 작업
 
-- **P2-W3-01**: GPU 백엔드 인프라 (OpenGL ES 컨텍스트)
+- **P2-W3-02**: GPU 필터 셰이더 구현
+
+---
+
+## 7. 실행 내역
+
+### 2026-01-28: 구현 완료
+
+**확장된 파일**:
+- `cpp/include/iris_sdk/cpu_beauty_backend.h`
+  - WrinkleRegions 구조체 추가
+  - V2 메서드 선언 추가 (applySkinSmoothingV2, applySoftFocusV2, applyBrightnessV2, applyWrinkleRemoval)
+  - 헬퍼 함수 추가 (detectSkinTone, overlayBlend, createWrinkleRegionMasks)
+
+- `cpp/src/cpu_beauty_backend.cpp`
+  - 모든 V2 필터 효과 구현
+  - FastGuidedFilter 통합
+
+**신규 파일**:
+- `cpp/tests/test_new_filter_effects.cpp`: 14개 단위 테스트
+
+**구현된 효과**:
+| 효과 | 구현 방식 | 파라미터 |
+|------|----------|----------|
+| SkinSmoothingV2 | FastGuidedFilter | eps: 0.01~0.16, radius: 4~12 |
+| SoftFocusV2 | GuidedFilter + Overlay + Glow | 3단계 블렌딩 |
+| BrightnessV2 | LAB L채널 비선형 조정 | 하이라이트 보호 |
+| WrinkleRemoval | 랜드마크 기반 마스크 + 강한 스무딩 | eps: 0.04~0.16 |
+| Whitening | LAB L채널 감마 보정 | 피부톤 영역 선택 |
+| ColorBalance | LAB A/B 채널 조정 | ±10/±15 |
+
+**테스트 결과**: 14/14 통과

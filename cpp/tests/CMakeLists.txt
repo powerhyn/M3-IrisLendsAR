@@ -536,3 +536,22 @@ if(OpenCV_FOUND)
 endif()
 
 gtest_discover_tests(test_fast_guided_filter DISCOVERY_TIMEOUT 120)
+
+# ============================================================
+# P2-W2-03: NewFilterEffects 테스트 (V2 필터)
+# ============================================================
+add_executable(test_new_filter_effects test_new_filter_effects.cpp)
+target_include_directories(test_new_filter_effects PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_new_filter_effects PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (CPUBeautyBackend에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_new_filter_effects PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_new_filter_effects PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_new_filter_effects DISCOVERY_TIMEOUT 120)

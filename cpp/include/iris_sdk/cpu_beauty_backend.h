@@ -9,10 +9,23 @@
 #define IRIS_SDK_CPU_BEAUTY_BACKEND_H
 
 #include "beauty_backend.h"
+#include "types.h"
 #include <opencv2/core.hpp>
 #include <mutex>
 
 namespace iris_sdk {
+
+/**
+ * @brief 주름 영역 마스크 구조체
+ *
+ * 얼굴 랜드마크 기반으로 주름이 발생하는 주요 영역의 마스크를 저장합니다.
+ */
+struct WrinkleRegions {
+    cv::Mat forehead_mask;      ///< 이마 영역 마스크
+    cv::Mat crow_feet_mask;     ///< 눈가 주름 영역 마스크
+    cv::Mat frown_lines_mask;   ///< 미간 주름 영역 마스크
+    cv::Mat combined;           ///< 모든 주름 영역 결합 마스크
+};
 
 /**
  * @brief CPU 기반 뷰티 필터 백엔드 (OpenCV)
@@ -95,6 +108,108 @@ private:
      * @brief 색상 밸런스 조정
      */
     void applyColorBalance(cv::Mat& frame, float balance);
+
+    //=========================================================================
+    // V2 필터 효과 함수 (Guided Filter 기반)
+    //=========================================================================
+
+    /**
+     * @brief 피부 스무딩 V2 (Guided Filter 기반)
+     *
+     * FastGuidedFilter를 사용하여 에지 보존 스무딩을 적용합니다.
+     * Bilateral Filter보다 빠르고 자연스러운 결과를 제공합니다.
+     *
+     * @param frame 입력/출력 프레임
+     * @param strength 스무딩 강도 (0.0 ~ 1.0)
+     * @param protection_mask 보호 마스크 (눈/입술 등)
+     */
+    void applySkinSmoothingV2(cv::Mat& frame, float strength, const cv::Mat& protection_mask);
+
+    /**
+     * @brief 소프트 포커스 V2 (Guided Filter + 오버레이 블렌딩)
+     *
+     * Guided Filter로 에지 보존 스무딩 후 오버레이 블렌딩으로
+     * 하이라이트를 강조하여 자연스러운 글로우 효과를 만듭니다.
+     *
+     * @param frame 입력/출력 프레임
+     * @param strength 소프트 포커스 강도 (0.0 ~ 1.0)
+     */
+    void applySoftFocusV2(cv::Mat& frame, float strength);
+
+    /**
+     * @brief 밝기 V2 (하이라이트 보호)
+     *
+     * LAB 색상 공간에서 비선형 밝기 조정을 적용하여
+     * 하이라이트 영역의 클리핑을 방지합니다.
+     *
+     * @param frame 입력/출력 프레임
+     * @param brightness 밝기 조정값 (0.5~1.5, 1.0=원본)
+     */
+    void applyBrightnessV2(cv::Mat& frame, float brightness);
+
+    /**
+     * @brief 주름 제거 (타겟 스무딩)
+     *
+     * 얼굴 랜드마크를 기반으로 주름이 발생하는 영역
+     * (이마, 눈가, 미간)을 선택적으로 스무딩합니다.
+     *
+     * @param frame 입력/출력 프레임
+     * @param strength 주름 제거 강도 (0.0 ~ 1.0)
+     * @param face_mesh 얼굴 랜드마크 배열 (478개)
+     * @param landmark_count 랜드마크 개수
+     * @param offset_x ROI 영역의 X 오프셋
+     * @param offset_y ROI 영역의 Y 오프셋
+     */
+    void applyWrinkleRemoval(cv::Mat& frame, float strength,
+                             const IrisLandmark* face_mesh, int landmark_count,
+                             int offset_x, int offset_y);
+
+    //=========================================================================
+    // 헬퍼 함수
+    //=========================================================================
+
+    /**
+     * @brief LAB 기반 피부톤 감지
+     *
+     * LAB 색상 공간의 A, B 채널을 분석하여 피부톤 영역을 감지합니다.
+     *
+     * @param A_channel LAB A 채널
+     * @param B_channel LAB B 채널
+     * @return 피부톤 마스크 (CV_8UC1)
+     */
+    static cv::Mat detectSkinTone(const cv::Mat& A_channel, const cv::Mat& B_channel);
+
+    /**
+     * @brief 오버레이 블렌딩
+     *
+     * 포토샵 스타일의 오버레이 블렌드 모드를 적용합니다.
+     * 어두운 영역은 더 어둡게, 밝은 영역은 더 밝게 만듭니다.
+     *
+     * @param base 베이스 이미지
+     * @param blend 블렌드 이미지
+     * @param result 결과 이미지
+     * @param opacity 블렌드 불투명도 (0.0 ~ 1.0)
+     */
+    static void overlayBlend(const cv::Mat& base, const cv::Mat& blend,
+                             cv::Mat& result, float opacity);
+
+    /**
+     * @brief 주름 영역 마스크 생성
+     *
+     * 얼굴 랜드마크를 기반으로 주름이 발생하는 주요 영역의 마스크를 생성합니다.
+     *
+     * @param face_mesh 얼굴 랜드마크 배열
+     * @param landmark_count 랜드마크 개수
+     * @param frame_width 프레임 너비
+     * @param frame_height 프레임 높이
+     * @param offset_x ROI X 오프셋
+     * @param offset_y ROI Y 오프셋
+     * @return 주름 영역 마스크 구조체
+     */
+    static WrinkleRegions createWrinkleRegionMasks(
+        const IrisLandmark* face_mesh, int landmark_count,
+        int frame_width, int frame_height,
+        int offset_x, int offset_y);
 
     //=========================================================================
     // ROI 기반 처리
