@@ -236,6 +236,61 @@ void GridMesh::resetDisplacements() {
     }
 }
 
+int GridMesh::addControlPoints(const IrisLandmark* face_mesh,
+                                const int* landmark_indices,
+                                int count) {
+    if (!initialized_ || face_mesh == nullptr || landmark_indices == nullptr || count <= 0) {
+        return 0;
+    }
+
+    int added_count = 0;
+
+    for (int i = 0; i < count; ++i) {
+        int lm_idx = landmark_indices[i];
+
+        // 유효성 검사
+        if (lm_idx < 0 || lm_idx >= static_cast<int>(landmark_to_vertex_.size())) {
+            continue;
+        }
+
+        // 이미 등록된 경우 스킵
+        if (landmark_to_vertex_[lm_idx] >= 0) {
+            continue;
+        }
+
+        const IrisLandmark& lm = face_mesh[lm_idx];
+        float lm_x = lm.x;
+        float lm_y = lm.y;
+
+        // ROI 내부에 있는지 확인
+        if (lm_x < face_rect_.x || lm_x > face_rect_.x + face_rect_.width ||
+            lm_y < face_rect_.y || lm_y > face_rect_.y + face_rect_.height) {
+            continue;
+        }
+
+        // 최근접 정점 찾기
+        int nearest_idx = findNearestVertex(lm_x, lm_y);
+        if (nearest_idx >= 0 && nearest_idx < static_cast<int>(vertices_.size())) {
+            GridVertex& vertex = vertices_[nearest_idx];
+
+            // 다른 랜드마크에 이미 할당된 정점이면 스킵
+            if (vertex.is_control && vertex.landmark_idx != lm_idx) {
+                continue;
+            }
+
+            vertex.is_control = true;
+            vertex.landmark_idx = lm_idx;
+            vertex.x = lm_x;
+            vertex.y = lm_y;
+
+            landmark_to_vertex_[lm_idx] = nearest_idx;
+            added_count++;
+        }
+    }
+
+    return added_count;
+}
+
 bool GridMesh::setControlPointDisplacement(int landmark_idx, float dx, float dy) {
     if (landmark_idx < 0 || landmark_idx >= static_cast<int>(landmark_to_vertex_.size())) {
         return false;

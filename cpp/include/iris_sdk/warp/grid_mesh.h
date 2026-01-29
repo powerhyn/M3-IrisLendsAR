@@ -146,6 +146,21 @@ public:
     bool setControlPointDisplacement(int landmark_idx, float dx, float dy);
 
     /**
+     * @brief 추가 컨트롤 포인트 등록 (Face Warp 효과용)
+     *
+     * 기존 setControlPoints에서 등록되지 않은 랜드마크를 추가로
+     * 컨트롤 포인트로 등록합니다. 이미 등록된 랜드마크는 무시됩니다.
+     *
+     * @param face_mesh MediaPipe Face Mesh 랜드마크 배열
+     * @param landmark_indices 추가할 랜드마크 인덱스 배열
+     * @param count 인덱스 배열 크기
+     * @return 추가된 컨트롤 포인트 수
+     */
+    int addControlPoints(const IrisLandmark* face_mesh,
+                         const int* landmark_indices,
+                         int count);
+
+    /**
      * @brief RBF 보간으로 모든 정점의 변위 계산
      *
      * 컨트롤 포인트의 변위를 기반으로 Gaussian RBF 함수를 사용하여

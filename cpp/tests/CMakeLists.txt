@@ -555,3 +555,16 @@ if(OpenCV_FOUND)
 endif()
 
 gtest_discover_tests(test_new_filter_effects DISCOVERY_TIMEOUT 120)
+
+# ============================================================
+# P2-W4-02: FaceWarpController 테스트 (Slim Face / V-Line)
+# ============================================================
+add_executable(test_face_warp_controller test_face_warp_controller.cpp)
+target_include_directories(test_face_warp_controller PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_face_warp_controller PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_face_warp_controller DISCOVERY_TIMEOUT 60)

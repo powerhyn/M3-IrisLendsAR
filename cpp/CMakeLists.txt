@@ -67,6 +67,7 @@ set(IRIS_SDK_SOURCES
     src/gpu/shader_sources.cpp
     # Warp module
     src/warp/grid_mesh.cpp
+    src/warp/face_warp_controller.cpp
 )
 
 set(IRIS_SDK_HEADERS
@@ -88,6 +89,7 @@ set(IRIS_SDK_HEADERS
     include/iris_sdk/gpu/gpu_beauty_backend.h
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
+    include/iris_sdk/warp/face_warp_controller.h
 )
 
 # =============================================================================
