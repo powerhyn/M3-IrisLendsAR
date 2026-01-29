@@ -572,6 +572,166 @@ IRIS_SDK_EXPORT const char* iris_sdk_error_to_string(IrisSdkError error);
  */
 IRIS_SDK_EXPORT void iris_sdk_free_result(IrisResult* result);
 
+// ============================================================================
+// 뷰티 필터 V2 GPU API (Phase 2)
+// ============================================================================
+
+/**
+ * @brief 뷰티 필터 V2 설정 (C API용 POD 구조체)
+ *
+ * FFI 호환을 위한 POD 타입 구조체입니다.
+ * JNI, Obj-C++, dart:ffi, WASM 등 모든 바인딩에서 사용됩니다.
+ */
+typedef struct IrisBeautyConfigV2 {
+    /* 기본 (V1 호환) */
+    int enabled;            /**< 필터 활성화 여부 (0=비활성, 1=활성) */
+    float intensity;        /**< 전체 강도 (0.0~1.0) */
+    float smoothing;        /**< 피부 스무딩 (0.0~1.0) */
+    float brightness;       /**< 밝기 조절 (0.5~1.5, 1.0=원본) */
+    float soft_focus;       /**< 소프트 포커스 (0.0~1.0) */
+
+    /* V2 확장 - 피부 효과 */
+    float whitening;        /**< 피부톤 화이트닝 (0.0~1.0) */
+    float color_balance;    /**< 컬러 밸런스 (-1.0~1.0, 음수=쿨톤, 양수=웜톤) */
+    float wrinkle_remove;   /**< 주름 제거 (0.0~1.0) */
+
+    /* V2 확장 - 얼굴 형태 보정 */
+    float slim_face;        /**< 얼굴 슬림화 (0.0~1.0) */
+    float enlarge_eyes;     /**< 눈 확대 (0.0~1.0) */
+    float thin_chin;        /**< 턱 축소 (0.0~1.0) */
+
+    /* 처리 옵션 */
+    int use_gpu;            /**< GPU 가속 사용 (0=CPU, 1=GPU) */
+    int roi_only;           /**< 얼굴 영역만 처리 (0=전체, 1=ROI만) */
+    int protect_eyes;       /**< 눈 영역 보호 (0=미보호, 1=보호) */
+    int protect_lips;       /**< 입술 영역 보호 (0=미보호, 1=보호) */
+    int downscale_factor;   /**< 다운스케일 팩터 (1, 2, 4) */
+    int feather_radius;     /**< ROI 페더링 반경 (픽셀) */
+} IrisBeautyConfigV2;
+
+/**
+ * @brief 기본 V2 뷰티 필터 설정 반환
+ *
+ * 기본값으로 초기화된 IrisBeautyConfigV2를 설정합니다.
+ *
+ * @param config 설정 구조체 포인터 (NULL 불가)
+ */
+IRIS_SDK_EXPORT void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* config);
+
+/**
+ * @brief 뷰티 필터 V2 적용 (CPU 버퍼)
+ *
+ * CPU 메모리 버퍼에 V2 뷰티 필터를 적용합니다.
+ * 프레임 데이터는 in-place로 수정됩니다.
+ *
+ * @param frame_data 프레임 데이터 (in-place 수정됨)
+ * @param width 프레임 너비
+ * @param height 프레임 높이
+ * @param format 픽셀 포맷
+ * @param config V2 뷰티 필터 설정
+ * @param detection 얼굴 검출 결과 (NULL 가능, NULL이면 전체 프레임 처리)
+ * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_v2_c(
+    uint8_t* frame_data,
+    int width, int height,
+    IrisFrameFormat format,
+    const IrisBeautyConfigV2* config,
+    const IrisResult* detection
+);
+
+/**
+ * @brief GPU 뷰티 백엔드 초기화
+ *
+ * OpenGL ES 기반 GPU 뷰티 필터 백엔드를 초기화합니다.
+ * Android에서는 EGL 컨텍스트가 현재 스레드에 바인딩되어 있어야 합니다.
+ *
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_ERROR_NOT_SUPPORTED GPU 미지원
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_init_gpu_beauty(void);
+
+/**
+ * @brief GPU 뷰티 백엔드 해제
+ *
+ * GPU 리소스를 해제합니다.
+ * OpenGL 컨텍스트가 여전히 유효해야 합니다.
+ */
+IRIS_SDK_EXPORT void iris_sdk_release_gpu_beauty(void);
+
+/**
+ * @brief GPU 뷰티 백엔드 초기화 여부 확인
+ *
+ * @return 1 초기화됨, 0 미초기화
+ */
+IRIS_SDK_EXPORT int iris_sdk_is_gpu_beauty_initialized(void);
+
+/**
+ * @brief 뷰티 필터 V2 적용 (GPU 텍스처)
+ *
+ * OpenGL ES 텍스처에 V2 뷰티 필터를 적용합니다.
+ * GPU 뷰티 백엔드가 초기화되어 있어야 합니다.
+ *
+ * @param input_texture 입력 OpenGL ES 텍스처 ID
+ * @param output_texture 출력 텍스처 ID 포인터 (SDK가 관리하는 텍스처 반환)
+ * @param width 텍스처 너비
+ * @param height 텍스처 높이
+ * @param config V2 뷰티 필터 설정
+ * @param detection 얼굴 검출 결과 (NULL 가능)
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_ERROR_NOT_INITIALIZED GPU 미초기화
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
+    uint32_t input_texture,
+    uint32_t* output_texture,
+    int width, int height,
+    const IrisBeautyConfigV2* config,
+    const IrisResult* detection
+);
+
+/**
+ * @brief Face Warp 적용 (GPU)
+ *
+ * GPU에서 얼굴 형태 보정(Face Warp)을 적용합니다.
+ * 슬림 페이스, 눈 확대, 턱 축소 등의 효과를 렌더링합니다.
+ *
+ * @param input_texture 입력 OpenGL ES 텍스처 ID
+ * @param output_texture 출력 텍스처 ID 포인터
+ * @param width 텍스처 너비
+ * @param height 텍스처 높이
+ * @param slim_face 얼굴 슬림화 강도 (0.0~1.0)
+ * @param thin_chin 턱 축소 강도 (0.0~1.0)
+ * @param enlarge_eyes 눈 확대 강도 (0.0~1.0)
+ * @param detection 얼굴 검출 결과 (필수, NULL이면 pass-through)
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_face_warp(
+    uint32_t input_texture,
+    uint32_t* output_texture,
+    int width, int height,
+    float slim_face,
+    float thin_chin,
+    float enlarge_eyes,
+    const IrisResult* detection
+);
+
+/**
+ * @brief SDK 관리 텍스처 해제
+ *
+ * SDK가 내부적으로 관리하는 텍스처를 해제합니다.
+ * 외부에서 생성한 텍스처를 전달하면 무시됩니다.
+ *
+ * @param texture 해제할 텍스처 ID
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_INVALID_PARAM 관리 대상 아님
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_release_texture(uint32_t texture);
+
+/**
+ * @brief 텍스처가 SDK 관리인지 확인
+ *
+ * @param texture 확인할 텍스처 ID
+ * @return 1 SDK 관리, 0 외부 텍스처
+ */
+IRIS_SDK_EXPORT int iris_sdk_is_texture_managed(uint32_t texture);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

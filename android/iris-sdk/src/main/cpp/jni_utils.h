@@ -23,6 +23,7 @@ struct IrisLensConfig;
 struct IrisLandmark;
 struct IrisRect;
 struct BeautyFilterConfig;
+struct IrisBeautyConfigV2;
 
 // ============================================================================
 // Android 로깅 매크로
@@ -362,6 +363,25 @@ struct JniCache {
     jfieldID beautyConfig_brightness = nullptr;
     jfieldID beautyConfig_softFocus = nullptr;
 
+    // BeautyFilterConfigV2 클래스
+    jclass beautyConfigV2Class = nullptr;
+    jfieldID beautyConfigV2_enabled = nullptr;
+    jfieldID beautyConfigV2_intensity = nullptr;
+    jfieldID beautyConfigV2_smoothing = nullptr;
+    jfieldID beautyConfigV2_brightness = nullptr;
+    jfieldID beautyConfigV2_softFocus = nullptr;
+    jfieldID beautyConfigV2_whitening = nullptr;
+    jfieldID beautyConfigV2_colorBalance = nullptr;
+    jfieldID beautyConfigV2_wrinkleRemove = nullptr;
+    jfieldID beautyConfigV2_slimFace = nullptr;
+    jfieldID beautyConfigV2_enlargeEyes = nullptr;
+    jfieldID beautyConfigV2_thinChin = nullptr;
+    jfieldID beautyConfigV2_useGpu = nullptr;
+    jfieldID beautyConfigV2_roiOnly = nullptr;
+    jfieldID beautyConfigV2_protectEyes = nullptr;
+    jfieldID beautyConfigV2_protectLips = nullptr;
+    jfieldID beautyConfigV2_downscaleFactor = nullptr;
+
     /**
      * @brief 캐시 초기화
      * @param env JNI 환경
@@ -431,6 +451,26 @@ bool copyBeautyConfigFromJava(JNIEnv* env, jobject src, BeautyFilterConfig& dest
  * @return 성공 여부
  */
 bool copyBeautyConfigToJava(JNIEnv* env, const BeautyFilterConfig& src, jobject dest);
+
+/**
+ * @brief Java BeautyFilterConfigV2를 C IrisBeautyConfigV2로 변환
+ *
+ * @param env JNI 환경
+ * @param src Java BeautyFilterConfigV2 객체
+ * @param dest C IrisBeautyConfigV2 구조체
+ * @return 성공 여부
+ */
+bool copyBeautyConfigV2FromJava(JNIEnv* env, jobject src, IrisBeautyConfigV2& dest);
+
+/**
+ * @brief C IrisBeautyConfigV2를 Java BeautyFilterConfigV2 객체로 복사
+ *
+ * @param env JNI 환경
+ * @param src C IrisBeautyConfigV2 구조체
+ * @param dest Java BeautyFilterConfigV2 객체
+ * @return 성공 여부
+ */
+bool copyBeautyConfigV2ToJava(JNIEnv* env, const IrisBeautyConfigV2& src, jobject dest);
 
 /**
  * @brief Java 예외 확인 및 로깅
