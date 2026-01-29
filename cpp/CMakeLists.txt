@@ -59,6 +59,9 @@ set(IRIS_SDK_SOURCES
     src/beauty_processor.cpp
     src/cpu_beauty_backend.cpp
     src/fast_guided_filter.cpp
+    # Profiling and optimization
+    src/profiler.cpp
+    src/buffer_pool.cpp
     # GPU module
     src/gpu/render_context.cpp
     src/gpu/cpu_render_context.cpp
@@ -66,6 +69,7 @@ set(IRIS_SDK_SOURCES
     src/gpu/texture_pool.cpp
     src/gpu/gpu_beauty_backend.cpp
     src/gpu/shader_sources.cpp
+    src/gpu/gpu_profiler.cpp
     # Warp module
     src/warp/grid_mesh.cpp
     src/warp/face_warp_controller.cpp
@@ -81,6 +85,9 @@ set(IRIS_SDK_HEADERS
     # include/iris_sdk/sdk_api.h
     # include/iris_sdk.h
     include/iris_sdk/beauty_roi_manager.h
+    # Profiling and optimization headers
+    include/iris_sdk/profiler.h
+    include/iris_sdk/buffer_pool.h
     # GPU module headers
     include/iris_sdk/gpu/texture_handle.h
     include/iris_sdk/gpu/render_context.h
@@ -88,6 +95,7 @@ set(IRIS_SDK_HEADERS
     include/iris_sdk/gpu/shader_manager.h
     include/iris_sdk/gpu/texture_pool.h
     include/iris_sdk/gpu/gpu_beauty_backend.h
+    include/iris_sdk/gpu/gpu_profiler.h
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
     include/iris_sdk/warp/face_warp_controller.h

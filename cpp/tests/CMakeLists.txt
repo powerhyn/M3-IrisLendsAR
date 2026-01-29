@@ -581,3 +581,22 @@ target_link_libraries(test_eye_enlargement PRIVATE
 )
 
 gtest_discover_tests(test_eye_enlargement DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W5-02: Profiler 및 BufferPool 테스트
+# ============================================================
+add_executable(test_profiler test_profiler.cpp)
+target_include_directories(test_profiler PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_profiler PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (BufferPool에 필요)
+if(OpenCV_FOUND)
+    target_link_libraries(test_profiler PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_profiler PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_profiler DISCOVERY_TIMEOUT 120)
