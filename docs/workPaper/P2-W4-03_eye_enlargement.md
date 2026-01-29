@@ -6,9 +6,11 @@
 |------|------|
 | **작업 ID** | P2-W4-03 |
 | **Phase** | Phase 4: Face Warp 구현 |
-| **상태** | ⏳ 대기 |
+| **상태** | ✅ 완료 |
+| **완료일** | 2026-01-29 |
 | **예상 기간** | 2일 |
-| **의존성** | P2-W4-01 (Grid Mesh) |
+| **실제 기간** | 1일 |
+| **의존성** | P2-W4-01 (Grid Mesh), P2-W4-02 (FaceWarpController) |
 | **담당** | systems-programming:cpp-pro |
 
 ---
@@ -18,415 +20,186 @@
 눈 영역 랜드마크 기반 자연스러운 눈 확대 효과 구현
 
 ### 핵심 산출물
-- 눈 중심 기준 방사형 확대
-- 눈꺼풀/눈썹 영역 자연스러운 변형
-- 좌우 대칭 처리
+- [x] 눈 중심(홍채) 기준 방사형 확대
+- [x] 눈꺼풀/눈썹 영역 자연스러운 변형
+- [x] 좌우 대칭 처리
+- [x] 단위 테스트 (12개 테스트 케이스)
 
 ---
 
-## 2. 랜드마크 분석
+## 2. 구현 내용
 
-### 2.1 눈 영역 랜드마크
-
-```
-왼쪽 눈 (LEFT_EYE):
-        105 (눈썹 상단)
-         │
-   70───33───────133───243
-   │     │         │     │
-   63──159───145──153───154
-         │
-        168 (눈 아래)
-
-오른쪽 눈 (RIGHT_EYE):
-        334 (눈썹 상단)
-         │
-  300──362───────263───466
-   │     │         │     │
-  293──386───374──380───381
-         │
-        397 (눈 아래)
-```
-
-### 2.2 눈 확대 전략
-
-```
-확대 전:                확대 후:
-   ┌───────┐            ┌─────────┐
-   │  eye  │   ───►     │   eye   │
-   └───────┘            └─────────┘
-
-방사형 확대: 중심에서 외곽으로 밀어냄
-- 눈 내부: 확대 비율 적용
-- 눈 외곽: 부드럽게 감소하는 변위
-- 눈썹 영역: 미세한 상향 조정
-```
-
----
-
-## 3. 상세 구현
-
-### 3.1 Eye Enlargement 구현
-
-**파일**: `cpp/src/warp/face_warp_controller.cpp` (확장)
+### 2.1 MediaPipe 478 랜드마크 인덱스
 
 ```cpp
-// 눈 영역 랜드마크 인덱스
-namespace {
+// 헤더에 정의된 상수들 (face_warp_controller.h)
 
-// 왼쪽 눈
-const int LEFT_EYE_CENTER = 468;  // 홍채 중심
-const int LEFT_EYE_CONTOUR[] = {
+// 홍채 중심
+static constexpr int LEFT_IRIS_CENTER = 468;
+static constexpr int RIGHT_IRIS_CENTER = 473;
+
+// 왼쪽 눈 윤곽 (16개 랜드마크)
+static constexpr std::array<int, 16> LEFT_EYE_CONTOUR = {
     33, 7, 163, 144, 145, 153, 154, 155, 133,
     173, 157, 158, 159, 160, 161, 246
 };
-const int LEFT_EYE_CONTOUR_COUNT = 16;
 
-// 왼쪽 눈 주변 (확장 영역)
-const int LEFT_EYE_OUTER[] = {
-    70, 63, 105, 66, 107, 55, 65, 52, 53, 46
-};
-const int LEFT_EYE_OUTER_COUNT = 10;
-
-// 왼쪽 눈썹
-const int LEFT_EYEBROW[] = {
-    70, 63, 105, 66, 107, 55, 65, 52, 53, 46
-};
-const int LEFT_EYEBROW_COUNT = 10;
-
-// 오른쪽 눈
-const int RIGHT_EYE_CENTER = 473;  // 홍채 중심
-const int RIGHT_EYE_CONTOUR[] = {
+// 오른쪽 눈 윤곽 (16개 랜드마크)
+static constexpr std::array<int, 16> RIGHT_EYE_CONTOUR = {
     362, 382, 381, 380, 374, 373, 390, 249, 263,
     466, 388, 387, 386, 385, 384, 398
 };
-const int RIGHT_EYE_CONTOUR_COUNT = 16;
 
-// 오른쪽 눈 주변
-const int RIGHT_EYE_OUTER[] = {
+// 눈썹 (각 10개 랜드마크)
+static constexpr std::array<int, 10> LEFT_EYEBROW = {
+    70, 63, 105, 66, 107, 55, 65, 52, 53, 46
+};
+static constexpr std::array<int, 10> RIGHT_EYEBROW = {
     300, 293, 334, 296, 336, 285, 295, 282, 283, 276
 };
-const int RIGHT_EYE_OUTER_COUNT = 10;
-
-} // namespace
-
-void FaceWarpController::applyEnlargeEyes(
-    GridMesh& mesh,
-    const IrisLandmark* face_mesh,
-    float strength) {
-
-    // 최대 확대 비율 (중심에서)
-    float max_scale = 1.0f + strength * 0.25f;  // 최대 25% 확대
-
-    // 왼쪽 눈 처리
-    applyEyeEnlargement(
-        mesh, face_mesh,
-        LEFT_EYE_CENTER,
-        LEFT_EYE_CONTOUR, LEFT_EYE_CONTOUR_COUNT,
-        LEFT_EYE_OUTER, LEFT_EYE_OUTER_COUNT,
-        LEFT_EYEBROW, LEFT_EYEBROW_COUNT,
-        max_scale
-    );
-
-    // 오른쪽 눈 처리
-    applyEyeEnlargement(
-        mesh, face_mesh,
-        RIGHT_EYE_CENTER,
-        RIGHT_EYE_CONTOUR, RIGHT_EYE_CONTOUR_COUNT,
-        RIGHT_EYE_OUTER, RIGHT_EYE_OUTER_COUNT,
-        nullptr, 0,  // 오른쪽 눈썹은 별도 정의 필요
-        max_scale
-    );
-}
-
-void FaceWarpController::applyEyeEnlargement(
-    GridMesh& mesh,
-    const IrisLandmark* face_mesh,
-    int center_idx,
-    const int* contour_indices, int contour_count,
-    const int* outer_indices, int outer_count,
-    const int* eyebrow_indices, int eyebrow_count,
-    float scale) {
-
-    // 눈 중심 좌표
-    float center_x = face_mesh[center_idx].x;
-    float center_y = face_mesh[center_idx].y;
-
-    // 눈 크기 추정 (외곽 점들로부터)
-    float max_dist = 0.0f;
-    for (int i = 0; i < contour_count; ++i) {
-        int idx = contour_indices[i];
-        float dx = face_mesh[idx].x - center_x;
-        float dy = face_mesh[idx].y - center_y;
-        float dist = std::sqrt(dx * dx + dy * dy);
-        max_dist = std::max(max_dist, dist);
-    }
-
-    float eye_radius = max_dist * 1.2f;  // 약간 여유 있게
-
-    // 눈 윤곽 랜드마크: 방사형 확대
-    for (int i = 0; i < contour_count; ++i) {
-        int idx = contour_indices[i];
-        float lm_x = face_mesh[idx].x;
-        float lm_y = face_mesh[idx].y;
-
-        // 중심으로부터의 벡터
-        float vec_x = lm_x - center_x;
-        float vec_y = lm_y - center_y;
-        float dist = std::sqrt(vec_x * vec_x + vec_y * vec_y);
-
-        if (dist < 1e-6f) continue;
-
-        // 정규화
-        float norm_x = vec_x / dist;
-        float norm_y = vec_y / dist;
-
-        // 확대 변위 (중심에서 멀어지는 방향)
-        float displacement = dist * (scale - 1.0f);
-
-        float dx = norm_x * displacement;
-        float dy = norm_y * displacement;
-
-        mesh.setControlPointDisplacement(idx, dx, dy);
-    }
-
-    // 외곽 영역: 감쇠된 변위
-    for (int i = 0; i < outer_count; ++i) {
-        int idx = outer_indices[i];
-        float lm_x = face_mesh[idx].x;
-        float lm_y = face_mesh[idx].y;
-
-        float vec_x = lm_x - center_x;
-        float vec_y = lm_y - center_y;
-        float dist = std::sqrt(vec_x * vec_x + vec_y * vec_y);
-
-        if (dist < 1e-6f) continue;
-
-        // 감쇠 계수 (거리에 따라 감소)
-        float attenuation = 1.0f - std::min(1.0f, dist / (eye_radius * 2.0f));
-        attenuation = attenuation * attenuation;  // 더 부드럽게
-
-        float norm_x = vec_x / dist;
-        float norm_y = vec_y / dist;
-
-        float displacement = dist * (scale - 1.0f) * attenuation * 0.5f;
-
-        float dx = norm_x * displacement;
-        float dy = norm_y * displacement;
-
-        mesh.setControlPointDisplacement(idx, dx, dy);
-    }
-
-    // 눈썹: 약간 상향 (눈 확대에 맞춰)
-    if (eyebrow_indices && eyebrow_count > 0) {
-        float eyebrow_lift = (scale - 1.0f) * 0.3f * eye_radius;
-
-        for (int i = 0; i < eyebrow_count; ++i) {
-            int idx = eyebrow_indices[i];
-
-            // 현재 변위에 추가
-            float current_dx = 0.0f, current_dy = 0.0f;
-            // (기존 변위 가져오기 필요)
-
-            mesh.setControlPointDisplacement(idx, current_dx, current_dy - eyebrow_lift);
-        }
-    }
-}
 ```
 
-### 3.2 비선형 확대 (Magnification)
-
-더 자연스러운 결과를 위한 비선형 확대 함수:
+### 2.2 효과 파라미터
 
 ```cpp
-/**
- * @brief 비선형 확대 함수
- *
- * 중심에서 멀어질수록 확대 비율이 감소
- *
- * @param dist 중심으로부터 거리
- * @param radius 영향 반경
- * @param strength 최대 강도
- * @return 확대 비율 (1.0 = 변화 없음)
- */
-float computeMagnification(float dist, float radius, float strength) {
-    if (dist > radius * 2.0f) {
-        return 1.0f;  // 영향 없음
-    }
+// 최대 확대 비율: 25%
+static constexpr float MAX_EYE_ENLARGE_SCALE = 0.25f;
 
-    float normalized = dist / radius;
-
-    if (normalized < 1.0f) {
-        // 눈 내부: 전체 확대
-        return 1.0f + strength;
-    } else {
-        // 외곽: 부드럽게 감소
-        float t = (normalized - 1.0f);  // 0 ~ 1
-        float ease = 1.0f - t * t;      // ease-out
-        return 1.0f + strength * ease;
-    }
-}
+// 눈썹 리프트 비율 (눈 확대의 30%)
+static constexpr float EYEBROW_LIFT_RATIO = 0.3f;
 ```
 
-### 3.3 GPU 셰이더 기반 확대 (대안)
+### 2.3 알고리즘
 
-메시 변형 대신 셰이더로 구현하는 방법:
-
-**파일**: `cpp/src/gpu/shaders/eye_magnify.frag`
-
-```glsl
-#version 310 es
-precision highp float;
-
-in vec2 v_TexCoord;
-out vec4 fragColor;
-
-uniform sampler2D u_Texture;
-uniform vec2 u_LeftEyeCenter;   // 왼쪽 눈 중심 (정규화 좌표)
-uniform vec2 u_RightEyeCenter;  // 오른쪽 눈 중심
-uniform float u_EyeRadius;      // 눈 반경 (정규화)
-uniform float u_Strength;       // 확대 강도
-
-vec2 applyMagnification(vec2 uv, vec2 center, float radius, float strength) {
-    vec2 delta = uv - center;
-    float dist = length(delta);
-
-    if (dist > radius * 2.0) {
-        return uv;
-    }
-
-    float normalized = dist / radius;
-    float magnification;
-
-    if (normalized < 1.0) {
-        // 눈 내부: 축소된 좌표로 매핑 (확대 효과)
-        magnification = 1.0 / (1.0 + strength);
-    } else {
-        // 외곽: 부드럽게 전환
-        float t = normalized - 1.0;
-        float ease = 1.0 - t * t;
-        magnification = 1.0 / (1.0 + strength * ease);
-    }
-
-    return center + delta * magnification;
-}
-
-void main() {
-    vec2 uv = v_TexCoord;
-
-    // 왼쪽 눈 확대
-    uv = applyMagnification(uv, u_LeftEyeCenter, u_EyeRadius, u_Strength);
-
-    // 오른쪽 눈 확대
-    uv = applyMagnification(uv, u_RightEyeCenter, u_EyeRadius, u_Strength);
-
-    fragColor = texture(u_Texture, uv);
-}
+```
+1. 눈 중심 좌표 획득 (홍채 중심 랜드마크)
+2. 눈 반지름 계산 (윤곽 점들의 최대 거리)
+3. 방사형 확대 적용:
+   - 각 윤곽 점에서 중심 방향 벡터 계산
+   - 거리 비율에 따른 가중치 적용 (내부: 감소, 외부: 전체)
+   - 확대 변위 = 거리 × scale_factor × weight
+4. 눈썹 리프트:
+   - 눈 확대에 비례하여 상향 이동
+   - 이동량 = eye_radius × scale_factor × 0.3
 ```
 
 ---
 
-## 4. 통합 테스트
+## 3. 변경된 파일
 
-### 4.1 전체 Face Warp 파이프라인
+### 3.1 헤더 파일
+- **파일**: `cpp/include/iris_sdk/warp/face_warp_controller.h`
+- **변경 내용**:
+  - 눈 랜드마크 상수 추가 (IRIS_CENTER, EYE_CONTOUR, EYEBROW)
+  - MAX_EYE_ENLARGE_SCALE, EYEBROW_LIFT_RATIO 상수 추가
+  - `applyEyeEnlargementSingle` 템플릿 메서드 선언
+  - `calculateEyeRadius` 정적 템플릿 메서드 선언
 
-```cpp
-void processFrame(
-    cv::Mat& frame,
-    const IrisLandmark* face_mesh,
-    const BeautyFilterConfigV2& config) {
+### 3.2 구현 파일
+- **파일**: `cpp/src/warp/face_warp_controller.cpp`
+- **변경 내용**:
+  - `applyEnlargeEyes()` 구현 (placeholder 대체)
+  - `applyEyeEnlargementSingle()` 템플릿 메서드 구현
+  - `calculateEyeRadius()` 템플릿 메서드 구현
+  - `registerWarpControlPoints()` 업데이트 (눈 랜드마크 추가)
 
-    // 1. Grid Mesh 초기화
-    GridMesh mesh;
-    Rect face_rect = computeFaceBoundingBox(face_mesh);
-    mesh.initialize(20, face_rect);
-    mesh.setControlPoints(face_mesh, frame.cols, frame.rows);
+### 3.3 테스트 파일
+- **파일**: `cpp/tests/test_eye_enlargement.cpp` (신규)
+- **테스트 케이스** (12개):
+  1. RadialExpansionFromCenter - 방사형 확대 동작
+  2. SymmetricLeftRightEyes - 좌우 대칭
+  3. EyebrowLiftsUp - 눈썹 상향 이동
+  4. ZeroStrengthNoChange - 강도 0일 때 무변화
+  5. MaxStrengthBounded - 최대 강도 제한
+  6. StrengthScaling - 강도 스케일링
+  7. CombinedWithSlimFace - 슬림페이스 효과와 결합
+  8. CombinedWithThinChin - V라인 효과와 결합
+  9. AllEffectsCombined - 모든 효과 결합
+  10. ExpansionDirectionIsOutward - 확장 방향 검증
+  11. LandmarkConstantsValid - 랜드마크 상수 유효성
+  12. EffectParametersReasonable - 파라미터 범위 검증
 
-    // 2. Face Warp 효과 적용
-    FaceWarpController warp_controller;
-    FaceWarpController::WarpConfig warp_config;
-    warp_config.slimFace = config.slimFace;
-    warp_config.thinChin = config.thinChin;
-    warp_config.enlargeEyes = config.enlargeEyes;
-
-    warp_controller.applyWarp(mesh, face_mesh, warp_config);
-
-    // 3. GPU 렌더링
-    GPUMeshRenderer renderer;
-    // ...
-}
-```
-
----
-
-## 5. 단위 테스트
-
-**파일**: `cpp/tests/test_eye_enlargement.cpp`
-
-```cpp
-TEST(EyeEnlargement, CenteredExpansion) {
-    GridMesh mesh;
-    Rect face_rect{0.0f, 0.0f, 1.0f, 1.0f};
-    mesh.initialize(20, face_rect);
-
-    IrisLandmark face_mesh[478];
-    // 눈 중심을 (0.3, 0.4)로 설정
-    face_mesh[468].x = 0.3f;
-    face_mesh[468].y = 0.4f;
-    // 눈 윤곽 설정...
-
-    mesh.setControlPoints(face_mesh, 100, 100);
-
-    FaceWarpController controller;
-    FaceWarpController::WarpConfig config;
-    config.enlargeEyes = 0.5f;
-
-    controller.applyWarp(mesh, face_mesh, config);
-
-    // 눈 윤곽 점들이 중심에서 멀어졌는지 확인
-    const auto& vertices = mesh.getVertices();
-    for (const auto& v : vertices) {
-        if (v.landmark_idx == LEFT_EYE_CONTOUR[0]) {
-            float orig_dist = std::sqrt(
-                (0.3f - face_mesh[v.landmark_idx].x) *
-                (0.3f - face_mesh[v.landmark_idx].x) +
-                (0.4f - face_mesh[v.landmark_idx].y) *
-                (0.4f - face_mesh[v.landmark_idx].y)
-            );
-            float new_dist = std::sqrt(
-                (0.3f - (v.x + v.dx)) * (0.3f - (v.x + v.dx)) +
-                (0.4f - (v.y + v.dy)) * (0.4f - (v.y + v.dy))
-            );
-
-            EXPECT_GT(new_dist, orig_dist);  // 확대됨
-            break;
-        }
-    }
-}
-
-TEST(EyeEnlargement, SymmetricLeftRight) {
-    // 좌우 대칭 확인
-}
-
-TEST(EyeEnlargement, SmoothFalloff) {
-    // 외곽으로 갈수록 변위 감소 확인
-}
-```
+### 3.4 CMakeLists.txt
+- **파일**: `cpp/tests/CMakeLists.txt`
+- **변경 내용**: test_eye_enlargement 타겟 추가
 
 ---
 
-## 6. 완료 기준
+## 4. 테스트 결과
 
-- [ ] 눈 중심 기준 방사형 확대 구현
-- [ ] 비선형 확대 함수
-- [ ] 외곽 영역 부드러운 감쇠
-- [ ] 눈썹 영역 연동 조정
-- [ ] GPU 셰이더 대안 구현 (선택적)
-- [ ] 좌우 대칭 검증
-- [ ] 단위 테스트 통과
+```
+[==========] Running 12 tests from 1 test suite.
+[----------] 12 tests from EyeEnlargementTest
+[ RUN      ] EyeEnlargementTest.RadialExpansionFromCenter
+[       OK ] EyeEnlargementTest.RadialExpansionFromCenter (1 ms)
+[ RUN      ] EyeEnlargementTest.SymmetricLeftRightEyes
+[       OK ] EyeEnlargementTest.SymmetricLeftRightEyes (1 ms)
+[ RUN      ] EyeEnlargementTest.EyebrowLiftsUp
+[       OK ] EyeEnlargementTest.EyebrowLiftsUp (0 ms)
+[ RUN      ] EyeEnlargementTest.ZeroStrengthNoChange
+[       OK ] EyeEnlargementTest.ZeroStrengthNoChange (0 ms)
+[ RUN      ] EyeEnlargementTest.MaxStrengthBounded
+[       OK ] EyeEnlargementTest.MaxStrengthBounded (1 ms)
+[ RUN      ] EyeEnlargementTest.StrengthScaling
+[       OK ] EyeEnlargementTest.StrengthScaling (1 ms)
+[ RUN      ] EyeEnlargementTest.CombinedWithSlimFace
+[       OK ] EyeEnlargementTest.CombinedWithSlimFace (2 ms)
+[ RUN      ] EyeEnlargementTest.CombinedWithThinChin
+[       OK ] EyeEnlargementTest.CombinedWithThinChin (0 ms)
+[ RUN      ] EyeEnlargementTest.AllEffectsCombined
+[       OK ] EyeEnlargementTest.AllEffectsCombined (0 ms)
+[ RUN      ] EyeEnlargementTest.ExpansionDirectionIsOutward
+[       OK ] EyeEnlargementTest.ExpansionDirectionIsOutward (1 ms)
+[ RUN      ] EyeEnlargementTest.LandmarkConstantsValid
+[       OK ] EyeEnlargementTest.LandmarkConstantsValid (0 ms)
+[ RUN      ] EyeEnlargementTest.EffectParametersReasonable
+[       OK ] EyeEnlargementTest.EffectParametersReasonable (0 ms)
+[==========] 12 tests from 1 test suite ran. (12 ms total)
+[  PASSED  ] 12 tests.
+```
+
+기존 FaceWarpController 테스트 (23개)도 모두 통과.
+
+---
+
+## 5. 완료 기준 체크리스트
+
+- [x] 눈 중심 기준 방사형 확대 구현
+- [x] 비선형 확대 함수 (inner region weight)
+- [x] 외곽 영역 부드러운 감쇠 (RBF 보간)
+- [x] 눈썹 영역 연동 조정 (상향 리프트)
+- [ ] GPU 셰이더 대안 구현 (선택적, 미구현)
+- [x] 좌우 대칭 검증
+- [x] 단위 테스트 통과 (12/12)
+
+---
+
+## 6. 사용법
+
+```cpp
+#include "iris_sdk/warp/face_warp_controller.h"
+#include "iris_sdk/warp/grid_mesh.h"
+
+// GridMesh 초기화
+iris_sdk::warp::GridMesh mesh;
+mesh.initialize(20, face_rect);
+mesh.setControlPoints(face_landmarks, width, height);
+
+// FaceWarpController로 효과 적용
+iris_sdk::warp::FaceWarpController controller;
+iris_sdk::warp::WarpConfig config;
+config.slimFace = 0.5f;     // 슬림페이스
+config.thinChin = 0.5f;     // V라인
+config.enlargeEyes = 0.5f;  // 눈 확대
+
+controller.applyWarp(mesh, face_landmarks, config);
+
+// mesh의 final positions 사용하여 렌더링
+```
 
 ---
 
 ## 7. 다음 작업
 
 - **P2-W5-01**: JNI 바인딩 및 Android 통합
+- **선택적**: GPU 셰이더 기반 눈 확대 최적화

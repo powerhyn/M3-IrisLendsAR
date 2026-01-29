@@ -568,3 +568,16 @@ target_link_libraries(test_face_warp_controller PRIVATE
 )
 
 gtest_discover_tests(test_face_warp_controller DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P2-W4-03: Eye Enlargement 테스트
+# ============================================================
+add_executable(test_eye_enlargement test_eye_enlargement.cpp)
+target_include_directories(test_eye_enlargement PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_eye_enlargement PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_eye_enlargement DISCOVERY_TIMEOUT 60)

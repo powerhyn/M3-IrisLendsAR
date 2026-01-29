@@ -1,8 +1,9 @@
 /**
  * @file face_warp_controller.cpp
- * @brief Implementation of FaceWarpController for slim face and V-line effects
+ * @brief Implementation of FaceWarpController for slim face, V-line, and eye enlargement effects
  *
  * P2-W4-02: Slim Face / V-Line Effect Implementation
+ * P2-W4-03: Eye Enlargement Effect Implementation
  */
 
 #include "iris_sdk/warp/face_warp_controller.h"
@@ -252,18 +253,121 @@ void FaceWarpController::applyThinChin(GridMesh& mesh,
 void FaceWarpController::applyEnlargeEyes(GridMesh& mesh,
                                            const IrisLandmark* face_mesh,
                                            float strength) {
-    // Placeholder for P2-W4-03
-    // Eye enlargement will involve:
-    // - Upper/lower eyelid landmarks expansion outward from eye center
-    // - Eye corner landmarks slight outward movement
-    // - Radial displacement pattern from eye center
+    // Apply eye enlargement to both eyes
+    // Each eye uses radial expansion from iris center
 
-    (void)mesh;
-    (void)face_mesh;
-    (void)strength;
+    // Left eye enlargement
+    applyEyeEnlargementSingle(mesh, face_mesh,
+                               LEFT_IRIS_CENTER,
+                               LEFT_EYE_CONTOUR,
+                               LEFT_EYEBROW,
+                               strength);
 
-    // TODO: Implement in P2-W4-03
+    // Right eye enlargement
+    applyEyeEnlargementSingle(mesh, face_mesh,
+                               RIGHT_IRIS_CENTER,
+                               RIGHT_EYE_CONTOUR,
+                               RIGHT_EYEBROW,
+                               strength);
 }
+
+template<std::size_t ContourSize, std::size_t EyebrowSize>
+void FaceWarpController::applyEyeEnlargementSingle(
+    GridMesh& mesh,
+    const IrisLandmark* face_mesh,
+    int iris_center_idx,
+    const std::array<int, ContourSize>& eye_contour,
+    const std::array<int, EyebrowSize>& eyebrow_indices,
+    float strength) {
+
+    // Get eye center coordinates
+    float center_x = face_mesh[iris_center_idx].x;
+    float center_y = face_mesh[iris_center_idx].y;
+
+    // Calculate eye radius from contour
+    float eye_radius = calculateEyeRadius(face_mesh, iris_center_idx, eye_contour);
+
+    if (eye_radius < 1e-6f) {
+        return;  // Invalid eye radius
+    }
+
+    // Calculate scale factor based on strength
+    float scale_factor = strength * MAX_EYE_ENLARGE_SCALE;
+
+    // Apply radial expansion to eye contour landmarks
+    for (int idx : eye_contour) {
+        float lm_x = face_mesh[idx].x;
+        float lm_y = face_mesh[idx].y;
+
+        // Vector from center to landmark
+        float vec_x = lm_x - center_x;
+        float vec_y = lm_y - center_y;
+        float dist = std::sqrt(vec_x * vec_x + vec_y * vec_y);
+
+        if (dist < 1e-6f) {
+            continue;  // Skip points at center
+        }
+
+        // Normalize direction vector
+        float norm_x = vec_x / dist;
+        float norm_y = vec_y / dist;
+
+        // Calculate displacement magnitude
+        // Points closer to eye radius get full expansion
+        // Inner points get slightly less to preserve iris shape
+        float dist_ratio = dist / eye_radius;
+        float expansion_weight = 1.0f;
+        if (dist_ratio < 0.5f) {
+            // Inner region: reduced expansion to preserve iris
+            expansion_weight = 0.5f + dist_ratio;
+        }
+
+        float displacement = dist * scale_factor * expansion_weight;
+
+        // Apply displacement (outward from center)
+        float dx = norm_x * displacement;
+        float dy = norm_y * displacement;
+
+        mesh.setControlPointDisplacement(idx, dx, dy);
+    }
+
+    // Apply subtle eyebrow lift proportional to eye expansion
+    float eyebrow_lift = eye_radius * scale_factor * EYEBROW_LIFT_RATIO;
+
+    for (int idx : eyebrow_indices) {
+        // Eyebrow moves upward (negative Y in image coordinates)
+        mesh.setControlPointDisplacement(idx, 0.0f, -eyebrow_lift);
+    }
+}
+
+template<std::size_t ContourSize>
+float FaceWarpController::calculateEyeRadius(
+    const IrisLandmark* face_mesh,
+    int iris_center_idx,
+    const std::array<int, ContourSize>& eye_contour) {
+
+    float center_x = face_mesh[iris_center_idx].x;
+    float center_y = face_mesh[iris_center_idx].y;
+
+    float max_dist = 0.0f;
+
+    for (int idx : eye_contour) {
+        float dx = face_mesh[idx].x - center_x;
+        float dy = face_mesh[idx].y - center_y;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        max_dist = std::max(max_dist, dist);
+    }
+
+    return max_dist;
+}
+
+// Explicit template instantiations
+template void FaceWarpController::applyEyeEnlargementSingle<16, 10>(
+    GridMesh&, const IrisLandmark*, int,
+    const std::array<int, 16>&, const std::array<int, 10>&, float);
+
+template float FaceWarpController::calculateEyeRadius<16>(
+    const IrisLandmark*, int, const std::array<int, 16>&);
 
 // =============================================================================
 // Helper Functions
@@ -309,7 +413,12 @@ void FaceWarpController::registerWarpControlPoints(GridMesh& mesh, const IrisLan
         RIGHT_CHEEK_INDICES.size() +
         CHIN_CENTER_INDICES.size() +
         LEFT_JAW_INDICES.size() +
-        RIGHT_JAW_INDICES.size()
+        RIGHT_JAW_INDICES.size() +
+        LEFT_EYE_CONTOUR.size() +
+        RIGHT_EYE_CONTOUR.size() +
+        LEFT_EYEBROW.size() +
+        RIGHT_EYEBROW.size() +
+        2  // Iris centers
     );
 
     // Left cheek
@@ -336,6 +445,31 @@ void FaceWarpController::registerWarpControlPoints(GridMesh& mesh, const IrisLan
     for (int idx : RIGHT_JAW_INDICES) {
         warp_landmarks.push_back(idx);
     }
+
+    // Eye landmarks for eye enlargement effect
+    // Left eye contour
+    for (int idx : LEFT_EYE_CONTOUR) {
+        warp_landmarks.push_back(idx);
+    }
+
+    // Right eye contour
+    for (int idx : RIGHT_EYE_CONTOUR) {
+        warp_landmarks.push_back(idx);
+    }
+
+    // Left eyebrow
+    for (int idx : LEFT_EYEBROW) {
+        warp_landmarks.push_back(idx);
+    }
+
+    // Right eyebrow
+    for (int idx : RIGHT_EYEBROW) {
+        warp_landmarks.push_back(idx);
+    }
+
+    // Iris centers (reference points)
+    warp_landmarks.push_back(LEFT_IRIS_CENTER);
+    warp_landmarks.push_back(RIGHT_IRIS_CENTER);
 
     // Register these as additional control points
     mesh.addControlPoints(face_mesh, warp_landmarks.data(), static_cast<int>(warp_landmarks.size()));

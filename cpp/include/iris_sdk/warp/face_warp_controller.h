@@ -1,14 +1,15 @@
 /**
  * @file face_warp_controller.h
- * @brief Face warp effects controller for slim face and V-line effects
+ * @brief Face warp effects controller for slim face, V-line, and eye enlargement effects
  *
  * P2-W4-02: Slim Face / V-Line Effect Implementation
+ * P2-W4-03: Eye Enlargement Effect Implementation
  *
  * This class applies face warping effects using GridMesh displacement control.
  * Effects include:
  * - Slim Face: Moves cheek landmarks inward toward face center
  * - Thin Chin / V-Line: Moves jaw and chin landmarks inward and upward
- * - Enlarge Eyes: (Placeholder for P2-W4-03)
+ * - Enlarge Eyes: Radial expansion of eye contour from iris center with eyebrow lift
  */
 
 #ifndef IRIS_SDK_WARP_FACE_WARP_CONTROLLER_H
@@ -99,6 +100,38 @@ public:
     static constexpr int NOSE_TIP_INDEX = 4;
 
     // =========================================================================
+    // Eye Landmark Constants (MediaPipe 478 Face Mesh)
+    // =========================================================================
+
+    /// Left iris center landmark index
+    static constexpr int LEFT_IRIS_CENTER = 468;
+
+    /// Right iris center landmark index
+    static constexpr int RIGHT_IRIS_CENTER = 473;
+
+    /// Left eye contour landmark indices (upper and lower lids)
+    static constexpr std::array<int, 16> LEFT_EYE_CONTOUR = {
+        33, 7, 163, 144, 145, 153, 154, 155, 133,
+        173, 157, 158, 159, 160, 161, 246
+    };
+
+    /// Right eye contour landmark indices (upper and lower lids)
+    static constexpr std::array<int, 16> RIGHT_EYE_CONTOUR = {
+        362, 382, 381, 380, 374, 373, 390, 249, 263,
+        466, 388, 387, 386, 385, 384, 398
+    };
+
+    /// Left eyebrow landmark indices
+    static constexpr std::array<int, 10> LEFT_EYEBROW = {
+        70, 63, 105, 66, 107, 55, 65, 52, 53, 46
+    };
+
+    /// Right eyebrow landmark indices
+    static constexpr std::array<int, 10> RIGHT_EYEBROW = {
+        300, 293, 334, 296, 336, 285, 295, 282, 283, 276
+    };
+
+    // =========================================================================
     // Effect Parameters
     // =========================================================================
 
@@ -110,6 +143,12 @@ public:
 
     /// Maximum Y displacement ratio for V-line effect (2.5% upward)
     static constexpr float MAX_VLINE_DY = 0.025f;
+
+    /// Maximum eye enlargement scale (25% max at full strength)
+    static constexpr float MAX_EYE_ENLARGE_SCALE = 0.25f;
+
+    /// Eyebrow lift ratio relative to eye expansion
+    static constexpr float EYEBROW_LIFT_RATIO = 0.3f;
 
     // =========================================================================
     // Public API
@@ -202,7 +241,10 @@ private:
                        float center_x);
 
     /**
-     * @brief Apply eye enlargement effect (placeholder for P2-W4-03)
+     * @brief Apply eye enlargement effect
+     *
+     * Enlarges both eyes using radial expansion from iris center.
+     * Also applies subtle eyebrow lift to maintain natural appearance.
      *
      * @param mesh GridMesh to modify
      * @param face_mesh Face mesh landmarks
@@ -211,6 +253,45 @@ private:
     void applyEnlargeEyes(GridMesh& mesh,
                           const IrisLandmark* face_mesh,
                           float strength);
+
+    /**
+     * @brief Apply eye enlargement to a single eye
+     *
+     * Helper method that performs radial expansion from eye center
+     * for one eye (left or right).
+     *
+     * @param mesh GridMesh to modify
+     * @param face_mesh Face mesh landmarks
+     * @param iris_center_idx Iris center landmark index (468 or 473)
+     * @param eye_contour Eye contour landmark indices
+     * @param contour_size Number of contour landmarks
+     * @param eyebrow_indices Eyebrow landmark indices
+     * @param eyebrow_size Number of eyebrow landmarks
+     * @param strength Effect strength (0.0 ~ 1.0)
+     */
+    template<std::size_t ContourSize, std::size_t EyebrowSize>
+    void applyEyeEnlargementSingle(GridMesh& mesh,
+                                    const IrisLandmark* face_mesh,
+                                    int iris_center_idx,
+                                    const std::array<int, ContourSize>& eye_contour,
+                                    const std::array<int, EyebrowSize>& eyebrow_indices,
+                                    float strength);
+
+    /**
+     * @brief Calculate eye radius from contour landmarks
+     *
+     * Finds the maximum distance from iris center to any contour point.
+     *
+     * @param face_mesh Face mesh landmarks
+     * @param iris_center_idx Iris center landmark index
+     * @param eye_contour Eye contour landmark indices
+     * @param contour_size Number of contour landmarks
+     * @return Eye radius in normalized coordinates
+     */
+    template<std::size_t ContourSize>
+    static float calculateEyeRadius(const IrisLandmark* face_mesh,
+                                     int iris_center_idx,
+                                     const std::array<int, ContourSize>& eye_contour);
 
     /**
      * @brief Calculate Y-position weight for smooth gradient effect
