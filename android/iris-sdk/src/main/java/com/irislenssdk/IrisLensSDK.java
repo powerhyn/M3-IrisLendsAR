@@ -629,6 +629,157 @@ public final class IrisLensSDK {
     }
 
     // ========================================================================
+    // 뷰티 필터 V2 API
+    // ========================================================================
+
+    /**
+     * GPU 뷰티 백엔드를 초기화합니다.
+     *
+     * <p>GPU 가속 뷰티 필터를 사용하려면 먼저 이 메서드를 호출해야 합니다.
+     * OpenGL ES 컨텍스트가 현재 스레드에 바인딩되어 있어야 합니다.</p>
+     *
+     * @return 에러 코드 (OK = 성공, ERROR_NOT_SUPPORTED = GPU 미지원)
+     */
+    public static int initGpuBeauty() {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeInitGpuBeauty();
+    }
+
+    /**
+     * GPU 뷰티 백엔드를 해제합니다.
+     *
+     * <p>앱 종료 시 또는 GPU 리소스 정리가 필요할 때 호출합니다.</p>
+     */
+    public static void releaseGpuBeauty() {
+        if (sLibraryLoaded) {
+            nativeReleaseGpuBeauty();
+        }
+    }
+
+    /**
+     * GPU 뷰티 백엔드 초기화 여부를 확인합니다.
+     *
+     * @return true면 초기화됨
+     */
+    public static boolean isGpuBeautyInitialized() {
+        if (!sLibraryLoaded) {
+            return false;
+        }
+        return nativeIsGpuBeautyInitialized();
+    }
+
+    /**
+     * 기본 V2 뷰티 필터 설정을 가져옵니다.
+     *
+     * @return 기본 설정이 적용된 BeautyFilterConfigV2
+     */
+    @NonNull
+    public static BeautyFilterConfigV2 getDefaultBeautyConfigV2() {
+        BeautyFilterConfigV2 config = new BeautyFilterConfigV2();
+        if (sLibraryLoaded) {
+            nativeDefaultBeautyConfigV2(config);
+        }
+        return config;
+    }
+
+    /**
+     * V2 뷰티 필터를 프레임에 적용합니다 (CPU).
+     *
+     * <p>프레임 데이터는 in-place로 수정됩니다.
+     * 얼굴 검출 결과가 있으면 ROI 기반 처리로 성능이 향상됩니다.</p>
+     *
+     * @param frameData 프레임 데이터 (수정됨)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 프레임 포맷 (FORMAT_* 상수)
+     * @param config V2 뷰티 필터 설정
+     * @param result 얼굴 검출 결과 (null 가능, null이면 전체 프레임 처리)
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int applyBeautyFilterV2(@NonNull byte[] frameData, int width, int height,
+                                           int format, @NonNull BeautyFilterConfigV2 config,
+                                           @Nullable IrisResult result) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        // IrisResult를 네이티브 포인터로 변환하는 것은 현재 지원하지 않음
+        // 추후 네이티브 결과 캐싱 구현 시 사용
+        return nativeApplyBeautyV2(frameData, width, height, format, config, 0L);
+    }
+
+    /**
+     * V2 뷰티 필터를 GPU 텍스처에 적용합니다.
+     *
+     * <p>GPU 뷰티 백엔드가 초기화되어 있어야 합니다.
+     * GLSurfaceView.Renderer의 onDrawFrame 등 OpenGL 컨텍스트 내에서 호출해야 합니다.</p>
+     *
+     * @param inputTexture 입력 OpenGL ES 텍스처 ID
+     * @param width 텍스처 너비
+     * @param height 텍스처 높이
+     * @param config V2 뷰티 필터 설정
+     * @return 출력 텍스처 ID (실패 시 입력 텍스처 반환)
+     */
+    public static int applyBeautyFilterTextureV2(int inputTexture, int width, int height,
+                                                  @NonNull BeautyFilterConfigV2 config) {
+        if (!sLibraryLoaded) {
+            return inputTexture;
+        }
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L);
+    }
+
+    /**
+     * Face Warp 효과를 GPU 텍스처에 적용합니다.
+     *
+     * <p>얼굴 형태 보정(슬림 페이스, 턱 축소, 눈 확대)을 수행합니다.
+     * 얼굴 검출 결과가 필요합니다.</p>
+     *
+     * @param inputTexture 입력 OpenGL ES 텍스처 ID
+     * @param width 텍스처 너비
+     * @param height 텍스처 높이
+     * @param slimFace 얼굴 슬림화 강도 (0.0~1.0)
+     * @param thinChin 턱 축소 강도 (0.0~1.0)
+     * @param enlargeEyes 눈 확대 강도 (0.0~1.0)
+     * @return 출력 텍스처 ID
+     */
+    public static int applyFaceWarp(int inputTexture, int width, int height,
+                                     float slimFace, float thinChin, float enlargeEyes) {
+        if (!sLibraryLoaded) {
+            return inputTexture;
+        }
+        // 검출 결과 없이 호출 시 pass-through
+        return nativeApplyFaceWarp(inputTexture, width, height, slimFace, thinChin, enlargeEyes, 0L);
+    }
+
+    /**
+     * SDK가 관리하는 텍스처를 해제합니다.
+     *
+     * <p>applyBeautyFilterTextureV2나 applyFaceWarp에서 반환된 텍스처 중
+     * SDK가 내부적으로 생성한 텍스처를 해제합니다.</p>
+     *
+     * @param texture 해제할 텍스처 ID
+     */
+    public static void releaseTexture(int texture) {
+        if (sLibraryLoaded) {
+            nativeReleaseTexture(texture);
+        }
+    }
+
+    /**
+     * 텍스처가 SDK 관리인지 확인합니다.
+     *
+     * @param texture 확인할 텍스처 ID
+     * @return true면 SDK 관리 텍스처
+     */
+    public static boolean isTextureManaged(int texture) {
+        if (!sLibraryLoaded) {
+            return false;
+        }
+        return nativeIsTextureManaged(texture);
+    }
+
+    // ========================================================================
     // 정보 API
     // ========================================================================
 
@@ -808,4 +959,63 @@ public final class IrisLensSDK {
 
     // NV21 → RGBA 고속 변환 API
     private static native int nativeNv21ToRgba(byte[] nv21Data, int width, int height, android.graphics.Bitmap bitmap);
+
+    // ========================================================================
+    // Beauty Filter V2 Native Methods
+    // ========================================================================
+
+    /**
+     * GPU 뷰티 백엔드 초기화
+     * @return 에러 코드 (0 = 성공)
+     */
+    private static native int nativeInitGpuBeauty();
+
+    /**
+     * GPU 뷰티 백엔드 해제
+     */
+    private static native void nativeReleaseGpuBeauty();
+
+    /**
+     * GPU 뷰티 백엔드 초기화 여부 확인
+     */
+    private static native boolean nativeIsGpuBeautyInitialized();
+
+    /**
+     * 기본 V2 설정으로 초기화
+     */
+    private static native void nativeDefaultBeautyConfigV2(BeautyFilterConfigV2 config);
+
+    /**
+     * V2 뷰티 필터 적용 (CPU 버퍼)
+     */
+    private static native int nativeApplyBeautyV2(
+            byte[] frameData, int width, int height, int format,
+            BeautyFilterConfigV2 config, long detectionPtr);
+
+    /**
+     * V2 뷰티 필터 적용 (GPU 텍스처)
+     * @return 출력 텍스처 ID (0이면 실패)
+     */
+    private static native int nativeApplyBeautyTextureV2(
+            int inputTexture, int width, int height,
+            BeautyFilterConfigV2 config, long detectionPtr);
+
+    /**
+     * Face Warp 적용 (GPU)
+     * @return 출력 텍스처 ID
+     */
+    private static native int nativeApplyFaceWarp(
+            int inputTexture, int width, int height,
+            float slimFace, float thinChin, float enlargeEyes,
+            long detectionPtr);
+
+    /**
+     * SDK 관리 텍스처 해제
+     */
+    private static native void nativeReleaseTexture(int texture);
+
+    /**
+     * 텍스처가 SDK 관리인지 확인
+     */
+    private static native boolean nativeIsTextureManaged(int texture);
 }

@@ -140,6 +140,59 @@ public:
      */
     void onMemoryPressure(int level);
 
+    //=========================================================================
+    // V2 API - 텍스처 ID 기반 (C API 호환)
+    //=========================================================================
+
+    /**
+     * @brief 텍스처 ID 기반 뷰티 필터 적용 (C API용)
+     *
+     * @param input_texture 입력 OpenGL 텍스처 ID
+     * @param output_texture 출력 텍스처 ID (새로 생성됨)
+     * @param width 텍스처 너비
+     * @param height 텍스처 높이
+     * @param config 필터 설정
+     * @param detection 얼굴 검출 결과 (ROI 생성용)
+     * @return 에러 코드
+     */
+    IrisSdkError applyTextureId(
+        uint32_t input_texture,
+        uint32_t* output_texture,
+        int width, int height,
+        const BeautyFilterConfigV2& config,
+        const IrisResult* detection
+    );
+
+    /**
+     * @brief Face Warp 적용 (얼굴 형태 변형)
+     *
+     * @param input_texture 입력 텍스처 ID
+     * @param output_texture 출력 텍스처 ID
+     * @param width 텍스처 너비
+     * @param height 텍스처 높이
+     * @param slim_face 갸름한 얼굴 강도 (0.0~1.0)
+     * @param thin_chin 턱 축소 강도 (0.0~1.0)
+     * @param enlarge_eyes 눈 확대 강도 (0.0~1.0)
+     * @param detection 얼굴 검출 결과 (랜드마크 필요)
+     * @return 에러 코드
+     */
+    IrisSdkError applyFaceWarp(
+        uint32_t input_texture,
+        uint32_t* output_texture,
+        int width, int height,
+        float slim_face,
+        float thin_chin,
+        float enlarge_eyes,
+        const IrisResult* detection
+    );
+
+    /**
+     * @brief SDK가 관리하는 텍스처 해제
+     *
+     * @param texture 해제할 텍스처 ID
+     */
+    void releaseTexture(uint32_t texture);
+
 private:
     //=========================================================================
     // 초기화 헬퍼

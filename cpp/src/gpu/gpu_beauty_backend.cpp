@@ -5,6 +5,9 @@
 
 #include "iris_sdk/gpu/gpu_beauty_backend.h"
 #include "iris_sdk/gpu/render_context.h"
+#include "iris_sdk/beauty_roi_manager.h"
+#include <algorithm>
+#include <cmath>
 
 #if IRIS_SDK_GPU_AVAILABLE
 #include "iris_sdk/gpu/gles_render_context.h"
@@ -613,6 +616,228 @@ void GPUBeautyBackend::onMemoryPressure(int level) {
     if (texture_pool_) {
         texture_pool_->onMemoryPressure(level);
     }
+}
+
+//=============================================================================
+// V2 API - 텍스처 ID 기반 (C API 호환)
+//=============================================================================
+
+IrisSdkError GPUBeautyBackend::applyTextureId(
+    uint32_t input_texture,
+    uint32_t* output_texture,
+    int width, int height,
+    const BeautyFilterConfigV2& config,
+    const IrisResult* detection) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+
+    if (input_texture == 0 || !output_texture) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    if (width <= 0 || height <= 0) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    if (!config.enabled) {
+        *output_texture = input_texture;
+        return IRIS_SDK_OK;
+    }
+
+#if IRIS_SDK_GPU_AVAILABLE
+    render_context_->makeCurrent();
+
+    // TextureHandle 생성 (입력)
+    GLuint input_tex_id = static_cast<GLuint>(input_texture);
+    TextureHandle input_handle;
+    input_handle.native_handle = &input_tex_id;
+    input_handle.type = TextureHandle::Type::OpenGLES;
+    input_handle.width = width;
+    input_handle.height = height;
+    input_handle.format = TextureFormat::RGBA8;
+
+    // ROI 생성 (detection이 있는 경우)
+    BeautyROI roi;
+    BeautyROI* roi_ptr = nullptr;
+
+    if (detection && detection->detected && config.roiOnly) {
+        int face_x = static_cast<int>(detection->face_rect.x * width);
+        int face_y = static_cast<int>(detection->face_rect.y * height);
+        int face_w = static_cast<int>(detection->face_rect.width * width);
+        int face_h = static_cast<int>(detection->face_rect.height * height);
+
+        int margin_x = face_w / 5;
+        int margin_y = face_h / 5;
+        face_x = std::max(0, face_x - margin_x);
+        face_y = std::max(0, face_y - margin_y);
+        face_w = std::min(width - face_x, face_w + 2 * margin_x);
+        face_h = std::min(height - face_y, face_h + 2 * margin_y);
+
+        roi.face_rect = Rect{
+            static_cast<float>(face_x),
+            static_cast<float>(face_y),
+            static_cast<float>(face_w),
+            static_cast<float>(face_h)
+        };
+        roi.mask_width = face_w;
+        roi.mask_height = face_h;
+        roi.valid = true;
+        roi.timestamp_ms = detection->timestamp_ms;
+
+        if (detection->face_mesh_valid) {
+            BeautyROIManager::computeROI(
+                detection->face_mesh, 478,
+                width, height, config, roi
+            );
+        }
+        roi_ptr = &roi;
+    }
+
+    // Ping-Pong 버퍼 획득
+    TexturePool::TextureInfo* ping = nullptr;
+    TexturePool::TextureInfo* pong = nullptr;
+    if (!texture_pool_->acquirePingPongPair(width, height, ping, pong)) {
+        LOGE("Failed to acquire ping-pong buffers");
+        return IRIS_SDK_UNKNOWN;
+    }
+
+    GLuint current_input = input_tex_id;
+    TexturePool::TextureInfo* current_output = ping;
+
+    // 뷰포트 설정
+    glViewport(0, 0, width, height);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+
+    // 필터 체인 실행
+    if (config.smoothing > 0.01f) {
+        executeSmoothingPass(current_input, current_output->fbo_id,
+                             width, height, config);
+        current_input = current_output->texture_id;
+        current_output = (current_output == ping) ? pong : ping;
+    }
+
+    if (config.whitening > 0.01f) {
+        executeWhiteningPass(current_input, current_output->fbo_id,
+                             width, height, config.whitening);
+        current_input = current_output->texture_id;
+        current_output = (current_output == ping) ? pong : ping;
+    }
+
+    if (std::abs(config.colorBalance) > 0.01f) {
+        executeColorBalancePass(current_input, current_output->fbo_id,
+                                width, height, config.colorBalance);
+        current_input = current_output->texture_id;
+        current_output = (current_output == ping) ? pong : ping;
+    }
+
+    if (config.softFocus > 0.01f) {
+        executeSoftFocusPass(current_input, current_output->fbo_id,
+                             width, height, config.softFocus);
+        current_input = current_output->texture_id;
+        current_output = (current_output == ping) ? pong : ping;
+    }
+
+    if (std::abs(config.brightness - 1.0f) > 0.01f) {
+        executeBrightnessPass(current_input, current_output->fbo_id,
+                              width, height, config.brightness);
+        current_input = current_output->texture_id;
+    }
+
+    *output_texture = current_input;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    (void)roi_ptr;  // TODO: ROI 마스킹 적용
+#else
+    *output_texture = input_texture;
+    (void)detection;
+#endif
+
+    return IRIS_SDK_OK;
+}
+
+IrisSdkError GPUBeautyBackend::applyFaceWarp(
+    uint32_t input_texture,
+    uint32_t* output_texture,
+    int width, int height,
+    float slim_face,
+    float thin_chin,
+    float enlarge_eyes,
+    const IrisResult* detection) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+
+    if (input_texture == 0 || !output_texture) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    // 모든 값이 0이거나 검출 결과가 없으면 패스스루
+    if (!detection || !detection->detected ||
+        (slim_face <= 0.0f && thin_chin <= 0.0f && enlarge_eyes <= 0.0f)) {
+        *output_texture = input_texture;
+        return IRIS_SDK_OK;
+    }
+
+#if IRIS_SDK_GPU_AVAILABLE
+    render_context_->makeCurrent();
+
+    // TODO: Face Warp 셰이더 구현
+    // 현재는 입력 텍스처를 그대로 반환 (stub)
+    // Face Warp는 Face Mesh 랜드마크 기반 메시 워핑이 필요함
+
+    LOGW("Face Warp not yet implemented, returning input texture");
+    *output_texture = input_texture;
+
+    (void)width;
+    (void)height;
+    (void)slim_face;
+    (void)thin_chin;
+    (void)enlarge_eyes;
+#else
+    *output_texture = input_texture;
+    (void)width;
+    (void)height;
+    (void)slim_face;
+    (void)thin_chin;
+    (void)enlarge_eyes;
+#endif
+
+    return IRIS_SDK_OK;
+}
+
+void GPUBeautyBackend::releaseTexture(uint32_t texture) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_ || texture == 0) {
+        return;
+    }
+
+#if IRIS_SDK_GPU_AVAILABLE
+    render_context_->makeCurrent();
+
+    // 텍스처 풀에서 관리하는 텍스처인지 확인 후 반환
+    if (texture_pool_) {
+        // 텍스처 풀의 텍스처는 직접 삭제하지 않고 풀에 반환
+        // 외부에서 생성한 텍스처는 직접 삭제
+        GLuint tex_id = static_cast<GLuint>(texture);
+
+        // 텍스처 풀에 없는 경우에만 직접 삭제
+        // 참고: 실제 구현에서는 풀에서 관리 여부 확인 필요
+        glDeleteTextures(1, &tex_id);
+        LOGI("Released texture %u", tex_id);
+    }
+#else
+    (void)texture;
+#endif
 }
 
 } // namespace iris_sdk

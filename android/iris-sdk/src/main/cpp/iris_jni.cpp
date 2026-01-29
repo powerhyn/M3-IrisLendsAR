@@ -132,6 +132,44 @@ bool JniCache::init(JNIEnv* env) {
         return false;
     }
 
+    // BeautyFilterConfigV2 클래스 찾기
+    jclass localBeautyConfigV2Class = env->FindClass("com/irislenssdk/BeautyFilterConfigV2");
+    if (!localBeautyConfigV2Class) {
+        LOGE("Failed to find BeautyFilterConfigV2 class");
+        return false;
+    }
+    beautyConfigV2Class = static_cast<jclass>(env->NewGlobalRef(localBeautyConfigV2Class));
+    env->DeleteLocalRef(localBeautyConfigV2Class);
+
+    // BeautyFilterConfigV2 필드 ID 캐시
+    beautyConfigV2_enabled = env->GetFieldID(beautyConfigV2Class, "enabled", "Z");
+    beautyConfigV2_intensity = env->GetFieldID(beautyConfigV2Class, "intensity", "F");
+    beautyConfigV2_smoothing = env->GetFieldID(beautyConfigV2Class, "smoothing", "F");
+    beautyConfigV2_brightness = env->GetFieldID(beautyConfigV2Class, "brightness", "F");
+    beautyConfigV2_softFocus = env->GetFieldID(beautyConfigV2Class, "softFocus", "F");
+    beautyConfigV2_whitening = env->GetFieldID(beautyConfigV2Class, "whitening", "F");
+    beautyConfigV2_colorBalance = env->GetFieldID(beautyConfigV2Class, "colorBalance", "F");
+    beautyConfigV2_wrinkleRemove = env->GetFieldID(beautyConfigV2Class, "wrinkleRemove", "F");
+    beautyConfigV2_slimFace = env->GetFieldID(beautyConfigV2Class, "slimFace", "F");
+    beautyConfigV2_enlargeEyes = env->GetFieldID(beautyConfigV2Class, "enlargeEyes", "F");
+    beautyConfigV2_thinChin = env->GetFieldID(beautyConfigV2Class, "thinChin", "F");
+    beautyConfigV2_useGpu = env->GetFieldID(beautyConfigV2Class, "useGpu", "Z");
+    beautyConfigV2_roiOnly = env->GetFieldID(beautyConfigV2Class, "roiOnly", "Z");
+    beautyConfigV2_protectEyes = env->GetFieldID(beautyConfigV2Class, "protectEyes", "Z");
+    beautyConfigV2_protectLips = env->GetFieldID(beautyConfigV2Class, "protectLips", "Z");
+    beautyConfigV2_downscaleFactor = env->GetFieldID(beautyConfigV2Class, "downscaleFactor", "I");
+
+    // 필드 ID 검증
+    if (!beautyConfigV2_enabled || !beautyConfigV2_intensity || !beautyConfigV2_smoothing ||
+        !beautyConfigV2_brightness || !beautyConfigV2_softFocus || !beautyConfigV2_whitening ||
+        !beautyConfigV2_colorBalance || !beautyConfigV2_wrinkleRemove || !beautyConfigV2_slimFace ||
+        !beautyConfigV2_enlargeEyes || !beautyConfigV2_thinChin || !beautyConfigV2_useGpu ||
+        !beautyConfigV2_roiOnly || !beautyConfigV2_protectEyes || !beautyConfigV2_protectLips ||
+        !beautyConfigV2_downscaleFactor) {
+        LOGE("Failed to get BeautyFilterConfigV2 field IDs");
+        return false;
+    }
+
     LOGI("JNI cache initialized successfully");
     return true;
 }
@@ -150,6 +188,10 @@ void JniCache::destroy(JNIEnv* env) {
     if (beautyConfigClass) {
         env->DeleteGlobalRef(beautyConfigClass);
         beautyConfigClass = nullptr;
+    }
+    if (beautyConfigV2Class) {
+        env->DeleteGlobalRef(beautyConfigV2Class);
+        beautyConfigV2Class = nullptr;
     }
 
     LOGI("JNI cache destroyed");
@@ -276,6 +318,64 @@ bool copyBeautyConfigToJava(JNIEnv* env, const BeautyFilterConfig& src, jobject 
     env->SetFloatField(dest, g_jniCache.beautyConfig_smoothing, src.smoothing);
     env->SetFloatField(dest, g_jniCache.beautyConfig_brightness, src.brightness);
     env->SetFloatField(dest, g_jniCache.beautyConfig_softFocus, src.softFocus);
+
+    return !checkAndLogException(env);
+}
+
+bool copyBeautyConfigV2FromJava(JNIEnv* env, jobject src, IrisBeautyConfigV2& dest) {
+    if (!env || !src) return false;
+    if (!g_jniCache.beautyConfigV2Class) {
+        LOGE("BeautyConfigV2 class not cached");
+        return false;
+    }
+
+    // 기본값으로 초기화
+    iris_sdk_default_beauty_config_v2_c(&dest);
+
+    // Java 객체에서 값 복사
+    dest.enabled = env->GetBooleanField(src, g_jniCache.beautyConfigV2_enabled) ? 1 : 0;
+    dest.intensity = env->GetFloatField(src, g_jniCache.beautyConfigV2_intensity);
+    dest.smoothing = env->GetFloatField(src, g_jniCache.beautyConfigV2_smoothing);
+    dest.brightness = env->GetFloatField(src, g_jniCache.beautyConfigV2_brightness);
+    dest.soft_focus = env->GetFloatField(src, g_jniCache.beautyConfigV2_softFocus);
+    dest.whitening = env->GetFloatField(src, g_jniCache.beautyConfigV2_whitening);
+    dest.color_balance = env->GetFloatField(src, g_jniCache.beautyConfigV2_colorBalance);
+    dest.wrinkle_remove = env->GetFloatField(src, g_jniCache.beautyConfigV2_wrinkleRemove);
+    dest.slim_face = env->GetFloatField(src, g_jniCache.beautyConfigV2_slimFace);
+    dest.enlarge_eyes = env->GetFloatField(src, g_jniCache.beautyConfigV2_enlargeEyes);
+    dest.thin_chin = env->GetFloatField(src, g_jniCache.beautyConfigV2_thinChin);
+    dest.use_gpu = env->GetBooleanField(src, g_jniCache.beautyConfigV2_useGpu) ? 1 : 0;
+    dest.roi_only = env->GetBooleanField(src, g_jniCache.beautyConfigV2_roiOnly) ? 1 : 0;
+    dest.protect_eyes = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectEyes) ? 1 : 0;
+    dest.protect_lips = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectLips) ? 1 : 0;
+    dest.downscale_factor = env->GetIntField(src, g_jniCache.beautyConfigV2_downscaleFactor);
+
+    return !checkAndLogException(env);
+}
+
+bool copyBeautyConfigV2ToJava(JNIEnv* env, const IrisBeautyConfigV2& src, jobject dest) {
+    if (!env || !dest) return false;
+    if (!g_jniCache.beautyConfigV2Class) {
+        LOGE("BeautyConfigV2 class not cached");
+        return false;
+    }
+
+    env->SetBooleanField(dest, g_jniCache.beautyConfigV2_enabled, src.enabled != 0);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_intensity, src.intensity);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_smoothing, src.smoothing);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_brightness, src.brightness);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_softFocus, src.soft_focus);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_whitening, src.whitening);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_colorBalance, src.color_balance);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_wrinkleRemove, src.wrinkle_remove);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_slimFace, src.slim_face);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_enlargeEyes, src.enlarge_eyes);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_thinChin, src.thin_chin);
+    env->SetBooleanField(dest, g_jniCache.beautyConfigV2_useGpu, src.use_gpu != 0);
+    env->SetBooleanField(dest, g_jniCache.beautyConfigV2_roiOnly, src.roi_only != 0);
+    env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectEyes, src.protect_eyes != 0);
+    env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectLips, src.protect_lips != 0);
+    env->SetIntField(dest, g_jniCache.beautyConfigV2_downscaleFactor, src.downscale_factor);
 
     return !checkAndLogException(env);
 }
@@ -1251,6 +1351,309 @@ Java_com_irislenssdk_IrisLensSDK_nativeNv21ToRgba(
 
     LOGV("nativeNv21ToRgba completed successfully");
     return static_cast<jint>(IRIS_SDK_OK);
+}
+
+// ============================================================================
+// Beauty Filter V2 API
+// ============================================================================
+
+/**
+ * @brief 기본 V2 뷰티 필터 설정 가져오기
+ *
+ * 기본값으로 초기화된 BeautyFilterConfigV2를 Java 객체에 복사합니다.
+ *
+ * Java: native void nativeDefaultBeautyConfigV2(BeautyFilterConfigV2 config);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeDefaultBeautyConfigV2(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jobject configObj) {
+
+    LOGD("nativeDefaultBeautyConfigV2 called");
+
+    if (!configObj) {
+        LOGE("nativeDefaultBeautyConfigV2: configObj is null");
+        return;
+    }
+
+    // C API로 기본 설정 가져오기
+    IrisBeautyConfigV2 nativeConfig = {};
+    iris_sdk_default_beauty_config_v2_c(&nativeConfig);
+
+    // Java 객체로 복사
+    if (!copyBeautyConfigV2ToJava(env, nativeConfig, configObj)) {
+        LOGE("Failed to copy default beauty config V2 to Java object");
+    }
+}
+
+/**
+ * @brief GPU 뷰티 백엔드 초기화
+ *
+ * Java: native int nativeInitGpuBeauty();
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeInitGpuBeauty(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    LOGD("nativeInitGpuBeauty called");
+
+    IrisSdkError result = iris_sdk_init_gpu_beauty();
+
+    if (result == IRIS_SDK_OK) {
+        LOGI("GPU beauty backend initialized successfully");
+    } else {
+        LOGW("GPU beauty backend initialization failed: %d (%s)",
+             result, iris_sdk_error_to_string(result));
+    }
+
+    return static_cast<jint>(result);
+}
+
+/**
+ * @brief GPU 뷰티 백엔드 해제
+ *
+ * Java: native void nativeReleaseGpuBeauty();
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeReleaseGpuBeauty(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    LOGD("nativeReleaseGpuBeauty called");
+    iris_sdk_release_gpu_beauty();
+    LOGI("GPU beauty backend released");
+}
+
+/**
+ * @brief GPU 뷰티 백엔드 초기화 여부 확인
+ *
+ * Java: native boolean nativeIsGpuBeautyInitialized();
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeIsGpuBeautyInitialized(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    int initialized = iris_sdk_is_gpu_beauty_initialized();
+    LOGV("nativeIsGpuBeautyInitialized: %s", initialized ? "true" : "false");
+    return initialized ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * @brief V2 뷰티 필터 적용 (CPU 버퍼)
+ *
+ * Java: native int nativeApplyBeautyV2(byte[] frameData, int width, int height,
+ *                                       int format, BeautyFilterConfigV2 config,
+ *                                       long detectionPtr);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jbyteArray frameData,
+    jint width,
+    jint height,
+    jint format,
+    jobject configObj,
+    jlong detectionPtr) {
+
+    LOGV("nativeApplyBeautyV2 called: %dx%d, format=%d", width, height, format);
+
+    // 파라미터 검증
+    if (!frameData) {
+        LOGE("nativeApplyBeautyV2: frameData is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+    if (!configObj) {
+        LOGE("nativeApplyBeautyV2: configObj is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+    if (width <= 0 || height <= 0) {
+        LOGE("nativeApplyBeautyV2: invalid dimensions %dx%d", width, height);
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // RAII로 바이트 배열 접근 (쓰기 가능)
+    ScopedByteArray frame(env, frameData, 0);  // mode=0: 변경사항 복사
+    if (!frame.valid()) {
+        LOGE("nativeApplyBeautyV2: failed to get frame data");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // 버퍼 크기 검증
+    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
+        LOGE("nativeApplyBeautyV2: frame buffer size mismatch");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // Java 객체에서 설정 복사
+    IrisBeautyConfigV2 nativeConfig = {};
+    if (!copyBeautyConfigV2FromJava(env, configObj, nativeConfig)) {
+        LOGE("Failed to copy beauty config V2 from Java object");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // 검출 결과 포인터 변환
+    const IrisResult* detection = reinterpret_cast<const IrisResult*>(detectionPtr);
+
+    // C API 호출
+    IrisSdkError error = iris_sdk_apply_beauty_v2_c(
+        frame.data(),
+        static_cast<int>(width),
+        static_cast<int>(height),
+        static_cast<IrisFrameFormat>(format),
+        &nativeConfig,
+        detection
+    );
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("Apply beauty V2 failed: %d (%s)", error, iris_sdk_error_to_string(error));
+    }
+
+    return static_cast<jint>(error);
+}
+
+/**
+ * @brief V2 뷰티 필터 적용 (GPU 텍스처)
+ *
+ * Java: native int nativeApplyBeautyTextureV2(int inputTexture, int width, int height,
+ *                                              BeautyFilterConfigV2 config, long detectionPtr);
+ *
+ * @return 출력 텍스처 ID (0이면 실패)
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jint inputTexture,
+    jint width,
+    jint height,
+    jobject configObj,
+    jlong detectionPtr) {
+
+    LOGV("nativeApplyBeautyTextureV2 called: texture=%d, %dx%d", inputTexture, width, height);
+
+    if (!configObj) {
+        LOGE("nativeApplyBeautyTextureV2: configObj is null");
+        return 0;
+    }
+    if (width <= 0 || height <= 0) {
+        LOGE("nativeApplyBeautyTextureV2: invalid dimensions %dx%d", width, height);
+        return 0;
+    }
+
+    // Java 객체에서 설정 복사
+    IrisBeautyConfigV2 nativeConfig = {};
+    if (!copyBeautyConfigV2FromJava(env, configObj, nativeConfig)) {
+        LOGE("Failed to copy beauty config V2 from Java object");
+        return 0;
+    }
+
+    // 검출 결과 포인터 변환
+    const IrisResult* detection = reinterpret_cast<const IrisResult*>(detectionPtr);
+
+    // C API 호출
+    uint32_t outputTexture = 0;
+    IrisSdkError error = iris_sdk_apply_beauty_texture_v2(
+        static_cast<uint32_t>(inputTexture),
+        &outputTexture,
+        static_cast<int>(width),
+        static_cast<int>(height),
+        &nativeConfig,
+        detection
+    );
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("Apply beauty texture V2 failed: %d (%s)", error, iris_sdk_error_to_string(error));
+        return static_cast<jint>(inputTexture);  // 실패 시 입력 텍스처 반환
+    }
+
+    return static_cast<jint>(outputTexture);
+}
+
+/**
+ * @brief Face Warp 적용 (GPU)
+ *
+ * Java: native int nativeApplyFaceWarp(int inputTexture, int width, int height,
+ *                                       float slimFace, float thinChin, float enlargeEyes,
+ *                                       long detectionPtr);
+ *
+ * @return 출력 텍스처 ID
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeApplyFaceWarp(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jint inputTexture,
+    jint width,
+    jint height,
+    jfloat slimFace,
+    jfloat thinChin,
+    jfloat enlargeEyes,
+    jlong detectionPtr) {
+
+    LOGV("nativeApplyFaceWarp called: texture=%d, %dx%d, slim=%.2f, chin=%.2f, eyes=%.2f",
+         inputTexture, width, height, slimFace, thinChin, enlargeEyes);
+
+    // 검출 결과 포인터 변환
+    const IrisResult* detection = reinterpret_cast<const IrisResult*>(detectionPtr);
+
+    // C API 호출
+    uint32_t outputTexture = 0;
+    IrisSdkError error = iris_sdk_apply_face_warp(
+        static_cast<uint32_t>(inputTexture),
+        &outputTexture,
+        static_cast<int>(width),
+        static_cast<int>(height),
+        slimFace,
+        thinChin,
+        enlargeEyes,
+        detection
+    );
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("Apply face warp failed: %d (%s)", error, iris_sdk_error_to_string(error));
+        return static_cast<jint>(inputTexture);
+    }
+
+    return static_cast<jint>(outputTexture);
+}
+
+/**
+ * @brief SDK 관리 텍스처 해제
+ *
+ * Java: native void nativeReleaseTexture(int texture);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeReleaseTexture(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jint texture) {
+
+    LOGV("nativeReleaseTexture called: texture=%d", texture);
+
+    IrisSdkError error = iris_sdk_release_texture(static_cast<uint32_t>(texture));
+
+    if (error != IRIS_SDK_OK) {
+        LOGV("Release texture result: %d (may not be SDK-managed)", error);
+    }
+}
+
+/**
+ * @brief 텍스처가 SDK 관리인지 확인
+ *
+ * Java: native boolean nativeIsTextureManaged(int texture);
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeIsTextureManaged(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jint texture) {
+
+    int managed = iris_sdk_is_texture_managed(static_cast<uint32_t>(texture));
+    return managed ? JNI_TRUE : JNI_FALSE;
 }
 
 }  // extern "C"
