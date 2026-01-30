@@ -12,6 +12,7 @@
 #include "iris_sdk/beauty_backend.h"
 #include "iris_sdk/gpu/shader_manager.h"
 #include "iris_sdk/gpu/texture_pool.h"
+#include "iris_sdk/gpu/gpu_profiler.h"
 
 #include <memory>
 #include <mutex>
@@ -140,6 +141,29 @@ public:
      */
     void onMemoryPressure(int level);
 
+    /**
+     * @brief GPU 프로파일러 활성화/비활성화
+     * @param enabled true: 활성화, false: 비활성화
+     */
+    void setProfilingEnabled(bool enabled);
+
+    /**
+     * @brief GPU 프로파일러 활성화 여부
+     */
+    bool isProfilingEnabled() const;
+
+    /**
+     * @brief GPU 성능 리포트 생성
+     * @return 포맷된 성능 리포트 문자열
+     */
+    std::string getProfilingReport() const;
+
+    /**
+     * @brief GPU 프로파일러 접근
+     */
+    GPUProfiler* getProfiler() { return profiler_.get(); }
+    const GPUProfiler* getProfiler() const { return profiler_.get(); }
+
     //=========================================================================
     // V2 API - 텍스처 ID 기반 (C API 호환)
     //=========================================================================
@@ -241,6 +265,12 @@ private:
                       GLuint mask_tex, GLuint output_fbo,
                       int width, int height);
 
+    /// 통합 Color Adjustment 패스 (Brightness + ColorBalance + Whitening)
+    /// 3개 패스를 1개로 병합하여 성능 최적화
+    void executeCombinedColorPass(GLuint input_tex, GLuint output_fbo,
+                                  int width, int height,
+                                  float brightness, float balance, float whitening);
+
     //=========================================================================
     // 멤버 변수
     //=========================================================================
@@ -253,6 +283,7 @@ private:
 
     std::unique_ptr<ShaderManager> shader_manager_;
     std::unique_ptr<TexturePool> texture_pool_;
+    std::unique_ptr<GPUProfiler> profiler_;  // GPU 성능 프로파일러
 
     // 풀스크린 쿼드 VAO/VBO
     GLuint quad_vao_ = 0;
@@ -266,6 +297,56 @@ private:
     GLuint soft_focus_program_ = 0;
     GLuint brightness_program_ = 0;
     GLuint masking_program_ = 0;
+    GLuint combined_color_program_ = 0;  // 통합 Color Adjustment (최적화)
+
+    //=========================================================================
+    // Uniform Location 캐시 (성능 최적화)
+    //=========================================================================
+
+    /// 셰이더별 Uniform Location 캐시 구조체
+    struct UniformLocations {
+        // 공통
+        GLint uTexture = -1;
+
+        // Smoothing (Bilateral Filter)
+        GLint uTexelSize = -1;
+        GLint uStrength = -1;
+
+        // Brightness
+        GLint uBrightness = -1;
+
+        // Whitening
+        GLint uWhiteningStrength = -1;
+
+        // Color Balance
+        GLint uBalance = -1;
+
+        // Soft Focus
+        GLint uSoftFocusTexelSize = -1;
+        GLint uSoftFocusStrength = -1;
+
+        // Masking
+        GLint uFiltered = -1;
+        GLint uOriginal = -1;
+        GLint uMask = -1;
+
+        // Combined Color Adjustment (통합 필터)
+        GLint uCombinedBrightness = -1;
+        GLint uCombinedBalance = -1;
+        GLint uCombinedWhitening = -1;
+    };
+
+    /// 프로그램별 Uniform Location 캐시
+    UniformLocations smoothing_uniforms_;
+    UniformLocations whitening_uniforms_;
+    UniformLocations color_balance_uniforms_;
+    UniformLocations soft_focus_uniforms_;
+    UniformLocations brightness_uniforms_;
+    UniformLocations masking_uniforms_;
+    UniformLocations combined_color_uniforms_;  // 통합 Color Adjustment
+
+    /// Uniform Location 캐싱 (초기화 시 호출)
+    void cacheUniformLocations();
 
     bool initialized_ = false;
     mutable std::mutex mutex_;
