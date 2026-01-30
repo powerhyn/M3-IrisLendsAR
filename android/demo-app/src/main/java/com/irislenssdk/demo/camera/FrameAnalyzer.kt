@@ -19,6 +19,7 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Log
 import androidx.camera.core.ImageProxy
+import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import java.io.ByteArrayOutputStream
@@ -72,6 +73,9 @@ class FrameAnalyzer(
 
     // 뷰티 필터 활성화 플래그
     var beautyFilterEnabled: Boolean = false
+
+    // V2 뷰티 필터 설정 (외부에서 설정)
+    var beautyConfigV2: BeautyFilterConfigV2? = null
 
     // 프레임 스킵 카운터 (뷰티 필터 적용 빈도 조절)
     private var beautyFrameCounter = 0
@@ -160,15 +164,26 @@ class FrameAnalyzer(
 
             // 뷰티 필터 적용 (활성화된 경우, 프레임 스킵 적용)
             var filteredBitmap: Bitmap? = null
-            if (beautyFilterEnabled && IrisLensSDK.isBeautyFilterEnabled()) {
+            val configV2 = beautyConfigV2
+            if (beautyFilterEnabled && configV2 != null && configV2.enabled) {
                 beautyFrameCounter++
 
                 // 프레임 스킵: N프레임마다 필터 적용, 나머지는 캐시 사용
                 if (beautyFrameCounter % BEAUTY_FILTER_FRAME_SKIP == 0) {
-                    // 프레임에 뷰티 필터 적용 (in-place 수정)
-                    val filterError = IrisLensSDK.applyBeautyFilter(
-                        nv21, width, height, IrisLensSDK.FORMAT_NV21
+                    // V2 API 시도, 실패 시 V1 폴백
+                    var filterError = IrisLensSDK.applyBeautyFilterV2(
+                        nv21, width, height, IrisLensSDK.FORMAT_NV21,
+                        configV2, irisResult
                     )
+
+                    // V2 실패 시 V1으로 폴백
+                    if (filterError != IrisLensSDK.OK) {
+                        Log.w(TAG, "Beauty V2 failed ($filterError), falling back to V1")
+                        filterError = IrisLensSDK.applyBeautyFilter(
+                            nv21, width, height, IrisLensSDK.FORMAT_NV21
+                        )
+                    }
+
                     if (filterError == IrisLensSDK.OK) {
                         // NV21 → Bitmap 변환 후 캐시
                         cachedFilteredBitmap?.recycle()
@@ -176,7 +191,10 @@ class FrameAnalyzer(
                         filteredBitmap = cachedFilteredBitmap
                     } else {
                         Log.w(TAG, "Beauty filter error: ${IrisLensSDK.errorToString(filterError)}")
-                        filteredBitmap = cachedFilteredBitmap  // 캐시 사용
+                        // 필터 실패해도 원본 프레임 표시
+                        cachedFilteredBitmap?.recycle()
+                        cachedFilteredBitmap = nv21ToBitmap(nv21, width, height, rotationDegrees)
+                        filteredBitmap = cachedFilteredBitmap
                     }
                 } else {
                     // 캐시된 비트맵 재사용 (프레임 스킵)

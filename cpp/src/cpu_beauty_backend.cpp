@@ -9,6 +9,7 @@
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace iris_sdk {
 
@@ -77,6 +78,18 @@ cv::Mat CPUBeautyBackend::convertToBGR(const uint8_t* data, int width, int heigh
             result = cv::Mat(height, width, CV_8UC3, const_cast<uint8_t*>(data)).clone();
             break;
         }
+        case IRIS_FORMAT_NV21: {
+            // NV21 (YUV420sp): Y plane + interleaved VU plane
+            cv::Mat nv21(height + height / 2, width, CV_8UC1, const_cast<uint8_t*>(data));
+            cv::cvtColor(nv21, result, cv::COLOR_YUV2BGR_NV21);
+            break;
+        }
+        case IRIS_FORMAT_NV12: {
+            // NV12 (YUV420sp): Y plane + interleaved UV plane
+            cv::Mat nv12(height + height / 2, width, CV_8UC1, const_cast<uint8_t*>(data));
+            cv::cvtColor(nv12, result, cv::COLOR_YUV2BGR_NV12);
+            break;
+        }
         default:
             // 지원하지 않는 포맷
             break;
@@ -106,6 +119,48 @@ void CPUBeautyBackend::convertFromBGR(const cv::Mat& bgr, uint8_t* data,
         case IRIS_FORMAT_BGR: {
             cv::Mat dst(height, width, CV_8UC3, data);
             bgr.copyTo(dst);
+            break;
+        }
+        case IRIS_FORMAT_NV21: {
+            // BGR -> I420 변환 후 VU 인터리브로 재배열
+            cv::Mat yuv_i420;
+            cv::cvtColor(bgr, yuv_i420, cv::COLOR_BGR2YUV_I420);
+
+            // Y 평면 복사
+            int y_size = width * height;
+            int uv_size = y_size / 4;
+            std::memcpy(data, yuv_i420.data, y_size);
+
+            // U, V 평면을 VU 인터리브로 재배열 (NV21: VUVU...)
+            const uint8_t* u_plane = yuv_i420.data + y_size;
+            const uint8_t* v_plane = u_plane + uv_size;
+            uint8_t* vu_plane = data + y_size;
+
+            for (int i = 0; i < uv_size; i++) {
+                vu_plane[2*i] = v_plane[i];     // V
+                vu_plane[2*i + 1] = u_plane[i]; // U
+            }
+            break;
+        }
+        case IRIS_FORMAT_NV12: {
+            // BGR -> I420 변환 후 UV 인터리브로 재배열
+            cv::Mat yuv_i420;
+            cv::cvtColor(bgr, yuv_i420, cv::COLOR_BGR2YUV_I420);
+
+            // Y 평면 복사
+            int y_size = width * height;
+            int uv_size = y_size / 4;
+            std::memcpy(data, yuv_i420.data, y_size);
+
+            // U, V 평면을 UV 인터리브로 재배열 (NV12: UVUV...)
+            const uint8_t* u_plane = yuv_i420.data + y_size;
+            const uint8_t* v_plane = u_plane + uv_size;
+            uint8_t* uv_plane = data + y_size;
+
+            for (int i = 0; i < uv_size; i++) {
+                uv_plane[2*i] = u_plane[i];     // U
+                uv_plane[2*i + 1] = v_plane[i]; // V
+            }
             break;
         }
         default:

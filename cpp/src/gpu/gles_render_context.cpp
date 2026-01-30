@@ -10,6 +10,11 @@
 #include <android/log.h>
 #include <cstring>
 
+// EGL_OPENGL_ES3_BIT_KHR may not be defined in older NDK headers
+#ifndef EGL_OPENGL_ES3_BIT_KHR
+#define EGL_OPENGL_ES3_BIT_KHR 0x0040
+#endif
+
 #define LOG_TAG "GLESRenderContext"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)

@@ -248,7 +248,7 @@ IrisSdkError iris_sdk_init_gpu_beauty(void) {
     }
 
     g_gpu_beauty = std::make_unique<iris_sdk::GPUBeautyBackend>();
-    if (!g_gpu_beauty->initialize()) {
+    if (!g_gpu_beauty->initialize(nullptr)) {
         g_gpu_beauty.reset();
         return IRIS_SDK_ERROR_NOT_INITIALIZED;
     }
@@ -358,7 +358,7 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
         &result_texture,
         width, height,
         cpp_config,
-        detection
+        reinterpret_cast<const iris_sdk::IrisResult*>(detection)
     );
 
     if (err == IRIS_SDK_OK && result_texture != 0) {
@@ -415,7 +415,7 @@ IrisSdkError iris_sdk_apply_face_warp(
         slim_face,
         thin_chin,
         enlarge_eyes,
-        detection
+        reinterpret_cast<const iris_sdk::IrisResult*>(detection)
     );
 
     if (err == IRIS_SDK_OK && result_texture != 0) {
