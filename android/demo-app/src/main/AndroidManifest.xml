@@ -66,6 +66,14 @@
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize" />
 
+        <!-- GPU 렌더링 테스트 액티비티 -->
+        <activity
+            android:name=".GpuRenderActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize"
+            android:hardwareAccelerated="true" />
+
     </application>
 
 </manifest>

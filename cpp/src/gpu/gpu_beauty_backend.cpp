@@ -51,23 +51,24 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
         return true;
     }
 
-    if (!render_context) {
-        LOGE("RenderContext is null");
-        return false;
-    }
-
 #if IRIS_SDK_GPU_AVAILABLE
-    // GLESRenderContext로 다운캐스트
-    render_context_ = dynamic_cast<GLESRenderContext*>(render_context);
-    if (!render_context_) {
-        LOGE("RenderContext is not GLESRenderContext");
-        return false;
-    }
+    if (render_context) {
+        // GLESRenderContext로 다운캐스트
+        render_context_ = dynamic_cast<GLESRenderContext*>(render_context);
+        if (!render_context_) {
+            LOGE("RenderContext is not GLESRenderContext");
+            return false;
+        }
 
-    // GL 컨텍스트 활성화
-    if (!render_context_->makeCurrent()) {
-        LOGE("Failed to make GL context current");
-        return false;
+        // GL 컨텍스트 활성화
+        if (!render_context_->makeCurrent()) {
+            LOGE("Failed to make GL context current");
+            return false;
+        }
+    } else {
+        // render_context가 null일 경우, 현재 스레드의 EGL 컨텍스트 사용 (Android GLSurfaceView)
+        render_context_ = nullptr;
+        LOGI("Using current thread's EGL context (GLSurfaceView mode)");
     }
 #else
     render_context_ = nullptr;
@@ -375,7 +376,10 @@ IrisSdkError GPUBeautyBackend::apply(
     // 여기서는 기본 프레임워크만 구현
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // TODO: 텍스처 업로드 → applyTexture 호출 → 다운로드
     // 현재는 stub 구현
@@ -413,7 +417,10 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     int width = input.width;
     int height = input.height;
@@ -780,7 +787,10 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // TextureHandle 생성 (입력)
     GLuint input_tex_id = static_cast<GLuint>(input_texture);
@@ -929,7 +939,10 @@ IrisSdkError GPUBeautyBackend::applyFaceWarp(
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // TODO: Face Warp 셰이더 구현
     // 현재는 입력 텍스처를 그대로 반환 (stub)
@@ -963,7 +976,10 @@ void GPUBeautyBackend::releaseTexture(uint32_t texture) {
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // 텍스처 풀에서 관리하는 텍스처인지 확인 후 반환
     if (texture_pool_) {
