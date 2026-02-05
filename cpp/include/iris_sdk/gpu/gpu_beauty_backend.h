@@ -348,6 +348,11 @@ private:
     /// Uniform Location 캐싱 (초기화 시 호출)
     void cacheUniformLocations();
 
+    // 이전 출력 텍스처 추적 (텍스처 풀 관리용)
+    TexturePool::TextureInfo* previous_output_ping_ = nullptr;
+    TexturePool::TextureInfo* previous_output_pong_ = nullptr;
+    GLuint previous_output_texture_ = 0;
+
     bool initialized_ = false;
     mutable std::mutex mutex_;
 };

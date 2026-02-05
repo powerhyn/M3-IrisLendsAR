@@ -247,14 +247,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // 2단계: GPU Beauty 필터 적용
         val inputTexture = rgbaTextureId
-        val outputTexture = if (beautyEnabled && beautyConfig.enabled) {
+        val beautyApplied = beautyEnabled && beautyConfig.enabled
+        val outputTexture = if (beautyApplied) {
             applyGpuBeautyFilter(inputTexture)
         } else {
             inputTexture
         }
 
-        // 3단계: 화면에 렌더링
-        renderToScreen(outputTexture)
+        // 3단계: 화면에 렌더링 (뷰티 적용 여부 전달 - 테스트용 틴트)
+        renderToScreen(outputTexture, beautyApplied)
 
         checkGlError("onDrawFrame")
     }
@@ -306,6 +307,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
         val texHeight = if (frameHeight > 0) frameHeight else viewHeight
 
+        // 디버그: 뷰티 설정 확인
+        Log.d(TAG, "Beauty filter call: enabled=${beautyConfig.enabled}, smoothing=${beautyConfig.smoothing}, brightness=${beautyConfig.brightness}")
+
         // GPU Beauty Backend 호출 (JNI)
         val outputTexture = IrisLensSDK.applyBeautyFilterTextureV2(
             inputTexture,
@@ -314,23 +318,28 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             beautyConfig
         )
 
+        // 디버그: 결과 확인
+        Log.d(TAG, "Beauty filter result: input=$inputTexture, output=$outputTexture, size=${texWidth}x${texHeight}")
+
         return if (outputTexture != 0 && outputTexture != inputTexture) {
-            // 이전 출력 텍스처가 있으면 해제
-            if (beautyOutputTextureId != 0 && beautyOutputTextureId != outputTexture) {
-                IrisLensSDK.releaseTexture(beautyOutputTextureId)
-            }
+            // NOTE: 텍스처 해제는 C++ TexturePool에서 관리함
+            // Android에서 releaseTexture() 호출하면 이중 해제 발생 → 검은 화면 원인
+            // 이전 코드: IrisLensSDK.releaseTexture(beautyOutputTextureId) - 제거됨
             beautyOutputTextureId = outputTexture
             beautyOutputTextureId
         } else {
             // 필터 실패 또는 pass-through 시 원본 반환
+            Log.w(TAG, "Beauty filter pass-through: output=$outputTexture (same as input or 0)")
             inputTexture
         }
     }
 
     /**
      * 화면에 텍스처 렌더링
+     * @param textureId 렌더링할 텍스처 ID
+     * @param beautyApplied 뷰티 필터 적용 여부 (테스트용 틴트)
      */
-    private fun renderToScreen(textureId: Int) {
+    private fun renderToScreen(textureId: Int, beautyApplied: Boolean = false) {
         // 기본 프레임버퍼 바인딩
         GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
         GLES31.glViewport(0, 0, viewWidth, viewHeight)
@@ -397,6 +406,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setBeautyEnabled(enabled: Boolean) {
         this.beautyEnabled = enabled
+        this.beautyConfig.enabled = enabled  // JNI에 전달되는 config도 업데이트
     }
 
     /**

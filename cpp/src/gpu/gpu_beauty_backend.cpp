@@ -699,8 +699,31 @@ void GPUBeautyBackend::executeCombinedColorPass(
     float brightness, float balance, float whitening) {
 
 #if IRIS_SDK_GPU_AVAILABLE
+    LOGI("CombinedColor: program=%u, fbo=%u, input=%u, brightness=%.2f",
+         combined_color_program_, output_fbo, input_tex, brightness);
+
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+
+    // FBO Completeness 체크 (디버깅)
+    GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
+        LOGE("CombinedColor: FBO incomplete! status=0x%x", fboStatus);
+        return;
+    }
+
+    // 텍스처 유효성 확인
+    GLboolean isValidTex = glIsTexture(input_tex);
+    LOGI("CombinedColor: input_tex=%u valid=%d", input_tex, isValidTex);
+
     glUseProgram(combined_color_program_);
+
+    // 프로그램 링크 상태 확인
+    GLint linkStatus;
+    glGetProgramiv(combined_color_program_, GL_LINK_STATUS, &linkStatus);
+    if (linkStatus != GL_TRUE) {
+        LOGE("CombinedColor: program link failed!");
+        return;
+    }
 
     // 캐시된 Uniform Location 사용
     glUniform1i(combined_color_uniforms_.uTexture, 0);
@@ -708,10 +731,22 @@ void GPUBeautyBackend::executeCombinedColorPass(
     glUniform1f(combined_color_uniforms_.uCombinedBalance, balance);
     glUniform1f(combined_color_uniforms_.uCombinedWhitening, whitening);
 
+    // GL 에러 체크
+    GLenum glErr = glGetError();
+    if (glErr != GL_NO_ERROR) {
+        LOGE("CombinedColor: GL error after uniforms: 0x%x", glErr);
+    }
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
 
     renderFullscreenQuad();
+
+    // 렌더링 후 에러 체크
+    glErr = glGetError();
+    if (glErr != GL_NO_ERROR) {
+        LOGE("CombinedColor: GL error after render: 0x%x", glErr);
+    }
 
     glBindTexture(GL_TEXTURE_2D, 0);
 #else
@@ -838,13 +873,49 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         roi_ptr = &roi;
     }
 
+    // DEBUG: 텍스처 풀 상태 로깅
+    auto stats_before = texture_pool_->getStats();
+    LOGI("TexturePool BEFORE release: total=%d, in_use=%d, available=%d",
+         stats_before.total_textures, stats_before.in_use, stats_before.available);
+
+    // 이전 프레임의 출력 텍스처 반환 (텍스처 풀 관리)
+    // GPU 동기화: 이전 프레임의 렌더링이 완료될 때까지 대기
+    // 이 텍스처들이 아직 GPU에서 사용 중일 수 있음 (renderToScreen의 비동기 커맨드)
+    if (previous_output_ping_ != nullptr || previous_output_pong_ != nullptr) {
+        glFinish();  // GPU 동기화 (성능 영향 있음, 디버깅용)
+        LOGI("Releasing previous: ping=%p, pong=%p",
+             (void*)previous_output_ping_, (void*)previous_output_pong_);
+    }
+    if (previous_output_ping_ != nullptr) {
+        texture_pool_->releaseTexture(previous_output_ping_);
+        previous_output_ping_ = nullptr;
+    }
+    if (previous_output_pong_ != nullptr) {
+        texture_pool_->releaseTexture(previous_output_pong_);
+        previous_output_pong_ = nullptr;
+    }
+
+    // DEBUG: 해제 후 상태
+    auto stats_after_release = texture_pool_->getStats();
+    LOGI("TexturePool AFTER release: total=%d, in_use=%d, available=%d",
+         stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
+
     // Ping-Pong 버퍼 획득
     TexturePool::TextureInfo* ping = nullptr;
     TexturePool::TextureInfo* pong = nullptr;
     if (!texture_pool_->acquirePingPongPair(width, height, ping, pong)) {
-        LOGE("Failed to acquire ping-pong buffers");
+        LOGE("Failed to acquire ping-pong buffers! Pool stats: total=%d, in_use=%d, available=%d",
+             stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
         return IRIS_SDK_UNKNOWN;
     }
+
+    // DEBUG: 획득 후 상태
+    auto stats_after_acquire = texture_pool_->getStats();
+    LOGI("TexturePool AFTER acquire: total=%d, in_use=%d, available=%d",
+         stats_after_acquire.total_textures, stats_after_acquire.in_use, stats_after_acquire.available);
+
+    LOGI("PingPong acquired: ping(tex=%u, fbo=%u), pong(tex=%u, fbo=%u), input=%u",
+         ping->texture_id, ping->fbo_id, pong->texture_id, pong->fbo_id, input_tex_id);
 
     GLuint current_input = input_tex_id;
     TexturePool::TextureInfo* current_output = ping;
@@ -897,6 +968,12 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     *output_texture = current_input;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Ping-Pong 버퍼를 다음 프레임에서 반환하도록 저장
+    // (현재 프레임에서 즉시 반환하면 출력 텍스처가 사라짐)
+    previous_output_ping_ = ping;
+    previous_output_pong_ = pong;
+    previous_output_texture_ = current_input;
 
     // 프레임 종료 처리 (프로파일링 결과 수집)
     if (profiling) {
