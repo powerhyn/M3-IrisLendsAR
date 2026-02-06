@@ -619,6 +619,19 @@ class MainActivity : AppCompatActivity() {
         binding.settingsButton.setOnClickListener {
             openSettings()
         }
+
+        // GPU 모드 버튼
+        binding.btnGpuMode.setOnClickListener {
+            openGpuRenderActivity()
+        }
+    }
+
+    /**
+     * GPU 렌더링 테스트 Activity 열기
+     */
+    private fun openGpuRenderActivity() {
+        val intent = android.content.Intent(this, GpuRenderActivity::class.java)
+        startActivity(intent)
     }
 
     // ==========================================================================

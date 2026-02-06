@@ -21,6 +21,7 @@
 #define IRIS_SDK_GPU_AVAILABLE 0
 // Desktop 스텁을 위한 타입 정의
 using GLuint = unsigned int;
+using GLint = int;
 using GLenum = unsigned int;
 #define GL_VERTEX_SHADER 0x8B31
 #define GL_FRAGMENT_SHADER 0x8B30
@@ -180,6 +181,9 @@ extern const char* MASKING_FRAGMENT;
 
 /// Gaussian Blur 프래그먼트 셰이더
 extern const char* GAUSSIAN_BLUR_FRAGMENT;
+
+/// 통합 Color Adjustment 셰이더 (Brightness + ColorBalance + Whitening)
+extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
 
 } // namespace shaders
 

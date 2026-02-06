@@ -301,6 +301,84 @@ void main() {
 )glsl";
 
 //=============================================================================
+// 통합 Color Adjustment 프래그먼트 셰이더 (Brightness + ColorBalance + Whitening)
+// 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
+//=============================================================================
+const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+
+uniform sampler2D uTexture;
+uniform float uBrightness;   // 0.5 ~ 1.5, 1.0 = 원본
+uniform float uBalance;      // -1.0 (쿨톤) ~ 1.0 (웜톤)
+uniform float uWhitening;    // 0.0 ~ 1.0
+
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+// RGB to YCbCr
+vec3 rgb2ycbcr(vec3 rgb) {
+    float y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+    float cb = -0.169 * rgb.r - 0.331 * rgb.g + 0.500 * rgb.b + 0.5;
+    float cr = 0.500 * rgb.r - 0.419 * rgb.g - 0.081 * rgb.b + 0.5;
+    return vec3(y, cb, cr);
+}
+
+// YCbCr to RGB
+vec3 ycbcr2rgb(vec3 ycbcr) {
+    float y = ycbcr.x;
+    float cb = ycbcr.y - 0.5;
+    float cr = ycbcr.z - 0.5;
+    float r = y + 1.402 * cr;
+    float g = y - 0.344 * cb - 0.714 * cr;
+    float b = y + 1.772 * cb;
+    return vec3(r, g, b);
+}
+
+void main() {
+    vec4 color = texture(uTexture, vTexCoord);
+    vec3 result = color.rgb;
+
+    // 1. Brightness (가장 먼저 적용)
+    if (abs(uBrightness - 1.0) > 0.01) {
+        result *= uBrightness;
+    }
+
+    // 2. Color Balance
+    if (abs(uBalance) > 0.01) {
+        if (uBalance > 0.0) {
+            // 웜톤: R/Yellow 증가
+            result.r += uBalance * 0.08;
+            result.g += uBalance * 0.04;
+        } else {
+            // 쿨톤: B/Cyan 증가
+            result.b += abs(uBalance) * 0.08;
+            result.g += abs(uBalance) * 0.02;
+        }
+    }
+
+    // 3. Whitening
+    if (uWhitening > 0.01) {
+        // YCbCr 변환
+        vec3 ycbcr = rgb2ycbcr(result);
+
+        // 밝기(Y) 증가 + 채도(Cb, Cr) 감소로 화이트닝 효과
+        float luminanceBoost = 1.0 + uWhitening * 0.2;  // 최대 20% 밝기 증가
+        float saturationReduce = 1.0 - uWhitening * 0.15;  // 최대 15% 채도 감소
+
+        ycbcr.x = min(ycbcr.x * luminanceBoost, 1.0);
+        ycbcr.y = mix(0.5, ycbcr.y, saturationReduce);
+        ycbcr.z = mix(0.5, ycbcr.z, saturationReduce);
+
+        // RGB 변환
+        result = ycbcr2rgb(ycbcr);
+    }
+
+    fragColor = vec4(clamp(result, 0.0, 1.0), color.a);
+}
+)glsl";
+
+//=============================================================================
 // Gaussian Blur 프래그먼트 셰이더 (추후 사용)
 //=============================================================================
 const char* GAUSSIAN_BLUR_FRAGMENT = R"glsl(

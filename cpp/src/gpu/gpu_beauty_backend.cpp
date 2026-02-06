@@ -51,23 +51,24 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
         return true;
     }
 
-    if (!render_context) {
-        LOGE("RenderContext is null");
-        return false;
-    }
-
 #if IRIS_SDK_GPU_AVAILABLE
-    // GLESRenderContext로 다운캐스트
-    render_context_ = dynamic_cast<GLESRenderContext*>(render_context);
-    if (!render_context_) {
-        LOGE("RenderContext is not GLESRenderContext");
-        return false;
-    }
+    if (render_context) {
+        // GLESRenderContext로 다운캐스트
+        render_context_ = dynamic_cast<GLESRenderContext*>(render_context);
+        if (!render_context_) {
+            LOGE("RenderContext is not GLESRenderContext");
+            return false;
+        }
 
-    // GL 컨텍스트 활성화
-    if (!render_context_->makeCurrent()) {
-        LOGE("Failed to make GL context current");
-        return false;
+        // GL 컨텍스트 활성화
+        if (!render_context_->makeCurrent()) {
+            LOGE("Failed to make GL context current");
+            return false;
+        }
+    } else {
+        // render_context가 null일 경우, 현재 스레드의 EGL 컨텍스트 사용 (Android GLSurfaceView)
+        render_context_ = nullptr;
+        LOGI("Using current thread's EGL context (GLSurfaceView mode)");
     }
 #else
     render_context_ = nullptr;
@@ -92,8 +93,20 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
         return false;
     }
 
+    // GPU 프로파일러 초기화
+    profiler_ = std::make_unique<GPUProfiler>();
+    if (profiler_->initialize()) {
+        profiler_->setEnabled(false);  // 기본 비활성화 (성능 영향)
+        LOGI("GPU profiler initialized (disabled by default)");
+    } else {
+        LOGW("GPU profiler not supported on this device");
+    }
+
     // 풀스크린 쿼드 설정
     setupFullscreenQuad();
+
+    // Uniform Location 캐싱 (성능 최적화)
+    cacheUniformLocations();
 
     initialized_ = true;
     LOGI("GPUBeautyBackend initialized successfully");
@@ -171,9 +184,58 @@ bool GPUBeautyBackend::initializeShaders() {
     }
     shader_manager_->cacheProgram("masking", masking_program_);
 
+    // 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
+    if (!shader_manager_->createProgram(
+            shaders::FULLSCREEN_QUAD_VERTEX,
+            shaders::COMBINED_COLOR_ADJUSTMENT_FRAGMENT,
+            combined_color_program_)) {
+        LOGE("Failed to create combined_color program");
+        return false;
+    }
+    shader_manager_->cacheProgram("combined_color", combined_color_program_);
+
     LOGI("All %zu shader programs created successfully",
          shader_manager_->getCachedProgramCount());
     return true;
+}
+
+void GPUBeautyBackend::cacheUniformLocations() {
+#if IRIS_SDK_GPU_AVAILABLE
+    // Smoothing (Bilateral Filter) Uniforms
+    smoothing_uniforms_.uTexture = glGetUniformLocation(smoothing_program_, "uTexture");
+    smoothing_uniforms_.uTexelSize = glGetUniformLocation(smoothing_program_, "uTexelSize");
+    smoothing_uniforms_.uStrength = glGetUniformLocation(smoothing_program_, "uStrength");
+
+    // Whitening Uniforms
+    whitening_uniforms_.uTexture = glGetUniformLocation(whitening_program_, "uTexture");
+    whitening_uniforms_.uWhiteningStrength = glGetUniformLocation(whitening_program_, "uStrength");
+
+    // Color Balance Uniforms
+    color_balance_uniforms_.uTexture = glGetUniformLocation(color_balance_program_, "uTexture");
+    color_balance_uniforms_.uBalance = glGetUniformLocation(color_balance_program_, "uBalance");
+
+    // Soft Focus Uniforms
+    soft_focus_uniforms_.uTexture = glGetUniformLocation(soft_focus_program_, "uTexture");
+    soft_focus_uniforms_.uSoftFocusTexelSize = glGetUniformLocation(soft_focus_program_, "uTexelSize");
+    soft_focus_uniforms_.uSoftFocusStrength = glGetUniformLocation(soft_focus_program_, "uStrength");
+
+    // Brightness Uniforms
+    brightness_uniforms_.uTexture = glGetUniformLocation(brightness_program_, "uTexture");
+    brightness_uniforms_.uBrightness = glGetUniformLocation(brightness_program_, "uBrightness");
+
+    // Masking Uniforms
+    masking_uniforms_.uFiltered = glGetUniformLocation(masking_program_, "uFiltered");
+    masking_uniforms_.uOriginal = glGetUniformLocation(masking_program_, "uOriginal");
+    masking_uniforms_.uMask = glGetUniformLocation(masking_program_, "uMask");
+
+    // Combined Color Adjustment Uniforms
+    combined_color_uniforms_.uTexture = glGetUniformLocation(combined_color_program_, "uTexture");
+    combined_color_uniforms_.uCombinedBrightness = glGetUniformLocation(combined_color_program_, "uBrightness");
+    combined_color_uniforms_.uCombinedBalance = glGetUniformLocation(combined_color_program_, "uBalance");
+    combined_color_uniforms_.uCombinedWhitening = glGetUniformLocation(combined_color_program_, "uWhitening");
+
+    LOGI("Uniform locations cached successfully");
+#endif
 }
 
 void GPUBeautyBackend::setupFullscreenQuad() {
@@ -261,6 +323,12 @@ void GPUBeautyBackend::release() {
         texture_pool_.reset();
     }
 
+    // 프로파일러 해제
+    if (profiler_) {
+        profiler_->release();
+        profiler_.reset();
+    }
+
     render_context_ = nullptr;
     initialized_ = false;
 
@@ -272,6 +340,7 @@ void GPUBeautyBackend::release() {
     soft_focus_program_ = 0;
     brightness_program_ = 0;
     masking_program_ = 0;
+    combined_color_program_ = 0;
 
     LOGI("GPUBeautyBackend released");
 }
@@ -307,7 +376,10 @@ IrisSdkError GPUBeautyBackend::apply(
     // 여기서는 기본 프레임워크만 구현
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // TODO: 텍스처 업로드 → applyTexture 호출 → 다운로드
     // 현재는 stub 구현
@@ -345,7 +417,10 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     int width = input.width;
     int height = input.height;
@@ -369,43 +444,43 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 
-    // 필터 체인 실행
-    // 1. 스무딩 (Bilateral Filter)
+    // 필터 체인 실행 (최적화됨 + 프로파일링)
+    bool profiling = profiler_ && profiler_->isEnabled();
+
+    // 1. 스무딩 (Bilateral Filter) - 단독 패스
     if (config.smoothing > 0.01f) {
+        if (profiling) profiler_->begin("Smoothing");
         executeSmoothingPass(current_input, current_output->fbo_id,
                              width, height, config);
+        if (profiling) profiler_->end("Smoothing");
         current_input = current_output->texture_id;
         current_output = (current_output == ping) ? pong : ping;
     }
 
-    // 2. 화이트닝
-    if (config.whitening > 0.01f) {
-        executeWhiteningPass(current_input, current_output->fbo_id,
-                             width, height, config.whitening);
+    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
+    //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
+    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
+    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
+    bool needsWhitening = config.whitening > 0.01f;
+
+    if (needsBrightness || needsBalance || needsWhitening) {
+        if (profiling) profiler_->begin("CombinedColor");
+        executeCombinedColorPass(current_input, current_output->fbo_id,
+                                 width, height,
+                                 config.brightness,
+                                 config.colorBalance,
+                                 config.whitening);
+        if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
         current_output = (current_output == ping) ? pong : ping;
     }
 
-    // 3. 컬러 밸런스
-    if (std::abs(config.colorBalance) > 0.01f) {
-        executeColorBalancePass(current_input, current_output->fbo_id,
-                                width, height, config.colorBalance);
-        current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
-    }
-
-    // 4. 소프트 포커스
+    // 3. 소프트 포커스 - 단독 패스 (blur 필요)
     if (config.softFocus > 0.01f) {
+        if (profiling) profiler_->begin("SoftFocus");
         executeSoftFocusPass(current_input, current_output->fbo_id,
                              width, height, config.softFocus);
-        current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
-    }
-
-    // 5. 밝기
-    if (std::abs(config.brightness - 1.0f) > 0.01f) {
-        executeBrightnessPass(current_input, current_output->fbo_id,
-                              width, height, config.brightness);
+        if (profiling) profiler_->end("SoftFocus");
         current_input = current_output->texture_id;
     }
 
@@ -421,6 +496,11 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     // 실제 구현에서는 호출자가 output 사용 후 반환해야 함
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // 프레임 종료 처리 (프로파일링 결과 수집)
+    if (profiling) {
+        profiler_->frameEnd();
+    }
 
     (void)roi;  // ROI 마스킹은 후속 작업에서 구현
 #else
@@ -441,11 +521,10 @@ void GPUBeautyBackend::executeSmoothingPass(
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     glUseProgram(smoothing_program_);
 
-    // Uniforms 설정
-    glUniform1i(glGetUniformLocation(smoothing_program_, "uTexture"), 0);
-    glUniform2f(glGetUniformLocation(smoothing_program_, "uTexelSize"),
-                1.0f / width, 1.0f / height);
-    glUniform1f(glGetUniformLocation(smoothing_program_, "uStrength"), config.smoothing);
+    // 캐시된 Uniform Location 사용 (성능 최적화)
+    glUniform1i(smoothing_uniforms_.uTexture, 0);
+    glUniform2f(smoothing_uniforms_.uTexelSize, 1.0f / width, 1.0f / height);
+    glUniform1f(smoothing_uniforms_.uStrength, config.smoothing);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
@@ -471,8 +550,9 @@ void GPUBeautyBackend::executeWhiteningPass(
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     glUseProgram(whitening_program_);
 
-    glUniform1i(glGetUniformLocation(whitening_program_, "uTexture"), 0);
-    glUniform1f(glGetUniformLocation(whitening_program_, "uStrength"), whitening);
+    // 캐시된 Uniform Location 사용
+    glUniform1i(whitening_uniforms_.uTexture, 0);
+    glUniform1f(whitening_uniforms_.uWhiteningStrength, whitening);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
@@ -498,8 +578,9 @@ void GPUBeautyBackend::executeColorBalancePass(
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     glUseProgram(color_balance_program_);
 
-    glUniform1i(glGetUniformLocation(color_balance_program_, "uTexture"), 0);
-    glUniform1f(glGetUniformLocation(color_balance_program_, "uBalance"), balance);
+    // 캐시된 Uniform Location 사용
+    glUniform1i(color_balance_uniforms_.uTexture, 0);
+    glUniform1f(color_balance_uniforms_.uBalance, balance);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
@@ -525,10 +606,10 @@ void GPUBeautyBackend::executeSoftFocusPass(
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     glUseProgram(soft_focus_program_);
 
-    glUniform1i(glGetUniformLocation(soft_focus_program_, "uTexture"), 0);
-    glUniform2f(glGetUniformLocation(soft_focus_program_, "uTexelSize"),
-                1.0f / width, 1.0f / height);
-    glUniform1f(glGetUniformLocation(soft_focus_program_, "uStrength"), strength);
+    // 캐시된 Uniform Location 사용
+    glUniform1i(soft_focus_uniforms_.uTexture, 0);
+    glUniform2f(soft_focus_uniforms_.uSoftFocusTexelSize, 1.0f / width, 1.0f / height);
+    glUniform1f(soft_focus_uniforms_.uSoftFocusStrength, strength);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
@@ -554,8 +635,9 @@ void GPUBeautyBackend::executeBrightnessPass(
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     glUseProgram(brightness_program_);
 
-    glUniform1i(glGetUniformLocation(brightness_program_, "uTexture"), 0);
-    glUniform1f(glGetUniformLocation(brightness_program_, "uBrightness"), brightness);
+    // 캐시된 Uniform Location 사용
+    glUniform1i(brightness_uniforms_.uTexture, 0);
+    glUniform1f(brightness_uniforms_.uBrightness, brightness);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
@@ -581,9 +663,10 @@ void GPUBeautyBackend::applyMasking(
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     glUseProgram(masking_program_);
 
-    glUniform1i(glGetUniformLocation(masking_program_, "uFiltered"), 0);
-    glUniform1i(glGetUniformLocation(masking_program_, "uOriginal"), 1);
-    glUniform1i(glGetUniformLocation(masking_program_, "uMask"), 2);
+    // 캐시된 Uniform Location 사용
+    glUniform1i(masking_uniforms_.uFiltered, 0);
+    glUniform1i(masking_uniforms_.uOriginal, 1);
+    glUniform1i(masking_uniforms_.uMask, 2);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, filtered_tex);
@@ -610,12 +693,102 @@ void GPUBeautyBackend::applyMasking(
 #endif
 }
 
+void GPUBeautyBackend::executeCombinedColorPass(
+    GLuint input_tex, GLuint output_fbo,
+    int width, int height,
+    float brightness, float balance, float whitening) {
+
+#if IRIS_SDK_GPU_AVAILABLE
+    LOGI("CombinedColor: program=%u, fbo=%u, input=%u, brightness=%.2f",
+         combined_color_program_, output_fbo, input_tex, brightness);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+
+    // FBO Completeness 체크 (디버깅)
+    GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (fboStatus != GL_FRAMEBUFFER_COMPLETE) {
+        LOGE("CombinedColor: FBO incomplete! status=0x%x", fboStatus);
+        return;
+    }
+
+    // 텍스처 유효성 확인
+    GLboolean isValidTex = glIsTexture(input_tex);
+    LOGI("CombinedColor: input_tex=%u valid=%d", input_tex, isValidTex);
+
+    glUseProgram(combined_color_program_);
+
+    // 프로그램 링크 상태 확인
+    GLint linkStatus;
+    glGetProgramiv(combined_color_program_, GL_LINK_STATUS, &linkStatus);
+    if (linkStatus != GL_TRUE) {
+        LOGE("CombinedColor: program link failed!");
+        return;
+    }
+
+    // 캐시된 Uniform Location 사용
+    glUniform1i(combined_color_uniforms_.uTexture, 0);
+    glUniform1f(combined_color_uniforms_.uCombinedBrightness, brightness);
+    glUniform1f(combined_color_uniforms_.uCombinedBalance, balance);
+    glUniform1f(combined_color_uniforms_.uCombinedWhitening, whitening);
+
+    // GL 에러 체크
+    GLenum glErr = glGetError();
+    if (glErr != GL_NO_ERROR) {
+        LOGE("CombinedColor: GL error after uniforms: 0x%x", glErr);
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, input_tex);
+
+    renderFullscreenQuad();
+
+    // 렌더링 후 에러 체크
+    glErr = glGetError();
+    if (glErr != GL_NO_ERROR) {
+        LOGE("CombinedColor: GL error after render: 0x%x", glErr);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+#else
+    (void)input_tex;
+    (void)output_fbo;
+    (void)width;
+    (void)height;
+    (void)brightness;
+    (void)balance;
+    (void)whitening;
+#endif
+}
+
 void GPUBeautyBackend::onMemoryPressure(int level) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (texture_pool_) {
         texture_pool_->onMemoryPressure(level);
     }
+}
+
+void GPUBeautyBackend::setProfilingEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (profiler_) {
+        profiler_->setEnabled(enabled);
+        LOGI("GPU profiling %s", enabled ? "enabled" : "disabled");
+    }
+}
+
+bool GPUBeautyBackend::isProfilingEnabled() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return profiler_ && profiler_->isEnabled();
+}
+
+std::string GPUBeautyBackend::getProfilingReport() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (profiler_) {
+        return profiler_->generateReport();
+    }
+    return "GPU profiler not available";
 }
 
 //=============================================================================
@@ -649,7 +822,10 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // TextureHandle 생성 (입력)
     GLuint input_tex_id = static_cast<GLuint>(input_texture);
@@ -697,13 +873,49 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         roi_ptr = &roi;
     }
 
+    // DEBUG: 텍스처 풀 상태 로깅
+    auto stats_before = texture_pool_->getStats();
+    LOGI("TexturePool BEFORE release: total=%d, in_use=%d, available=%d",
+         stats_before.total_textures, stats_before.in_use, stats_before.available);
+
+    // 이전 프레임의 출력 텍스처 반환 (텍스처 풀 관리)
+    // GPU 동기화: 이전 프레임의 렌더링이 완료될 때까지 대기
+    // 이 텍스처들이 아직 GPU에서 사용 중일 수 있음 (renderToScreen의 비동기 커맨드)
+    if (previous_output_ping_ != nullptr || previous_output_pong_ != nullptr) {
+        glFinish();  // GPU 동기화 (성능 영향 있음, 디버깅용)
+        LOGI("Releasing previous: ping=%p, pong=%p",
+             (void*)previous_output_ping_, (void*)previous_output_pong_);
+    }
+    if (previous_output_ping_ != nullptr) {
+        texture_pool_->releaseTexture(previous_output_ping_);
+        previous_output_ping_ = nullptr;
+    }
+    if (previous_output_pong_ != nullptr) {
+        texture_pool_->releaseTexture(previous_output_pong_);
+        previous_output_pong_ = nullptr;
+    }
+
+    // DEBUG: 해제 후 상태
+    auto stats_after_release = texture_pool_->getStats();
+    LOGI("TexturePool AFTER release: total=%d, in_use=%d, available=%d",
+         stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
+
     // Ping-Pong 버퍼 획득
     TexturePool::TextureInfo* ping = nullptr;
     TexturePool::TextureInfo* pong = nullptr;
     if (!texture_pool_->acquirePingPongPair(width, height, ping, pong)) {
-        LOGE("Failed to acquire ping-pong buffers");
+        LOGE("Failed to acquire ping-pong buffers! Pool stats: total=%d, in_use=%d, available=%d",
+             stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
         return IRIS_SDK_UNKNOWN;
     }
+
+    // DEBUG: 획득 후 상태
+    auto stats_after_acquire = texture_pool_->getStats();
+    LOGI("TexturePool AFTER acquire: total=%d, in_use=%d, available=%d",
+         stats_after_acquire.total_textures, stats_after_acquire.in_use, stats_after_acquire.available);
+
+    LOGI("PingPong acquired: ping(tex=%u, fbo=%u), pong(tex=%u, fbo=%u), input=%u",
+         ping->texture_id, ping->fbo_id, pong->texture_id, pong->fbo_id, input_tex_id);
 
     GLuint current_input = input_tex_id;
     TexturePool::TextureInfo* current_output = ping;
@@ -713,44 +925,60 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 
-    // 필터 체인 실행
+    // 필터 체인 실행 (최적화됨 + 프로파일링)
+    bool profiling = profiler_ && profiler_->isEnabled();
+
+    // 1. 스무딩 (Bilateral Filter) - 단독 패스
     if (config.smoothing > 0.01f) {
+        if (profiling) profiler_->begin("Smoothing");
         executeSmoothingPass(current_input, current_output->fbo_id,
                              width, height, config);
+        if (profiling) profiler_->end("Smoothing");
         current_input = current_output->texture_id;
         current_output = (current_output == ping) ? pong : ping;
     }
 
-    if (config.whitening > 0.01f) {
-        executeWhiteningPass(current_input, current_output->fbo_id,
-                             width, height, config.whitening);
+    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
+    //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
+    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
+    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
+    bool needsWhitening = config.whitening > 0.01f;
+
+    if (needsBrightness || needsBalance || needsWhitening) {
+        if (profiling) profiler_->begin("CombinedColor");
+        executeCombinedColorPass(current_input, current_output->fbo_id,
+                                 width, height,
+                                 config.brightness,
+                                 config.colorBalance,
+                                 config.whitening);
+        if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
         current_output = (current_output == ping) ? pong : ping;
     }
 
-    if (std::abs(config.colorBalance) > 0.01f) {
-        executeColorBalancePass(current_input, current_output->fbo_id,
-                                width, height, config.colorBalance);
-        current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
-    }
-
+    // 3. 소프트 포커스 - 단독 패스 (blur 필요)
     if (config.softFocus > 0.01f) {
+        if (profiling) profiler_->begin("SoftFocus");
         executeSoftFocusPass(current_input, current_output->fbo_id,
                              width, height, config.softFocus);
-        current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
-    }
-
-    if (std::abs(config.brightness - 1.0f) > 0.01f) {
-        executeBrightnessPass(current_input, current_output->fbo_id,
-                              width, height, config.brightness);
+        if (profiling) profiler_->end("SoftFocus");
         current_input = current_output->texture_id;
     }
 
     *output_texture = current_input;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Ping-Pong 버퍼를 다음 프레임에서 반환하도록 저장
+    // (현재 프레임에서 즉시 반환하면 출력 텍스처가 사라짐)
+    previous_output_ping_ = ping;
+    previous_output_pong_ = pong;
+    previous_output_texture_ = current_input;
+
+    // 프레임 종료 처리 (프로파일링 결과 수집)
+    if (profiling) {
+        profiler_->frameEnd();
+    }
 
     (void)roi_ptr;  // TODO: ROI 마스킹 적용
 #else
@@ -788,7 +1016,10 @@ IrisSdkError GPUBeautyBackend::applyFaceWarp(
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // TODO: Face Warp 셰이더 구현
     // 현재는 입력 텍스처를 그대로 반환 (stub)
@@ -822,7 +1053,10 @@ void GPUBeautyBackend::releaseTexture(uint32_t texture) {
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    render_context_->makeCurrent();
+    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
 
     // 텍스처 풀에서 관리하는 텍스처인지 확인 후 반환
     if (texture_pool_) {
