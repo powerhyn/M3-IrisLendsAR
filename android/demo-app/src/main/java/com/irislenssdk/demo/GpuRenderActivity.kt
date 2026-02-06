@@ -55,6 +55,9 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnToggleBeauty: Button
     private lateinit var seekSmoothing: SeekBar
     private lateinit var seekBrightness: SeekBar
+    private lateinit var seekWhitening: SeekBar
+    private lateinit var seekColorBalance: SeekBar
+    private lateinit var seekSoftFocus: SeekBar
 
     // 카메라
     private var cameraProvider: ProcessCameraProvider? = null
@@ -99,6 +102,9 @@ class GpuRenderActivity : AppCompatActivity() {
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
         seekSmoothing = findViewById(R.id.seekSmoothing)
         seekBrightness = findViewById(R.id.seekBrightness)
+        seekWhitening = findViewById(R.id.seekWhitening)
+        seekColorBalance = findViewById(R.id.seekColorBalance)
+        seekSoftFocus = findViewById(R.id.seekSoftFocus)
 
         // GPU 초기화 콜백 설정
         cameraGLView.onGpuInitialized = { success ->
@@ -137,9 +143,45 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // Whitening 슬라이더
+        seekWhitening.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                // 0-100 → 0.0-1.0
+                beautyConfig.whitening = progress / 100f
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Color Balance 슬라이더
+        seekColorBalance.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                // 0-100 → -1.0-1.0 (50 = 0.0 중립)
+                beautyConfig.colorBalance = (progress - 50) / 50f
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Soft Focus 슬라이더
+        seekSoftFocus.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                // 0-100 → 0.0-1.0
+                beautyConfig.softFocus = progress / 100f
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         // 초기값
         seekSmoothing.progress = 50
         seekBrightness.progress = 50
+        seekWhitening.progress = 0
+        seekColorBalance.progress = 50  // 중립 (0.0)
+        seekSoftFocus.progress = 30     // 기본값 0.3f
 
         // 초기 버튼 상태 표시 (ON = 뷰티 활성화)
         btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
@@ -164,6 +206,9 @@ class GpuRenderActivity : AppCompatActivity() {
         beautyConfig.enabled = true
         beautyConfig.smoothing = 0.5f
         beautyConfig.brightness = 1.0f
+        beautyConfig.whitening = 0.0f
+        beautyConfig.colorBalance = 0.0f
+        beautyConfig.softFocus = 0.3f
 
         // GLView에 초기 뷰티 설정 전달
         cameraGLView.setBeautyConfig(beautyConfig)
