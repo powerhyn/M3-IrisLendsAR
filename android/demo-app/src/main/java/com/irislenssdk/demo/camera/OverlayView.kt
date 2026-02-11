@@ -138,6 +138,9 @@ class OverlayView @JvmOverloads constructor(
     // 디버그 모드
     var debugMode: Boolean = false
 
+    // GPU 렌더 모드 (fit 기반 매핑 사용 — GL 화면 출력과 동일)
+    var gpuMode: Boolean = false
+
     // === One Euro Filter를 사용한 스무딩 (깜빡임/흔들거림 방지) ===
     private val leftXFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
     private val leftYFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
@@ -277,6 +280,30 @@ class OverlayView @JvmOverloads constructor(
 
     // 변환 매트릭스 (재사용)
     private val lensMatrix = Matrix()
+
+    /**
+     * 화면 변환 스케일 팩터를 계산합니다.
+     *
+     * @param imageW 분석 이미지 너비
+     * @param imageH 분석 이미지 높이
+     * @param viewW 뷰 너비
+     * @param viewH 뷰 높이
+     * @param fitMode true=fit (GL 출력과 동일), false=fill-center (PreviewView와 동일)
+     * @return 스케일 팩터
+     */
+    private fun computeScreenTransform(
+        imageW: Int, imageH: Int,
+        viewW: Int, viewH: Int,
+        fitMode: Boolean
+    ): Float {
+        return if (fitMode) {
+            // fit: 이미지가 뷰 안에 맞춤 (레터박스 가능)
+            kotlin.math.min(viewW.toFloat() / imageW, viewH.toFloat() / imageH)
+        } else {
+            // fill-center: 이미지가 뷰를 완전히 채움 (넘치는 부분 잘림)
+            max(viewW.toFloat() / imageW, viewH.toFloat() / imageH)
+        }
+    }
 
     /**
      * 홍채 검출 결과 설정 (One Euro Filter 적용)
@@ -469,11 +496,12 @@ class OverlayView @JvmOverloads constructor(
         Log.d(TAG, "View size: ${width}x${height}")
         Log.d(TAG, "imageAspect: ${imageWidth.toFloat()/imageHeight}, viewAspect: ${width.toFloat()/height}")
 
-        // 좌표 변환 계산 (MediaPipe 공식 예제 방식)
-        // PreviewView가 FILL_CENTER 모드이므로:
-        // 1. max() 사용: 이미지가 뷰를 완전히 채움 (넘치는 부분 잘림)
-        // 2. offset 계산: 중앙 정렬 (잘리는 부분이 양쪽에 균등하게 분배)
-        val scaleFactor = max(width.toFloat() / imageWidth, height.toFloat() / imageHeight)
+        // 좌표 변환 계산
+        // CPU 모드 (PreviewView FILL_CENTER): max() — 이미지가 뷰를 완전히 채움
+        // GPU 모드 (GL fit 출력): min() — 이미지가 뷰 안에 맞춤 (GL 화면과 동일)
+        val scaleFactor = computeScreenTransform(
+            imageWidth, imageHeight, width, height, gpuMode
+        )
 
         // 스케일된 이미지 크기
         val scaledImageWidth = imageWidth * scaleFactor

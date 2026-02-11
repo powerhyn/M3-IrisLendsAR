@@ -130,6 +130,18 @@ void TexturePool::releaseTexture(TextureInfo* info) {
     releaseTextureLocked(info);
 }
 
+bool TexturePool::releaseTextureById(GLuint texture_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& info : textures_) {
+        if (info->texture_id == texture_id) {
+            if (!info->in_use) return false;  // Already released
+            releaseTextureLocked(info.get());
+            return true;
+        }
+    }
+    return false;  // Not managed by pool
+}
+
 bool TexturePool::acquirePingPongPair(int width, int height,
                                        TextureInfo*& ping, TextureInfo*& pong) {
     std::lock_guard<std::mutex> lock(mutex_);

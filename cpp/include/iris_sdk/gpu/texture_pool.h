@@ -130,6 +130,17 @@ public:
     void releaseTexture(TextureInfo* info);
 
     /**
+     * @brief 텍스처 ID로 풀 관리 텍스처 반환 (조회+반환 원자화)
+     *
+     * texture_id로 풀에서 관리하는 텍스처를 찾아 반환합니다.
+     * 외부에 TextureInfo 포인터를 노출하지 않으므로 댕글링 리스크가 없습니다.
+     *
+     * @param texture_id GL 텍스처 ID
+     * @return true if texture was found and released, false if not managed by pool
+     */
+    bool releaseTextureById(GLuint texture_id);
+
+    /**
      * @brief Ping-Pong 버퍼 쌍 획득
      *
      * 필터 체이닝을 위한 두 개의 텍스처를 동시에 획득합니다.

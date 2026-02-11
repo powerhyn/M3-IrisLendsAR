@@ -754,6 +754,55 @@ public final class IrisLensSDK {
     }
 
     /**
+     * V2 뷰티 필터 + LUT를 GPU 텍스처에 적용합니다 (Detection Handle 포함).
+     *
+     * <p>Detection 슬롯의 검출 결과를 활용하여 ROI 기반 처리를 수행합니다.
+     * {@link #getDetectionSlotPtr()}로 얻은 포인터를 전달하세요.</p>
+     *
+     * @param inputTexture 입력 OpenGL ES 텍스처 ID
+     * @param width 텍스처 너비
+     * @param height 텍스처 높이
+     * @param config V2 뷰티 필터 설정
+     * @param detectionHandle 네이티브 검출 결과 포인터 (0L이면 ROI 미사용)
+     * @param lutTextureId LUT 3D 텍스처 ID (0이면 LUT 비활성)
+     * @param lutIntensity LUT 적용 강도 (0.0~1.0)
+     * @return 출력 텍스처 ID (실패 시 입력 텍스처 반환)
+     */
+    public static int applyBeautyFilterTextureV2(int inputTexture, int width, int height,
+                                                  @NonNull BeautyFilterConfigV2 config,
+                                                  long detectionHandle,
+                                                  int lutTextureId, float lutIntensity) {
+        if (!sLibraryLoaded) {
+            return inputTexture;
+        }
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, detectionHandle,
+                lutTextureId, lutIntensity);
+    }
+
+    /**
+     * Face Warp 효과를 GPU 텍스처에 적용합니다 (Detection Handle 포함).
+     *
+     * <p>Detection 슬롯의 검출 결과를 활용하여 얼굴 형태 보정을 수행합니다.</p>
+     *
+     * @param inputTexture 입력 OpenGL ES 텍스처 ID
+     * @param width 텍스처 너비
+     * @param height 텍스처 높이
+     * @param slimFace 얼굴 슬림화 강도 (0.0~1.0)
+     * @param thinChin 턱 축소 강도 (0.0~1.0)
+     * @param enlargeEyes 눈 확대 강도 (0.0~1.0)
+     * @param detectionHandle 네이티브 검출 결과 포인터 (0L이면 pass-through)
+     * @return 출력 텍스처 ID
+     */
+    public static int applyFaceWarp(int inputTexture, int width, int height,
+                                     float slimFace, float thinChin, float enlargeEyes,
+                                     long detectionHandle) {
+        if (!sLibraryLoaded) {
+            return inputTexture;
+        }
+        return nativeApplyFaceWarp(inputTexture, width, height, slimFace, thinChin, enlargeEyes, detectionHandle);
+    }
+
+    /**
      * Face Warp 효과를 GPU 텍스처에 적용합니다.
      *
      * <p>얼굴 형태 보정(슬림 페이스, 턱 축소, 눈 확대)을 수행합니다.
@@ -801,6 +850,51 @@ public final class IrisLensSDK {
             return false;
         }
         return nativeIsTextureManaged(texture);
+    }
+
+    // ========================================================================
+    // Detection Slot API (더블 버퍼, Lock-free)
+    // ========================================================================
+
+    /**
+     * Detection 슬롯에 최신 검출 결과를 기록합니다.
+     *
+     * <p>Analyzer 스레드에서 검출 완료 후 호출합니다.
+     * 내부적으로 더블 버퍼를 사용하여 GL 스레드와 lock-free로 데이터를 공유합니다.</p>
+     *
+     * @param result 검출 결과
+     */
+    public static void updateDetectionSlot(@NonNull IrisResult result) {
+        if (sLibraryLoaded) {
+            nativeUpdateDetectionSlot(result);
+        }
+    }
+
+    /**
+     * Detection 슬롯에서 최신 검출 결과의 네이티브 포인터를 가져옵니다.
+     *
+     * <p>GL 스레드에서 뷰티 필터 적용 직전에 호출합니다.
+     * 반환값은 C++ IrisResult 구조체 포인터로, GPU 뷰티 함수의
+     * detectionHandle 파라미터에 전달합니다.</p>
+     *
+     * @return 네이티브 IrisResult 포인터 (유효하지 않으면 0L)
+     */
+    public static long getDetectionSlotPtr() {
+        if (!sLibraryLoaded) {
+            return 0L;
+        }
+        return nativeGetDetectionSlotPtr();
+    }
+
+    /**
+     * Detection 슬롯을 해제합니다.
+     *
+     * <p>SDK 종료 시 또는 리소스 정리 시 호출합니다.</p>
+     */
+    public static void releaseDetectionSlot() {
+        if (sLibraryLoaded) {
+            nativeReleaseDetectionSlot();
+        }
     }
 
     // ========================================================================
@@ -1043,4 +1137,24 @@ public final class IrisLensSDK {
      * 텍스처가 SDK 관리인지 확인
      */
     private static native boolean nativeIsTextureManaged(int texture);
+
+    // ========================================================================
+    // Detection Slot Native Methods
+    // ========================================================================
+
+    /**
+     * Detection 슬롯에 검출 결과 기록 (Analyzer → GL 더블 버퍼)
+     */
+    private static native void nativeUpdateDetectionSlot(IrisResult result);
+
+    /**
+     * Detection 슬롯에서 활성 IrisResult 포인터 반환
+     * @return 네이티브 포인터 (jlong), 유효하지 않으면 0L
+     */
+    private static native long nativeGetDetectionSlotPtr();
+
+    /**
+     * Detection 슬롯 해제
+     */
+    private static native void nativeReleaseDetectionSlot();
 }

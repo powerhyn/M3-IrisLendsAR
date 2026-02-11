@@ -13,11 +13,13 @@
 #include "iris_sdk/gpu/gles_render_context.h"
 #include <android/log.h>
 #define LOG_TAG "GPUBeautyBackend"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #include <cstdio>
+#define LOGD(...) printf("[GPUBeautyBackend DEBUG] " __VA_ARGS__); printf("\n")
 #define LOGI(...) printf("[GPUBeautyBackend INFO] " __VA_ARGS__); printf("\n")
 #define LOGW(...) printf("[GPUBeautyBackend WARN] " __VA_ARGS__); printf("\n")
 #define LOGE(...) printf("[GPUBeautyBackend ERROR] " __VA_ARGS__); printf("\n")
@@ -382,26 +384,13 @@ IrisSdkError GPUBeautyBackend::apply(
         return IRIS_SDK_OK;  // 비활성화 시 아무 작업 없음
     }
 
-    // CPU 버퍼 처리는 텍스처 업로드/다운로드가 필요하여 성능이 낮음
-    // 실제 구현에서는 텍스처로 업로드 → 처리 → 다운로드
-    // 여기서는 기본 프레임워크만 구현
-
-#if IRIS_SDK_GPU_AVAILABLE
-    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
-    if (render_context_) {
-        render_context_->makeCurrent();
-    }
-
-    // TODO: 텍스처 업로드 → applyTexture 호출 → 다운로드
-    // 현재는 stub 구현
-
-    LOGW("CPU buffer processing not yet implemented, use applyTexture for GPU processing");
-#endif
+    // CPU 버퍼 경로는 미지원 — CPUBeautyBackend를 사용해야 함
+    LOGW("GPUBeautyBackend::apply() CPU buffer path not supported. Use CPUBeautyBackend instead.");
 
     (void)format;
     (void)roi;
 
-    return IRIS_SDK_OK;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
 }
 
 IrisSdkError GPUBeautyBackend::applyTexture(
@@ -973,6 +962,30 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 
+    // ROI glScissor 설정 (픽셀 좌표 top-left → GL bottom-left 변환)
+    bool scissor_active = false;
+    if (roi_ptr && roi_ptr->valid) {
+        int sx = static_cast<int>(std::floor(roi_ptr->face_rect.x));
+        int sy = static_cast<int>(std::floor(
+            static_cast<float>(height) - (roi_ptr->face_rect.y + roi_ptr->face_rect.height)));  // Y flip
+        int sw = static_cast<int>(std::ceil(roi_ptr->face_rect.width));
+        int sh = static_cast<int>(std::ceil(roi_ptr->face_rect.height));
+
+        // Clamp to valid range
+        sx = std::max(0, std::min(sx, width - 1));
+        sy = std::max(0, std::min(sy, height - 1));
+        sw = std::max(1, std::min(sw, width - sx));
+        sh = std::max(1, std::min(sh, height - sy));
+
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(sx, sy, sw, sh);
+        scissor_active = true;
+
+        LOGD("ROI Scissor: (%d, %d, %d, %d) from face_rect(%.1f, %.1f, %.1f, %.1f)",
+             sx, sy, sw, sh, roi_ptr->face_rect.x, roi_ptr->face_rect.y,
+             roi_ptr->face_rect.width, roi_ptr->face_rect.height);
+    }
+
     // 필터 체인 실행 (최적화됨 + 프로파일링)
     bool profiling = profiler_ && profiler_->isEnabled();
 
@@ -1011,6 +1024,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         current_input = current_output->texture_id;
     }
 
+    // ROI Scissor 해제
+    if (scissor_active) {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
     *output_texture = current_input;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1028,8 +1046,6 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     if (profiling) {
         profiler_->frameEnd();
     }
-
-    (void)roi_ptr;  // TODO: ROI 마스킹 적용
 #else
     *output_texture = input_texture;
     (void)detection;
@@ -1066,34 +1082,18 @@ IrisSdkError GPUBeautyBackend::applyFaceWarp(
         return IRIS_SDK_OK;
     }
 
-#if IRIS_SDK_GPU_AVAILABLE
-    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
-    if (render_context_) {
-        render_context_->makeCurrent();
-    }
+    // Face Warp 미구현 — P4에서 Face Mesh 기반 메시 워핑으로 구현 예정
+    LOGW("GPUBeautyBackend::applyFaceWarp() not supported. Will be implemented in P4.");
 
-    // TODO: Face Warp 셰이더 구현
-    // 현재는 입력 텍스처를 그대로 반환 (stub)
-    // Face Warp는 Face Mesh 랜드마크 기반 메시 워핑이 필요함
-
-    LOGW("Face Warp not yet implemented, returning input texture");
-    *output_texture = input_texture;
-
+    (void)input_texture;
+    (void)output_texture;
     (void)width;
     (void)height;
     (void)slim_face;
     (void)thin_chin;
     (void)enlarge_eyes;
-#else
-    *output_texture = input_texture;
-    (void)width;
-    (void)height;
-    (void)slim_face;
-    (void)thin_chin;
-    (void)enlarge_eyes;
-#endif
 
-    return IRIS_SDK_OK;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
 }
 
 void GPUBeautyBackend::releaseTexture(uint32_t texture) {
@@ -1104,21 +1104,18 @@ void GPUBeautyBackend::releaseTexture(uint32_t texture) {
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
     if (render_context_) {
         render_context_->makeCurrent();
     }
 
-    // 텍스처 풀에서 관리하는 텍스처인지 확인 후 반환
-    if (texture_pool_) {
-        // 텍스처 풀의 텍스처는 직접 삭제하지 않고 풀에 반환
-        // 외부에서 생성한 텍스처는 직접 삭제
-        GLuint tex_id = static_cast<GLuint>(texture);
+    GLuint tex_id = static_cast<GLuint>(texture);
 
-        // 텍스처 풀에 없는 경우에만 직접 삭제
-        // 참고: 실제 구현에서는 풀에서 관리 여부 확인 필요
+    // 풀 관리 텍스처는 풀에 반환, 외부 텍스처만 직접 삭제
+    if (texture_pool_ && texture_pool_->releaseTextureById(tex_id)) {
+        LOGI("Released pool-managed texture %u", tex_id);
+    } else {
         glDeleteTextures(1, &tex_id);
-        LOGI("Released texture %u", tex_id);
+        LOGI("Released external texture %u", tex_id);
     }
 #else
     (void)texture;

@@ -126,8 +126,10 @@ class GpuRenderActivity : AppCompatActivity() {
     private var isUpdatingSliders = false
     private var lutEnabled = false
 
-    // 홍채 검출
-    private val irisResult = IrisResult()
+    // 홍채 검출 (스레드별 불변 스냅샷 사용)
+    private val irisResult = IrisResult()       // Analyzer 스레드 전용 (JNI 결과 수신)
+    private val glIrisResult = IrisResult()     // GL 스레드 전달용 스냅샷
+    private val uiIrisResult = IrisResult()     // UI 스레드 전달용 스냅샷
 
     // NV21 버퍼 (재사용)
     private var nv21Buffer: ByteArray? = null
@@ -233,6 +235,7 @@ class GpuRenderActivity : AppCompatActivity() {
         overlayView.showFaceMesh = false
         overlayView.debugMode = false
         overlayView.showFaceRect = false
+        overlayView.gpuMode = true  // GPU 모드: fit 기반 매핑 (GL 출력과 동일)
     }
 
     private fun initLensManager() {
@@ -715,12 +718,16 @@ class GpuRenderActivity : AppCompatActivity() {
                 irisResult
             )
 
-            // GPU 렌더러에 검출 결과 전달
+            // GPU 렌더러에 검출 결과 전달 (깊은 복사 스냅샷)
             if (detectResult == IrisLensSDK.OK && irisResult.detected) {
-                cameraGLView.setIrisResult(irisResult)
+                glIrisResult.copyFrom(irisResult)
+                cameraGLView.setIrisResult(glIrisResult)
+
+                // Detection Slot 업데이트 (lock-free → GL 스레드에서 읽음)
+                IrisLensSDK.updateDetectionSlot(irisResult)
             }
 
-            // OverlayView에도 검출 결과 전달 (디버그 시각화용)
+            // OverlayView에도 검출 결과 전달 (디버그 시각화용, 별도 스냅샷)
             // SDK는 회전 후 좌표를 반환하므로 회전 후 프레임 크기를 전달해야 함
             // (imageProxy.width/height는 회전 전 센서 크기 → 매쉬가 늘어나는 원인)
             val isRotated = (rotation == 90 || rotation == 270)
@@ -734,9 +741,10 @@ class GpuRenderActivity : AppCompatActivity() {
             } else {
                 if (isRotated) imageProxy.width else imageProxy.height
             }
+            uiIrisResult.copyFrom(irisResult)
             runOnUiThread {
                 overlayView.setIrisResult(
-                    irisResult,
+                    uiIrisResult,
                     overlayFrameW,
                     overlayFrameH,
                     lensFacing == CameraSelector.LENS_FACING_FRONT
@@ -864,6 +872,7 @@ class GpuRenderActivity : AppCompatActivity() {
         cameraGLView.release()
         lensManager.release()
         analysisExecutor.shutdown()
+        IrisLensSDK.releaseDetectionSlot()
         IrisLensSDK.releaseGpuBeauty()
     }
 }

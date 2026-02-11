@@ -614,9 +614,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(uLensTextureLocation, 1)
 
         // 홍채 위치/크기 설정 (IrisResult는 이미 정규화된 좌표 0~1)
-        // leftRadius/rightRadius는 픽셀 단위이므로 정규화 필요
-        val normalizedLeftRadius = result.leftRadius / fboWidth.toFloat()
-        val normalizedRightRadius = result.rightRadius / fboWidth.toFloat()
+        // leftRadius/rightRadius는 픽셀 단위이므로 검출 좌표계 기준으로 정규화
+        // 좌표 계약: result.frameWidth/Height가 검출기의 좌표 기준 (회전 적용 후)
+        val (detW, detH) = resolveCoordinateSpace(result)
+        val normalizedLeftRadius = result.leftRadius / detW.toFloat()
+        val normalizedRightRadius = result.rightRadius / detW.toFloat()
 
         // 좌표 변환: renderOESToRgba()에서 적용한 변환과 동일하게 적용
         // 1. Y축 뒤집기 (uFlipY=1 적용됨)
@@ -658,7 +660,8 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(uApplyRightLocation, if (lensConfig.applyRight) 1 else 0)
 
         // 프레임 비율 전달 (원형 렌즈를 위한 aspect ratio 보정)
-        val frameAspect = fboWidth.toFloat() / fboHeight.toFloat()
+        // 좌표 계약: 검출 좌표계(detW/detH) 기준 aspect ratio 사용
+        val frameAspect = detW.toFloat() / detH.toFloat()
         GLES31.glUniform1f(uFrameAspectLocation, frameAspect)
 
         // 눈꺼풀 클리핑 좌표 추출 (MediaPipe Face Mesh 랜드마크)
@@ -775,15 +778,19 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val lutTextureId = if (lutEnabled && lut3dTextureId != 0) lut3dTextureId else 0
         val lutIntensityVal = if (lutTextureId != 0) lutIntensity else 0.0f
 
-        // 디버그: 뷰티+LUT 설정 확인
-        Log.d(TAG, "Beauty filter call: enabled=${beautyConfig.enabled}, smoothing=${beautyConfig.smoothing}, brightness=${beautyConfig.brightness}, lut=$lutTextureId, lutIntensity=$lutIntensityVal")
+        // Detection Slot에서 최신 검출 결과 포인터 취득 (lock-free)
+        val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
 
-        // GPU Beauty Backend 호출 (JNI) - LUT 통합
+        // 디버그: 뷰티+LUT 설정 확인
+        Log.d(TAG, "Beauty filter call: enabled=${beautyConfig.enabled}, smoothing=${beautyConfig.smoothing}, brightness=${beautyConfig.brightness}, lut=$lutTextureId, lutIntensity=$lutIntensityVal, detHandle=$detectionHandle")
+
+        // GPU Beauty Backend 호출 (JNI) - LUT 통합 + Detection Handle
         val outputTexture = IrisLensSDK.applyBeautyFilterTextureV2(
             inputTexture,
             texWidth,
             texHeight,
             beautyConfig,
+            detectionHandle,
             lutTextureId,
             lutIntensityVal
         )
@@ -901,6 +908,32 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setMirror(mirror: Boolean) {
         this.isMirror = mirror
+    }
+
+    /**
+     * 검출 좌표계와 렌더 좌표계를 통일합니다.
+     *
+     * 좌표 계약:
+     * - 1순위: result.frameWidth/frameHeight (검출기가 회전 적용 후 기록)
+     * - 2순위: frameWidth/frameHeight (카메라 프레임 크기, 회전 보정 적용)
+     * - 3순위: viewWidth/viewHeight (폴백)
+     *
+     * @return (detW, detH) 렌즈 계산에 사용할 좌표 기준 크기
+     */
+    private fun resolveCoordinateSpace(result: IrisResult): Pair<Int, Int> {
+        // 1순위: 검출 결과의 프레임 크기 (이미 회전 적용됨)
+        if (result.frameWidth > 0 && result.frameHeight > 0) {
+            return Pair(result.frameWidth, result.frameHeight)
+        }
+        // 2순위: 카메라 프레임 크기 (회전 보정)
+        val isRotated = (frameRotation == 90 || frameRotation == 270)
+        val w = if (frameWidth > 0) {
+            if (isRotated) frameHeight else frameWidth
+        } else viewWidth
+        val h = if (frameHeight > 0) {
+            if (isRotated) frameWidth else frameHeight
+        } else viewHeight
+        return Pair(w, h)
     }
 
     /**
