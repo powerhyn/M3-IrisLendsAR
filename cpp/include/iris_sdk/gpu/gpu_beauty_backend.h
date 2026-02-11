@@ -353,6 +353,11 @@ private:
     TexturePool::TextureInfo* previous_output_pong_ = nullptr;
     GLuint previous_output_texture_ = 0;
 
+    // GPU 동기화 펜스 (glFinish 대체)
+#if IRIS_SDK_GPU_AVAILABLE
+    GLsync previous_fence_ = nullptr;
+#endif
+
     bool initialized_ = false;
     mutable std::mutex mutex_;
 };

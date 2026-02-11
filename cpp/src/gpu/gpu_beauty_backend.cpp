@@ -311,6 +311,14 @@ void GPUBeautyBackend::release() {
     }
 #endif
 
+#if IRIS_SDK_GPU_AVAILABLE
+    // GPU 펜스 정리
+    if (previous_fence_ != nullptr) {
+        glDeleteSync(previous_fence_);
+        previous_fence_ = nullptr;
+    }
+#endif
+
     // 셰이더 해제
     if (shader_manager_) {
         shader_manager_->releaseAll();
@@ -486,7 +494,10 @@ IrisSdkError GPUBeautyBackend::applyTexture(
 
     // 출력 텍스처 핸들 설정
     // 주의: 이 텍스처는 풀에서 관리되므로 사용 후 반환 필요
-    output.native_handle = new GLuint(current_input);
+    // current_input이 가리키는 텍스처는 풀의 TextureInfo가 소유하므로
+    // native_handle은 해당 TextureInfo의 texture_id 주소를 사용
+    TexturePool::TextureInfo* result_info = (current_input == ping->texture_id) ? ping : pong;
+    output.native_handle = &result_info->texture_id;
     output.type = TextureHandle::Type::OpenGLES;
     output.width = width;
     output.height = height;
@@ -699,10 +710,11 @@ void GPUBeautyBackend::executeCombinedColorPass(
     float brightness, float balance, float whitening) {
 
 #if IRIS_SDK_GPU_AVAILABLE
+    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+
+#ifndef NDEBUG
     LOGI("CombinedColor: program=%u, fbo=%u, input=%u, brightness=%.2f",
          combined_color_program_, output_fbo, input_tex, brightness);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
 
     // FBO Completeness 체크 (디버깅)
     GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -714,9 +726,11 @@ void GPUBeautyBackend::executeCombinedColorPass(
     // 텍스처 유효성 확인
     GLboolean isValidTex = glIsTexture(input_tex);
     LOGI("CombinedColor: input_tex=%u valid=%d", input_tex, isValidTex);
+#endif
 
     glUseProgram(combined_color_program_);
 
+#ifndef NDEBUG
     // 프로그램 링크 상태 확인
     GLint linkStatus;
     glGetProgramiv(combined_color_program_, GL_LINK_STATUS, &linkStatus);
@@ -724,6 +738,7 @@ void GPUBeautyBackend::executeCombinedColorPass(
         LOGE("CombinedColor: program link failed!");
         return;
     }
+#endif
 
     // 캐시된 Uniform Location 사용
     glUniform1i(combined_color_uniforms_.uTexture, 0);
@@ -731,22 +746,18 @@ void GPUBeautyBackend::executeCombinedColorPass(
     glUniform1f(combined_color_uniforms_.uCombinedBalance, balance);
     glUniform1f(combined_color_uniforms_.uCombinedWhitening, whitening);
 
-    // GL 에러 체크
-    GLenum glErr = glGetError();
-    if (glErr != GL_NO_ERROR) {
-        LOGE("CombinedColor: GL error after uniforms: 0x%x", glErr);
-    }
-
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
 
     renderFullscreenQuad();
 
+#ifndef NDEBUG
     // 렌더링 후 에러 체크
-    glErr = glGetError();
+    GLenum glErr = glGetError();
     if (glErr != GL_NO_ERROR) {
         LOGE("CombinedColor: GL error after render: 0x%x", glErr);
     }
+#endif
 
     glBindTexture(GL_TEXTURE_2D, 0);
 #else
@@ -873,18 +884,18 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         roi_ptr = &roi;
     }
 
-    // DEBUG: 텍스처 풀 상태 로깅
-    auto stats_before = texture_pool_->getStats();
-    LOGI("TexturePool BEFORE release: total=%d, in_use=%d, available=%d",
-         stats_before.total_textures, stats_before.in_use, stats_before.available);
-
     // 이전 프레임의 출력 텍스처 반환 (텍스처 풀 관리)
-    // GPU 동기화: 이전 프레임의 렌더링이 완료될 때까지 대기
-    // 이 텍스처들이 아직 GPU에서 사용 중일 수 있음 (renderToScreen의 비동기 커맨드)
+    // GPU 동기화: glFenceSync로 이전 프레임 렌더링 완료 대기 (non-blocking)
     if (previous_output_ping_ != nullptr || previous_output_pong_ != nullptr) {
-        glFinish();  // GPU 동기화 (성능 영향 있음, 디버깅용)
-        LOGI("Releasing previous: ping=%p, pong=%p",
-             (void*)previous_output_ping_, (void*)previous_output_pong_);
+        if (previous_fence_ != nullptr) {
+            // 펜스가 시그널될 때까지 대기 (최대 16ms = 1프레임)
+            GLenum waitResult = glClientWaitSync(previous_fence_, GL_SYNC_FLUSH_COMMANDS_BIT, 16000000);
+            if (waitResult == GL_TIMEOUT_EXPIRED) {
+                LOGW("GPU fence wait timeout - previous frame still rendering");
+            }
+            glDeleteSync(previous_fence_);
+            previous_fence_ = nullptr;
+        }
     }
     if (previous_output_ping_ != nullptr) {
         texture_pool_->releaseTexture(previous_output_ping_);
@@ -895,27 +906,37 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         previous_output_pong_ = nullptr;
     }
 
-    // DEBUG: 해제 후 상태
-    auto stats_after_release = texture_pool_->getStats();
-    LOGI("TexturePool AFTER release: total=%d, in_use=%d, available=%d",
-         stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
+    // 활성 필터 수에 따라 동적으로 텍스처 할당
+    int active_filter_count = 0;
+    if (config.smoothing > 0.01f) active_filter_count++;
+    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
+    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
+    bool needsWhitening = config.whitening > 0.01f;
+    if (needsBrightness || needsBalance || needsWhitening) active_filter_count++;
+    if (config.softFocus > 0.01f) active_filter_count++;
 
-    // Ping-Pong 버퍼 획득
-    TexturePool::TextureInfo* ping = nullptr;
-    TexturePool::TextureInfo* pong = nullptr;
-    if (!texture_pool_->acquirePingPongPair(width, height, ping, pong)) {
-        LOGE("Failed to acquire ping-pong buffers! Pool stats: total=%d, in_use=%d, available=%d",
-             stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
-        return IRIS_SDK_UNKNOWN;
+    // 필터 0개: 패스스루 (텍스처 할당 불필요)
+    if (active_filter_count == 0) {
+        *output_texture = input_tex_id;
+        return IRIS_SDK_OK;
     }
 
-    // DEBUG: 획득 후 상태
-    auto stats_after_acquire = texture_pool_->getStats();
-    LOGI("TexturePool AFTER acquire: total=%d, in_use=%d, available=%d",
-         stats_after_acquire.total_textures, stats_after_acquire.in_use, stats_after_acquire.available);
+    // 필터 1개: 단일 텍스처, 2개+: ping-pong 버퍼
+    TexturePool::TextureInfo* ping = nullptr;
+    TexturePool::TextureInfo* pong = nullptr;
 
-    LOGI("PingPong acquired: ping(tex=%u, fbo=%u), pong(tex=%u, fbo=%u), input=%u",
-         ping->texture_id, ping->fbo_id, pong->texture_id, pong->fbo_id, input_tex_id);
+    if (active_filter_count == 1) {
+        ping = texture_pool_->acquireRenderTarget(width, height);
+        if (!ping) {
+            LOGE("Failed to acquire render target");
+            return IRIS_SDK_UNKNOWN;
+        }
+    } else {
+        if (!texture_pool_->acquirePingPongPair(width, height, ping, pong)) {
+            LOGE("Failed to acquire ping-pong buffers");
+            return IRIS_SDK_UNKNOWN;
+        }
+    }
 
     GLuint current_input = input_tex_id;
     TexturePool::TextureInfo* current_output = ping;
@@ -935,15 +956,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                              width, height, config);
         if (profiling) profiler_->end("Smoothing");
         current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
+        if (pong) current_output = (current_output == ping) ? pong : ping;
     }
 
     // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
     //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
-    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
-    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
-    bool needsWhitening = config.whitening > 0.01f;
-
     if (needsBrightness || needsBalance || needsWhitening) {
         if (profiling) profiler_->begin("CombinedColor");
         executeCombinedColorPass(current_input, current_output->fbo_id,
@@ -953,7 +970,7 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                                  config.whitening);
         if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
+        if (pong) current_output = (current_output == ping) ? pong : ping;
     }
 
     // 3. 소프트 포커스 - 단독 패스 (blur 필요)
@@ -968,6 +985,9 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     *output_texture = current_input;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // GPU 펜스 삽입: 현재 프레임 커맨드가 완료될 때 시그널됨
+    previous_fence_ = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
     // Ping-Pong 버퍼를 다음 프레임에서 반환하도록 저장
     // (현재 프레임에서 즉시 반환하면 출력 텍스처가 사라짐)

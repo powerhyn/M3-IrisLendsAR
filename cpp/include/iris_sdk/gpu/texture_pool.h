@@ -211,6 +211,12 @@ public:
     void onMemoryPressure(int level);
 
 private:
+    /// 렌더 타겟 획득 (lock 미획득 전제, 내부 전용)
+    TextureInfo* acquireRenderTargetLocked(int width, int height);
+
+    /// 텍스처 반환 (lock 미획득 전제, 내부 전용)
+    void releaseTextureLocked(TextureInfo* info);
+
     /// 새 텍스처 생성
     TextureInfo* createTexture(int width, int height);
 
