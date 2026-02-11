@@ -288,7 +288,9 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
     uint32_t* output_texture,
     int width, int height,
     const IrisBeautyConfigV2* config,
-    const IrisResult* detection) {
+    const IrisResult* detection,
+    uint32_t lut_texture_id,
+    float lut_intensity) {
 
 #ifdef IRIS_SDK_HAS_GLES
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
@@ -358,7 +360,9 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
         &result_texture,
         width, height,
         cpp_config,
-        reinterpret_cast<const iris_sdk::IrisResult*>(detection)
+        reinterpret_cast<const iris_sdk::IrisResult*>(detection),
+        lut_texture_id,
+        lut_intensity
     );
 
     if (err == IRIS_SDK_OK && result_texture != 0) {

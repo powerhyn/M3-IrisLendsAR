@@ -726,7 +726,31 @@ public final class IrisLensSDK {
         if (!sLibraryLoaded) {
             return inputTexture;
         }
-        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L);
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L, 0, 0.0f);
+    }
+
+    /**
+     * V2 뷰티 필터 + LUT를 GPU 텍스처에 적용합니다.
+     *
+     * <p>GPU 뷰티 백엔드가 초기화되어 있어야 합니다.
+     * GLSurfaceView.Renderer의 onDrawFrame 등 OpenGL 컨텍스트 내에서 호출해야 합니다.</p>
+     *
+     * @param inputTexture 입력 OpenGL ES 텍스처 ID
+     * @param width 텍스처 너비
+     * @param height 텍스처 높이
+     * @param config V2 뷰티 필터 설정
+     * @param lutTextureId LUT 3D 텍스처 ID (0이면 LUT 비활성)
+     * @param lutIntensity LUT 적용 강도 (0.0~1.0)
+     * @return 출력 텍스처 ID (실패 시 입력 텍스처 반환)
+     */
+    public static int applyBeautyFilterTextureV2(int inputTexture, int width, int height,
+                                                  @NonNull BeautyFilterConfigV2 config,
+                                                  int lutTextureId, float lutIntensity) {
+        if (!sLibraryLoaded) {
+            return inputTexture;
+        }
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L,
+                lutTextureId, lutIntensity);
     }
 
     /**
@@ -998,7 +1022,8 @@ public final class IrisLensSDK {
      */
     private static native int nativeApplyBeautyTextureV2(
             int inputTexture, int width, int height,
-            BeautyFilterConfigV2 config, long detectionPtr);
+            BeautyFilterConfigV2 config, long detectionPtr,
+            int lutTextureId, float lutIntensity);
 
     /**
      * Face Warp 적용 (GPU)

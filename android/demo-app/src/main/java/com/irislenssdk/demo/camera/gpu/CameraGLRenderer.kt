@@ -119,30 +119,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             }
         """
 
-        // LUT 색상 보정 프래그먼트 셰이더 (3D 텍스처)
-        private const val LUT_FRAGMENT_SHADER = """
-            #version 310 es
-            precision highp float;
-            precision highp sampler3D;
-
-            uniform sampler2D uTexture;
-            uniform sampler3D uLutTexture;
-            uniform float uLutIntensity;
-
-            in vec2 vTexCoord;
-            out vec4 fragColor;
-
-            void main() {
-                vec4 color = texture(uTexture, vTexCoord);
-
-                // 3D LUT 샘플링 (RGB → LUT 좌표)
-                vec3 lutColor = texture(uLutTexture, color.rgb).rgb;
-
-                // 원본과 LUT 결과를 intensity로 블렌딩
-                fragColor = vec4(mix(color.rgb, lutColor, uLutIntensity), color.a);
-            }
-        """
-
         // 렌즈 오버레이 프래그먼트 셰이더
         private const val LENS_OVERLAY_FRAGMENT_SHADER = """
             #version 310 es
@@ -283,7 +259,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var oesToRgbProgram: Int = 0
     private var passthroughProgram: Int = 0
     private var lensProgram: Int = 0
-    private var lutProgram: Int = 0
 
     // Uniform locations (OES → RGBA)
     private var uSTMatrixLocation: Int = -1
@@ -292,11 +267,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uScaleLocation: Int = -1
     private var uOESTextureLocation: Int = -1
     private var uTextureLocation: Int = -1
-
-    // Uniform locations (LUT 셰이더)
-    private var uLutInputTextureLocation: Int = -1
-    private var uLut3dTextureLocation: Int = -1
-    private var uLutIntensityLocation: Int = -1
 
     // Uniform locations (렌즈 셰이더)
     private var uLensCameraTextureLocation: Int = -1
@@ -336,9 +306,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var lensImageTextureId: Int = 0
     private var pendingLensBitmap: Bitmap? = null
 
-    // LUT 필터
-    private var lutFboId: Int = 0
-    private var lutOutputTextureId: Int = 0
+    // LUT 필터 (C++ Combined Color Pass로 통합 - 3D 텍스처만 관리)
     private var lut3dTextureId: Int = 0
     private var lutEnabled: Boolean = false
     private var lutIntensity: Float = 1.0f
@@ -396,7 +364,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         oesToRgbProgram = createProgram(VERTEX_SHADER, OES_TO_2D_FRAGMENT_SHADER)
         passthroughProgram = createProgram(VERTEX_SHADER, PASSTHROUGH_FRAGMENT_SHADER)
         lensProgram = createProgram(VERTEX_SHADER, LENS_OVERLAY_FRAGMENT_SHADER)
-        lutProgram = createProgram(VERTEX_SHADER, LUT_FRAGMENT_SHADER)
 
         // Uniform locations 캐시 (OES → RGBA)
         uSTMatrixLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uSTMatrix")
@@ -424,11 +391,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uLeftEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeBottom")
         uRightEyeTopLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeTop")
         uRightEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeBottom")
-
-        // Uniform locations 캐시 (LUT 셰이더)
-        uLutInputTextureLocation = GLES31.glGetUniformLocation(lutProgram, "uTexture")
-        uLut3dTextureLocation = GLES31.glGetUniformLocation(lutProgram, "uLutTexture")
-        uLutIntensityLocation = GLES31.glGetUniformLocation(lutProgram, "uLutIntensity")
 
         // 풀스크린 쿼드 설정
         setupFullscreenQuad()
@@ -489,20 +451,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             currentTexture = renderLensOverlay(currentTexture)
         }
 
-        // 3단계: GPU Beauty 필터 적용
+        // 3단계: 펜딩 LUT 3D 텍스처 적용 (beauty 호출 전 준비)
+        uploadPendingLut3dTexture()
+
+        // 4단계: GPU Beauty + LUT 통합 적용 (C++ Combined Color Pass에서 LUT 포함)
         val beautyApplied = beautyEnabled && beautyConfig.enabled
         var outputTexture = if (beautyApplied) {
             applyGpuBeautyFilter(currentTexture)
         } else {
             currentTexture
-        }
-
-        // 3.5단계: 펜딩 LUT 3D 텍스처 적용
-        uploadPendingLut3dTexture()
-
-        // 4단계: LUT 색상 보정 적용
-        if (lutEnabled && lut3dTextureId != 0) {
-            outputTexture = applyLutFilter(outputTexture)
         }
 
         // 5단계: 화면에 렌더링
@@ -814,15 +771,21 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
         val texHeight = if (frameHeight > 0) frameHeight else viewHeight
 
-        // 디버그: 뷰티 설정 확인
-        Log.d(TAG, "Beauty filter call: enabled=${beautyConfig.enabled}, smoothing=${beautyConfig.smoothing}, brightness=${beautyConfig.brightness}")
+        // LUT 파라미터 결정 (C++ Combined Color Pass에서 통합 처리)
+        val lutTextureId = if (lutEnabled && lut3dTextureId != 0) lut3dTextureId else 0
+        val lutIntensityVal = if (lutTextureId != 0) lutIntensity else 0.0f
 
-        // GPU Beauty Backend 호출 (JNI)
+        // 디버그: 뷰티+LUT 설정 확인
+        Log.d(TAG, "Beauty filter call: enabled=${beautyConfig.enabled}, smoothing=${beautyConfig.smoothing}, brightness=${beautyConfig.brightness}, lut=$lutTextureId, lutIntensity=$lutIntensityVal")
+
+        // GPU Beauty Backend 호출 (JNI) - LUT 통합
         val outputTexture = IrisLensSDK.applyBeautyFilterTextureV2(
             inputTexture,
             texWidth,
             texHeight,
-            beautyConfig
+            beautyConfig,
+            lutTextureId,
+            lutIntensityVal
         )
 
         // 디버그: 결과 확인
@@ -856,118 +819,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         lut3dTextureId = newTextureId
         Log.d(TAG, "LUT 3D texture set: id=$lut3dTextureId")
-    }
-
-    /**
-     * LUT 색상 보정 필터 적용
-     *
-     * @param inputTexture 입력 텍스처 ID
-     * @return 출력 텍스처 ID
-     */
-    private fun applyLutFilter(inputTexture: Int): Int {
-        // LUT FBO가 없으면 생성
-        if (lutFboId == 0 || lutOutputTextureId == 0) {
-            createLutFbo()
-            if (lutFboId == 0 || lutOutputTextureId == 0) {
-                Log.w(TAG, "LUT FBO creation failed, passing through")
-                return inputTexture
-            }
-        }
-
-        // FBO 바인딩
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, lutFboId)
-
-        val fboWidth = if (frameWidth > 0) frameWidth else viewWidth
-        val fboHeight = if (frameHeight > 0) frameHeight else viewHeight
-        GLES31.glViewport(0, 0, fboWidth, fboHeight)
-
-        // LUT 셰이더 사용
-        GLES31.glUseProgram(lutProgram)
-
-        // 변환 행렬 설정 (단위 행렬 - 이미 변환 완료된 텍스처)
-        val identityMatrix = FloatArray(16)
-        Matrix.setIdentityM(identityMatrix, 0)
-        val stLocation = GLES31.glGetUniformLocation(lutProgram, "uSTMatrix")
-        val mirrorLocation = GLES31.glGetUniformLocation(lutProgram, "uMirror")
-        val flipYLocation = GLES31.glGetUniformLocation(lutProgram, "uFlipY")
-        val scaleLocation = GLES31.glGetUniformLocation(lutProgram, "uScale")
-        GLES31.glUniformMatrix4fv(stLocation, 1, false, identityMatrix, 0)
-        GLES31.glUniform1i(mirrorLocation, 0)
-        GLES31.glUniform1i(flipYLocation, 0)
-        GLES31.glUniform2f(scaleLocation, 1.0f, 1.0f)
-
-        // 입력 텍스처 바인딩 (unit 0)
-        GLES31.glActiveTexture(GLES31.GL_TEXTURE0)
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, inputTexture)
-        GLES31.glUniform1i(uLutInputTextureLocation, 0)
-
-        // LUT 3D 텍스처 바인딩 (unit 1)
-        GLES31.glActiveTexture(GLES31.GL_TEXTURE1)
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_3D, lut3dTextureId)
-        GLES31.glUniform1i(uLut3dTextureLocation, 1)
-
-        // LUT 강도 설정
-        GLES31.glUniform1f(uLutIntensityLocation, lutIntensity)
-
-        // 풀스크린 쿼드 렌더링
-        renderFullscreenQuad()
-
-        // FBO 언바인딩
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
-
-        return lutOutputTextureId
-    }
-
-    /**
-     * LUT FBO 생성
-     */
-    private fun createLutFbo() {
-        val width = if (frameWidth > 0) frameWidth else viewWidth
-        val height = if (frameHeight > 0) frameHeight else viewHeight
-
-        // 기존 버퍼 삭제
-        if (lutOutputTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(lutOutputTextureId), 0)
-        }
-        if (lutFboId != 0) {
-            GLES31.glDeleteFramebuffers(1, intArrayOf(lutFboId), 0)
-        }
-
-        // 텍스처 생성
-        val textures = IntArray(1)
-        GLES31.glGenTextures(1, textures, 0)
-        lutOutputTextureId = textures[0]
-
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, lutOutputTextureId)
-        GLES31.glTexImage2D(
-            GLES31.GL_TEXTURE_2D, 0, GLES31.GL_RGBA,
-            width, height, 0,
-            GLES31.GL_RGBA, GLES31.GL_UNSIGNED_BYTE, null
-        )
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MAG_FILTER, GLES31.GL_LINEAR)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_S, GLES31.GL_CLAMP_TO_EDGE)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_T, GLES31.GL_CLAMP_TO_EDGE)
-
-        // FBO 생성
-        val fbos = IntArray(1)
-        GLES31.glGenFramebuffers(1, fbos, 0)
-        lutFboId = fbos[0]
-
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, lutFboId)
-        GLES31.glFramebufferTexture2D(
-            GLES31.GL_FRAMEBUFFER, GLES31.GL_COLOR_ATTACHMENT0,
-            GLES31.GL_TEXTURE_2D, lutOutputTextureId, 0
-        )
-
-        val status = GLES31.glCheckFramebufferStatus(GLES31.GL_FRAMEBUFFER)
-        if (status != GLES31.GL_FRAMEBUFFER_COMPLETE) {
-            Log.e(TAG, "LUT FBO is not complete: $status")
-        }
-
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
-
-        Log.d(TAG, "LUT FBO created: ${width}x${height}")
     }
 
     /**
@@ -1230,11 +1081,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             createLensFbo()
         }
 
-        // LUT FBO도 재생성
-        if (lutFboId != 0) {
-            createLutFbo()
-        }
-
         Log.d(TAG, "Intermediate buffers created: ${width}x${height}")
     }
 
@@ -1395,18 +1241,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         }
         pendingLensBitmap = null
 
-        // LUT 관련 리소스 해제
-        if (lutProgram != 0) {
-            GLES31.glDeleteProgram(lutProgram)
-        }
+        // LUT 3D 텍스처 해제 (LUT 셰이더/FBO는 C++ 통합으로 제거됨)
         if (lut3dTextureId != 0) {
             GLES31.glDeleteTextures(1, intArrayOf(lut3dTextureId), 0)
-        }
-        if (lutOutputTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(lutOutputTextureId), 0)
-        }
-        if (lutFboId != 0) {
-            GLES31.glDeleteFramebuffers(1, intArrayOf(lutFboId), 0)
         }
 
         surfaceTexture?.release()

@@ -1521,7 +1521,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
  * @brief V2 뷰티 필터 적용 (GPU 텍스처)
  *
  * Java: native int nativeApplyBeautyTextureV2(int inputTexture, int width, int height,
- *                                              BeautyFilterConfigV2 config, long detectionPtr);
+ *                                              BeautyFilterConfigV2 config, long detectionPtr,
+ *                                              int lutTextureId, float lutIntensity);
  *
  * @return 출력 텍스처 ID (0이면 실패)
  */
@@ -1533,9 +1534,12 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
     jint width,
     jint height,
     jobject configObj,
-    jlong detectionPtr) {
+    jlong detectionPtr,
+    jint lutTextureId,
+    jfloat lutIntensity) {
 
-    LOGV("nativeApplyBeautyTextureV2 called: texture=%d, %dx%d", inputTexture, width, height);
+    LOGV("nativeApplyBeautyTextureV2 called: texture=%d, %dx%d, lut=%d, lutIntensity=%.2f",
+         inputTexture, width, height, lutTextureId, lutIntensity);
 
     if (!configObj) {
         LOGE("nativeApplyBeautyTextureV2: configObj is null");
@@ -1564,7 +1568,9 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
         static_cast<int>(width),
         static_cast<int>(height),
         &nativeConfig,
-        detection
+        detection,
+        static_cast<uint32_t>(lutTextureId),
+        static_cast<float>(lutIntensity)
     );
 
     if (error != IRIS_SDK_OK) {

@@ -316,6 +316,8 @@ uniform sampler2D uTexture;
 uniform float uBrightness;   // 0.5 ~ 1.5, 1.0 = 원본
 uniform float uBalance;      // -1.0 (쿨톤) ~ 1.0 (웜톤)
 uniform float uWhitening;    // 0.0 ~ 1.0
+uniform highp sampler3D uLutTexture;
+uniform float uLutIntensity;  // 0.0 = LUT disabled
 
 in vec2 vTexCoord;
 out vec4 fragColor;
@@ -380,6 +382,12 @@ void main() {
 
         // RGB 변환
         result = ycbcr2rgb(ycbcr);
+    }
+
+    // 4. LUT Application (after color correction, for stylization)
+    if (uLutIntensity > 0.01) {
+        vec3 lutColor = texture(uLutTexture, result).rgb;
+        result = mix(result, lutColor, uLutIntensity);
     }
 
     fragColor = vec4(clamp(result, 0.0, 1.0), color.a);

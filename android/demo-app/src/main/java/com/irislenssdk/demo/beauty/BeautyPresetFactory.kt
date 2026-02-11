@@ -178,4 +178,32 @@ object BeautyPresetFactory {
 
         return config
     }
+
+    // ========================================================================
+    // LUT 프리셋 연결
+    // ========================================================================
+
+    /**
+     * 뷰티 프리셋에 연결된 기본 LUT 프리셋
+     */
+    fun getDefaultLutPreset(preset: BeautyPreset): LutTextureLoader.LutPreset? {
+        return when (preset) {
+            BeautyPreset.NATURAL -> LutTextureLoader.LutPreset.NATURAL_GLOW
+            BeautyPreset.STUDIO -> LutTextureLoader.LutPreset.CLEAN_PORCELAIN
+            BeautyPreset.GLAMOUR -> LutTextureLoader.LutPreset.ROSY_GLOW
+            BeautyPreset.CUSTOM -> null  // Custom has no default LUT
+        }
+    }
+
+    /**
+     * 기본 LUT 강도
+     */
+    fun getDefaultLutIntensity(preset: BeautyPreset): Float {
+        return when (preset) {
+            BeautyPreset.NATURAL -> 0.3f
+            BeautyPreset.STUDIO -> 0.5f
+            BeautyPreset.GLAMOUR -> 0.6f
+            BeautyPreset.CUSTOM -> 0.0f
+        }
+    }
 }

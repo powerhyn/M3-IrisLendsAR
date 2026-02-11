@@ -35,6 +35,7 @@ extern const char* WHITENING_FRAGMENT;
 extern const char* COLOR_BALANCE_FRAGMENT;
 extern const char* SOFT_FOCUS_FRAGMENT;
 extern const char* MASKING_FRAGMENT;
+extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
 }
 
 GPUBeautyBackend::GPUBeautyBackend() = default;
@@ -233,6 +234,8 @@ void GPUBeautyBackend::cacheUniformLocations() {
     combined_color_uniforms_.uCombinedBrightness = glGetUniformLocation(combined_color_program_, "uBrightness");
     combined_color_uniforms_.uCombinedBalance = glGetUniformLocation(combined_color_program_, "uBalance");
     combined_color_uniforms_.uCombinedWhitening = glGetUniformLocation(combined_color_program_, "uWhitening");
+    combined_color_uniforms_.uCombinedLutTexture = glGetUniformLocation(combined_color_program_, "uLutTexture");
+    combined_color_uniforms_.uCombinedLutIntensity = glGetUniformLocation(combined_color_program_, "uLutIntensity");
 
     LOGI("Uniform locations cached successfully");
 #endif
@@ -707,7 +710,8 @@ void GPUBeautyBackend::applyMasking(
 void GPUBeautyBackend::executeCombinedColorPass(
     GLuint input_tex, GLuint output_fbo,
     int width, int height,
-    float brightness, float balance, float whitening) {
+    float brightness, float balance, float whitening,
+    GLuint lut_texture, float lut_intensity) {
 
 #if IRIS_SDK_GPU_AVAILABLE
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
@@ -746,10 +750,29 @@ void GPUBeautyBackend::executeCombinedColorPass(
     glUniform1f(combined_color_uniforms_.uCombinedBalance, balance);
     glUniform1f(combined_color_uniforms_.uCombinedWhitening, whitening);
 
+    // LUT: C++ controls activation - if no texture, force intensity to 0
+    float effective_lut_intensity = (lut_texture != 0) ? lut_intensity : 0.0f;
+    glUniform1f(combined_color_uniforms_.uCombinedLutIntensity, effective_lut_intensity);
+    if (lut_texture != 0 && lut_intensity > 0.01f) {
+        glUniform1i(combined_color_uniforms_.uCombinedLutTexture, 1);  // TEXTURE1
+    }
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
 
+    // Bind LUT 3D texture to TEXTURE1 if active
+    if (lut_texture != 0 && lut_intensity > 0.01f) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_3D, lut_texture);
+    }
+
     renderFullscreenQuad();
+
+    // Cleanup LUT texture binding
+    if (lut_texture != 0 && lut_intensity > 0.01f) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_3D, 0);
+    }
 
 #ifndef NDEBUG
     // 렌더링 후 에러 체크
@@ -768,6 +791,8 @@ void GPUBeautyBackend::executeCombinedColorPass(
     (void)brightness;
     (void)balance;
     (void)whitening;
+    (void)lut_texture;
+    (void)lut_intensity;
 #endif
 }
 
@@ -811,7 +836,9 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     uint32_t* output_texture,
     int width, int height,
     const BeautyFilterConfigV2& config,
-    const IrisResult* detection) {
+    const IrisResult* detection,
+    uint32_t lut_texture_id,
+    float lut_intensity) {
 
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -967,7 +994,9 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                                  width, height,
                                  config.brightness,
                                  config.colorBalance,
-                                 config.whitening);
+                                 config.whitening,
+                                 static_cast<GLuint>(lut_texture_id),
+                                 lut_intensity);
         if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
         if (pong) current_output = (current_output == ping) ? pong : ping;
@@ -1004,6 +1033,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 #else
     *output_texture = input_texture;
     (void)detection;
+    (void)lut_texture_id;
+    (void)lut_intensity;
 #endif
 
     return IRIS_SDK_OK;
