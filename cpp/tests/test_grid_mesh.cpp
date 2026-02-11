@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include "iris_sdk/warp/grid_mesh.h"
+#include <chrono>
 #include <cmath>
 #include <vector>
 #include <algorithm>
@@ -378,6 +379,294 @@ TEST(GridMeshRbfTest, SetSigma) {
     GridMesh mesh;
     mesh.setRbfSigma(0.25f);
     EXPECT_FLOAT_EQ(mesh.getRbfSigma(), 0.25f);
+}
+
+// =============================================================================
+// LOD (Level of Detail) 테스트
+// =============================================================================
+
+class GridMeshLODTest : public ::testing::Test {
+protected:
+    GridMesh mesh;
+};
+
+TEST_F(GridMeshLODTest, SelectLODForLargeFace) {
+    // 얼굴이 화면의 48% (0.8 * 0.6) 차지 → High
+    Rect large_face{0.1f, 0.2f, 0.8f, 0.6f};
+    EXPECT_EQ(GridMesh::selectLOD(large_face), MeshLOD::High);
+}
+
+TEST_F(GridMeshLODTest, SelectLODForMediumFace) {
+    // 얼굴이 화면의 20% (0.5 * 0.4) 차지 → Medium
+    Rect medium_face{0.25f, 0.3f, 0.5f, 0.4f};
+    EXPECT_EQ(GridMesh::selectLOD(medium_face), MeshLOD::Medium);
+}
+
+TEST_F(GridMeshLODTest, SelectLODForSmallFace) {
+    // 얼굴이 화면의 6% (0.2 * 0.3) 차지 → Low
+    Rect small_face{0.4f, 0.35f, 0.2f, 0.3f};
+    EXPECT_EQ(GridMesh::selectLOD(small_face), MeshLOD::Low);
+}
+
+TEST_F(GridMeshLODTest, SelectLODAtHighThreshold) {
+    // 정확히 30% → High
+    Rect threshold_face{0.0f, 0.0f, 0.6f, 0.5f};
+    EXPECT_EQ(GridMesh::selectLOD(threshold_face), MeshLOD::High);
+}
+
+TEST_F(GridMeshLODTest, SelectLODAtMediumThreshold) {
+    // 정확히 15% → Medium
+    Rect threshold_face{0.0f, 0.0f, 0.5f, 0.3f};
+    EXPECT_EQ(GridMesh::selectLOD(threshold_face), MeshLOD::Medium);
+}
+
+TEST_F(GridMeshLODTest, SelectLODBelowMediumThreshold) {
+    // 14% → Low
+    Rect below_face{0.0f, 0.0f, 0.35f, 0.4f};
+    EXPECT_EQ(GridMesh::selectLOD(below_face), MeshLOD::Low);
+}
+
+TEST_F(GridMeshLODTest, InitializeWithLODAutoSelect) {
+    // 큰 얼굴 → High (20x20)
+    Rect large_face{0.1f, 0.1f, 0.8f, 0.8f};
+    EXPECT_TRUE(mesh.initializeWithLOD(large_face));
+    EXPECT_EQ(mesh.getCurrentLOD(), MeshLOD::High);
+    EXPECT_EQ(mesh.getGridSize(), 20);
+    EXPECT_EQ(mesh.getVertexCount(), 21 * 21);
+}
+
+TEST_F(GridMeshLODTest, InitializeWithLODMedium) {
+    Rect medium_face{0.2f, 0.2f, 0.5f, 0.4f};
+    EXPECT_TRUE(mesh.initializeWithLOD(medium_face));
+    EXPECT_EQ(mesh.getCurrentLOD(), MeshLOD::Medium);
+    EXPECT_EQ(mesh.getGridSize(), 14);
+    EXPECT_EQ(mesh.getVertexCount(), 15 * 15);
+}
+
+TEST_F(GridMeshLODTest, InitializeWithLODLow) {
+    Rect small_face{0.3f, 0.3f, 0.2f, 0.3f};
+    EXPECT_TRUE(mesh.initializeWithLOD(small_face));
+    EXPECT_EQ(mesh.getCurrentLOD(), MeshLOD::Low);
+    EXPECT_EQ(mesh.getGridSize(), 8);
+    EXPECT_EQ(mesh.getVertexCount(), 9 * 9);
+}
+
+TEST_F(GridMeshLODTest, InitializeWithExplicitLOD) {
+    Rect face_rect{0.1f, 0.1f, 0.6f, 0.8f};
+
+    // 명시적으로 Low LOD 지정 (얼굴 크기와 무관)
+    EXPECT_TRUE(mesh.initializeWithLOD(MeshLOD::Low, face_rect));
+    EXPECT_EQ(mesh.getCurrentLOD(), MeshLOD::Low);
+    EXPECT_EQ(mesh.getGridSize(), 8);
+}
+
+TEST_F(GridMeshLODTest, LODGridSizesAreCorrect) {
+    EXPECT_EQ(GridMesh::LOD_GRID_SIZES[0], 8);   // Low
+    EXPECT_EQ(GridMesh::LOD_GRID_SIZES[1], 14);  // Medium
+    EXPECT_EQ(GridMesh::LOD_GRID_SIZES[2], 20);  // High
+}
+
+TEST_F(GridMeshLODTest, LODTriangleCountScaling) {
+    Rect face_rect{0.1f, 0.1f, 0.8f, 0.8f};
+
+    // Low LOD
+    GridMesh mesh_low;
+    mesh_low.initializeWithLOD(MeshLOD::Low, face_rect);
+    int low_triangles = mesh_low.getTriangleCount();
+
+    // Medium LOD
+    GridMesh mesh_med;
+    mesh_med.initializeWithLOD(MeshLOD::Medium, face_rect);
+    int med_triangles = mesh_med.getTriangleCount();
+
+    // High LOD
+    GridMesh mesh_high;
+    mesh_high.initializeWithLOD(MeshLOD::High, face_rect);
+    int high_triangles = mesh_high.getTriangleCount();
+
+    // 삼각형 수가 LOD 레벨에 따라 증가해야 함
+    EXPECT_LT(low_triangles, med_triangles);
+    EXPECT_LT(med_triangles, high_triangles);
+
+    // 구체적인 값 검증
+    EXPECT_EQ(low_triangles, 8 * 8 * 2);    // 128
+    EXPECT_EQ(med_triangles, 14 * 14 * 2);  // 392
+    EXPECT_EQ(high_triangles, 20 * 20 * 2); // 800
+}
+
+TEST_F(GridMeshLODTest, LODWithInvalidRectFails) {
+    Rect invalid_rect{0.0f, 0.0f, 0.0f, 0.0f};
+    EXPECT_FALSE(mesh.initializeWithLOD(invalid_rect));
+}
+
+// =============================================================================
+// 성능 최적화 테스트
+// =============================================================================
+
+class GridMeshPerformanceTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        face_rect = {0.0f, 0.0f, 1.0f, 1.0f};
+
+        // 랜드마크 생성 (468개)
+        landmarks.resize(468);
+        for (int i = 0; i < 468; ++i) {
+            landmarks[i].x = static_cast<float>(i % 22) / 21.0f;
+            landmarks[i].y = static_cast<float>(i / 22) / 21.0f;
+            landmarks[i].z = 0.0f;
+            landmarks[i].visibility = 1.0f;
+        }
+    }
+
+    Rect face_rect;
+    std::vector<IrisLandmark> landmarks;
+};
+
+TEST_F(GridMeshPerformanceTest, LowLODFasterThanHigh) {
+    const int iterations = 200;
+
+    // High LOD 성능 측정
+    GridMesh mesh_high;
+    mesh_high.initializeWithLOD(MeshLOD::High, face_rect);
+    mesh_high.setControlPoints(landmarks.data(), 468, 1920, 1080);
+
+    auto start_high = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < iterations; ++i) {
+        mesh_high.resetDisplacements();
+        mesh_high.setControlPointDisplacement(10, 0.1f, 0.1f);
+        mesh_high.interpolateDisplacements();
+        mesh_high.computeFinalPositions();
+    }
+    auto end_high = std::chrono::high_resolution_clock::now();
+    auto high_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_high - start_high).count();
+
+    // Low LOD 성능 측정
+    GridMesh mesh_low;
+    mesh_low.initializeWithLOD(MeshLOD::Low, face_rect);
+    mesh_low.setControlPoints(landmarks.data(), 468, 1920, 1080);
+
+    auto start_low = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < iterations; ++i) {
+        mesh_low.resetDisplacements();
+        mesh_low.setControlPointDisplacement(10, 0.1f, 0.1f);
+        mesh_low.interpolateDisplacements();
+        mesh_low.computeFinalPositions();
+    }
+    auto end_low = std::chrono::high_resolution_clock::now();
+    auto low_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_low - start_low).count();
+
+    // Low LOD는 High LOD보다 빨라야 함
+    EXPECT_LT(low_ms, high_ms) << "Low LOD (" << low_ms << "us) should be faster than High LOD (" << high_ms << "us)";
+}
+
+TEST_F(GridMeshPerformanceTest, OptimizedInterpolationSkipsZeroDisplacement) {
+    GridMesh mesh;
+    mesh.initialize(20, face_rect);
+    mesh.setControlPoints(landmarks.data(), 468, 1920, 1080);
+
+    // 변위 없이 보간 실행 → 활성 컨트롤 포인트 0개이므로 빨라야 함
+    auto start = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 1000; ++i) {
+        mesh.resetDisplacements();
+        mesh.interpolateDisplacements();
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+    // 1000번 보간이 50ms 이내 (변위 없는 경우 즉시 반환)
+    EXPECT_LT(duration.count(), 50)
+        << "Zero displacement interpolation should be fast: " << duration.count() << "ms";
+}
+
+TEST_F(GridMeshPerformanceTest, FindNearestVertexOptimized) {
+    GridMesh mesh;
+    mesh.initialize(20, face_rect);
+
+    // O(1) 최근접 탐색이 빠른지 검증
+    auto start = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 10000; ++i) {
+        float x = static_cast<float>(i % 100) / 100.0f;
+        float y = static_cast<float>(i / 100) / 100.0f;
+        // setControlPoints 내부에서 findNearestVertex 호출
+        // 직접 호출할 수 없으므로 setControlPoints 전체 측정
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // setControlPoints 전체 성능 검증
+    auto start2 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 100; ++i) {
+        mesh.setControlPoints(landmarks.data(), 468, 1920, 1080);
+    }
+    auto end2 = std::chrono::high_resolution_clock::now();
+    auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end2 - start2);
+
+    // 100번 setControlPoints가 100ms 이내
+    EXPECT_LT(duration2.count(), 100)
+        << "100x setControlPoints should complete in < 100ms: " << duration2.count() << "ms";
+}
+
+// =============================================================================
+// LOD + 변위 보간 정확도 테스트
+// =============================================================================
+
+class GridMeshLODAccuracyTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        face_rect = {0.0f, 0.0f, 1.0f, 1.0f};
+
+        landmarks.resize(468);
+        for (int i = 0; i < 468; ++i) {
+            landmarks[i].x = static_cast<float>(i % 22) / 21.0f;
+            landmarks[i].y = static_cast<float>(i / 22) / 21.0f;
+            landmarks[i].z = 0.0f;
+            landmarks[i].visibility = 1.0f;
+        }
+    }
+
+    Rect face_rect;
+    std::vector<IrisLandmark> landmarks;
+};
+
+TEST_F(GridMeshLODAccuracyTest, LowLODStillProducesReasonableResults) {
+    GridMesh mesh;
+    mesh.initializeWithLOD(MeshLOD::Low, face_rect);
+    mesh.setControlPoints(landmarks.data(), 468, 1920, 1080);
+
+    // 컨트롤 포인트에 변위 설정
+    mesh.setControlPointDisplacement(10, 0.1f, 0.1f);
+    mesh.interpolateDisplacements();
+    mesh.computeFinalPositions();
+
+    // 정점 버퍼가 올바른 크기
+    auto buffer = mesh.getVertexBuffer();
+    EXPECT_EQ(buffer.size(), static_cast<size_t>(mesh.getVertexCount()) * 4u);
+
+    // 비-컨트롤 정점에도 보간된 변위가 있어야 함
+    const auto& vertices = mesh.getVertices();
+    int nonzero_count = 0;
+    for (const auto& v : vertices) {
+        if (!v.is_control && (std::abs(v.dx) > 1e-6f || std::abs(v.dy) > 1e-6f)) {
+            nonzero_count++;
+        }
+    }
+    EXPECT_GT(nonzero_count, 0) << "Interpolation should affect nearby vertices even at Low LOD";
+}
+
+TEST_F(GridMeshLODAccuracyTest, AllLODsProduceValidIndexBuffers) {
+    for (int lod_int = 0; lod_int <= 2; ++lod_int) {
+        MeshLOD lod = static_cast<MeshLOD>(lod_int);
+        GridMesh mesh;
+        mesh.initializeWithLOD(lod, face_rect);
+
+        const auto& indices = mesh.getIndices();
+
+        // 모든 인덱스가 유효한 범위
+        for (uint16_t idx : indices) {
+            EXPECT_LT(idx, static_cast<uint16_t>(mesh.getVertexCount()))
+                << "Index out of range at LOD " << lod_int;
+        }
+    }
 }
 
 // =============================================================================

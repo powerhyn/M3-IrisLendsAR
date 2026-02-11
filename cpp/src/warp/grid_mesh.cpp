@@ -53,7 +53,8 @@ std::vector<int> ControlLandmarks::getAllIndices() {
 GridMesh::GridMesh()
     : grid_size_(0)
     , rbf_sigma_(DEFAULT_RBF_SIGMA)
-    , initialized_(false) {
+    , initialized_(false)
+    , current_lod_(MeshLOD::High) {
     face_rect_ = {0.0f, 0.0f, 0.0f, 0.0f};
 }
 
@@ -82,6 +83,30 @@ bool GridMesh::initialize(int grid_size, const Rect& face_rect) {
 
     initialized_ = true;
     return true;
+}
+
+bool GridMesh::initializeWithLOD(const Rect& face_rect) {
+    MeshLOD lod = selectLOD(face_rect);
+    return initializeWithLOD(lod, face_rect);
+}
+
+bool GridMesh::initializeWithLOD(MeshLOD lod, const Rect& face_rect) {
+    current_lod_ = lod;
+    int grid_size = LOD_GRID_SIZES[static_cast<int>(lod)];
+    return initialize(grid_size, face_rect);
+}
+
+MeshLOD GridMesh::selectLOD(const Rect& face_rect) {
+    // 얼굴 면적 비율로 LOD 결정
+    float face_area = face_rect.width * face_rect.height;
+
+    if (face_area >= LOD_THRESHOLD_HIGH) {
+        return MeshLOD::High;
+    } else if (face_area >= LOD_THRESHOLD_MEDIUM) {
+        return MeshLOD::Medium;
+    } else {
+        return MeshLOD::Low;
+    }
 }
 
 void GridMesh::createGridVertices() {
@@ -211,18 +236,55 @@ bool GridMesh::setControlPoints(const IrisLandmark* face_mesh,
 }
 
 int GridMesh::findNearestVertex(float lm_x, float lm_y) const {
-    int nearest_idx = -1;
+    if (vertices_.empty() || grid_size_ <= 0) {
+        return -1;
+    }
+
+    // O(1) 그리드 좌표 기반 빠른 탐색:
+    // 랜드마크의 정규화 좌표를 그리드 셀 좌표로 변환
+    const float roi_left = face_rect_.x;
+    const float roi_top = face_rect_.y;
+    const float roi_width = face_rect_.width;
+    const float roi_height = face_rect_.height;
+
+    if (roi_width <= 0.0f || roi_height <= 0.0f) {
+        return -1;
+    }
+
+    // ROI 내 정규화 좌표 (0~1)
+    float u = (lm_x - roi_left) / roi_width;
+    float v = (lm_y - roi_top) / roi_height;
+
+    // 그리드 셀 인덱스 (반올림하여 가장 가까운 정점)
+    int col = static_cast<int>(std::round(u * grid_size_));
+    int row = static_cast<int>(std::round(v * grid_size_));
+
+    // 범위 클램프
+    col = std::clamp(col, 0, grid_size_);
+    row = std::clamp(row, 0, grid_size_);
+
+    int center_idx = row * (grid_size_ + 1) + col;
+
+    // 주변 3x3 이웃 정점에서 실제 최근접 탐색 (정밀도 보완)
+    int nearest_idx = center_idx;
     float min_dist_sq = std::numeric_limits<float>::max();
 
-    for (int i = 0; i < static_cast<int>(vertices_.size()); ++i) {
-        const GridVertex& v = vertices_[i];
-        float dx = v.x - lm_x;
-        float dy = v.y - lm_y;
-        float dist_sq = dx * dx + dy * dy;
-
-        if (dist_sq < min_dist_sq) {
-            min_dist_sq = dist_sq;
-            nearest_idx = i;
+    for (int dr = -1; dr <= 1; ++dr) {
+        for (int dc = -1; dc <= 1; ++dc) {
+            int r = row + dr;
+            int c = col + dc;
+            if (r < 0 || r > grid_size_ || c < 0 || c > grid_size_) {
+                continue;
+            }
+            int idx = r * (grid_size_ + 1) + c;
+            const GridVertex& vtx = vertices_[idx];
+            float dx = vtx.x - lm_x;
+            float dy = vtx.y - lm_y;
+            float dist_sq = dx * dx + dy * dy;
+            if (dist_sq < min_dist_sq) {
+                min_dist_sq = dist_sq;
+                nearest_idx = idx;
+            }
         }
     }
 
@@ -308,17 +370,22 @@ bool GridMesh::setControlPointDisplacement(int landmark_idx, float dx, float dy)
 }
 
 void GridMesh::interpolateDisplacements() {
-    // 컨트롤 포인트 수집
-    std::vector<int> control_indices;
+    // 변위가 있는 컨트롤 포인트만 수집 (최적화)
+    std::vector<int> active_control_indices;
+    active_control_indices.reserve(64);
     for (int i = 0; i < static_cast<int>(vertices_.size()); ++i) {
-        if (vertices_[i].is_control) {
-            control_indices.push_back(i);
+        if (vertices_[i].is_control &&
+            (std::abs(vertices_[i].dx) > 1e-7f || std::abs(vertices_[i].dy) > 1e-7f)) {
+            active_control_indices.push_back(i);
         }
     }
 
-    if (control_indices.empty()) {
-        return;  // 컨트롤 포인트 없음
+    if (active_control_indices.empty()) {
+        return;  // 활성 컨트롤 포인트 없음
     }
+
+    // RBF 가중치 임계값 (이 이하의 가중치는 무시하여 연산 절감)
+    const float weight_threshold = 1e-4f;
 
     // 비-컨트롤 정점에 대해 RBF 보간
     for (int i = 0; i < static_cast<int>(vertices_.size()); ++i) {
@@ -332,17 +399,23 @@ void GridMesh::interpolateDisplacements() {
         float dx_sum = 0.0f;
         float dy_sum = 0.0f;
 
-        // 모든 컨트롤 포인트로부터 가중 평균
-        for (int ctrl_idx : control_indices) {
+        // 활성 컨트롤 포인트만 순회
+        for (int ctrl_idx : active_control_indices) {
             const GridVertex& ctrl = vertices_[ctrl_idx];
 
-            // 거리 계산
+            // 거리 계산 (sqrt 대신 거리 제곱으로 RBF 계산)
             float dist_x = vertex.x - ctrl.x;
             float dist_y = vertex.y - ctrl.y;
-            float distance = std::sqrt(dist_x * dist_x + dist_y * dist_y);
+            float dist_sq = dist_x * dist_x + dist_y * dist_y;
 
-            // RBF 가중치
-            float weight = gaussianRbf(distance);
+            // Gaussian RBF: exp(-dist_sq / (2 * sigma^2))
+            const float sigma_sq_2 = 2.0f * rbf_sigma_ * rbf_sigma_;
+            float weight = std::exp(-dist_sq / sigma_sq_2);
+
+            // 가중치 임계값 이하 스킵
+            if (weight < weight_threshold) {
+                continue;
+            }
 
             weight_sum += weight;
             dx_sum += weight * ctrl.dx;

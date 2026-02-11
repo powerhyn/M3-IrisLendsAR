@@ -12,6 +12,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <array>
 #include "../types.h"
 #include "../export.h"
 
@@ -88,10 +89,25 @@ struct ControlLandmarks {
 };
 
 /**
+ * @brief LOD(Level of Detail) 레벨 열거형
+ *
+ * 얼굴 크기(화면 비율)에 따라 적절한 메쉬 밀도를 선택합니다.
+ * - High: 얼굴이 화면의 30% 이상 차지 (근거리 / 상세)
+ * - Medium: 얼굴이 화면의 15~30% (중간 거리)
+ * - Low: 얼굴이 화면의 15% 미만 (원거리 / 전신)
+ */
+enum class MeshLOD : int {
+    Low    = 0,  ///< 8x8 그리드 (81 정점, 128 삼각형)
+    Medium = 1,  ///< 14x14 그리드 (225 정점, 392 삼각형)
+    High   = 2   ///< 20x20 그리드 (441 정점, 800 삼각형)
+};
+
+/**
  * @brief Face Warp용 Grid Mesh 클래스
  *
  * 균일 그리드를 생성하고 얼굴 랜드마크 기반 변형을 지원합니다.
  * GPU 렌더링을 위한 정점/인덱스 버퍼를 제공합니다.
+ * LOD(Level of Detail)를 지원하여 얼굴 크기에 따라 메쉬 밀도를 자동 조절합니다.
  */
 class IRIS_SDK_EXPORT GridMesh {
 public:
@@ -100,6 +116,13 @@ public:
 
     /// RBF 보간 파라미터 (Gaussian 함수의 sigma)
     static constexpr float DEFAULT_RBF_SIGMA = 0.15f;
+
+    /// LOD별 그리드 크기
+    static constexpr std::array<int, 3> LOD_GRID_SIZES = {8, 14, 20};
+
+    /// LOD 전환 임계값 (얼굴 면적 비율)
+    static constexpr float LOD_THRESHOLD_HIGH = 0.30f;    ///< 30% 이상 → High
+    static constexpr float LOD_THRESHOLD_MEDIUM = 0.15f;  ///< 15% 이상 → Medium
 
     GridMesh();
     ~GridMesh();
@@ -117,6 +140,36 @@ public:
      * @return 초기화 성공 여부
      */
     bool initialize(int grid_size, const Rect& face_rect);
+
+    /**
+     * @brief LOD 기반 그리드 메시 초기화
+     *
+     * 얼굴 ROI의 화면 비율에 따라 적절한 LOD를 자동 선택합니다.
+     *
+     * @param face_rect 얼굴 ROI 영역 (이미지 기준 정규화 좌표)
+     * @return 초기화 성공 여부
+     */
+    bool initializeWithLOD(const Rect& face_rect);
+
+    /**
+     * @brief 특정 LOD 레벨로 그리드 메시 초기화
+     * @param lod LOD 레벨
+     * @param face_rect 얼굴 ROI 영역
+     * @return 초기화 성공 여부
+     */
+    bool initializeWithLOD(MeshLOD lod, const Rect& face_rect);
+
+    /**
+     * @brief 얼굴 ROI의 화면 비율에서 적절한 LOD 레벨 결정
+     * @param face_rect 얼굴 ROI 영역 (정규화 좌표)
+     * @return 적절한 LOD 레벨
+     */
+    static MeshLOD selectLOD(const Rect& face_rect);
+
+    /**
+     * @brief 현재 LOD 레벨 반환
+     */
+    MeshLOD getCurrentLOD() const { return current_lod_; }
 
     /**
      * @brief 얼굴 랜드마크로 컨트롤 포인트 설정
@@ -265,6 +318,7 @@ private:
     int grid_size_;                         ///< 그리드 분할 수
     float rbf_sigma_;                       ///< RBF Sigma 파라미터
     bool initialized_;                      ///< 초기화 완료 여부
+    MeshLOD current_lod_;                   ///< 현재 LOD 레벨
 
     /// 랜드마크 인덱스 -> 정점 인덱스 매핑
     std::vector<int> landmark_to_vertex_;
