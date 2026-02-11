@@ -10,6 +10,7 @@
 package com.irislenssdk.demo.camera.gpu
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
@@ -19,6 +20,7 @@ import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
 import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisResult
+import com.irislenssdk.LensConfig
 import java.util.concurrent.Executors
 
 /**
@@ -50,6 +52,13 @@ class CameraGLView @JvmOverloads constructor(
         set(value) {
             field = value
             glRenderer.onGpuInitialized = value
+        }
+
+    // GPU FPS 업데이트 콜백
+    var onGpuFpsUpdated: ((Int) -> Unit)? = null
+        set(value) {
+            field = value
+            glRenderer.onGpuFpsUpdated = value
         }
 
     // 펜딩 SurfaceRequest (GL 초기화 전 Preview.setSurfaceProvider 호출 시)
@@ -175,6 +184,62 @@ class CameraGLView @JvmOverloads constructor(
     fun setFrameRotation(rotation: Int) {
         queueEvent {
             glRenderer.setFrameRotation(rotation)
+        }
+    }
+
+    /**
+     * 렌즈 설정
+     */
+    fun setLensConfig(config: LensConfig) {
+        queueEvent {
+            glRenderer.setLensConfig(config)
+        }
+    }
+
+    /**
+     * 렌즈 활성화/비활성화
+     */
+    fun setLensEnabled(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setLensEnabled(enabled)
+        }
+    }
+
+    /**
+     * 렌즈 텍스처 설정 (비트맵)
+     */
+    fun setLensTexture(bitmap: Bitmap?) {
+        queueEvent {
+            glRenderer.setLensTexture(bitmap)
+        }
+    }
+
+    /**
+     * LUT 3D 텍스처 설정 (GL 스레드에서 실행)
+     *
+     * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)
+     */
+    fun setLut3dTexture(textureId: Int) {
+        queueEvent {
+            glRenderer.setLut3dTexture(textureId)
+        }
+    }
+
+    /**
+     * LUT 필터 활성화/비활성화
+     */
+    fun setLutEnabled(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setLutEnabled(enabled)
+        }
+    }
+
+    /**
+     * LUT 필터 강도 설정 (0.0 ~ 1.0)
+     */
+    fun setLutIntensity(intensity: Float) {
+        queueEvent {
+            glRenderer.setLutIntensity(intensity)
         }
     }
 
