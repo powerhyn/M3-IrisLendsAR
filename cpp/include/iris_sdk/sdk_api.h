@@ -189,6 +189,7 @@ typedef struct IrisLensConfig {
     float scale;                /**< 크기 배율 (기본값 1.0) */
     float offset_x;             /**< X 오프셋 (정규화, 기본값 0.0) */
     float offset_y;             /**< Y 오프셋 (정규화, 기본값 0.0) */
+    float rotation;             /**< 회전 각도 (라디안, -PI~PI, 기본값 0.0) */
     IrisBlendMode blend_mode;   /**< 블렌드 모드 (기본값 NORMAL) */
     float edge_feather;         /**< 가장자리 페더링 (0.0~1.0, 기본값 0.1) */
     bool apply_left;            /**< 왼쪽 눈 적용 여부 (기본값 true) */

@@ -96,6 +96,7 @@ bool JniCache::init(JNIEnv* env) {
     lensConfig_scale = env->GetFieldID(lensConfigClass, "scale", "F");
     lensConfig_offsetX = env->GetFieldID(lensConfigClass, "offsetX", "F");
     lensConfig_offsetY = env->GetFieldID(lensConfigClass, "offsetY", "F");
+    lensConfig_rotation = env->GetFieldID(lensConfigClass, "rotation", "F");
     lensConfig_blendMode = env->GetFieldID(lensConfigClass, "blendMode", "I");
     lensConfig_edgeFeather = env->GetFieldID(lensConfigClass, "edgeFeather", "F");
     lensConfig_applyLeft = env->GetFieldID(lensConfigClass, "applyLeft", "Z");
@@ -103,7 +104,7 @@ bool JniCache::init(JNIEnv* env) {
 
     // 필드 ID 검증
     if (!lensConfig_opacity || !lensConfig_scale || !lensConfig_offsetX ||
-        !lensConfig_offsetY || !lensConfig_blendMode || !lensConfig_edgeFeather ||
+        !lensConfig_offsetY || !lensConfig_rotation || !lensConfig_blendMode || !lensConfig_edgeFeather ||
         !lensConfig_applyLeft || !lensConfig_applyRight) {
         LOGE("Failed to get LensConfig field IDs");
         return false;
@@ -281,6 +282,7 @@ bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     dest.scale = env->GetFloatField(src, g_jniCache.lensConfig_scale);
     dest.offset_x = env->GetFloatField(src, g_jniCache.lensConfig_offsetX);
     dest.offset_y = env->GetFloatField(src, g_jniCache.lensConfig_offsetY);
+    dest.rotation = env->GetFloatField(src, g_jniCache.lensConfig_rotation);
     dest.blend_mode = static_cast<IrisBlendMode>(
         env->GetIntField(src, g_jniCache.lensConfig_blendMode));
     dest.edge_feather = env->GetFloatField(src, g_jniCache.lensConfig_edgeFeather);

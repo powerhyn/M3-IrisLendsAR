@@ -150,6 +150,7 @@ iris_sdk::LensConfig convert_to_cpp_lens_config(const IrisLensConfig* c_config) 
     cpp_config.scale = c_config->scale;
     cpp_config.offset_x = c_config->offset_x;
     cpp_config.offset_y = c_config->offset_y;
+    cpp_config.rotation = c_config->rotation;
     cpp_config.blend_mode = convert_blend_mode(c_config->blend_mode);
     cpp_config.edge_feather = c_config->edge_feather;
     cpp_config.apply_left = c_config->apply_left;
@@ -742,6 +743,7 @@ void iris_sdk_default_lens_config(IrisLensConfig* config) {
     config->scale = 1.0f;
     config->offset_x = 0.0f;
     config->offset_y = 0.0f;
+    config->rotation = 0.0f;
     config->blend_mode = IRIS_BLEND_NORMAL;
     config->edge_feather = 0.1f;
     config->apply_left = true;

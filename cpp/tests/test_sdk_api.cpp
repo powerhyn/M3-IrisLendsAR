@@ -337,6 +337,7 @@ TEST_F(SdkApiTest, DefaultLensConfigSetsCorrectValues) {
     EXPECT_FLOAT_EQ(1.0f, config.scale);
     EXPECT_FLOAT_EQ(0.0f, config.offset_x);
     EXPECT_FLOAT_EQ(0.0f, config.offset_y);
+    EXPECT_FLOAT_EQ(0.0f, config.rotation);
     EXPECT_EQ(IRIS_BLEND_NORMAL, config.blend_mode);
     EXPECT_FLOAT_EQ(0.1f, config.edge_feather);
     EXPECT_TRUE(config.apply_left);

@@ -350,6 +350,7 @@ struct JniCache {
     jfieldID lensConfig_scale = nullptr;
     jfieldID lensConfig_offsetX = nullptr;
     jfieldID lensConfig_offsetY = nullptr;
+    jfieldID lensConfig_rotation = nullptr;
     jfieldID lensConfig_blendMode = nullptr;
     jfieldID lensConfig_edgeFeather = nullptr;
     jfieldID lensConfig_applyLeft = nullptr;
