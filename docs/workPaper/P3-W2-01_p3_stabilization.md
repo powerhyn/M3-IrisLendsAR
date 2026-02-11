@@ -266,13 +266,42 @@ sh = clamp(sh, 1, H - sy)
 
 ---
 
+### Phase 4: ISS-004 홍채 반경 불일치 수정 (High)
+
+**관련 문서**: `docs/workPaper/ISS-004_lens_iris_radius_mismatch_report.md`
+
+**문제**: 디버그 화면에서 홍채 랜드마크(보라색 점)는 홍채 내부에 위치하지만, 렌즈 반경 디버그 원(녹색)이 눈 양 끝에 가까운 영역을 덮어 과대 렌더링.
+
+#### 4-1. Fix-A (P0): 디버그 표기 분리
+- **파일**: `android/demo-app/.../OverlayView.kt`
+- **수정**:
+  - `rawIrisPaint` 추가 (파란색 점선, `#4488FF`, `DashPathEffect`)
+  - `drawIrisMarker()` — 원 2개 분리: raw(파란 점선) + effective(녹색 실선)
+  - 디버그 텍스트에 `rawR`, `effR` 분리 출력
+
+#### 4-2. Fix-B (P1): GPU 반경 정규화 좌표계 수정
+- **파일**: `android/demo-app/.../CameraGLRenderer.kt`
+- **수정**: `normalizedRadius = radius / detW` → `radius / detH`
+- **근거**: 셰이더가 `adjustedCoord = vec2(texCoord.x * aspectRatio, texCoord.y)` 사용 → isotropic height 단위 공간이므로 detH로 정규화해야 함
+- **효과**: Portrait(1080x1920) 기준 ~1.78x 과대 렌더링 해소
+
+#### 4-3. Fix-C (P2): V2 홍채 보정 로직 개선
+- **파일**: `cpp/src/mediapipe_detector.cpp`
+- **수정**:
+  - `validateAndFixIrisCoordinates()` snap-to-center → lerp 보간으로 변경
+  - 임계값: 고정 `0.05` → 눈폭의 50% 비례로 동적 조정
+  - 시선 추적 정보 보존
+
+---
+
 ## 수정 대상 파일 요약
 
 | 파일 | Phase | 변경 유형 |
 |------|-------|-----------|
-| `android/demo-app/.../CameraGLRenderer.kt` | 0, 2 | 좌표계 통일, Detection handle 전달 |
-| `android/demo-app/.../OverlayView.kt` | 0 | 매핑 정책 GL 통일 |
+| `android/demo-app/.../CameraGLRenderer.kt` | 0, 2, 4 | 좌표계 통일, Detection handle 전달, 반경 정규화 detW→detH |
+| `android/demo-app/.../OverlayView.kt` | 0, 4 | 매핑 정책 GL 통일, 디버그 원 분리(raw/effective) |
 | `android/demo-app/.../GpuRenderActivity.kt` | 0 | IrisResult 불변 스냅샷 |
+| `cpp/src/mediapipe_detector.cpp` | 4 | V2 홍채 보정 snap→lerp, 동적 임계값 |
 | `cpp/src/gpu/gpu_beauty_backend.cpp` | 1, 2, 3 | releaseTexture 안전성, ROI 마스킹 구현, stub 에러 반환 |
 | `cpp/include/iris_sdk/gpu/texture_pool.h` | 1 | `releaseTextureById()` 선언 |
 | `cpp/src/gpu/texture_pool.cpp` | 1 | `releaseTextureById()` 구현 |
@@ -353,3 +382,4 @@ sh = clamp(sh, 1, H - sy)
 | 2026-02-11 | 리뷰 코멘트 3건 추가 반영 (releaseTextureById API 구체화, 더블 버퍼 스레드 정책, ROI 2단계 전략) |
 | 2026-02-11 | 리뷰 코멘트 5건 추가 반영 (valid+generation 동시성 계약, glScissor Y변환 수식, Scissor 시각 검증, releaseTextureById 원자화, 포인터 노출 제거) |
 | 2026-02-11 | 전체 구현 완료: Phase 0~3 모두 구현, C++ 빌드 검증 완료, TEXTURE_OWNERSHIP.md 작성 |
+| 2026-02-11 | Phase 4 추가: ISS-004 Fix-A/B/C 구현 (디버그 원 분리, GPU 반경 정규화 수정, V2 보정 lerp 변경) |

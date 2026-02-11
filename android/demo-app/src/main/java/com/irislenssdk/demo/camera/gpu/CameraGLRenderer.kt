@@ -617,8 +617,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // leftRadius/rightRadius는 픽셀 단위이므로 검출 좌표계 기준으로 정규화
         // 좌표 계약: result.frameWidth/Height가 검출기의 좌표 기준 (회전 적용 후)
         val (detW, detH) = resolveCoordinateSpace(result)
-        val normalizedLeftRadius = result.leftRadius / detW.toFloat()
-        val normalizedRightRadius = result.rightRadius / detW.toFloat()
+        // ISS-004 Fix-B: 셰이더의 adjusted 좌표계(높이 기준)에 맞춰 detH로 정규화
+        // 셰이더: adjustedCoord = vec2(texCoord.x * aspectRatio, texCoord.y)
+        // → 양 축이 "프레임 높이 분의 1 픽셀" 단위로 통일됨
+        // 이전: detW로 나눔 → portrait에서 ar(≈1.78)배 과대 렌더링
+        val normalizedLeftRadius = result.leftRadius / detH.toFloat()
+        val normalizedRightRadius = result.rightRadius / detH.toFloat()
 
         // 좌표 변환: renderOESToRgba()에서 적용한 변환과 동일하게 적용
         // 1. Y축 뒤집기 (uFlipY=1 적용됨)

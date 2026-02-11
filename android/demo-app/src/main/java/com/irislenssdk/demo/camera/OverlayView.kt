@@ -14,6 +14,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -243,6 +244,15 @@ class OverlayView @JvmOverloads constructor(
     private val meshPointPaint = Paint().apply {
         color = COLOR_FACE_MESH_POINT
         style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
+    // ISS-004 Fix-A: Raw 홍채 반경 원 (파란색 점선 - 실제 홍채 경계)
+    private val rawIrisPaint = Paint().apply {
+        color = 0xFF4488FF.toInt()  // 밝은 파란색
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
         isAntiAlias = true
     }
 
@@ -823,22 +833,29 @@ class OverlayView @JvmOverloads constructor(
         // 정규화 좌표 → 화면 좌표 변환 (MediaPipe 공식 예제 방식)
         var cx = normalizedX * imageWidth * scaleFactor + offsetX
         val cy = normalizedY * imageHeight * scaleFactor + offsetY
-        val r = radius * scaleFactor * lensConfig.scale
+
+        // ISS-004 Fix-A: Raw 홍채 반경과 Effective 렌즈 반경 분리 표시
+        val rawR = radius * scaleFactor                       // 실제 홍채 크기
+        val effectiveR = radius * scaleFactor * lensConfig.scale  // 렌즈 적용 크기
 
         // 미러링 (전면 카메라)
         if (isMirror) {
             cx = width - cx
         }
 
-        // 홍채 원 그리기
-        canvas.drawCircle(cx, cy, r, irisPaint)
+        // 1) Raw 홍채 반경 원 (파란색 점선 - 실제 홍채 경계)
+        canvas.drawCircle(cx, cy, rawR, rawIrisPaint)
+
+        // 2) Effective 렌즈 반경 원 (녹색 실선 - 렌즈 적용 영역)
+        canvas.drawCircle(cx, cy, effectiveR, irisPaint)
 
         // 중심점 그리기
         canvas.drawCircle(cx, cy, CENTER_DOT_RADIUS, centerPaint)
 
-        // 디버그 모드: 라벨 표시
+        // 디버그 모드: 라벨 + 반경 정보 표시
         debugTextPaint.textSize = 24f
-        canvas.drawText(label, cx + r + 10, cy, debugTextPaint)
+        val debugLabel = "%s rawR=%.0f effR=%.0f".format(label, rawR, effectiveR)
+        canvas.drawText(debugLabel, cx + effectiveR + 10, cy, debugTextPaint)
     }
 
     /**
@@ -925,18 +942,20 @@ class OverlayView @JvmOverloads constructor(
             else -> "N/A ($meshSize)"
         }
 
-        // 디버그 텍스트
+        // 디버그 텍스트 (ISS-004 Fix-A: rawR + effectiveR 동시 표시)
         val debugInfo = buildString {
             append("Model: $modelVersion\n")
             append("Confidence: %.2f\n".format(result.confidence))
-            append("Left: (%.3f, %.3f) r=%.1f\n".format(
-                result.leftIrisX, result.leftIrisY, result.leftRadius))
-            append("Right: (%.3f, %.3f) r=%.1f\n".format(
-                result.rightIrisX, result.rightIrisY, result.rightRadius))
+            append("Left: (%.3f, %.3f) rawR=%.1f effR=%.1f\n".format(
+                result.leftIrisX, result.leftIrisY,
+                result.leftRadius, result.leftRadius * lensConfig.scale))
+            append("Right: (%.3f, %.3f) rawR=%.1f effR=%.1f\n".format(
+                result.rightIrisX, result.rightIrisY,
+                result.rightRadius, result.rightRadius * lensConfig.scale))
             append("Face: P=%.1f Y=%.1f R=%.1f\n".format(
                 result.facePitch, result.faceYaw, result.faceRoll))
-            append("Lens: %.0f%% opacity, %.0f%% scale".format(
-                lensConfig.opacity * 100, lensConfig.scale * 100))
+            append("Lens: %.0f%% opacity, x%.1f scale".format(
+                lensConfig.opacity * 100, lensConfig.scale))
         }
 
         // 배경

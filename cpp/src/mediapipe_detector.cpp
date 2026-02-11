@@ -1871,6 +1871,22 @@ public:
         float right_eye_center_x = (right_eye_inner_x + right_eye_outer_x) / 2.0f;
         float right_eye_center_y = (right_eye_inner_y + right_eye_outer_y) / 2.0f;
 
+        // ISS-004 Fix-C: 동적 임계값 (눈 폭 비례)
+        // 고정 임계값 대신 눈 폭의 비율로 계산하여 거리/해상도에 무관하게 동작
+        float left_eye_width = std::sqrt(
+            std::pow(left_eye_inner_x - left_eye_outer_x, 2.0f) +
+            std::pow(left_eye_inner_y - left_eye_outer_y, 2.0f));
+        float right_eye_width = std::sqrt(
+            std::pow(right_eye_inner_x - right_eye_outer_x, 2.0f) +
+            std::pow(right_eye_inner_y - right_eye_outer_y, 2.0f));
+
+        // 동적 임계값: 눈 폭의 50% (홍채는 눈 폭 안에서 움직이므로)
+        // 눈 폭을 구할 수 없으면 고정 임계값 사용
+        float left_threshold = (left_eye_width > 0.001f)
+            ? left_eye_width * 0.5f : max_distance_threshold;
+        float right_threshold = (right_eye_width > 0.001f)
+            ? right_eye_width * 0.5f : max_distance_threshold;
+
         // 현재 홍채 중심 위치
         float left_iris_x = left_iris[0];
         float left_iris_y = left_iris[1];
@@ -1887,49 +1903,65 @@ public:
 
         static bool fix_debug_printed = false;
 
-        // 왼쪽 홍채 검증 및 수정
-        if (left_distance > max_distance_threshold) {
+        // ISS-004 Fix-C: 왼쪽 홍채 검증 및 보간(lerp) 보정
+        // 강제 이동 대신 보간하여 시선 추적 정보를 보존
+        if (left_distance > left_threshold) {
             if (!fix_debug_printed) {
                 std::fprintf(stderr, "[DEBUG] Iris position fix (left):\n");
-                std::fprintf(stderr, "  Eye center: (%.4f, %.4f)\n", left_eye_center_x, left_eye_center_y);
+                std::fprintf(stderr, "  Eye center: (%.4f, %.4f), eye_width=%.4f, threshold=%.4f\n",
+                            left_eye_center_x, left_eye_center_y, left_eye_width, left_threshold);
                 std::fprintf(stderr, "  Iris (before): (%.4f, %.4f), distance=%.4f\n",
                             left_iris_x, left_iris_y, left_distance);
             }
-            // 홍채 중심을 눈 중심으로 이동
-            left_iris[0] = left_eye_center_x;
-            left_iris[1] = left_eye_center_y;
-            // 경계점들도 눈 중심 기준으로 조정 (반지름 유지)
-            float offset_x = left_eye_center_x - left_iris_x;
-            float offset_y = left_eye_center_y - left_iris_y;
+            // 보간 비율: 임계값 초과량에 비례하여 눈 중심으로 당김
+            // distance가 threshold의 2배이면 t=0.5 (50% 보정), 매우 크면 t→1.0 (완전 보정)
+            float excess = (left_distance - left_threshold) / left_threshold;
+            float t = std::min(excess / 2.0f, 1.0f);  // 0 ~ 1 범위로 클램핑
+
+            float new_x = left_iris_x + t * (left_eye_center_x - left_iris_x);
+            float new_y = left_iris_y + t * (left_eye_center_y - left_iris_y);
+
+            float offset_x = new_x - left_iris_x;
+            float offset_y = new_y - left_iris_y;
+            left_iris[0] = new_x;
+            left_iris[1] = new_y;
+            // 경계점들도 동일하게 이동 (반지름 유지)
             for (int i = 1; i < IRIS_LANDMARK_COUNT; ++i) {
                 left_iris[i * 3 + 0] += offset_x;
                 left_iris[i * 3 + 1] += offset_y;
             }
             if (!fix_debug_printed) {
-                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f)\n", left_iris[0], left_iris[1]);
+                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f), lerp_t=%.3f\n",
+                            left_iris[0], left_iris[1], t);
             }
         }
 
-        // 오른쪽 홍채 검증 및 수정
-        if (right_distance > max_distance_threshold) {
+        // ISS-004 Fix-C: 오른쪽 홍채 검증 및 보간(lerp) 보정
+        if (right_distance > right_threshold) {
             if (!fix_debug_printed) {
                 std::fprintf(stderr, "[DEBUG] Iris position fix (right):\n");
-                std::fprintf(stderr, "  Eye center: (%.4f, %.4f)\n", right_eye_center_x, right_eye_center_y);
+                std::fprintf(stderr, "  Eye center: (%.4f, %.4f), eye_width=%.4f, threshold=%.4f\n",
+                            right_eye_center_x, right_eye_center_y, right_eye_width, right_threshold);
                 std::fprintf(stderr, "  Iris (before): (%.4f, %.4f), distance=%.4f\n",
                             right_iris_x, right_iris_y, right_distance);
             }
-            // 홍채 중심을 눈 중심으로 이동
-            right_iris[0] = right_eye_center_x;
-            right_iris[1] = right_eye_center_y;
-            // 경계점들도 눈 중심 기준으로 조정
-            float offset_x = right_eye_center_x - right_iris_x;
-            float offset_y = right_eye_center_y - right_iris_y;
+            float excess = (right_distance - right_threshold) / right_threshold;
+            float t = std::min(excess / 2.0f, 1.0f);
+
+            float new_x = right_iris_x + t * (right_eye_center_x - right_iris_x);
+            float new_y = right_iris_y + t * (right_eye_center_y - right_iris_y);
+
+            float offset_x = new_x - right_iris_x;
+            float offset_y = new_y - right_iris_y;
+            right_iris[0] = new_x;
+            right_iris[1] = new_y;
             for (int i = 1; i < IRIS_LANDMARK_COUNT; ++i) {
                 right_iris[i * 3 + 0] += offset_x;
                 right_iris[i * 3 + 1] += offset_y;
             }
             if (!fix_debug_printed) {
-                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f)\n", right_iris[0], right_iris[1]);
+                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f), lerp_t=%.3f\n",
+                            right_iris[0], right_iris[1], t);
             }
         }
 
