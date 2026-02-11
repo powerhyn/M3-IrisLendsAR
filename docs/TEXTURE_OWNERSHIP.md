@@ -47,7 +47,12 @@ SDK 전달: applyBeautyFilterTextureV2(inputTexture, ...) — 읽기 전용
 
 **금지 사항**:
 - 출력 텍스처에 대해 `IrisLensSDK.releaseTexture()` 호출 금지 → 이중 해제 발생
+- 렌더러 종료(`release()`)에서도 호출 금지 → `releaseGpuBeauty()`가 일괄 정리
 - 출력 텍스처를 다음 프레임 이후까지 캐싱 금지 (재활용됨)
+
+**Passthrough 주의**:
+- 필터가 모두 비활성이면 입력 텍스처를 그대로 반환 (Pool 텍스처가 아님)
+- `sdk_api_v2`는 passthrough 시 입력 텍스처를 관리 목록에 등록하지 않음
 
 ## GPUBeautyBackend 해제 순서
 
@@ -87,7 +92,7 @@ Detection Slot(더블 버퍼)은 텍스처 소유권과 독립적입니다:
 
 | 상황 | 올바른 처리 |
 |------|------------|
-| 뷰티 필터 출력 텍스처 해제 | 하지 않음 (Pool이 자동 관리) |
+| 뷰티 필터 출력 텍스처 해제 | 하지 않음 (Pool이 자동 관리, 종료 시에도 호출 금지) |
 | 카메라 OES 텍스처 해제 | 앱이 `glDeleteTextures()` |
 | LUT 3D 텍스처 해제 | 앱이 `glDeleteTextures()` |
 | SDK 종료 시 텍스처 | `releaseGpuBeauty()` 호출 (내부에서 일괄 정리) |

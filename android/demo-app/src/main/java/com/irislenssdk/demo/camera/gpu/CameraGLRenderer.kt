@@ -1233,9 +1233,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 리소스 해제
      */
     fun release() {
-        if (beautyOutputTextureId != 0) {
-            IrisLensSDK.releaseTexture(beautyOutputTextureId)
-        }
+        // beautyOutputTextureId는 TexturePool 소유 → releaseGpuBeauty()에서 일괄 해제
+        // 여기서 releaseTexture() 호출하면 이중 해제 발생
+        beautyOutputTextureId = 0
 
         if (oesTextureId != 0) {
             GLES31.glDeleteTextures(1, intArrayOf(oesTextureId), 0)

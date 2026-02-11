@@ -896,6 +896,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                 detection->face_mesh, 478,
                 width, height, config, roi
             );
+            // computeROI outputs normalized (0~1) face_rect → convert to pixel
+            roi.face_rect.x *= width;
+            roi.face_rect.y *= height;
+            roi.face_rect.width *= width;
+            roi.face_rect.height *= height;
         }
         roi_ptr = &roi;
     }
@@ -928,7 +933,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
     bool needsBalance = std::abs(config.colorBalance) > 0.01f;
     bool needsWhitening = config.whitening > 0.01f;
-    if (needsBrightness || needsBalance || needsWhitening) active_filter_count++;
+    bool needsLut = (lut_texture_id != 0 && lut_intensity > 0.01f);
+    if (needsBrightness || needsBalance || needsWhitening || needsLut) active_filter_count++;
     if (config.softFocus > 0.01f) active_filter_count++;
 
     // 필터 0개: 패스스루 (텍스처 할당 불필요)
@@ -961,6 +967,19 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     glViewport(0, 0, width, height);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
+
+    // ROI passthrough: scissor 활성화 전에 출력 FBO를 원본으로 채움
+    // → scissor 외부 픽셀이 stale 데이터가 되는 것을 방지
+    if (roi_ptr && roi_ptr->valid) {
+        executeCombinedColorPass(input_tex_id, ping->fbo_id,
+                                 width, height,
+                                 1.0f, 0.0f, 0.0f, 0, 0.0f);
+        if (pong) {
+            executeCombinedColorPass(input_tex_id, pong->fbo_id,
+                                     width, height,
+                                     1.0f, 0.0f, 0.0f, 0, 0.0f);
+        }
+    }
 
     // ROI glScissor 설정 (픽셀 좌표 top-left → GL bottom-left 변환)
     bool scissor_active = false;
@@ -999,9 +1018,9 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         if (pong) current_output = (current_output == ping) ? pong : ping;
     }
 
-    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
+    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening + LUT)
     //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
-    if (needsBrightness || needsBalance || needsWhitening) {
+    if (needsBrightness || needsBalance || needsWhitening || needsLut) {
         if (profiling) profiler_->begin("CombinedColor");
         executeCombinedColorPass(current_input, current_output->fbo_id,
                                  width, height,

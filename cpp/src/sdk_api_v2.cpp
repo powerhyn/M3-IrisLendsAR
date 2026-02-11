@@ -371,8 +371,10 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
 
     if (err == IRIS_SDK_OK && result_texture != 0) {
         *output_texture = result_texture;
-        // 관리 텍스처로 등록
-        g_managed_textures.insert(result_texture);
+        // 관리 텍스처로 등록 (passthrough 시 입력 텍스처는 등록하지 않음)
+        if (result_texture != input_texture) {
+            g_managed_textures.insert(result_texture);
+        }
     } else {
         *output_texture = input_texture;  // 실패 시 입력 텍스처 반환
     }
