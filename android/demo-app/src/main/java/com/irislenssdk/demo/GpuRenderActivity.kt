@@ -303,11 +303,11 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // Scale 슬라이더 (0~100 → 1.0~4.0, progress 50 = scale 2.5)
-        seekLensScale.progress = ((lensConfig.scale - 1.0f) / 3.0f * 100).toInt().coerceIn(0, 100)
+        // Scale 슬라이더 (0~100 → 0.8~1.8, progress 50 = scale 1.3)
+        seekLensScale.progress = ((lensConfig.scale - 0.8f) / 1.0f * 100).toInt().coerceIn(0, 100)
         seekLensScale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                lensConfig.scale = 1.0f + progress / 100f * 3.0f  // 1.0 ~ 4.0
+                lensConfig.scale = 0.8f + progress / 100f * 1.0f  // 0.8 ~ 1.8
                 cameraGLView.setLensConfig(lensConfig)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}

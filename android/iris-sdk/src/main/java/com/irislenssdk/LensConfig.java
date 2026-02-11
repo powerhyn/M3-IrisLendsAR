@@ -158,7 +158,7 @@ public class LensConfig {
      */
     public void setDefaults() {
         opacity = 0.7f;
-        scale = 2.5f;  // 홍채 반경 대비 렌즈 크기 배율 (2.0~3.0 권장)
+        scale = 1.3f;  // 홍채 반경 대비 렌즈 크기 배율 (0.8~1.8 범위, 1.3 기본)
         offsetX = 0.0f;
         offsetY = 0.0f;
         rotation = 0.0f;

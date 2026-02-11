@@ -46,12 +46,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.IrisLensSDKDemo">
 
-        <!-- 메인 액티비티 -->
+        <!-- GPU 뷰티 렌더링 액티비티 (메인) -->
         <activity
-            android:name=".MainActivity"
+            android:name=".GpuRenderActivity"
             android:exported="true"
             android:screenOrientation="portrait"
-            android:configChanges="orientation|screenSize">
+            android:configChanges="orientation|screenSize"
+            android:hardwareAccelerated="true">
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -59,20 +60,19 @@
             </intent-filter>
         </activity>
 
+        <!-- 레거시 메인 액티비티 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize" />
+
         <!-- MediaPipe 벤치마크 액티비티 -->
         <activity
             android:name=".MediaPipeBenchmarkActivity"
             android:exported="false"
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize" />
-
-        <!-- GPU 렌더링 테스트 액티비티 -->
-        <activity
-            android:name=".GpuRenderActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:configChanges="orientation|screenSize"
-            android:hardwareAccelerated="true" />
 
     </application>
 
