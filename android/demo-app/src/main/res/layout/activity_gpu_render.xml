@@ -555,14 +555,146 @@
                     android:layout_marginTop="8dp"
                     android:layout_marginBottom="4dp" />
 
-                <!-- LUT 필터 토글 -->
-                <Button
-                    android:id="@+id/btnToggleLut"
+                <!-- LUT 프리셋 라벨 -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LUT Filter"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <!-- LUT 프리셋 가로 스크롤 -->
+                <HorizontalScrollView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="LUT Filter: OFF"
-                    android:textAllCaps="false"
-                    android:backgroundTint="#FF795548" />
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/lutPresetRow"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnLutOff"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="OFF"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutRosyGlow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Rosy"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutPeachCream"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Peach"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutCleanPorcelain"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Clean"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutGoldenHour"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Golden"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutFilmVintage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Film"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutCoolEditorial"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Cool"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutWarmSunset"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Warm"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:layout_marginEnd="4dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                        <Button
+                            android:id="@+id/btnLutNaturalGlow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:minWidth="64dp"
+                            android:text="Natural"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:backgroundTint="#FF795548"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+
+                    </LinearLayout>
+                </HorizontalScrollView>
 
                 <!-- LUT 강도 슬라이더 -->
                 <LinearLayout

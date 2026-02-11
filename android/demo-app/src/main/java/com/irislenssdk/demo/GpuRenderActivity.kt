@@ -105,9 +105,9 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var seekWhitening: SeekBar
     private lateinit var seekColorBalance: SeekBar
     private lateinit var seekSoftFocus: SeekBar
-    private lateinit var btnToggleLut: Button
     private lateinit var lutIntensityPanel: LinearLayout
     private lateinit var seekLutIntensity: SeekBar
+    private lateinit var lutPresetButtons: List<Button>
 
     // 카메라
     private var cameraProvider: ProcessCameraProvider? = null
@@ -125,6 +125,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private var currentPreset = BeautyPreset.CUSTOM
     private var isUpdatingSliders = false
     private var lutEnabled = false
+    private var currentLutPreset: LutTextureLoader.LutPreset? = null
+    private var currentLutTextureId: Int = 0
 
     // 홍채 검출 (스레드별 불변 스냅샷 사용)
     private val irisResult = IrisResult()       // Analyzer 스레드 전용 (JNI 결과 수신)
@@ -188,9 +190,19 @@ class GpuRenderActivity : AppCompatActivity() {
         seekWhitening = findViewById(R.id.seekWhitening)
         seekColorBalance = findViewById(R.id.seekColorBalance)
         seekSoftFocus = findViewById(R.id.seekSoftFocus)
-        btnToggleLut = findViewById(R.id.btnToggleLut)
         lutIntensityPanel = findViewById(R.id.lutIntensityPanel)
         seekLutIntensity = findViewById(R.id.seekLutIntensity)
+        lutPresetButtons = listOf(
+            findViewById(R.id.btnLutOff),
+            findViewById(R.id.btnLutRosyGlow),
+            findViewById(R.id.btnLutPeachCream),
+            findViewById(R.id.btnLutCleanPorcelain),
+            findViewById(R.id.btnLutGoldenHour),
+            findViewById(R.id.btnLutFilmVintage),
+            findViewById(R.id.btnLutCoolEditorial),
+            findViewById(R.id.btnLutWarmSunset),
+            findViewById(R.id.btnLutNaturalGlow)
+        )
 
         // GPU 초기화 콜백 설정
         cameraGLView.onGpuInitialized = { success ->
@@ -490,40 +502,33 @@ class GpuRenderActivity : AppCompatActivity() {
     }
 
     /**
-     * LUT 필터 컨트롤 설정
+     * LUT 프리셋 컨트롤 설정
      *
-     * Identity LUT를 프로그래밍적으로 생성하여 테스트합니다.
-     * Identity LUT는 색상을 변경하지 않으므로 on/off 차이가 없어야 합니다.
-     * 실제 컬러 그레이딩 LUT PNG를 assets/luts/에 추가하면 효과가 나타납니다.
+     * 8종 LUT 프리셋 + OFF 버튼으로 구성.
+     * 프리셋 선택 시 GL 스레드에서 LUT 3D 텍스처를 생성하여 적용합니다.
      */
     private fun setupLutControls() {
-        btnToggleLut.setOnClickListener {
-            lutEnabled = !lutEnabled
+        // 프리셋 매핑: 버튼 인덱스 → LutPreset (0 = OFF)
+        val presetMap = listOf(
+            null,  // OFF
+            LutTextureLoader.LutPreset.ROSY_GLOW,
+            LutTextureLoader.LutPreset.PEACH_CREAM,
+            LutTextureLoader.LutPreset.CLEAN_PORCELAIN,
+            LutTextureLoader.LutPreset.GOLDEN_HOUR,
+            LutTextureLoader.LutPreset.FILM_VINTAGE,
+            LutTextureLoader.LutPreset.COOL_EDITORIAL,
+            LutTextureLoader.LutPreset.WARM_SUNSET,
+            LutTextureLoader.LutPreset.NATURAL_GLOW
+        )
 
-            if (lutEnabled) {
-                // GL 스레드에서 Identity LUT 3D 텍스처 생성 및 적용
-                cameraGLView.queueEvent {
-                    val identityBitmap = LutTextureLoader.generateIdentityLutBitmap()
-                    val textureId = LutTextureLoader.createLut3dTexture(identityBitmap)
-                    identityBitmap.recycle()
-
-                    if (textureId != 0) {
-                        cameraGLView.setLut3dTexture(textureId)
-                        cameraGLView.setLutEnabled(true)
-                        Log.d(TAG, "LUT filter enabled with identity LUT (textureId=$textureId)")
-                    } else {
-                        Log.e(TAG, "Failed to create identity LUT texture")
-                    }
-                }
-
-                lutIntensityPanel.visibility = View.VISIBLE
-                btnToggleLut.text = "LUT Filter: ON (Identity)"
-            } else {
-                cameraGLView.setLutEnabled(false)
-                lutIntensityPanel.visibility = View.GONE
-                btnToggleLut.text = "LUT Filter: OFF"
+        lutPresetButtons.forEachIndexed { index, button ->
+            button.setOnClickListener {
+                applyLutPreset(presetMap[index])
             }
         }
+
+        // 초기 상태: OFF 하이라이트
+        updateLutPresetHighlight()
 
         seekLutIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -532,6 +537,78 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+    }
+
+    /**
+     * LUT 프리셋을 적용합니다 (null = OFF).
+     */
+    private fun applyLutPreset(preset: LutTextureLoader.LutPreset?) {
+        if (preset == null) {
+            // OFF
+            lutEnabled = false
+            currentLutPreset = null
+            cameraGLView.setLutEnabled(false)
+            lutIntensityPanel.visibility = View.GONE
+            updateLutPresetHighlight()
+            Log.d(TAG, "LUT filter disabled")
+            return
+        }
+
+        // 같은 프리셋 재선택 시 토글 OFF
+        if (lutEnabled && currentLutPreset == preset) {
+            applyLutPreset(null)
+            return
+        }
+
+        currentLutPreset = preset
+        lutEnabled = true
+        lutIntensityPanel.visibility = View.VISIBLE
+        updateLutPresetHighlight()
+
+        // GL 스레드에서 LUT 텍스처 로드
+        cameraGLView.queueEvent {
+            // 이전 텍스처 해제
+            if (currentLutTextureId != 0) {
+                val texId = intArrayOf(currentLutTextureId)
+                android.opengl.GLES31.glDeleteTextures(1, texId, 0)
+                currentLutTextureId = 0
+            }
+
+            val textureId = LutTextureLoader.loadPresetLut(this@GpuRenderActivity, preset)
+            if (textureId != 0) {
+                currentLutTextureId = textureId
+                cameraGLView.setLut3dTexture(textureId)
+                cameraGLView.setLutEnabled(true)
+                Log.d(TAG, "LUT preset applied: ${preset.displayName} (textureId=$textureId)")
+            } else {
+                Log.e(TAG, "Failed to load LUT preset: ${preset.displayName}")
+            }
+        }
+    }
+
+    /**
+     * 현재 선택된 LUT 프리셋 버튼을 하이라이트합니다.
+     */
+    private fun updateLutPresetHighlight() {
+        val presets = listOf(
+            null,
+            LutTextureLoader.LutPreset.ROSY_GLOW,
+            LutTextureLoader.LutPreset.PEACH_CREAM,
+            LutTextureLoader.LutPreset.CLEAN_PORCELAIN,
+            LutTextureLoader.LutPreset.GOLDEN_HOUR,
+            LutTextureLoader.LutPreset.FILM_VINTAGE,
+            LutTextureLoader.LutPreset.COOL_EDITORIAL,
+            LutTextureLoader.LutPreset.WARM_SUNSET,
+            LutTextureLoader.LutPreset.NATURAL_GLOW
+        )
+        lutPresetButtons.forEachIndexed { index, button ->
+            val isSelected = if (currentLutPreset == null && !lutEnabled) {
+                index == 0  // OFF 선택
+            } else {
+                presets[index] == currentLutPreset
+            }
+            button.alpha = if (isSelected) 1.0f else 0.5f
+        }
     }
 
     private fun setupDebugControls() {
