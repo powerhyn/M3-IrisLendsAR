@@ -892,15 +892,16 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         roi.timestamp_ms = detection->timestamp_ms;
 
         if (detection->face_mesh_valid) {
-            BeautyROIManager::computeROI(
-                detection->face_mesh, 478,
-                width, height, config, roi
-            );
-            // computeROI outputs normalized (0~1) face_rect → convert to pixel
-            roi.face_rect.x *= width;
-            roi.face_rect.y *= height;
-            roi.face_rect.width *= width;
-            roi.face_rect.height *= height;
+            if (BeautyROIManager::computeROI(
+                    detection->face_mesh, 478,
+                    width, height, config, roi)) {
+                // computeROI outputs normalized (0~1) face_rect → convert to pixel
+                roi.face_rect.x *= width;
+                roi.face_rect.y *= height;
+                roi.face_rect.width *= width;
+                roi.face_rect.height *= height;
+            }
+            // 실패 시 line 871-888의 픽셀 좌표 ROI를 그대로 사용
         }
         roi_ptr = &roi;
     }
