@@ -247,7 +247,7 @@ class GpuRenderActivity : AppCompatActivity() {
         overlayView.showFaceMesh = false
         overlayView.debugMode = false
         overlayView.showFaceRect = false
-        overlayView.gpuMode = true  // GPU 모드: fit 기반 매핑 (GL 출력과 동일)
+        overlayView.screenMappingMode = OverlayView.ScreenMappingMode.COVER  // GL Cover 출력과 동일한 매핑
     }
 
     private fun initLensManager() {
@@ -794,12 +794,14 @@ class GpuRenderActivity : AppCompatActivity() {
                 irisResult
             )
 
-            // GPU 렌더러에 검출 결과 전달 (깊은 복사 스냅샷)
-            if (detectResult == IrisLensSDK.OK && irisResult.detected) {
-                glIrisResult.copyFrom(irisResult)
-                cameraGLView.setIrisResult(glIrisResult)
+            // GPU 렌더러에 검출 결과 전달 (매 프레임, 미검출 포함)
+            // detected=false 프레임도 전달하여 stale 스냅샷 방지
+            // → GL 쪽에서 렌즈 페이드아웃/클리핑 폴백 정책 적용 가능
+            glIrisResult.copyFrom(irisResult)
+            cameraGLView.setIrisResult(glIrisResult)
 
-                // Detection Slot 업데이트 (lock-free → GL 스레드에서 읽음)
+            // Detection Slot 업데이트 (lock-free → GL 스레드에서 읽음)
+            if (detectResult == IrisLensSDK.OK) {
                 IrisLensSDK.updateDetectionSlot(irisResult)
             }
 

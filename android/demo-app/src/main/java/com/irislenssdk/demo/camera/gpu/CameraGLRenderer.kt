@@ -42,6 +42,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     companion object {
         private const val TAG = "CameraGLRenderer"
 
+        // FaceMesh 비유효 시 이전 눈꺼풀 클리핑 경계를 유지할 프레임 수
+        private const val EYELID_HOLD_FRAMES = 5
+
         // 풀스크린 쿼드 좌표 (NDC + 텍스처 좌표)
         // SurfaceTexture.getTransformMatrix()가 필요한 변환을 포함하므로
         // 텍스처 좌표는 표준 좌표 사용
@@ -206,8 +209,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 float eyelidFeather = 0.015;  // 눈꺼풀 경계 페더링
                 float minY = min(eyeTop, eyeBottom);
                 float maxY = max(eyeTop, eyeBottom);
+                // topClip: minY 아래쪽에서 1.0 (눈 안쪽), minY 위쪽에서 0.0 (눈꺼풀 밖)
                 float topClip = smoothstep(minY - eyelidFeather, minY + eyelidFeather, vTexCoord.y);
-                float bottomClip = smoothstep(maxY + eyelidFeather, maxY - eyelidFeather, vTexCoord.y);
+                // bottomClip: maxY 위쪽에서 1.0 (눈 안쪽), maxY 아래쪽에서 0.0 (눈꺼풀 밖)
+                // 주의: smoothstep(edge0, edge1, x)는 edge0 < edge1 필수 (GLSL spec)
+                float bottomClip = 1.0 - smoothstep(maxY - eyelidFeather, maxY + eyelidFeather, vTexCoord.y);
                 float eyelidMask = topClip * bottomClip;
 
                 // 최종 알파 계산 (눈꺼풀 마스크 적용)
@@ -331,6 +337,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
     // 홍채 검출 결과 (렌즈 오버레이용)
     private var irisResult: IrisResult? = null
+
+    // 눈꺼풀 클리핑 temporal hold (FaceMesh 비유효 시 이전 값 유지)
+    private var cachedLeftEyeTop: Float = 0.0f
+    private var cachedLeftEyeBottom: Float = 1.0f
+    private var cachedRightEyeTop: Float = 0.0f
+    private var cachedRightEyeBottom: Float = 1.0f
+    private var eyelidCacheValidFrames: Int = 0  // 캐시 유효 잔여 프레임 수
 
     // 렌즈 설정
     private var lensConfig: LensConfig = LensConfig()
@@ -694,12 +707,26 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 rightEyeBottom = tempBottom
             }
 
+            // 캐시 갱신 (temporal hold용)
+            cachedLeftEyeTop = leftEyeTop
+            cachedLeftEyeBottom = leftEyeBottom
+            cachedRightEyeTop = rightEyeTop
+            cachedRightEyeBottom = rightEyeBottom
+            eyelidCacheValidFrames = EYELID_HOLD_FRAMES
+
             GLES31.glUniform1f(uLeftEyeTopLocation, leftEyeTop)
             GLES31.glUniform1f(uLeftEyeBottomLocation, leftEyeBottom)
             GLES31.glUniform1f(uRightEyeTopLocation, rightEyeTop)
             GLES31.glUniform1f(uRightEyeBottomLocation, rightEyeBottom)
+        } else if (eyelidCacheValidFrames > 0) {
+            // FaceMesh 비유효: 이전 유효 경계를 N프레임 유지 (깜빡임 방지)
+            eyelidCacheValidFrames--
+            GLES31.glUniform1f(uLeftEyeTopLocation, cachedLeftEyeTop)
+            GLES31.glUniform1f(uLeftEyeBottomLocation, cachedLeftEyeBottom)
+            GLES31.glUniform1f(uRightEyeTopLocation, cachedRightEyeTop)
+            GLES31.glUniform1f(uRightEyeBottomLocation, cachedRightEyeBottom)
         } else {
-            // faceMesh가 없으면 클리핑 비활성화 (전체 영역 허용)
+            // 캐시 소진: 클리핑 비활성화 (전체 영역 허용)
             GLES31.glUniform1f(uLeftEyeTopLocation, 0.0f)
             GLES31.glUniform1f(uLeftEyeBottomLocation, 1.0f)
             GLES31.glUniform1f(uRightEyeTopLocation, 0.0f)

@@ -139,8 +139,20 @@ class OverlayView @JvmOverloads constructor(
     // 디버그 모드
     var debugMode: Boolean = false
 
-    // GPU 렌더 모드 (fit 기반 매핑 사용 — GL 화면 출력과 동일)
-    var gpuMode: Boolean = false
+    /**
+     * 화면 매핑 정책.
+     * - FIT: 이미지를 뷰 안에 맞춤 (레터박스 가능). CPU 모드에서 PreviewView FILL_CENTER와 사용.
+     * - COVER: 이미지가 뷰를 완전히 채움 (넘치는 부분 crop). GPU 모드의 GL 출력과 동일.
+     */
+    enum class ScreenMappingMode { FIT, COVER }
+
+    var screenMappingMode: ScreenMappingMode = ScreenMappingMode.FIT
+
+    // 하위 호환: 기존 gpuMode 사용처 지원
+    @Deprecated("screenMappingMode를 직접 사용하세요", ReplaceWith("screenMappingMode"))
+    var gpuMode: Boolean
+        get() = screenMappingMode == ScreenMappingMode.COVER
+        set(value) { screenMappingMode = if (value) ScreenMappingMode.COVER else ScreenMappingMode.FIT }
 
     // === One Euro Filter를 사용한 스무딩 (깜빡임/흔들거림 방지) ===
     private val leftXFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
@@ -507,10 +519,11 @@ class OverlayView @JvmOverloads constructor(
         Log.d(TAG, "imageAspect: ${imageWidth.toFloat()/imageHeight}, viewAspect: ${width.toFloat()/height}")
 
         // 좌표 변환 계산
-        // CPU 모드 (PreviewView FILL_CENTER): max() — 이미지가 뷰를 완전히 채움
-        // GPU 모드 (GL fit 출력): min() — 이미지가 뷰 안에 맞춤 (GL 화면과 동일)
+        // FIT: min() — 이미지가 뷰 안에 맞춤 (레터박스)
+        // COVER: max() — 이미지가 뷰를 완전히 채움 (넘치는 부분 crop, GL Cover 출력과 동일)
+        val useFitMode = screenMappingMode == ScreenMappingMode.FIT
         val scaleFactor = computeScreenTransform(
-            imageWidth, imageHeight, width, height, gpuMode
+            imageWidth, imageHeight, width, height, useFitMode
         )
 
         // 스케일된 이미지 크기
