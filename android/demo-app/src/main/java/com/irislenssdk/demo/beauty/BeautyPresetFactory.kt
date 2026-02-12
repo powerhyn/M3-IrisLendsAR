@@ -59,7 +59,7 @@ object BeautyPresetFactory {
             .protectEyes(true)
             .protectLips(true)
             .useGpu(true)
-            .roiOnly(true)
+            .roiOnly(false)
             .build()
     }
 
@@ -83,7 +83,7 @@ object BeautyPresetFactory {
             .protectEyes(true)
             .protectLips(true)
             .useGpu(true)
-            .roiOnly(true)
+            .roiOnly(false)
             .build()
     }
 
@@ -107,7 +107,7 @@ object BeautyPresetFactory {
             .protectEyes(true)
             .protectLips(true)
             .useGpu(true)
-            .roiOnly(true)
+            .roiOnly(false)
             .build()
     }
 

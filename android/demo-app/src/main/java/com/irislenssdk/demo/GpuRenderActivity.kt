@@ -544,9 +544,13 @@ class GpuRenderActivity : AppCompatActivity() {
      */
     private fun applyLutPreset(preset: LutTextureLoader.LutPreset?) {
         if (preset == null) {
-            // OFF
+            // OFF — Renderer가 기존 텍스처 삭제 책임 (ownership 단일화)
             lutEnabled = false
             currentLutPreset = null
+            currentLutTextureId = 0
+            // CameraGLView.setLut3dTexture()가 내부에서 queueEvent 처리
+            // → 이중 큐잉 방지를 위해 Activity에서는 queueEvent 불필요
+            cameraGLView.setLut3dTexture(0)
             cameraGLView.setLutEnabled(false)
             lutIntensityPanel.visibility = View.GONE
             updateLutPresetHighlight()
@@ -565,20 +569,14 @@ class GpuRenderActivity : AppCompatActivity() {
         lutIntensityPanel.visibility = View.VISIBLE
         updateLutPresetHighlight()
 
-        // GL 스레드에서 LUT 텍스처 로드
+        // GL 스레드에서 LUT 텍스처 로드 + 설정을 단일 queueEvent로 처리
+        // Direct 메서드 사용 → 이미 GL 스레드이므로 내부 queueEvent 불필요
         cameraGLView.queueEvent {
-            // 이전 텍스처 해제
-            if (currentLutTextureId != 0) {
-                val texId = intArrayOf(currentLutTextureId)
-                android.opengl.GLES31.glDeleteTextures(1, texId, 0)
-                currentLutTextureId = 0
-            }
-
             val textureId = LutTextureLoader.loadPresetLut(this@GpuRenderActivity, preset)
             if (textureId != 0) {
                 currentLutTextureId = textureId
-                cameraGLView.setLut3dTexture(textureId)
-                cameraGLView.setLutEnabled(true)
+                cameraGLView.setLut3dTextureDirect(textureId)
+                cameraGLView.setLutEnabledDirect(true)
                 Log.d(TAG, "LUT preset applied: ${preset.displayName} (textureId=$textureId)")
             } else {
                 Log.e(TAG, "Failed to load LUT preset: ${preset.displayName}")
@@ -672,6 +670,7 @@ class GpuRenderActivity : AppCompatActivity() {
         beautyConfig.whitening = 0.0f
         beautyConfig.colorBalance = 0.0f
         beautyConfig.softFocus = 0.3f
+        beautyConfig.roiOnly = false  // 전체 화면 뷰티 처리 (ROI 전용 모드 OFF)
 
         // GLView에 초기 뷰티 설정 전달
         cameraGLView.setBeautyConfig(beautyConfig)

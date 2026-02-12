@@ -856,7 +856,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(mirrorLocation, 0)  // 이미 미러링 적용됨
         GLES31.glUniform1i(flipYLocation, 0)   // 이미 Y축 뒤집기 적용됨
 
-        // Aspect ratio 보정 스케일 계산 (Cover 모드 - 화면 꽉 채우기)
+        // Aspect ratio 보정 스케일 계산 (Cover 모드 - 화면 꽉 채우기, 넘치는 부분 crop)
         // 회전 고려: 90도 또는 270도 회전 시 width/height 교환
         val isRotated = (frameRotation == 90 || frameRotation == 270)
         val texWidth = if (frameWidth > 0) {
@@ -869,12 +869,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val texAspect = texWidth.toFloat() / texHeight.toFloat()
         val viewAspect = viewWidth.toFloat() / viewHeight.toFloat()
 
+        // Cover 모드: 화면을 꽉 채우고 넘치는 부분은 GL viewport에 의해 자동 crop
         val (scaleX, scaleY) = if (texAspect > viewAspect) {
-            // 텍스처가 더 넓음 → 높이 맞추고 좌우 확장
-            1.0f to (viewAspect / texAspect)
-        } else {
-            // 텍스처가 더 좁음 → 너비 맞추고 상하 확장
+            // 텍스처가 더 넓음 → 높이 채우고 좌우 넘침 (crop)
             (texAspect / viewAspect) to 1.0f
+        } else {
+            // 텍스처가 더 좁음 → 너비 채우고 상하 넘침 (crop)
+            1.0f to (viewAspect / texAspect)
         }
         GLES31.glUniform2f(scaleLocation, scaleX, scaleY)
 
@@ -989,6 +990,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)
      */
     fun setLut3dTexture(textureId: Int) {
+        // pending 슬롯에 아직 업로드되지 않은 텍스처가 있으면 누수 방지를 위해 즉시 삭제
+        val oldPending = pendingLut3dTextureId
+        if (oldPending > 0 && oldPending != textureId) {
+            GLES31.glDeleteTextures(1, intArrayOf(oldPending), 0)
+            Log.d(TAG, "Deleted overwritten pending LUT texture: id=$oldPending")
+        }
+
         if (textureId == 0) {
             lutEnabled = false
             pendingLut3dTextureId = 0

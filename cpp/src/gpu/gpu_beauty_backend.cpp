@@ -111,6 +111,27 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
     // Uniform Location 캐싱 (성능 최적화)
     cacheUniformLocations();
 
+#if IRIS_SDK_GPU_AVAILABLE
+    // Neutral 1x1x1 identity 3D LUT 생성 (sampler3D fallback)
+    // LUT OFF 시 glBindTexture(GL_TEXTURE_3D, 0) 대신 바인딩하여
+    // 드라이버 의존적 불안정을 방지
+    {
+        glGenTextures(1, &neutral_lut_texture_);
+        glBindTexture(GL_TEXTURE_3D, neutral_lut_texture_);
+        // Identity: RGB 그대로 반환 (R=1, G=1, B=1, A=1)
+        const uint8_t identity_data[4] = {255, 255, 255, 255};
+        glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, identity_data);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_3D, 0);
+        LOGI("Neutral 1x1x1 identity LUT created: id=%u", neutral_lut_texture_);
+    }
+#endif
+
     initialized_ = true;
     LOGI("GPUBeautyBackend initialized successfully");
     return true;
@@ -321,6 +342,12 @@ void GPUBeautyBackend::release() {
     if (previous_fence_ != nullptr) {
         glDeleteSync(previous_fence_);
         previous_fence_ = nullptr;
+    }
+
+    // Neutral LUT 텍스처 해제
+    if (neutral_lut_texture_ != 0) {
+        glDeleteTextures(1, &neutral_lut_texture_);
+        neutral_lut_texture_ = 0;
     }
 #endif
 
@@ -742,26 +769,31 @@ void GPUBeautyBackend::executeCombinedColorPass(
     // LUT: C++ controls activation - if no texture, force intensity to 0
     float effective_lut_intensity = (lut_texture != 0) ? lut_intensity : 0.0f;
     glUniform1f(combined_color_uniforms_.uCombinedLutIntensity, effective_lut_intensity);
-    if (lut_texture != 0 && lut_intensity > 0.01f) {
-        glUniform1i(combined_color_uniforms_.uCombinedLutTexture, 1);  // TEXTURE1
-    }
+
+    // P0-FIX: sampler2D(unit0) / sampler3D(unit1) 충돌 방지
+    // uCombinedLutTexture는 LUT 활성 여부와 관계없이 항상 TEXTURE1에 바인딩.
+    // LUT 비활성 시 uniform 기본값(0)이 TEXTURE0을 가리키면
+    // sampler2D와 sampler3D가 동일 유닛을 공유 → GL_INVALID_OPERATION.
+    glUniform1i(combined_color_uniforms_.uCombinedLutTexture, 1);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
 
-    // Bind LUT 3D texture to TEXTURE1 if active
+    // TEXTURE1: LUT 텍스처 또는 neutral identity fallback
+    glActiveTexture(GL_TEXTURE1);
     if (lut_texture != 0 && lut_intensity > 0.01f) {
-        glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_3D, lut_texture);
+    } else {
+        // Neutral 1x1x1 identity LUT로 sampler3D 경로 안정화
+        // glBindTexture(GL_TEXTURE_3D, 0) 대신 사용하여 드라이버 호환성 확보
+        glBindTexture(GL_TEXTURE_3D, neutral_lut_texture_);
     }
 
     renderFullscreenQuad();
 
-    // Cleanup LUT texture binding
-    if (lut_texture != 0 && lut_intensity > 0.01f) {
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_3D, 0);
-    }
+    // Cleanup: TEXTURE1 해제
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_3D, 0);
 
 #ifndef NDEBUG
     // 렌더링 후 에러 체크
@@ -982,28 +1014,48 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         }
     }
 
-    // ROI glScissor 설정 (픽셀 좌표 top-left → GL bottom-left 변환)
+    // ROI glScissor 설정 (교집합 기반 — 프레임 경계를 넘는 ROI에도 안전)
     bool scissor_active = false;
     if (roi_ptr && roi_ptr->valid) {
-        int sx = static_cast<int>(std::floor(roi_ptr->face_rect.x));
-        int sy = static_cast<int>(std::floor(
-            static_cast<float>(height) - (roi_ptr->face_rect.y + roi_ptr->face_rect.height)));  // Y flip
-        int sw = static_cast<int>(std::ceil(roi_ptr->face_rect.width));
-        int sh = static_cast<int>(std::ceil(roi_ptr->face_rect.height));
+        // top-left 기준 ROI 사각형
+        int rect_x = static_cast<int>(std::floor(roi_ptr->face_rect.x));
+        int rect_y = static_cast<int>(std::floor(roi_ptr->face_rect.y));
+        int rect_w = static_cast<int>(std::ceil(roi_ptr->face_rect.width));
+        int rect_h = static_cast<int>(std::ceil(roi_ptr->face_rect.height));
 
-        // Clamp to valid range
-        sx = std::max(0, std::min(sx, width - 1));
-        sy = std::max(0, std::min(sy, height - 1));
-        sw = std::max(1, std::min(sw, width - sx));
-        sh = std::max(1, std::min(sh, height - sy));
+        // 프레임 영역 [0, width) × [0, height) 과의 교집합 (Intersection)
+        int intersect_l = std::max(0, rect_x);
+        int intersect_t = std::max(0, rect_y);
+        int intersect_r = std::min(width,  rect_x + rect_w);
+        int intersect_b = std::min(height, rect_y + rect_h);
 
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(sx, sy, sw, sh);
-        scissor_active = true;
+        int sw = intersect_r - intersect_l;
+        int sh = intersect_b - intersect_t;
 
-        LOGD("ROI Scissor: (%d, %d, %d, %d) from face_rect(%.1f, %.1f, %.1f, %.1f)",
-             sx, sy, sw, sh, roi_ptr->face_rect.x, roi_ptr->face_rect.y,
-             roi_ptr->face_rect.width, roi_ptr->face_rect.height);
+        if (sw > 0 && sh > 0) {
+            // GL bottom-left 좌표계로 변환
+            int sx = intersect_l;
+            int sy = height - intersect_b;
+
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(sx, sy, sw, sh);
+            scissor_active = true;
+
+            LOGD("ROI Scissor: (%d, %d, %d, %d) from face_rect(%.1f, %.1f, %.1f, %.1f)",
+                 sx, sy, sw, sh, roi_ptr->face_rect.x, roi_ptr->face_rect.y,
+                 roi_ptr->face_rect.width, roi_ptr->face_rect.height);
+        } else {
+            // roiOnly 정책: 교집합이 비어있으면 필터 처리를 건너뛰고
+            // pre-fill된 원본(passthrough)을 그대로 반환
+            LOGW("ROI Scissor skipped: intersection empty (rect=%d,%d,%d,%d frame=%dx%d)",
+                 rect_x, rect_y, rect_w, rect_h, width, height);
+            *output_texture = current_input;
+            if (ping) { previous_output_ping_ = ping; }
+            if (pong) { previous_output_pong_ = pong; }
+            previous_fence_ = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            return IRIS_SDK_OK;
+        }
     }
 
     // 필터 체인 실행 (최적화됨 + 프로파일링)

@@ -365,6 +365,9 @@ private:
     GLsync previous_fence_ = nullptr;
 #endif
 
+    // Neutral 1x1x1 identity 3D LUT (sampler3D fallback용)
+    GLuint neutral_lut_texture_ = 0;
+
     bool initialized_ = false;
     mutable std::mutex mutex_;
 };
