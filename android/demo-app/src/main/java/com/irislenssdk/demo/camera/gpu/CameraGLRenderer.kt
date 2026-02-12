@@ -26,6 +26,7 @@ import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
+import com.irislenssdk.demo.camera.OneEuroFilter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -44,6 +45,26 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // FaceMesh 비유효 시 이전 눈꺼풀 클리핑 경계를 유지할 프레임 수
         private const val EYELID_HOLD_FRAMES = 5
+
+        // One Euro Filter 파라미터 (GL 렌즈 경로용)
+        private const val GL_FILTER_MIN_CUTOFF = 15.0f  // 빠른 반응 + 스무딩
+        private const val GL_FILTER_BETA = 0.5f          // 빠른 움직임 민감도
+        private const val GL_FILTER_BETA_RADIUS = 0.25f  // 반경: 더 부드럽게
+        private const val GL_FILTER_BETA_EYELID = 0.3f   // 눈꺼풀: 중간 스무딩
+        private const val GL_FILTER_D_CUTOFF = 1.0f
+
+        // 반경 데드밴드 (정규화 좌표 기준, detH=1920 시 ~0.5px)
+        private const val RADIUS_DEADBAND = 0.0003f
+
+        // 눈꺼풀 경계 페더링 범위 (픽셀 기반 동적 계산)
+        private const val EYELID_FEATHER_MIN_PX = 2.0f
+        private const val EYELID_FEATHER_MAX_PX = 6.0f
+
+        // 다중 랜드마크: 상/하 눈꺼풀 인덱스
+        private val LEFT_UPPER_EYELID_INDICES = intArrayOf(159, 160, 161)
+        private val LEFT_LOWER_EYELID_INDICES = intArrayOf(145, 144, 153)
+        private val RIGHT_UPPER_EYELID_INDICES = intArrayOf(386, 385, 384)
+        private val RIGHT_LOWER_EYELID_INDICES = intArrayOf(374, 373, 380)
 
         // 풀스크린 쿼드 좌표 (NDC + 텍스처 좌표)
         // SurfaceTexture.getTransformMatrix()가 필요한 변환을 포함하므로
@@ -152,6 +173,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform float uLeftEyeBottom;   // 왼쪽 눈 하단 Y
             uniform float uRightEyeTop;     // 오른쪽 눈 상단 Y
             uniform float uRightEyeBottom;  // 오른쪽 눈 하단 Y
+            uniform float uEyelidFeather;   // 눈꺼풀 경계 페더링 (동적, 픽셀 기반)
 
             in vec2 vTexCoord;
             out vec4 fragColor;
@@ -206,7 +228,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 float edgeAlpha = smoothstep(1.0, featherStart, dist);
 
                 // 눈꺼풀 클리핑 (Y축 뒤집힘 고려: top < bottom after flip)
-                float eyelidFeather = 0.015;  // 눈꺼풀 경계 페더링
+                float eyelidFeather = uEyelidFeather;
                 float minY = min(eyeTop, eyeBottom);
                 float maxY = max(eyeTop, eyeBottom);
                 // topClip: minY 아래쪽에서 1.0 (눈 안쪽), minY 위쪽에서 0.0 (눈꺼풀 밖)
@@ -292,6 +314,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uLeftEyeBottomLocation: Int = -1
     private var uRightEyeTopLocation: Int = -1
     private var uRightEyeBottomLocation: Int = -1
+    private var uEyelidFeatherLocation: Int = -1
 
     // 풀스크린 쿼드 VAO/VBO
     private var quadVao: Int = 0
@@ -337,6 +360,24 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
     // 홍채 검출 결과 (렌즈 오버레이용)
     private var irisResult: IrisResult? = null
+
+    // === One Euro Filter: 홍채 중심/반경 안정화 (GL 경로) ===
+    private val glLeftXFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftYFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftRadiusFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_RADIUS, GL_FILTER_D_CUTOFF)
+    private val glRightXFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightYFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightRadiusFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_RADIUS, GL_FILTER_D_CUTOFF)
+
+    // === One Euro Filter: 눈꺼풀 경계 안정화 ===
+    private val glLeftEyeTopFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glLeftEyeBottomFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEyeTopFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEyeBottomFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+
+    // 필터링된 반경 (데드밴드 적용용)
+    private var lastFilteredLeftRadius: Float = 0f
+    private var lastFilteredRightRadius: Float = 0f
 
     // 눈꺼풀 클리핑 temporal hold (FaceMesh 비유효 시 이전 값 유지)
     private var cachedLeftEyeTop: Float = 0.0f
@@ -404,6 +445,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uLeftEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeBottom")
         uRightEyeTopLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeTop")
         uRightEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeBottom")
+        uEyelidFeatherLocation = GLES31.glGetUniformLocation(lensProgram, "uEyelidFeather")
 
         // 풀스크린 쿼드 설정
         setupFullscreenQuad()
@@ -562,13 +604,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         lensImageTextureId = textures[0]
 
         GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, lensImageTextureId)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR)
         GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MAG_FILTER, GLES31.GL_LINEAR)
         GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_S, GLES31.GL_CLAMP_TO_EDGE)
         GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_T, GLES31.GL_CLAMP_TO_EDGE)
 
-        // 비트맵 업로드
+        // 비트맵 업로드 + mipmap 생성 (축소 시 shimmer/aliasing 방지)
         GLUtils.texImage2D(GLES31.GL_TEXTURE_2D, 0, bitmap, 0)
+        GLES31.glGenerateMipmap(GLES31.GL_TEXTURE_2D)
+        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR_MIPMAP_LINEAR)
 
         GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, 0)
 
@@ -627,19 +670,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(uLensTextureLocation, 1)
 
         // 홍채 위치/크기 설정 (IrisResult는 이미 정규화된 좌표 0~1)
-        // leftRadius/rightRadius는 픽셀 단위이므로 검출 좌표계 기준으로 정규화
         // 좌표 계약: result.frameWidth/Height가 검출기의 좌표 기준 (회전 적용 후)
         val (detW, detH) = resolveCoordinateSpace(result)
+        val detHf = detH.toFloat()
         // ISS-004 Fix-B: 셰이더의 adjusted 좌표계(높이 기준)에 맞춰 detH로 정규화
-        // 셰이더: adjustedCoord = vec2(texCoord.x * aspectRatio, texCoord.y)
-        // → 양 축이 "프레임 높이 분의 1 픽셀" 단위로 통일됨
-        // 이전: detW로 나눔 → portrait에서 ar(≈1.78)배 과대 렌더링
-        val normalizedLeftRadius = result.leftRadius / detH.toFloat()
-        val normalizedRightRadius = result.rightRadius / detH.toFloat()
+        val normalizedLeftRadius = result.leftRadius / detHf
+        val normalizedRightRadius = result.rightRadius / detHf
 
         // 좌표 변환: renderOESToRgba()에서 적용한 변환과 동일하게 적용
-        // 1. Y축 뒤집기 (uFlipY=1 적용됨)
-        // 2. 미러링 (전면 카메라, uMirror=1 적용됨)
         var leftX = result.leftIrisX
         var leftY = result.leftIrisY
         var rightX = result.rightIrisX
@@ -653,20 +691,39 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         if (isMirror) {
             leftX = 1.0f - leftX
             rightX = 1.0f - rightX
-            // 미러링 시 좌/우 눈도 교환
-            val tempX = leftX
-            val tempY = leftY
-            val tempRadius = normalizedLeftRadius
-            leftX = rightX
-            leftY = rightY
-            rightX = tempX
-            rightY = tempY
+            val tempX = leftX; val tempY = leftY
+            leftX = rightX; leftY = rightY
+            rightX = tempX; rightY = tempY
         }
 
-        GLES31.glUniform2f(uLeftIrisCenterLocation, leftX, leftY)
-        GLES31.glUniform1f(uLeftIrisRadiusLocation, if (isMirror) normalizedRightRadius else normalizedLeftRadius)
-        GLES31.glUniform2f(uRightIrisCenterLocation, rightX, rightY)
-        GLES31.glUniform1f(uRightIrisRadiusLocation, if (isMirror) normalizedLeftRadius else normalizedRightRadius)
+        // === One Euro Filter: 홍채 중심/반경 안정화 ===
+        val now = System.currentTimeMillis()
+        val rawLeftRadius = if (isMirror) normalizedRightRadius else normalizedLeftRadius
+        val rawRightRadius = if (isMirror) normalizedLeftRadius else normalizedRightRadius
+
+        val filteredLeftX = glLeftXFilter.filter(leftX, now)
+        val filteredLeftY = glLeftYFilter.filter(leftY, now)
+        var filteredLeftR = glLeftRadiusFilter.filter(rawLeftRadius, now)
+        val filteredRightX = glRightXFilter.filter(rightX, now)
+        val filteredRightY = glRightYFilter.filter(rightY, now)
+        var filteredRightR = glRightRadiusFilter.filter(rawRightRadius, now)
+
+        // 반경 데드밴드: 변화량이 임계값 미만이면 이전 값 유지
+        if (kotlin.math.abs(filteredLeftR - lastFilteredLeftRadius) < RADIUS_DEADBAND && lastFilteredLeftRadius > 0f) {
+            filteredLeftR = lastFilteredLeftRadius
+        } else {
+            lastFilteredLeftRadius = filteredLeftR
+        }
+        if (kotlin.math.abs(filteredRightR - lastFilteredRightRadius) < RADIUS_DEADBAND && lastFilteredRightRadius > 0f) {
+            filteredRightR = lastFilteredRightRadius
+        } else {
+            lastFilteredRightRadius = filteredRightR
+        }
+
+        GLES31.glUniform2f(uLeftIrisCenterLocation, filteredLeftX, filteredLeftY)
+        GLES31.glUniform1f(uLeftIrisRadiusLocation, filteredLeftR)
+        GLES31.glUniform2f(uRightIrisCenterLocation, filteredRightX, filteredRightY)
+        GLES31.glUniform1f(uRightIrisRadiusLocation, filteredRightR)
 
         // 렌즈 설정 전달
         GLES31.glUniform1f(uLensOpacityLocation, lensConfig.opacity)
@@ -676,22 +733,27 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(uApplyLeftLocation, if (lensConfig.applyLeft) 1 else 0)
         GLES31.glUniform1i(uApplyRightLocation, if (lensConfig.applyRight) 1 else 0)
 
-        // 프레임 비율 전달 (원형 렌즈를 위한 aspect ratio 보정)
-        // 좌표 계약: 검출 좌표계(detW/detH) 기준 aspect ratio 사용
-        val frameAspect = detW.toFloat() / detH.toFloat()
+        // 프레임 비율 전달
+        val frameAspect = detW.toFloat() / detHf
         GLES31.glUniform1f(uFrameAspectLocation, frameAspect)
 
-        // 눈꺼풀 클리핑 좌표 추출 (MediaPipe Face Mesh 랜드마크)
-        // 랜드마크 인덱스: 왼쪽 눈 상단(159), 하단(145), 오른쪽 눈 상단(386), 하단(374)
+        // === 동적 eyelidFeather 계산 (픽셀 기반) ===
+        val featherPx = EYELID_FEATHER_MIN_PX.coerceAtLeast(
+            EYELID_FEATHER_MAX_PX.coerceAtMost(4.0f)
+        )
+        val eyelidFeatherNorm = featherPx / detHf
+        GLES31.glUniform1f(uEyelidFeatherLocation, eyelidFeatherNorm)
+
+        // === 눈꺼풀 클리핑: 다중 랜드마크 + One Euro Filter ===
         val faceMesh = result.faceMesh
         if (result.faceMeshValid && faceMesh != null) {
-            // Y 좌표 추출 (인덱스 * 3 + 1 = y 좌표)
-            var leftEyeTop = faceMesh[159 * 3 + 1]
-            var leftEyeBottom = faceMesh[145 * 3 + 1]
-            var rightEyeTop = faceMesh[386 * 3 + 1]
-            var rightEyeBottom = faceMesh[374 * 3 + 1]
+            // 다중 랜드마크에서 median Y 추출 (노이즈 내성 향상)
+            var leftEyeTop = medianLandmarkY(faceMesh, LEFT_UPPER_EYELID_INDICES)
+            var leftEyeBottom = medianLandmarkY(faceMesh, LEFT_LOWER_EYELID_INDICES)
+            var rightEyeTop = medianLandmarkY(faceMesh, RIGHT_UPPER_EYELID_INDICES)
+            var rightEyeBottom = medianLandmarkY(faceMesh, RIGHT_LOWER_EYELID_INDICES)
 
-            // Y축 뒤집기 적용 (renderOESToRgba와 동일)
+            // Y축 뒤집기 적용
             leftEyeTop = 1.0f - leftEyeTop
             leftEyeBottom = 1.0f - leftEyeBottom
             rightEyeTop = 1.0f - rightEyeTop
@@ -699,13 +761,16 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
             // 미러링 시 좌/우 교환
             if (isMirror) {
-                val tempTop = leftEyeTop
-                val tempBottom = leftEyeBottom
-                leftEyeTop = rightEyeTop
-                leftEyeBottom = rightEyeBottom
-                rightEyeTop = tempTop
-                rightEyeBottom = tempBottom
+                val tT = leftEyeTop; val tB = leftEyeBottom
+                leftEyeTop = rightEyeTop; leftEyeBottom = rightEyeBottom
+                rightEyeTop = tT; rightEyeBottom = tB
             }
+
+            // One Euro Filter 적용 (눈꺼풀 경계 안정화)
+            leftEyeTop = glLeftEyeTopFilter.filter(leftEyeTop, now)
+            leftEyeBottom = glLeftEyeBottomFilter.filter(leftEyeBottom, now)
+            rightEyeTop = glRightEyeTopFilter.filter(rightEyeTop, now)
+            rightEyeBottom = glRightEyeBottomFilter.filter(rightEyeBottom, now)
 
             // 캐시 갱신 (temporal hold용)
             cachedLeftEyeTop = leftEyeTop
@@ -719,12 +784,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glUniform1f(uRightEyeTopLocation, rightEyeTop)
             GLES31.glUniform1f(uRightEyeBottomLocation, rightEyeBottom)
         } else if (eyelidCacheValidFrames > 0) {
-            // FaceMesh 비유효: 이전 유효 경계를 N프레임 유지 (깜빡임 방지)
+            // FaceMesh 비유효: temporal hold + 점진적 감쇠(fade)
             eyelidCacheValidFrames--
-            GLES31.glUniform1f(uLeftEyeTopLocation, cachedLeftEyeTop)
-            GLES31.glUniform1f(uLeftEyeBottomLocation, cachedLeftEyeBottom)
-            GLES31.glUniform1f(uRightEyeTopLocation, cachedRightEyeTop)
-            GLES31.glUniform1f(uRightEyeBottomLocation, cachedRightEyeBottom)
+            // 감쇠 비율: 잔여 프레임 / 전체 → 0에 가까워질수록 클리핑 해제
+            val fadeAlpha = eyelidCacheValidFrames.toFloat() / EYELID_HOLD_FRAMES.toFloat()
+            // 캐시 값 → 전체 허용(0.0/1.0) 방향으로 lerp
+            GLES31.glUniform1f(uLeftEyeTopLocation, lerp(0.0f, cachedLeftEyeTop, fadeAlpha))
+            GLES31.glUniform1f(uLeftEyeBottomLocation, lerp(1.0f, cachedLeftEyeBottom, fadeAlpha))
+            GLES31.glUniform1f(uRightEyeTopLocation, lerp(0.0f, cachedRightEyeTop, fadeAlpha))
+            GLES31.glUniform1f(uRightEyeBottomLocation, lerp(1.0f, cachedRightEyeBottom, fadeAlpha))
         } else {
             // 캐시 소진: 클리핑 비활성화 (전체 영역 허용)
             GLES31.glUniform1f(uLeftEyeTopLocation, 0.0f)
@@ -966,6 +1034,27 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             if (isRotated) frameWidth else frameHeight
         } else viewHeight
         return Pair(w, h)
+    }
+
+    /**
+     * FaceMesh 랜드마크 인덱스 배열에서 Y 좌표의 중앙값(median) 추출.
+     * 단일 점 대비 노이즈 내성 향상.
+     */
+    private fun medianLandmarkY(mesh: FloatArray, indices: IntArray): Float {
+        val ys = FloatArray(indices.size) { mesh[indices[it] * 3 + 1] }
+        ys.sort()
+        return if (ys.size % 2 == 1) {
+            ys[ys.size / 2]
+        } else {
+            (ys[ys.size / 2 - 1] + ys[ys.size / 2]) / 2f
+        }
+    }
+
+    /**
+     * 선형 보간 (a → b, t=0이면 a, t=1이면 b)
+     */
+    private fun lerp(a: Float, b: Float, t: Float): Float {
+        return a + (b - a) * t
     }
 
     /**
