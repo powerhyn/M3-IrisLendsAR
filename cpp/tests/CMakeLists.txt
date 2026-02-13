@@ -341,6 +341,7 @@ gtest_discover_tests(test_camera_demo DISCOVERY_TIMEOUT 60)
 # ============================================================
 add_executable(test_sdk_api test_sdk_api.cpp)
 target_include_directories(test_sdk_api PRIVATE ${TEST_COMMON_INCLUDES})
+target_compile_definitions(test_sdk_api PRIVATE IRIS_SDK_TEST_HOOKS)
 target_link_libraries(test_sdk_api PRIVATE
     GTest::gtest
     GTest::gtest_main

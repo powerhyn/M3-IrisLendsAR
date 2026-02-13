@@ -136,7 +136,14 @@ iris_sdk::BlendMode convert_blend_mode(IrisBlendMode mode) {
             return iris_sdk::BlendMode::Screen;
         case IRIS_BLEND_OVERLAY:
             return iris_sdk::BlendMode::Overlay;
+        case IRIS_BLEND_LUMINANCE_TINT:
+            return iris_sdk::BlendMode::LuminanceTint;
+        case IRIS_BLEND_LUMINANCE_TINT_LINEAR:
+            return iris_sdk::BlendMode::LuminanceTintLinear;
+        case IRIS_BLEND_SOFT_LIGHT:
+            return iris_sdk::BlendMode::SoftLight;
         default:
+            LOGW("Unknown blend mode: %d, falling back to Normal", static_cast<int>(mode));
             return iris_sdk::BlendMode::Normal;
     }
 }
@@ -905,3 +912,13 @@ bool iris_sdk_is_using_inference_thread(void) {
 }
 
 }  // extern "C"
+
+// ============================================================================
+// 테스트 전용 hook (테스트 빌드에서만 노출)
+// ============================================================================
+
+#ifdef IRIS_SDK_TEST_HOOKS
+extern "C" int iris_sdk_test_convert_blend_mode(int raw_mode) {
+    return static_cast<int>(convert_blend_mode(static_cast<IrisBlendMode>(raw_mode)));
+}
+#endif

@@ -354,8 +354,13 @@ bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     dest.offset_x = env->GetFloatField(src, g_jniCache.lensConfig_offsetX);
     dest.offset_y = env->GetFloatField(src, g_jniCache.lensConfig_offsetY);
     dest.rotation = env->GetFloatField(src, g_jniCache.lensConfig_rotation);
-    dest.blend_mode = static_cast<IrisBlendMode>(
-        env->GetIntField(src, g_jniCache.lensConfig_blendMode));
+    int rawBlendMode = env->GetIntField(src, g_jniCache.lensConfig_blendMode);
+    if (rawBlendMode < IRIS_BLEND_NORMAL || rawBlendMode > IRIS_BLEND_SOFT_LIGHT) {
+        LOGW("Invalid blend mode from Java: %d, clamping to NORMAL(0)", rawBlendMode);
+        dest.blend_mode = IRIS_BLEND_NORMAL;
+    } else {
+        dest.blend_mode = static_cast<IrisBlendMode>(rawBlendMode);
+    }
     dest.edge_feather = env->GetFloatField(src, g_jniCache.lensConfig_edgeFeather);
     dest.apply_left = env->GetBooleanField(src, g_jniCache.lensConfig_applyLeft);
     dest.apply_right = env->GetBooleanField(src, g_jniCache.lensConfig_applyRight);

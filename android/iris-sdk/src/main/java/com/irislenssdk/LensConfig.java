@@ -66,6 +66,27 @@ public class LensConfig {
      */
     public static final int BLEND_OVERLAY = 3;
 
+    /**
+     * 휘도 보존 틴트 (sRGB 근사).
+     * 원본 홍채의 밝기 패턴을 보존하면서 색상만 교체합니다.
+     * @experimental 동작이 변경될 수 있습니다.
+     */
+    public static final int BLEND_LUMINANCE_TINT = 4;
+
+    /**
+     * 휘도 보존 틴트 (선형 색공간).
+     * sRGB 근사 대비 중간톤 정확도가 높습니다.
+     * @experimental 동작이 변경될 수 있습니다.
+     */
+    public static final int BLEND_LUMINANCE_TINT_LINEAR = 5;
+
+    /**
+     * 소프트 라이트 블렌딩.
+     * 부드러운 조명 효과로 은은한 색상 변화를 제공합니다.
+     * @experimental 동작이 변경될 수 있습니다.
+     */
+    public static final int BLEND_SOFT_LIGHT = 6;
+
     // ========================================================================
     // 필드 (JNI에서 직접 접근)
     // ========================================================================
@@ -179,7 +200,7 @@ public class LensConfig {
                 && offsetX >= -1.0f && offsetX <= 1.0f
                 && offsetY >= -1.0f && offsetY <= 1.0f
                 && rotation >= -(float) Math.PI && rotation <= (float) Math.PI
-                && blendMode >= BLEND_NORMAL && blendMode <= BLEND_OVERLAY
+                && blendMode >= BLEND_NORMAL && blendMode <= BLEND_SOFT_LIGHT
                 && edgeFeather >= 0.0f && edgeFeather <= 1.0f;
     }
 
@@ -192,7 +213,7 @@ public class LensConfig {
         offsetX = Math.max(-1.0f, Math.min(1.0f, offsetX));
         offsetY = Math.max(-1.0f, Math.min(1.0f, offsetY));
         rotation = Math.max(-(float) Math.PI, Math.min((float) Math.PI, rotation));
-        blendMode = Math.max(BLEND_NORMAL, Math.min(BLEND_OVERLAY, blendMode));
+        blendMode = Math.max(BLEND_NORMAL, Math.min(BLEND_SOFT_LIGHT, blendMode));
         edgeFeather = Math.max(0.0f, Math.min(1.0f, edgeFeather));
     }
 
@@ -226,6 +247,12 @@ public class LensConfig {
                 return "SCREEN";
             case BLEND_OVERLAY:
                 return "OVERLAY";
+            case BLEND_LUMINANCE_TINT:
+                return "LUMINANCE_TINT";
+            case BLEND_LUMINANCE_TINT_LINEAR:
+                return "LUMINANCE_TINT_LINEAR";
+            case BLEND_SOFT_LIGHT:
+                return "SOFT_LIGHT";
             default:
                 return "UNKNOWN";
         }

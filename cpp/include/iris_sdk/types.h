@@ -22,10 +22,13 @@ namespace iris_sdk {
  * 렌즈 렌더링 시 사용할 블렌딩 방식
  */
 enum class BlendMode : int {
-    Normal = 0,     ///< 일반 알파 블렌딩
-    Multiply = 1,   ///< 곱하기 블렌딩
-    Screen = 2,     ///< 스크린 블렌딩
-    Overlay = 3     ///< 오버레이 블렌딩
+    Normal = 0,             ///< 일반 알파 블렌딩
+    Multiply = 1,           ///< 곱하기 블렌딩
+    Screen = 2,             ///< 스크린 블렌딩
+    Overlay = 3,            ///< 오버레이 블렌딩
+    LuminanceTint = 4,      ///< 휘도 보존 틴트 (sRGB 근사) @experimental
+    LuminanceTintLinear = 5,///< 휘도 보존 틴트 (선형 색공간) @experimental
+    SoftLight = 6           ///< 소프트 라이트 블렌딩 @experimental
 };
 
 /**

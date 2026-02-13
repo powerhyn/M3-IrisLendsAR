@@ -55,7 +55,37 @@ enum class BlendMode(val value: Int) {
      * 대비가 강화되어 선명한 효과를 제공합니다.
      * 패턴 렌즈에 적합합니다.
      */
-    OVERLAY(JavaLensConfig.BLEND_OVERLAY);
+    OVERLAY(JavaLensConfig.BLEND_OVERLAY),
+
+    /**
+     * 휘도 보존 틴트 (sRGB 근사).
+     *
+     * 원본 홍채의 밝기 패턴(줄무늬, 깊이, 명암)을 보존하면서 색상만 교체합니다.
+     * 실제 콘택트렌즈의 물리적 원리에 가장 가까운 합성 방식입니다.
+     *
+     * @experimental 이 모드는 실험적이며 동작이 변경될 수 있습니다.
+     */
+    LUMINANCE_TINT(JavaLensConfig.BLEND_LUMINANCE_TINT),
+
+    /**
+     * 휘도 보존 틴트 (선형 색공간).
+     *
+     * sRGB 근사 대비 중간톤 정확도가 높고, specular highlight를 보존합니다.
+     * GPU 부하가 약간 더 높습니다.
+     *
+     * @experimental 이 모드는 실험적이며 동작이 변경될 수 있습니다.
+     */
+    LUMINANCE_TINT_LINEAR(JavaLensConfig.BLEND_LUMINANCE_TINT_LINEAR),
+
+    /**
+     * 소프트 라이트 블렌딩.
+     *
+     * Photoshop Soft Light 공식 기반으로 부드러운 조명 효과를 제공합니다.
+     * 은은한 색상 변화에 적합합니다.
+     *
+     * @experimental 이 모드는 실험적이며 동작이 변경될 수 있습니다.
+     */
+    SOFT_LIGHT(JavaLensConfig.BLEND_SOFT_LIGHT);
 
     companion object {
         /**
