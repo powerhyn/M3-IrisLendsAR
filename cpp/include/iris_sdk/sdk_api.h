@@ -105,10 +105,13 @@ typedef enum IrisFrameFormat {
  * 렌즈 렌더링 시 프레임과 텍스처를 합성하는 방식을 지정합니다.
  */
 typedef enum IrisBlendMode {
-    IRIS_BLEND_NORMAL = 0,      /**< 일반 알파 블렌딩 */
-    IRIS_BLEND_MULTIPLY = 1,    /**< 곱하기 블렌딩 */
-    IRIS_BLEND_SCREEN = 2,      /**< 스크린 블렌딩 */
-    IRIS_BLEND_OVERLAY = 3      /**< 오버레이 블렌딩 */
+    IRIS_BLEND_NORMAL = 0,              /**< 일반 알파 블렌딩 */
+    IRIS_BLEND_MULTIPLY = 1,            /**< 곱하기 블렌딩 */
+    IRIS_BLEND_SCREEN = 2,              /**< 스크린 블렌딩 */
+    IRIS_BLEND_OVERLAY = 3,             /**< 오버레이 블렌딩 */
+    IRIS_BLEND_LUMINANCE_TINT = 4,      /**< 휘도 보존 틴트 (sRGB 근사) @experimental */
+    IRIS_BLEND_LUMINANCE_TINT_LINEAR = 5,/**< 휘도 보존 틴트 (선형 색공간) @experimental */
+    IRIS_BLEND_SOFT_LIGHT = 6           /**< 소프트 라이트 블렌딩 @experimental */
 } IrisBlendMode;
 
 // ============================================================================

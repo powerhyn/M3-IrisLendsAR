@@ -544,6 +544,7 @@ generate_export_header(iris_sdk
 # Tests
 # =============================================================================
 if(BUILD_TESTS)
+    target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_TEST_HOOKS)
     enable_testing()
     add_subdirectory(tests)
 endif()

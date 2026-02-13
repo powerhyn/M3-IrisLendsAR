@@ -42,7 +42,9 @@
       "Skill(code-review-ai:ai-review)",
       "Bash(echo:*)",
       "Bash(grep:*)",
-      "Bash(adb install:*)"
+      "Bash(adb install:*)",
+      "mcp__serena__replace_symbol_body",
+      "Bash(./bin/test_sdk_api:*)"
     ]
   },
   "enabledPlugins": {

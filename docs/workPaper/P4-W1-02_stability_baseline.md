@@ -164,6 +164,45 @@ Gate 1 Conditional 시 이 파라미터를 조정 후 재측정.
 - [ ] 반경 σ 계산 결과 Pass 기준 충족
 - [ ] GPU tier 판별 정상 동작
 
+## 스모크 테스트 (권장 25~40분)
+
+### 목적
+- Logger가 실제 프레임 데이터를 기록하는지, Gate 1 판정에 필요한 최소 데이터가 나오는지 즉시 확인한다.
+
+### 실행 순서
+
+1. Demo App 빌드/실행
+   - 명령: `cd android && ./gradlew :demo-app:assembleDebug`
+   - 확인: 앱 실행 가능, 얼굴 검출/렌즈 렌더링 정상
+
+2. S1(정지) 로그 5초 수집
+   - 동작: 정면 주시 5초, logger start/stop 수행
+   - 확인: 로그 파일 1개 이상 생성 (`iris_stability_log_*.csv`)
+
+3. CSV 추출
+   - 예시: `adb pull <앱 로그 경로>/iris_stability_log_*.csv /tmp/`
+   - 확인: 로컬에서 파일 열림
+
+4. CSV 구조 빠른 확인
+   - 확인 항목:
+     - 헤더 컬럼 수 22개
+     - 데이터 행 100행 이상(5초 수집 기준)
+     - `flt_left_r`, `flt_right_r`, `render_time_us` 컬럼 값이 비어 있지 않음
+
+5. Gate 1 빠른 1차 판정
+   - 확인 항목:
+     - 반경 안정성(σ) 계산 결과가 Pass/Conditional/Fail 중 하나로 출력
+     - GPU tier(Adreno/Mali/기타) 판별값이 로그에 함께 기록
+
+### 내가 확인해야 하는 핵심
+- "CSV가 나온다"가 아니라, **Gate 판정 가능한 품질의 CSV가 나오는지**를 본다.
+- 최소 조건: `22컬럼 + 100행 이상 + 주요 수치 컬럼 값 유효 + Gate 분류 가능`.
+
+### 최종 판정
+- 필수 통과: 1, 2, 3, 4
+- 권장 통과: 5
+- 필수 항목 실패 시 P4-W1-03 진행 금지
+
 ## 다음 단계
 
 - Gate 1 **PASS** → P4-W1-03 (Luminance Tint 셰이더) 착수

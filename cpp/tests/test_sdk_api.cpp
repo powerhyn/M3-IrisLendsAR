@@ -6,6 +6,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <climits>
 #include <cstring>
 #include <filesystem>
 
@@ -431,6 +432,29 @@ TEST(SdkApiFormatTest, BlendModeEnumValues) {
     EXPECT_EQ(1, IRIS_BLEND_MULTIPLY);
     EXPECT_EQ(2, IRIS_BLEND_SCREEN);
     EXPECT_EQ(3, IRIS_BLEND_OVERLAY);
+    EXPECT_EQ(4, IRIS_BLEND_LUMINANCE_TINT);
+    EXPECT_EQ(5, IRIS_BLEND_LUMINANCE_TINT_LINEAR);
+    EXPECT_EQ(6, IRIS_BLEND_SOFT_LIGHT);
+}
+
+// Test hook: sdk_api.cpp의 convert_blend_mode()를 직접 호출
+extern "C" int iris_sdk_test_convert_blend_mode(int raw_mode);
+
+TEST(SdkApiFormatTest, InvalidBlendModeFallsBackToNormal) {
+    // 범위 밖 값 → Normal(0)으로 폴백 검증
+    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(-1));
+    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(7));
+    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(99));
+    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(INT_MIN));
+    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(INT_MAX));
+}
+
+TEST(SdkApiFormatTest, ValidBlendModeRoundTrip) {
+    // 유효 범위(0-6) → 동일 값 반환 검증
+    for (int i = 0; i <= 6; ++i) {
+        EXPECT_EQ(i, iris_sdk_test_convert_blend_mode(i))
+            << "BlendMode " << i << " should round-trip to itself";
+    }
 }
 
 // ============================================================================
