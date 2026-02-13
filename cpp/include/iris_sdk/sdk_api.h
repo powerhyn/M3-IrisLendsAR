@@ -189,6 +189,7 @@ typedef struct IrisLensConfig {
     float scale;                /**< 크기 배율 (기본값 1.0) */
     float offset_x;             /**< X 오프셋 (정규화, 기본값 0.0) */
     float offset_y;             /**< Y 오프셋 (정규화, 기본값 0.0) */
+    float rotation;             /**< 회전 각도 (라디안, -PI~PI, 기본값 0.0) */
     IrisBlendMode blend_mode;   /**< 블렌드 모드 (기본값 NORMAL) */
     float edge_feather;         /**< 가장자리 페더링 (0.0~1.0, 기본값 0.1) */
     bool apply_left;            /**< 왼쪽 눈 적용 여부 (기본값 true) */
@@ -677,6 +678,8 @@ IRIS_SDK_EXPORT int iris_sdk_is_gpu_beauty_initialized(void);
  * @param height 텍스처 높이
  * @param config V2 뷰티 필터 설정
  * @param detection 얼굴 검출 결과 (NULL 가능)
+ * @param lut_texture_id LUT 3D 텍스처 ID (0이면 LUT 비활성)
+ * @param lut_intensity LUT 적용 강도 (0.0~1.0)
  * @return IRIS_SDK_OK 성공, IRIS_SDK_ERROR_NOT_INITIALIZED GPU 미초기화
  */
 IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
@@ -684,7 +687,9 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
     uint32_t* output_texture,
     int width, int height,
     const IrisBeautyConfigV2* config,
-    const IrisResult* detection
+    const IrisResult* detection,
+    uint32_t lut_texture_id,
+    float lut_intensity
 );
 
 /**

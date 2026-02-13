@@ -95,7 +95,7 @@ void main() {
 
     // Bilateral 파라미터
     float sigmaSpace = 3.0 + uStrength * 5.0;  // 공간 시그마 (3~8)
-    float sigmaColor = 0.1 + uStrength * 0.2;  // 색상 시그마 (0.1~0.3)
+    float sigmaColor = 0.1 + uStrength * 0.4;  // 색상 시그마 (0.1~0.5)
 
     // 커널 반경 (성능을 위해 제한)
     const int RADIUS = 4;
@@ -175,8 +175,12 @@ void main() {
     // YCbCr 변환
     vec3 ycbcr = rgb2ycbcr(color.rgb);
 
-    // 밝기(Y) 증가 + 채도(Cb, Cr) 감소로 화이트닝 효과
-    float luminanceBoost = 1.0 + uStrength * 0.2;  // 최대 20% 밝기 증가
+    // 하이라이트 보호: Y가 높은 영역에서 boost를 점진적으로 줄임
+    float highlightProtection = 1.0 - smoothstep(0.7, 0.95, ycbcr.x) * 0.7;
+
+    // 적응형 밝기 증가 (하이라이트 영역은 boost 감소)
+    float baseLuminanceBoost = 1.0 + uStrength * 0.2;
+    float luminanceBoost = 1.0 + (baseLuminanceBoost - 1.0) * highlightProtection;
     float saturationReduce = 1.0 - uStrength * 0.15;  // 최대 15% 채도 감소
 
     ycbcr.x = min(ycbcr.x * luminanceBoost, 1.0);
@@ -312,6 +316,8 @@ uniform sampler2D uTexture;
 uniform float uBrightness;   // 0.5 ~ 1.5, 1.0 = 원본
 uniform float uBalance;      // -1.0 (쿨톤) ~ 1.0 (웜톤)
 uniform float uWhitening;    // 0.0 ~ 1.0
+uniform highp sampler3D uLutTexture;
+uniform float uLutIntensity;  // 0.0 = LUT disabled
 
 in vec2 vTexCoord;
 out vec4 fragColor;
@@ -362,8 +368,12 @@ void main() {
         // YCbCr 변환
         vec3 ycbcr = rgb2ycbcr(result);
 
-        // 밝기(Y) 증가 + 채도(Cb, Cr) 감소로 화이트닝 효과
-        float luminanceBoost = 1.0 + uWhitening * 0.2;  // 최대 20% 밝기 증가
+        // 하이라이트 보호: Y가 높은 영역에서 boost를 점진적으로 줄임
+        float highlightProtection = 1.0 - smoothstep(0.7, 0.95, ycbcr.x) * 0.7;
+
+        // 적응형 밝기 증가 (하이라이트 영역은 boost 감소)
+        float baseLuminanceBoost = 1.0 + uWhitening * 0.2;
+        float luminanceBoost = 1.0 + (baseLuminanceBoost - 1.0) * highlightProtection;
         float saturationReduce = 1.0 - uWhitening * 0.15;  // 최대 15% 채도 감소
 
         ycbcr.x = min(ycbcr.x * luminanceBoost, 1.0);
@@ -372,6 +382,12 @@ void main() {
 
         // RGB 변환
         result = ycbcr2rgb(ycbcr);
+    }
+
+    // 4. LUT Application (after color correction, for stylization)
+    if (uLutIntensity > 0.01) {
+        vec3 lutColor = texture(uLutTexture, result).rgb;
+        result = mix(result, lutColor, uLutIntensity);
     }
 
     fragColor = vec4(clamp(result, 0.0, 1.0), color.a);

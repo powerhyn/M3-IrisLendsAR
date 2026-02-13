@@ -95,6 +95,12 @@ public class LensConfig {
     public float offsetY;
 
     /**
+     * 렌즈 회전 각도 (라디안, -PI ~ PI).
+     * 렌즈 이미지를 회전시킵니다.
+     */
+    public float rotation;
+
+    /**
      * 블렌드 모드 (BLEND_* 상수 사용).
      */
     public int blendMode;
@@ -136,6 +142,7 @@ public class LensConfig {
         this.scale = other.scale;
         this.offsetX = other.offsetX;
         this.offsetY = other.offsetY;
+        this.rotation = other.rotation;
         this.blendMode = other.blendMode;
         this.edgeFeather = other.edgeFeather;
         this.applyLeft = other.applyLeft;
@@ -150,12 +157,13 @@ public class LensConfig {
      * 모든 필드를 기본값으로 설정합니다.
      */
     public void setDefaults() {
-        opacity = 0.4f;
-        scale = 0.9f;
+        opacity = 0.7f;
+        scale = 1.3f;  // 홍채 반경 대비 렌즈 크기 배율 (0.8~1.8 범위, 1.3 기본)
         offsetX = 0.0f;
         offsetY = 0.0f;
+        rotation = 0.0f;
         blendMode = BLEND_NORMAL;
-        edgeFeather = 0.1f;
+        edgeFeather = 0.15f;
         applyLeft = true;
         applyRight = true;
     }
@@ -170,6 +178,7 @@ public class LensConfig {
                 && scale > 0.0f
                 && offsetX >= -1.0f && offsetX <= 1.0f
                 && offsetY >= -1.0f && offsetY <= 1.0f
+                && rotation >= -(float) Math.PI && rotation <= (float) Math.PI
                 && blendMode >= BLEND_NORMAL && blendMode <= BLEND_OVERLAY
                 && edgeFeather >= 0.0f && edgeFeather <= 1.0f;
     }
@@ -182,6 +191,7 @@ public class LensConfig {
         scale = Math.max(0.1f, Math.min(3.0f, scale));
         offsetX = Math.max(-1.0f, Math.min(1.0f, offsetX));
         offsetY = Math.max(-1.0f, Math.min(1.0f, offsetY));
+        rotation = Math.max(-(float) Math.PI, Math.min((float) Math.PI, rotation));
         blendMode = Math.max(BLEND_NORMAL, Math.min(BLEND_OVERLAY, blendMode));
         edgeFeather = Math.max(0.0f, Math.min(1.0f, edgeFeather));
     }
@@ -193,6 +203,7 @@ public class LensConfig {
                 "opacity=" + opacity +
                 ", scale=" + scale +
                 ", offset=(" + offsetX + ", " + offsetY + ")" +
+                ", rotation=" + rotation +
                 ", blendMode=" + getBlendModeName() +
                 ", edgeFeather=" + edgeFeather +
                 ", applyLeft=" + applyLeft +
@@ -294,6 +305,17 @@ public class LensConfig {
         public Builder offset(float x, float y) {
             config.offsetX = x;
             config.offsetY = y;
+            return this;
+        }
+
+        /**
+         * 렌즈 회전 각도를 설정합니다.
+         *
+         * @param rotation 회전 각도 (라디안, -PI ~ PI)
+         * @return this
+         */
+        public Builder rotation(float rotation) {
+            config.rotation = rotation;
             return this;
         }
 

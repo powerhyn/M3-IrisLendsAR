@@ -13,6 +13,7 @@
 #include "iris_sdk/sdk_api.h"
 #include "iris_sdk/beauty_filter.h"
 
+#include <atomic>
 #include <cstring>
 #include <mutex>
 
@@ -96,6 +97,7 @@ bool JniCache::init(JNIEnv* env) {
     lensConfig_scale = env->GetFieldID(lensConfigClass, "scale", "F");
     lensConfig_offsetX = env->GetFieldID(lensConfigClass, "offsetX", "F");
     lensConfig_offsetY = env->GetFieldID(lensConfigClass, "offsetY", "F");
+    lensConfig_rotation = env->GetFieldID(lensConfigClass, "rotation", "F");
     lensConfig_blendMode = env->GetFieldID(lensConfigClass, "blendMode", "I");
     lensConfig_edgeFeather = env->GetFieldID(lensConfigClass, "edgeFeather", "F");
     lensConfig_applyLeft = env->GetFieldID(lensConfigClass, "applyLeft", "Z");
@@ -103,7 +105,7 @@ bool JniCache::init(JNIEnv* env) {
 
     // 필드 ID 검증
     if (!lensConfig_opacity || !lensConfig_scale || !lensConfig_offsetX ||
-        !lensConfig_offsetY || !lensConfig_blendMode || !lensConfig_edgeFeather ||
+        !lensConfig_offsetY || !lensConfig_rotation || !lensConfig_blendMode || !lensConfig_edgeFeather ||
         !lensConfig_applyLeft || !lensConfig_applyRight) {
         LOGE("Failed to get LensConfig field IDs");
         return false;
@@ -270,6 +272,76 @@ bool copyResultToJava(JNIEnv* env, const IrisResult& src, jobject dest) {
     return !checkAndLogException(env);
 }
 
+bool copyResultFromJava(JNIEnv* env, jobject src, IrisResult& dest) {
+    if (!env || !src) return false;
+    if (!g_jniCache.isInitialized()) {
+        LOGE("JNI cache not initialized");
+        return false;
+    }
+
+    // 검출 상태
+    dest.detected = env->GetBooleanField(src, g_jniCache.irisResult_detected);
+    dest.left_detected = env->GetBooleanField(src, g_jniCache.irisResult_leftDetected);
+    dest.right_detected = env->GetBooleanField(src, g_jniCache.irisResult_rightDetected);
+    dest.confidence = env->GetFloatField(src, g_jniCache.irisResult_confidence);
+
+    // 왼쪽 홍채
+    dest.left_iris[0].x = env->GetFloatField(src, g_jniCache.irisResult_leftIrisX);
+    dest.left_iris[0].y = env->GetFloatField(src, g_jniCache.irisResult_leftIrisY);
+    dest.left_iris[0].z = env->GetFloatField(src, g_jniCache.irisResult_leftIrisZ);
+    dest.left_radius = env->GetFloatField(src, g_jniCache.irisResult_leftRadius);
+
+    // 오른쪽 홍채
+    dest.right_iris[0].x = env->GetFloatField(src, g_jniCache.irisResult_rightIrisX);
+    dest.right_iris[0].y = env->GetFloatField(src, g_jniCache.irisResult_rightIrisY);
+    dest.right_iris[0].z = env->GetFloatField(src, g_jniCache.irisResult_rightIrisZ);
+    dest.right_radius = env->GetFloatField(src, g_jniCache.irisResult_rightRadius);
+
+    // 얼굴 영역
+    dest.face_rect.x = env->GetFloatField(src, g_jniCache.irisResult_faceRectX);
+    dest.face_rect.y = env->GetFloatField(src, g_jniCache.irisResult_faceRectY);
+    dest.face_rect.width = env->GetFloatField(src, g_jniCache.irisResult_faceRectWidth);
+    dest.face_rect.height = env->GetFloatField(src, g_jniCache.irisResult_faceRectHeight);
+
+    // 얼굴 회전
+    dest.face_rotation[0] = env->GetFloatField(src, g_jniCache.irisResult_facePitch);
+    dest.face_rotation[1] = env->GetFloatField(src, g_jniCache.irisResult_faceYaw);
+    dest.face_rotation[2] = env->GetFloatField(src, g_jniCache.irisResult_faceRoll);
+
+    // 프레임 정보
+    dest.timestamp_ms = env->GetLongField(src, g_jniCache.irisResult_timestampMs);
+    dest.frame_width = env->GetIntField(src, g_jniCache.irisResult_frameWidth);
+    dest.frame_height = env->GetIntField(src, g_jniCache.irisResult_frameHeight);
+
+    // Face Mesh
+    dest.face_mesh_valid = env->GetBooleanField(src, g_jniCache.irisResult_faceMeshValid);
+
+    if (dest.face_mesh_valid) {
+        jfloatArray faceMeshArray = static_cast<jfloatArray>(
+            env->GetObjectField(src, g_jniCache.irisResult_faceMesh));
+
+        if (faceMeshArray) {
+            constexpr int LANDMARK_COUNT = 478;
+            constexpr int ARRAY_SIZE = LANDMARK_COUNT * 3;
+
+            jsize arrayLen = env->GetArrayLength(faceMeshArray);
+            if (arrayLen >= ARRAY_SIZE) {
+                float tempBuffer[ARRAY_SIZE];
+                env->GetFloatArrayRegion(faceMeshArray, 0, ARRAY_SIZE, tempBuffer);
+
+                for (int i = 0; i < LANDMARK_COUNT; ++i) {
+                    dest.face_mesh[i].x = tempBuffer[i * 3];
+                    dest.face_mesh[i].y = tempBuffer[i * 3 + 1];
+                    dest.face_mesh[i].z = tempBuffer[i * 3 + 2];
+                }
+            }
+            env->DeleteLocalRef(faceMeshArray);
+        }
+    }
+
+    return !checkAndLogException(env);
+}
+
 bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     if (!env || !src) return false;
     if (!g_jniCache.isInitialized()) {
@@ -281,6 +353,7 @@ bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     dest.scale = env->GetFloatField(src, g_jniCache.lensConfig_scale);
     dest.offset_x = env->GetFloatField(src, g_jniCache.lensConfig_offsetX);
     dest.offset_y = env->GetFloatField(src, g_jniCache.lensConfig_offsetY);
+    dest.rotation = env->GetFloatField(src, g_jniCache.lensConfig_rotation);
     dest.blend_mode = static_cast<IrisBlendMode>(
         env->GetIntField(src, g_jniCache.lensConfig_blendMode));
     dest.edge_feather = env->GetFloatField(src, g_jniCache.lensConfig_edgeFeather);
@@ -403,6 +476,22 @@ void throwException(JNIEnv* env, const char* className, const char* message) {
 
 }  // namespace jni
 }  // namespace iris
+
+// ============================================================================
+// Detection Slot (더블 버퍼 — lock-free IrisResult 전달)
+// ============================================================================
+namespace {
+
+struct DetectionSlot {
+    IrisResult data{};
+    std::atomic<bool> valid{false};
+    std::atomic<uint64_t> generation{0};
+};
+
+DetectionSlot g_detection_slots[2];
+std::atomic<int> g_active_slot_index{-1};  // -1 = 초기 미설정
+
+}  // anonymous namespace
 
 using namespace iris::jni;
 
@@ -1519,7 +1608,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
  * @brief V2 뷰티 필터 적용 (GPU 텍스처)
  *
  * Java: native int nativeApplyBeautyTextureV2(int inputTexture, int width, int height,
- *                                              BeautyFilterConfigV2 config, long detectionPtr);
+ *                                              BeautyFilterConfigV2 config, long detectionPtr,
+ *                                              int lutTextureId, float lutIntensity);
  *
  * @return 출력 텍스처 ID (0이면 실패)
  */
@@ -1531,9 +1621,12 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
     jint width,
     jint height,
     jobject configObj,
-    jlong detectionPtr) {
+    jlong detectionPtr,
+    jint lutTextureId,
+    jfloat lutIntensity) {
 
-    LOGV("nativeApplyBeautyTextureV2 called: texture=%d, %dx%d", inputTexture, width, height);
+    LOGV("nativeApplyBeautyTextureV2 called: texture=%d, %dx%d, lut=%d, lutIntensity=%.2f",
+         inputTexture, width, height, lutTextureId, lutIntensity);
 
     if (!configObj) {
         LOGE("nativeApplyBeautyTextureV2: configObj is null");
@@ -1562,7 +1655,9 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
         static_cast<int>(width),
         static_cast<int>(height),
         &nativeConfig,
-        detection
+        detection,
+        static_cast<uint32_t>(lutTextureId),
+        static_cast<float>(lutIntensity)
     );
 
     if (error != IRIS_SDK_OK) {
@@ -1654,6 +1749,94 @@ Java_com_irislenssdk_IrisLensSDK_nativeIsTextureManaged(
 
     int managed = iris_sdk_is_texture_managed(static_cast<uint32_t>(texture));
     return managed ? JNI_TRUE : JNI_FALSE;
+}
+
+// ============================================================================
+// Detection Slot JNI (더블 버퍼 — lock-free IrisResult 전달)
+// ============================================================================
+
+/**
+ * @brief Detection 슬롯에 IrisResult 업데이트 (Analyzer 스레드에서 호출)
+ *
+ * 비활성 슬롯에 덮어쓰기 후 atomic swap으로 활성 슬롯 전환.
+ * Lock-free, wait-free writer.
+ *
+ * Java: native void nativeUpdateDetectionSlot(IrisResult result);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeUpdateDetectionSlot(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jobject resultObj) {
+
+    if (!resultObj) {
+        LOGW("nativeUpdateDetectionSlot: resultObj is null");
+        return;
+    }
+
+    // 비활성 슬롯 결정
+    int current_active = g_active_slot_index.load(std::memory_order_acquire);
+    int write_idx = (current_active == 0) ? 1 : 0;
+
+    // 비활성 슬롯에 데이터 복사
+    if (!iris::jni::copyResultFromJava(env, resultObj, g_detection_slots[write_idx].data)) {
+        LOGE("nativeUpdateDetectionSlot: failed to copy result from Java");
+        return;
+    }
+
+    // generation 증가 → valid 설정 → active swap (release ordering)
+    g_detection_slots[write_idx].generation.fetch_add(1, std::memory_order_release);
+    g_detection_slots[write_idx].valid.store(true, std::memory_order_release);
+    g_active_slot_index.store(write_idx, std::memory_order_release);
+}
+
+/**
+ * @brief 현재 활성 Detection 슬롯의 네이티브 포인터 반환 (GL 스레드에서 호출)
+ *
+ * 반환된 포인터는 applyBeautyFilterTextureV2()의 detectionPtr로 사용.
+ * Lock-free, wait-free reader. Generation 검증은 호출측에서 수행.
+ *
+ * Java: native long nativeGetDetectionSlotPtr();
+ * @return 활성 슬롯의 IrisResult 포인터 (jlong), 유효하지 않으면 0L
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetDetectionSlotPtr(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    int read_idx = g_active_slot_index.load(std::memory_order_acquire);
+
+    // 초기 미설정 상태
+    if (read_idx < 0 || read_idx > 1) {
+        return 0L;
+    }
+
+    // valid 확인
+    if (!g_detection_slots[read_idx].valid.load(std::memory_order_acquire)) {
+        return 0L;
+    }
+
+    return reinterpret_cast<jlong>(&g_detection_slots[read_idx].data);
+}
+
+/**
+ * @brief Detection 슬롯 해제 (SDK 종료 시 1회 호출)
+ *
+ * Java: native void nativeReleaseDetectionSlot();
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeReleaseDetectionSlot(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    // 슬롯 초기화 (메모리 해제 불필요 — 스택/전역 할당)
+    g_detection_slots[0].valid.store(false, std::memory_order_release);
+    g_detection_slots[0].generation.store(0, std::memory_order_release);
+    g_detection_slots[1].valid.store(false, std::memory_order_release);
+    g_detection_slots[1].generation.store(0, std::memory_order_release);
+    g_active_slot_index.store(-1, std::memory_order_release);
+
+    LOGI("Detection slots released");
 }
 
 }  // extern "C"

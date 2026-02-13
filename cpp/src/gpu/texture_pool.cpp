@@ -77,8 +77,8 @@ void TexturePool::release() {
     LOGI("TexturePool released: %zu textures freed", count);
 }
 
-TexturePool::TextureInfo* TexturePool::acquireRenderTarget(int width, int height) {
-    std::lock_guard<std::mutex> lock(mutex_);
+TexturePool::TextureInfo* TexturePool::acquireRenderTargetLocked(int width, int height) {
+    // mutex_ 이미 획득된 상태에서 호출됨
 
     if (!initialized_) {
         LOGE("TexturePool not initialized");
@@ -112,25 +112,48 @@ TexturePool::TextureInfo* TexturePool::acquireRenderTarget(int width, int height
     return info;
 }
 
-void TexturePool::releaseTexture(TextureInfo* info) {
+void TexturePool::releaseTextureLocked(TextureInfo* info) {
+    // mutex_ 이미 획득된 상태에서 호출됨
     if (!info) return;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-
     info->in_use = false;
     last_used_time_[info->texture_id] = currentTimeMs();
 }
 
+TexturePool::TextureInfo* TexturePool::acquireRenderTarget(int width, int height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return acquireRenderTargetLocked(width, height);
+}
+
+void TexturePool::releaseTexture(TextureInfo* info) {
+    if (!info) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    releaseTextureLocked(info);
+}
+
+bool TexturePool::releaseTextureById(GLuint texture_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& info : textures_) {
+        if (info->texture_id == texture_id) {
+            if (!info->in_use) return false;  // Already released
+            releaseTextureLocked(info.get());
+            return true;
+        }
+    }
+    return false;  // Not managed by pool
+}
+
 bool TexturePool::acquirePingPongPair(int width, int height,
                                        TextureInfo*& ping, TextureInfo*& pong) {
-    ping = acquireRenderTarget(width, height);
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    ping = acquireRenderTargetLocked(width, height);
     if (!ping) {
         return false;
     }
 
-    pong = acquireRenderTarget(width, height);
+    pong = acquireRenderTargetLocked(width, height);
     if (!pong) {
-        releaseTexture(ping);
+        releaseTextureLocked(ping);
         ping = nullptr;
         return false;
     }

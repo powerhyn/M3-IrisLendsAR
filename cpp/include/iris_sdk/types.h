@@ -157,6 +157,7 @@ struct LensConfig {
     float scale = 1.0f;         ///< 크기 배율
     float offset_x = 0.0f;      ///< X 오프셋 (정규화)
     float offset_y = 0.0f;      ///< Y 오프셋 (정규화)
+    float rotation = 0.0f;      ///< 회전 각도 (라디안, -PI~PI)
     BlendMode blend_mode = BlendMode::Normal;   ///< 블렌드 모드
     float edge_feather = 0.1f;  ///< 가장자리 페더링 (0.0~1.0)
     bool apply_left = true;     ///< 왼쪽 눈 적용 여부

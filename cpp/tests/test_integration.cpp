@@ -1143,6 +1143,7 @@ TEST(IntegrationTestBasic, DefaultLensConfigWorks) {
     EXPECT_FLOAT_EQ(1.0f, config.scale);
     EXPECT_FLOAT_EQ(0.0f, config.offset_x);
     EXPECT_FLOAT_EQ(0.0f, config.offset_y);
+    EXPECT_FLOAT_EQ(0.0f, config.rotation);
     EXPECT_TRUE(config.apply_left);
     EXPECT_TRUE(config.apply_right);
 }

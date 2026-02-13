@@ -280,6 +280,50 @@ public class IrisResult {
     }
 
     /**
+     * 다른 IrisResult의 데이터를 깊은 복사합니다.
+     * 스레드 간 불변 스냅샷 전달에 사용합니다.
+     *
+     * @param src 복사할 원본
+     */
+    public void copyFrom(@NonNull IrisResult src) {
+        this.detected = src.detected;
+        this.leftDetected = src.leftDetected;
+        this.rightDetected = src.rightDetected;
+        this.confidence = src.confidence;
+
+        this.leftIrisX = src.leftIrisX;
+        this.leftIrisY = src.leftIrisY;
+        this.leftIrisZ = src.leftIrisZ;
+        this.leftRadius = src.leftRadius;
+
+        this.rightIrisX = src.rightIrisX;
+        this.rightIrisY = src.rightIrisY;
+        this.rightIrisZ = src.rightIrisZ;
+        this.rightRadius = src.rightRadius;
+
+        this.faceRectX = src.faceRectX;
+        this.faceRectY = src.faceRectY;
+        this.faceRectWidth = src.faceRectWidth;
+        this.faceRectHeight = src.faceRectHeight;
+
+        this.facePitch = src.facePitch;
+        this.faceYaw = src.faceYaw;
+        this.faceRoll = src.faceRoll;
+
+        this.faceMeshValid = src.faceMeshValid;
+        if (src.faceMesh != null) {
+            if (this.faceMesh == null || this.faceMesh.length != src.faceMesh.length) {
+                this.faceMesh = new float[src.faceMesh.length];
+            }
+            System.arraycopy(src.faceMesh, 0, this.faceMesh, 0, src.faceMesh.length);
+        }
+
+        this.timestampMs = src.timestampMs;
+        this.frameWidth = src.frameWidth;
+        this.frameHeight = src.frameHeight;
+    }
+
+    /**
      * 얼굴이 정면을 향하고 있는지 확인합니다.
      *
      * @param thresholdDegrees 허용 각도 (기본값 15도 권장)

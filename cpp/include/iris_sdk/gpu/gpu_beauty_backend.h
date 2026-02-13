@@ -184,7 +184,9 @@ public:
         uint32_t* output_texture,
         int width, int height,
         const BeautyFilterConfigV2& config,
-        const IrisResult* detection
+        const IrisResult* detection,
+        uint32_t lut_texture_id = 0,
+        float lut_intensity = 0.0f
     );
 
     /**
@@ -269,7 +271,8 @@ private:
     /// 3개 패스를 1개로 병합하여 성능 최적화
     void executeCombinedColorPass(GLuint input_tex, GLuint output_fbo,
                                   int width, int height,
-                                  float brightness, float balance, float whitening);
+                                  float brightness, float balance, float whitening,
+                                  GLuint lut_texture = 0, float lut_intensity = 0.0f);
 
     //=========================================================================
     // 멤버 변수
@@ -334,6 +337,10 @@ private:
         GLint uCombinedBrightness = -1;
         GLint uCombinedBalance = -1;
         GLint uCombinedWhitening = -1;
+
+        // Combined Color + LUT
+        GLint uCombinedLutTexture = -1;
+        GLint uCombinedLutIntensity = -1;
     };
 
     /// 프로그램별 Uniform Location 캐시
@@ -352,6 +359,14 @@ private:
     TexturePool::TextureInfo* previous_output_ping_ = nullptr;
     TexturePool::TextureInfo* previous_output_pong_ = nullptr;
     GLuint previous_output_texture_ = 0;
+
+    // GPU 동기화 펜스 (glFinish 대체)
+#if IRIS_SDK_GPU_AVAILABLE
+    GLsync previous_fence_ = nullptr;
+#endif
+
+    // Neutral 1x1x1 identity 3D LUT (sampler3D fallback용)
+    GLuint neutral_lut_texture_ = 0;
 
     bool initialized_ = false;
     mutable std::mutex mutex_;

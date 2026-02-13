@@ -14,6 +14,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -138,6 +139,21 @@ class OverlayView @JvmOverloads constructor(
     // 디버그 모드
     var debugMode: Boolean = false
 
+    /**
+     * 화면 매핑 정책.
+     * - FIT: 이미지를 뷰 안에 맞춤 (레터박스 가능). CPU 모드에서 PreviewView FILL_CENTER와 사용.
+     * - COVER: 이미지가 뷰를 완전히 채움 (넘치는 부분 crop). GPU 모드의 GL 출력과 동일.
+     */
+    enum class ScreenMappingMode { FIT, COVER }
+
+    var screenMappingMode: ScreenMappingMode = ScreenMappingMode.FIT
+
+    // 하위 호환: 기존 gpuMode 사용처 지원
+    @Deprecated("screenMappingMode를 직접 사용하세요", ReplaceWith("screenMappingMode"))
+    var gpuMode: Boolean
+        get() = screenMappingMode == ScreenMappingMode.COVER
+        set(value) { screenMappingMode = if (value) ScreenMappingMode.COVER else ScreenMappingMode.FIT }
+
     // === One Euro Filter를 사용한 스무딩 (깜빡임/흔들거림 방지) ===
     private val leftXFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
     private val leftYFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
@@ -243,6 +259,15 @@ class OverlayView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
+    // ISS-004 Fix-A: Raw 홍채 반경 원 (파란색 점선 - 실제 홍채 경계)
+    private val rawIrisPaint = Paint().apply {
+        color = 0xFF4488FF.toInt()  // 밝은 파란색
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
+        isAntiAlias = true
+    }
+
     // 홍채 랜드마크용 Paint (마젠타 - 눈에 잘 띄도록)
     private val irisLandmarkPaint = Paint().apply {
         color = COLOR_IRIS_LANDMARK
@@ -277,6 +302,30 @@ class OverlayView @JvmOverloads constructor(
 
     // 변환 매트릭스 (재사용)
     private val lensMatrix = Matrix()
+
+    /**
+     * 화면 변환 스케일 팩터를 계산합니다.
+     *
+     * @param imageW 분석 이미지 너비
+     * @param imageH 분석 이미지 높이
+     * @param viewW 뷰 너비
+     * @param viewH 뷰 높이
+     * @param fitMode true=fit (GL 출력과 동일), false=fill-center (PreviewView와 동일)
+     * @return 스케일 팩터
+     */
+    private fun computeScreenTransform(
+        imageW: Int, imageH: Int,
+        viewW: Int, viewH: Int,
+        fitMode: Boolean
+    ): Float {
+        return if (fitMode) {
+            // fit: 이미지가 뷰 안에 맞춤 (레터박스 가능)
+            kotlin.math.min(viewW.toFloat() / imageW, viewH.toFloat() / imageH)
+        } else {
+            // fill-center: 이미지가 뷰를 완전히 채움 (넘치는 부분 잘림)
+            max(viewW.toFloat() / imageW, viewH.toFloat() / imageH)
+        }
+    }
 
     /**
      * 홍채 검출 결과 설정 (One Euro Filter 적용)
@@ -469,11 +518,13 @@ class OverlayView @JvmOverloads constructor(
         Log.d(TAG, "View size: ${width}x${height}")
         Log.d(TAG, "imageAspect: ${imageWidth.toFloat()/imageHeight}, viewAspect: ${width.toFloat()/height}")
 
-        // 좌표 변환 계산 (MediaPipe 공식 예제 방식)
-        // PreviewView가 FILL_CENTER 모드이므로:
-        // 1. max() 사용: 이미지가 뷰를 완전히 채움 (넘치는 부분 잘림)
-        // 2. offset 계산: 중앙 정렬 (잘리는 부분이 양쪽에 균등하게 분배)
-        val scaleFactor = max(width.toFloat() / imageWidth, height.toFloat() / imageHeight)
+        // 좌표 변환 계산
+        // FIT: min() — 이미지가 뷰 안에 맞춤 (레터박스)
+        // COVER: max() — 이미지가 뷰를 완전히 채움 (넘치는 부분 crop, GL Cover 출력과 동일)
+        val useFitMode = screenMappingMode == ScreenMappingMode.FIT
+        val scaleFactor = computeScreenTransform(
+            imageWidth, imageHeight, width, height, useFitMode
+        )
 
         // 스케일된 이미지 크기
         val scaledImageWidth = imageWidth * scaleFactor
@@ -795,22 +846,29 @@ class OverlayView @JvmOverloads constructor(
         // 정규화 좌표 → 화면 좌표 변환 (MediaPipe 공식 예제 방식)
         var cx = normalizedX * imageWidth * scaleFactor + offsetX
         val cy = normalizedY * imageHeight * scaleFactor + offsetY
-        val r = radius * scaleFactor * lensConfig.scale
+
+        // ISS-004 Fix-A: Raw 홍채 반경과 Effective 렌즈 반경 분리 표시
+        val rawR = radius * scaleFactor                       // 실제 홍채 크기
+        val effectiveR = radius * scaleFactor * lensConfig.scale  // 렌즈 적용 크기
 
         // 미러링 (전면 카메라)
         if (isMirror) {
             cx = width - cx
         }
 
-        // 홍채 원 그리기
-        canvas.drawCircle(cx, cy, r, irisPaint)
+        // 1) Raw 홍채 반경 원 (파란색 점선 - 실제 홍채 경계)
+        canvas.drawCircle(cx, cy, rawR, rawIrisPaint)
+
+        // 2) Effective 렌즈 반경 원 (녹색 실선 - 렌즈 적용 영역)
+        canvas.drawCircle(cx, cy, effectiveR, irisPaint)
 
         // 중심점 그리기
         canvas.drawCircle(cx, cy, CENTER_DOT_RADIUS, centerPaint)
 
-        // 디버그 모드: 라벨 표시
+        // 디버그 모드: 라벨 + 반경 정보 표시
         debugTextPaint.textSize = 24f
-        canvas.drawText(label, cx + r + 10, cy, debugTextPaint)
+        val debugLabel = "%s rawR=%.0f effR=%.0f".format(label, rawR, effectiveR)
+        canvas.drawText(debugLabel, cx + effectiveR + 10, cy, debugTextPaint)
     }
 
     /**
@@ -897,18 +955,20 @@ class OverlayView @JvmOverloads constructor(
             else -> "N/A ($meshSize)"
         }
 
-        // 디버그 텍스트
+        // 디버그 텍스트 (ISS-004 Fix-A: rawR + effectiveR 동시 표시)
         val debugInfo = buildString {
             append("Model: $modelVersion\n")
             append("Confidence: %.2f\n".format(result.confidence))
-            append("Left: (%.3f, %.3f) r=%.1f\n".format(
-                result.leftIrisX, result.leftIrisY, result.leftRadius))
-            append("Right: (%.3f, %.3f) r=%.1f\n".format(
-                result.rightIrisX, result.rightIrisY, result.rightRadius))
+            append("Left: (%.3f, %.3f) rawR=%.1f effR=%.1f\n".format(
+                result.leftIrisX, result.leftIrisY,
+                result.leftRadius, result.leftRadius * lensConfig.scale))
+            append("Right: (%.3f, %.3f) rawR=%.1f effR=%.1f\n".format(
+                result.rightIrisX, result.rightIrisY,
+                result.rightRadius, result.rightRadius * lensConfig.scale))
             append("Face: P=%.1f Y=%.1f R=%.1f\n".format(
                 result.facePitch, result.faceYaw, result.faceRoll))
-            append("Lens: %.0f%% opacity, %.0f%% scale".format(
-                lensConfig.opacity * 100, lensConfig.scale * 100))
+            append("Lens: %.0f%% opacity, x%.1f scale".format(
+                lensConfig.opacity * 100, lensConfig.scale))
         }
 
         // 배경
@@ -1195,84 +1255,3 @@ class OverlayView @JvmOverloads constructor(
     }
 }
 
-/**
- * One Euro Filter - 적응형 노이즈 필터링
- *
- * 느린 움직임에는 강한 스무딩, 빠른 움직임에는 빠른 반응을 제공하는 필터.
- * 깜빡임과 흔들거림을 효과적으로 제거하면서 반응성 유지.
- *
- * @param minCutoff 최소 컷오프 주파수 (낮을수록 부드러움)
- * @param beta 속도 계수 (높을수록 빠른 움직임에 민감)
- * @param dCutoff 미분 컷오프 주파수
- *
- * 참조: https://cristal.univ-lille.fr/~casiez/1euro/
- */
-class OneEuroFilter(
-    private val minCutoff: Float = 1.0f,
-    private val beta: Float = 0.007f,
-    private val dCutoff: Float = 1.0f
-) {
-    private var x: Float = 0f
-    private var dx: Float = 0f
-    private var lastTime: Long = 0L
-    private var initialized: Boolean = false
-
-    /**
-     * 새로운 값을 필터링
-     * @param value 입력 값
-     * @param timestamp 타임스탬프 (밀리초)
-     * @return 필터링된 값
-     */
-    fun filter(value: Float, timestamp: Long): Float {
-        if (!initialized) {
-            x = value
-            dx = 0f
-            lastTime = timestamp
-            initialized = true
-            return value
-        }
-
-        // 시간 간격 계산 (초 단위)
-        val dt = ((timestamp - lastTime).coerceAtLeast(1L)) / 1000f
-        lastTime = timestamp
-
-        // 속도 추정 (미분 필터링)
-        val edx = (value - x) / dt
-        dx = lowPassFilter(edx, dx, alpha(dCutoff, dt))
-
-        // 적응형 컷오프 주파수 계산
-        val cutoff = minCutoff + beta * abs(dx)
-
-        // 위치 필터링
-        x = lowPassFilter(value, x, alpha(cutoff, dt))
-
-        return x
-    }
-
-    /**
-     * 필터 초기화 (검출 실패 후 재검출 시)
-     */
-    fun reset() {
-        initialized = false
-    }
-
-    /**
-     * 현재 필터링된 값 반환
-     */
-    fun getValue(): Float = x
-
-    /**
-     * 저역 통과 필터
-     */
-    private fun lowPassFilter(x: Float, prevX: Float, alpha: Float): Float {
-        return alpha * x + (1f - alpha) * prevX
-    }
-
-    /**
-     * 알파 값 계산 (컷오프 주파수 기반)
-     */
-    private fun alpha(cutoff: Float, dt: Float): Float {
-        val tau = 1f / (2f * Math.PI.toFloat() * cutoff)
-        return 1f / (1f + tau / dt)
-    }
-}

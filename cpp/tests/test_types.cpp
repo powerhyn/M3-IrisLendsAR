@@ -262,6 +262,7 @@ TEST_F(LensConfigTest, DefaultValues) {
     EXPECT_FLOAT_EQ(config.scale, 1.0f);
     EXPECT_FLOAT_EQ(config.offset_x, 0.0f);
     EXPECT_FLOAT_EQ(config.offset_y, 0.0f);
+    EXPECT_FLOAT_EQ(config.rotation, 0.0f);
     EXPECT_EQ(config.blend_mode, BlendMode::Normal);
     EXPECT_FLOAT_EQ(config.edge_feather, 0.1f);
     EXPECT_TRUE(config.apply_left);

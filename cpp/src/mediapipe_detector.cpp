@@ -29,6 +29,11 @@
 #define IRIS_SDK_GPU_ENABLED 0
 #endif
 
+// XNNPACK Delegate (CPU SIMD 가속)
+#ifdef IRIS_SDK_HAS_XNNPACK
+#include "tensorflow/lite/delegates/xnnpack/xnnpack_delegate.h"
+#endif
+
 // OpenCV 헤더 (조건부 컴파일)
 #ifdef IRIS_SDK_HAS_OPENCV
 #include <opencv2/core.hpp>
@@ -153,6 +158,13 @@ public:
     TfLiteDelegate* gpu_delegate_face_detection = nullptr;
     TfLiteDelegate* gpu_delegate_face_landmark = nullptr;
     TfLiteDelegate* gpu_delegate_iris_landmark = nullptr;
+#endif
+
+#ifdef IRIS_SDK_HAS_XNNPACK
+    // XNNPACK delegate 포인터 (수동 해제 필요)
+    TfLiteDelegate* xnnpack_delegate_face_detection = nullptr;
+    TfLiteDelegate* xnnpack_delegate_face_landmark = nullptr;
+    TfLiteDelegate* xnnpack_delegate_iris_landmark = nullptr;  // V1 전용
 #endif
 
     // ========================================
@@ -445,7 +457,8 @@ public:
     bool loadModel(const std::string& model_file,
                    std::unique_ptr<tflite::FlatBufferModel>& model,
                    std::unique_ptr<tflite::Interpreter>& interpreter,
-                   [[maybe_unused]] TfLiteDelegate** out_gpu_delegate = nullptr) {
+                   [[maybe_unused]] TfLiteDelegate** out_gpu_delegate = nullptr,
+                   [[maybe_unused]] TfLiteDelegate** out_xnnpack_delegate = nullptr) {
         // 모델 파일 로드
         model = tflite::FlatBufferModel::BuildFromFile(model_file.c_str());
         if (!model) {
@@ -508,17 +521,59 @@ public:
         }
 #endif  // IRIS_SDK_GPU_ENABLED
 
-        // CPU 폴백: GPU 미사용 또는 GPU 실패 시
+        // ========================================
+        // XNNPACK Delegate 적용 (CPU SIMD 가속)
+        // GPU 미사용 시에만 XNNPACK 적용 (GPU와 XNNPACK 동시 사용 불가)
+        // ========================================
+#ifdef IRIS_SDK_HAS_XNNPACK
 #if IRIS_SDK_GPU_ENABLED
         bool gpu_applied = (out_gpu_delegate != nullptr && *out_gpu_delegate != nullptr);
         if (!gpu_applied) {
-            // CPU 스레드 설정 (GPU 미사용 시에만)
+#else
+        {
+#endif
+            // XNNPACK delegate 옵션 설정
+            TfLiteXNNPackDelegateOptions xnnpack_opts =
+                TfLiteXNNPackDelegateOptionsDefault();
+            xnnpack_opts.num_threads = num_threads;
+
+            TfLiteDelegate* xnnpack_delegate =
+                TfLiteXNNPackDelegateCreate(&xnnpack_opts);
+            if (xnnpack_delegate != nullptr) {
+                TfLiteStatus status =
+                    interpreter->ModifyGraphWithDelegate(xnnpack_delegate);
+                if (status == kTfLiteOk) {
+                    std::fprintf(stderr,
+                        "[IrisSDK] XNNPACK delegate activated: %s\n",
+                        model_file.c_str());
+                    // XNNPACK delegate 포인터 저장 (수명 관리용)
+                    if (out_xnnpack_delegate != nullptr) {
+                        *out_xnnpack_delegate = xnnpack_delegate;
+                    }
+                } else {
+                    // XNNPACK 적용 실패 시 기본 CPU 폴백 (에러 아님)
+                    std::fprintf(stderr,
+                        "[IrisSDK] XNNPACK delegate failed, using default CPU: %s\n",
+                        model_file.c_str());
+                    TfLiteXNNPackDelegateDelete(xnnpack_delegate);
+                    xnnpack_delegate = nullptr;
+                }
+            }
             interpreter->SetNumThreads(num_threads);
         }
+#else  // !IRIS_SDK_HAS_XNNPACK
+        // XNNPACK 미지원 빌드: 기본 CPU
+#if IRIS_SDK_GPU_ENABLED
+        {
+            bool gpu_applied = (out_gpu_delegate != nullptr && *out_gpu_delegate != nullptr);
+            if (!gpu_applied) {
+                interpreter->SetNumThreads(num_threads);
+            }
+        }
 #else
-        // GPU 미지원 빌드: 항상 CPU 사용
         interpreter->SetNumThreads(num_threads);
 #endif
+#endif  // IRIS_SDK_HAS_XNNPACK
 
         // 텐서 할당
         if (interpreter->AllocateTensors() != kTfLiteOk) {
@@ -542,16 +597,21 @@ public:
 
         // Face Detection 모델 로드
         std::string face_detection_path = (base / REQUIRED_MODELS[0]).string();
+#ifdef IRIS_SDK_HAS_XNNPACK
+        TfLiteDelegate** xnnpack_fd_ptr = &xnnpack_delegate_face_detection;
+#else
+        TfLiteDelegate** xnnpack_fd_ptr = nullptr;
+#endif
 #if IRIS_SDK_GPU_ENABLED
         TfLiteDelegate** gpu_delegate_ptr = gpu_enabled ? &gpu_delegate_face_detection : nullptr;
-        if (!loadModel(face_detection_path, face_detection_model, face_detection_interpreter, gpu_delegate_ptr)) {
+        if (!loadModel(face_detection_path, face_detection_model, face_detection_interpreter, gpu_delegate_ptr, xnnpack_fd_ptr)) {
             return false;
         }
         if (gpu_delegate_face_detection != nullptr) {
             gpu_success_count++;
         }
 #else
-        if (!loadModel(face_detection_path, face_detection_model, face_detection_interpreter)) {
+        if (!loadModel(face_detection_path, face_detection_model, face_detection_interpreter, nullptr, xnnpack_fd_ptr)) {
             return false;
         }
 #endif
@@ -580,17 +640,22 @@ public:
         std::string face_landmark_v2_path = (base / "face_landmark_v2.tflite").string();
         std::string face_landmark_v1_path = (base / REQUIRED_MODELS[1]).string();
 
+#ifdef IRIS_SDK_HAS_XNNPACK
+        TfLiteDelegate** xnnpack_fl_ptr = &xnnpack_delegate_face_landmark;
+#else
+        TfLiteDelegate** xnnpack_fl_ptr = nullptr;
+#endif
 #if IRIS_SDK_GPU_ENABLED
         TfLiteDelegate** fl_gpu_ptr = gpu_enabled ? &gpu_delegate_face_landmark : nullptr;
         if (std::filesystem::exists(face_landmark_v2_path) &&
-            loadModel(face_landmark_v2_path, face_landmark_model, face_landmark_interpreter, fl_gpu_ptr)) {
+            loadModel(face_landmark_v2_path, face_landmark_model, face_landmark_interpreter, fl_gpu_ptr, xnnpack_fl_ptr)) {
             // V2 모델 로드 성공
             model_version = 2;
             std::fprintf(stderr, "[INFO] Face Landmark V2 model loaded (256x256, 478 landmarks)\n");
             if (gpu_delegate_face_landmark != nullptr) {
                 gpu_success_count++;
             }
-        } else if (loadModel(face_landmark_v1_path, face_landmark_model, face_landmark_interpreter, fl_gpu_ptr)) {
+        } else if (loadModel(face_landmark_v1_path, face_landmark_model, face_landmark_interpreter, fl_gpu_ptr, xnnpack_fl_ptr)) {
             // V1 모델로 폴백
             model_version = 1;
             std::fprintf(stderr, "[INFO] Face Landmark V1 model loaded (192x192, 468 landmarks)\n");
@@ -602,11 +667,11 @@ public:
         }
 #else
         if (std::filesystem::exists(face_landmark_v2_path) &&
-            loadModel(face_landmark_v2_path, face_landmark_model, face_landmark_interpreter)) {
+            loadModel(face_landmark_v2_path, face_landmark_model, face_landmark_interpreter, nullptr, xnnpack_fl_ptr)) {
             // V2 모델 로드 성공
             model_version = 2;
             std::fprintf(stderr, "[INFO] Face Landmark V2 model loaded (256x256, 478 landmarks)\n");
-        } else if (loadModel(face_landmark_v1_path, face_landmark_model, face_landmark_interpreter)) {
+        } else if (loadModel(face_landmark_v1_path, face_landmark_model, face_landmark_interpreter, nullptr, xnnpack_fl_ptr)) {
             // V1 모델로 폴백
             model_version = 1;
             std::fprintf(stderr, "[INFO] Face Landmark V1 model loaded (192x192, 468 landmarks)\n");
@@ -629,16 +694,21 @@ public:
         // ========================================
         if (model_version == 1) {
             std::string iris_landmark_path = (base / REQUIRED_MODELS[2]).string();
+#ifdef IRIS_SDK_HAS_XNNPACK
+            TfLiteDelegate** xnnpack_il_ptr = &xnnpack_delegate_iris_landmark;
+#else
+            TfLiteDelegate** xnnpack_il_ptr = nullptr;
+#endif
 #if IRIS_SDK_GPU_ENABLED
             TfLiteDelegate** il_gpu_ptr = gpu_enabled ? &gpu_delegate_iris_landmark : nullptr;
-            if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter, il_gpu_ptr)) {
+            if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter, il_gpu_ptr, xnnpack_il_ptr)) {
                 return false;
             }
             if (gpu_delegate_iris_landmark != nullptr) {
                 gpu_success_count++;
             }
 #else
-            if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter)) {
+            if (!loadModel(iris_landmark_path, iris_landmark_model, iris_landmark_interpreter, nullptr, xnnpack_il_ptr)) {
                 return false;
             }
 #endif
@@ -700,12 +770,83 @@ public:
     }
 
     /**
+     * @brief XNNPACK delegate 리소스 해제
+     */
+    void releaseXnnpackDelegates() {
+#ifdef IRIS_SDK_HAS_XNNPACK
+        auto release = [](TfLiteDelegate*& d) {
+            if (d != nullptr) {
+                TfLiteXNNPackDelegateDelete(d);
+                d = nullptr;
+            }
+        };
+        release(xnnpack_delegate_face_detection);
+        release(xnnpack_delegate_face_landmark);
+        release(xnnpack_delegate_iris_landmark);
+#endif
+    }
+
+    /**
+     * @brief GPU Delegate warm-up: 더미 추론으로 셰이더 사전 컴파일
+     *
+     * GPU Delegate는 첫 추론 시 GPU 셰이더 컴파일이 발생하여
+     * 100-500ms 지연이 생긴다. 초기화 단계에서 더미 입력으로
+     * 1회 추론하여 셰이더를 미리 컴파일한다.
+     */
+    void warmupGpuDelegates() {
+#if IRIS_SDK_GPU_ENABLED
+        std::fprintf(stderr, "[IrisSDK] GPU warm-up starting...\n");
+
+        // Face Detection warm-up
+        if (face_detection_interpreter) {
+            float* input = face_detection_interpreter->typed_input_tensor<float>(0);
+            if (input) {
+                const int fd_size = FACE_DETECTION_INPUT_WIDTH *
+                                    FACE_DETECTION_INPUT_HEIGHT *
+                                    FACE_DETECTION_INPUT_CHANNELS;
+                std::memset(input, 0, fd_size * sizeof(float));
+                face_detection_interpreter->Invoke();
+            }
+        }
+
+        // Face Landmark warm-up
+        if (face_landmark_interpreter) {
+            float* input = face_landmark_interpreter->typed_input_tensor<float>(0);
+            if (input) {
+                const int fl_w = (model_version == 2) ?
+                    FACE_LANDMARK_V2_INPUT_WIDTH : FACE_LANDMARK_INPUT_WIDTH;
+                const int fl_h = (model_version == 2) ?
+                    FACE_LANDMARK_V2_INPUT_HEIGHT : FACE_LANDMARK_INPUT_HEIGHT;
+                const int fl_size = fl_w * fl_h * FACE_LANDMARK_INPUT_CHANNELS;
+                std::memset(input, 0, fl_size * sizeof(float));
+                face_landmark_interpreter->Invoke();
+            }
+        }
+
+        // Iris Landmark warm-up (V1 전용)
+        if (model_version == 1 && iris_landmark_interpreter) {
+            float* input = iris_landmark_interpreter->typed_input_tensor<float>(0);
+            if (input) {
+                const int iris_size = IRIS_LANDMARK_INPUT_WIDTH *
+                                      IRIS_LANDMARK_INPUT_HEIGHT *
+                                      IRIS_LANDMARK_INPUT_CHANNELS;
+                std::memset(input, 0, iris_size * sizeof(float));
+                iris_landmark_interpreter->Invoke();
+            }
+        }
+
+        std::fprintf(stderr, "[IrisSDK] GPU warm-up completed\n");
+#endif  // IRIS_SDK_GPU_ENABLED
+    }
+
+    /**
      * @brief 모든 TFLite 리소스 해제
      */
     void releaseAllModels() {
-        // 인터프리터 해제 전에 GPU delegate 해제
+        // 인터프리터 해제 전에 delegate 해제
         // (delegate는 interpreter보다 먼저 해제해야 함)
         releaseGpuDelegates();
+        releaseXnnpackDelegates();
 
         face_detection_interpreter.reset();
         face_landmark_interpreter.reset();
@@ -1730,6 +1871,22 @@ public:
         float right_eye_center_x = (right_eye_inner_x + right_eye_outer_x) / 2.0f;
         float right_eye_center_y = (right_eye_inner_y + right_eye_outer_y) / 2.0f;
 
+        // ISS-004 Fix-C: 동적 임계값 (눈 폭 비례)
+        // 고정 임계값 대신 눈 폭의 비율로 계산하여 거리/해상도에 무관하게 동작
+        float left_eye_width = std::sqrt(
+            std::pow(left_eye_inner_x - left_eye_outer_x, 2.0f) +
+            std::pow(left_eye_inner_y - left_eye_outer_y, 2.0f));
+        float right_eye_width = std::sqrt(
+            std::pow(right_eye_inner_x - right_eye_outer_x, 2.0f) +
+            std::pow(right_eye_inner_y - right_eye_outer_y, 2.0f));
+
+        // 동적 임계값: 눈 폭의 50% (홍채는 눈 폭 안에서 움직이므로)
+        // 눈 폭을 구할 수 없으면 고정 임계값 사용
+        float left_threshold = (left_eye_width > 0.001f)
+            ? left_eye_width * 0.5f : max_distance_threshold;
+        float right_threshold = (right_eye_width > 0.001f)
+            ? right_eye_width * 0.5f : max_distance_threshold;
+
         // 현재 홍채 중심 위치
         float left_iris_x = left_iris[0];
         float left_iris_y = left_iris[1];
@@ -1746,49 +1903,65 @@ public:
 
         static bool fix_debug_printed = false;
 
-        // 왼쪽 홍채 검증 및 수정
-        if (left_distance > max_distance_threshold) {
+        // ISS-004 Fix-C: 왼쪽 홍채 검증 및 보간(lerp) 보정
+        // 강제 이동 대신 보간하여 시선 추적 정보를 보존
+        if (left_distance > left_threshold) {
             if (!fix_debug_printed) {
                 std::fprintf(stderr, "[DEBUG] Iris position fix (left):\n");
-                std::fprintf(stderr, "  Eye center: (%.4f, %.4f)\n", left_eye_center_x, left_eye_center_y);
+                std::fprintf(stderr, "  Eye center: (%.4f, %.4f), eye_width=%.4f, threshold=%.4f\n",
+                            left_eye_center_x, left_eye_center_y, left_eye_width, left_threshold);
                 std::fprintf(stderr, "  Iris (before): (%.4f, %.4f), distance=%.4f\n",
                             left_iris_x, left_iris_y, left_distance);
             }
-            // 홍채 중심을 눈 중심으로 이동
-            left_iris[0] = left_eye_center_x;
-            left_iris[1] = left_eye_center_y;
-            // 경계점들도 눈 중심 기준으로 조정 (반지름 유지)
-            float offset_x = left_eye_center_x - left_iris_x;
-            float offset_y = left_eye_center_y - left_iris_y;
+            // 보간 비율: 임계값 초과량에 비례하여 눈 중심으로 당김
+            // distance가 threshold의 2배이면 t=0.5 (50% 보정), 매우 크면 t→1.0 (완전 보정)
+            float excess = (left_distance - left_threshold) / left_threshold;
+            float t = std::min(excess / 2.0f, 1.0f);  // 0 ~ 1 범위로 클램핑
+
+            float new_x = left_iris_x + t * (left_eye_center_x - left_iris_x);
+            float new_y = left_iris_y + t * (left_eye_center_y - left_iris_y);
+
+            float offset_x = new_x - left_iris_x;
+            float offset_y = new_y - left_iris_y;
+            left_iris[0] = new_x;
+            left_iris[1] = new_y;
+            // 경계점들도 동일하게 이동 (반지름 유지)
             for (int i = 1; i < IRIS_LANDMARK_COUNT; ++i) {
                 left_iris[i * 3 + 0] += offset_x;
                 left_iris[i * 3 + 1] += offset_y;
             }
             if (!fix_debug_printed) {
-                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f)\n", left_iris[0], left_iris[1]);
+                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f), lerp_t=%.3f\n",
+                            left_iris[0], left_iris[1], t);
             }
         }
 
-        // 오른쪽 홍채 검증 및 수정
-        if (right_distance > max_distance_threshold) {
+        // ISS-004 Fix-C: 오른쪽 홍채 검증 및 보간(lerp) 보정
+        if (right_distance > right_threshold) {
             if (!fix_debug_printed) {
                 std::fprintf(stderr, "[DEBUG] Iris position fix (right):\n");
-                std::fprintf(stderr, "  Eye center: (%.4f, %.4f)\n", right_eye_center_x, right_eye_center_y);
+                std::fprintf(stderr, "  Eye center: (%.4f, %.4f), eye_width=%.4f, threshold=%.4f\n",
+                            right_eye_center_x, right_eye_center_y, right_eye_width, right_threshold);
                 std::fprintf(stderr, "  Iris (before): (%.4f, %.4f), distance=%.4f\n",
                             right_iris_x, right_iris_y, right_distance);
             }
-            // 홍채 중심을 눈 중심으로 이동
-            right_iris[0] = right_eye_center_x;
-            right_iris[1] = right_eye_center_y;
-            // 경계점들도 눈 중심 기준으로 조정
-            float offset_x = right_eye_center_x - right_iris_x;
-            float offset_y = right_eye_center_y - right_iris_y;
+            float excess = (right_distance - right_threshold) / right_threshold;
+            float t = std::min(excess / 2.0f, 1.0f);
+
+            float new_x = right_iris_x + t * (right_eye_center_x - right_iris_x);
+            float new_y = right_iris_y + t * (right_eye_center_y - right_iris_y);
+
+            float offset_x = new_x - right_iris_x;
+            float offset_y = new_y - right_iris_y;
+            right_iris[0] = new_x;
+            right_iris[1] = new_y;
             for (int i = 1; i < IRIS_LANDMARK_COUNT; ++i) {
                 right_iris[i * 3 + 0] += offset_x;
                 right_iris[i * 3 + 1] += offset_y;
             }
             if (!fix_debug_printed) {
-                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f)\n", right_iris[0], right_iris[1]);
+                std::fprintf(stderr, "  Iris (after): (%.4f, %.4f), lerp_t=%.3f\n",
+                            right_iris[0], right_iris[1], t);
             }
         }
 
@@ -1952,6 +2125,14 @@ bool MediaPipeDetector::initialize(const std::string& model_path) {
     // 성능 최적화: 사전 할당 버퍼 초기화
     impl_->initializeBuffers();
     impl_->resetTrackingCache();
+#endif
+
+    // GPU Delegate warm-up: 더미 추론으로 셰이더 사전 컴파일
+    // 첫 프레임 지연(100-500ms)을 초기화 단계로 이전
+#if IRIS_SDK_GPU_ENABLED
+    if (impl_->gpu_active) {
+        impl_->warmupGpuDelegates();
+    }
 #endif
 
     impl_->model_path = model_path;

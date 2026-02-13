@@ -10,6 +10,7 @@
 package com.irislenssdk.demo.camera.gpu
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
@@ -19,6 +20,7 @@ import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
 import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisResult
+import com.irislenssdk.LensConfig
 import java.util.concurrent.Executors
 
 /**
@@ -50,6 +52,13 @@ class CameraGLView @JvmOverloads constructor(
         set(value) {
             field = value
             glRenderer.onGpuInitialized = value
+        }
+
+    // GPU FPS 업데이트 콜백
+    var onGpuFpsUpdated: ((Int) -> Unit)? = null
+        set(value) {
+            field = value
+            glRenderer.onGpuFpsUpdated = value
         }
 
     // 펜딩 SurfaceRequest (GL 초기화 전 Preview.setSurfaceProvider 호출 시)
@@ -175,6 +184,77 @@ class CameraGLView @JvmOverloads constructor(
     fun setFrameRotation(rotation: Int) {
         queueEvent {
             glRenderer.setFrameRotation(rotation)
+        }
+    }
+
+    /**
+     * 렌즈 설정
+     */
+    fun setLensConfig(config: LensConfig) {
+        queueEvent {
+            glRenderer.setLensConfig(config)
+        }
+    }
+
+    /**
+     * 렌즈 활성화/비활성화
+     */
+    fun setLensEnabled(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setLensEnabled(enabled)
+        }
+    }
+
+    /**
+     * 렌즈 텍스처 설정 (비트맵)
+     */
+    fun setLensTexture(bitmap: Bitmap?) {
+        queueEvent {
+            glRenderer.setLensTexture(bitmap)
+        }
+    }
+
+    /**
+     * LUT 3D 텍스처 설정 (임의 스레드에서 호출 가능 — 내부에서 GL 스레드로 큐잉)
+     *
+     * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)
+     */
+    fun setLut3dTexture(textureId: Int) {
+        queueEvent {
+            glRenderer.setLut3dTexture(textureId)
+        }
+    }
+
+    /**
+     * LUT 3D 텍스처 설정 (GL 스레드 직접 호출 전용 — 이중 큐잉 방지)
+     * queueEvent 블록 안에서 호출할 때 사용합니다.
+     */
+    fun setLut3dTextureDirect(textureId: Int) {
+        glRenderer.setLut3dTexture(textureId)
+    }
+
+    /**
+     * LUT 필터 활성화/비활성화 (임의 스레드에서 호출 가능)
+     */
+    fun setLutEnabled(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setLutEnabled(enabled)
+        }
+    }
+
+    /**
+     * LUT 필터 활성화/비활성화 (GL 스레드 직접 호출 전용)
+     */
+    fun setLutEnabledDirect(enabled: Boolean) {
+        glRenderer.setLutEnabled(enabled)
+    }
+
+    /**
+     * LUT 필터 강도 설정 (0.0 ~ 1.0)
+     */
+    fun setLutIntensity(intensity: Float) {
+        queueEvent {
+            glRenderer.setLutIntensity(intensity)
         }
     }
 

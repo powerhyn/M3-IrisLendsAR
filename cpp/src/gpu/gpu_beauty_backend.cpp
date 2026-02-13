@@ -13,11 +13,13 @@
 #include "iris_sdk/gpu/gles_render_context.h"
 #include <android/log.h>
 #define LOG_TAG "GPUBeautyBackend"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #include <cstdio>
+#define LOGD(...) printf("[GPUBeautyBackend DEBUG] " __VA_ARGS__); printf("\n")
 #define LOGI(...) printf("[GPUBeautyBackend INFO] " __VA_ARGS__); printf("\n")
 #define LOGW(...) printf("[GPUBeautyBackend WARN] " __VA_ARGS__); printf("\n")
 #define LOGE(...) printf("[GPUBeautyBackend ERROR] " __VA_ARGS__); printf("\n")
@@ -35,6 +37,7 @@ extern const char* WHITENING_FRAGMENT;
 extern const char* COLOR_BALANCE_FRAGMENT;
 extern const char* SOFT_FOCUS_FRAGMENT;
 extern const char* MASKING_FRAGMENT;
+extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
 }
 
 GPUBeautyBackend::GPUBeautyBackend() = default;
@@ -107,6 +110,27 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
 
     // Uniform Location 캐싱 (성능 최적화)
     cacheUniformLocations();
+
+#if IRIS_SDK_GPU_AVAILABLE
+    // Neutral 1x1x1 identity 3D LUT 생성 (sampler3D fallback)
+    // LUT OFF 시 glBindTexture(GL_TEXTURE_3D, 0) 대신 바인딩하여
+    // 드라이버 의존적 불안정을 방지
+    {
+        glGenTextures(1, &neutral_lut_texture_);
+        glBindTexture(GL_TEXTURE_3D, neutral_lut_texture_);
+        // Identity: RGB 그대로 반환 (R=1, G=1, B=1, A=1)
+        const uint8_t identity_data[4] = {255, 255, 255, 255};
+        glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, identity_data);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_3D, 0);
+        LOGI("Neutral 1x1x1 identity LUT created: id=%u", neutral_lut_texture_);
+    }
+#endif
 
     initialized_ = true;
     LOGI("GPUBeautyBackend initialized successfully");
@@ -233,6 +257,8 @@ void GPUBeautyBackend::cacheUniformLocations() {
     combined_color_uniforms_.uCombinedBrightness = glGetUniformLocation(combined_color_program_, "uBrightness");
     combined_color_uniforms_.uCombinedBalance = glGetUniformLocation(combined_color_program_, "uBalance");
     combined_color_uniforms_.uCombinedWhitening = glGetUniformLocation(combined_color_program_, "uWhitening");
+    combined_color_uniforms_.uCombinedLutTexture = glGetUniformLocation(combined_color_program_, "uLutTexture");
+    combined_color_uniforms_.uCombinedLutIntensity = glGetUniformLocation(combined_color_program_, "uLutIntensity");
 
     LOGI("Uniform locations cached successfully");
 #endif
@@ -311,6 +337,20 @@ void GPUBeautyBackend::release() {
     }
 #endif
 
+#if IRIS_SDK_GPU_AVAILABLE
+    // GPU 펜스 정리
+    if (previous_fence_ != nullptr) {
+        glDeleteSync(previous_fence_);
+        previous_fence_ = nullptr;
+    }
+
+    // Neutral LUT 텍스처 해제
+    if (neutral_lut_texture_ != 0) {
+        glDeleteTextures(1, &neutral_lut_texture_);
+        neutral_lut_texture_ = 0;
+    }
+#endif
+
     // 셰이더 해제
     if (shader_manager_) {
         shader_manager_->releaseAll();
@@ -371,26 +411,13 @@ IrisSdkError GPUBeautyBackend::apply(
         return IRIS_SDK_OK;  // 비활성화 시 아무 작업 없음
     }
 
-    // CPU 버퍼 처리는 텍스처 업로드/다운로드가 필요하여 성능이 낮음
-    // 실제 구현에서는 텍스처로 업로드 → 처리 → 다운로드
-    // 여기서는 기본 프레임워크만 구현
-
-#if IRIS_SDK_GPU_AVAILABLE
-    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
-    if (render_context_) {
-        render_context_->makeCurrent();
-    }
-
-    // TODO: 텍스처 업로드 → applyTexture 호출 → 다운로드
-    // 현재는 stub 구현
-
-    LOGW("CPU buffer processing not yet implemented, use applyTexture for GPU processing");
-#endif
+    // CPU 버퍼 경로는 미지원 — CPUBeautyBackend를 사용해야 함
+    LOGW("GPUBeautyBackend::apply() CPU buffer path not supported. Use CPUBeautyBackend instead.");
 
     (void)format;
     (void)roi;
 
-    return IRIS_SDK_OK;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
 }
 
 IrisSdkError GPUBeautyBackend::applyTexture(
@@ -486,7 +513,10 @@ IrisSdkError GPUBeautyBackend::applyTexture(
 
     // 출력 텍스처 핸들 설정
     // 주의: 이 텍스처는 풀에서 관리되므로 사용 후 반환 필요
-    output.native_handle = new GLuint(current_input);
+    // current_input이 가리키는 텍스처는 풀의 TextureInfo가 소유하므로
+    // native_handle은 해당 TextureInfo의 texture_id 주소를 사용
+    TexturePool::TextureInfo* result_info = (current_input == ping->texture_id) ? ping : pong;
+    output.native_handle = &result_info->texture_id;
     output.type = TextureHandle::Type::OpenGLES;
     output.width = width;
     output.height = height;
@@ -696,13 +726,15 @@ void GPUBeautyBackend::applyMasking(
 void GPUBeautyBackend::executeCombinedColorPass(
     GLuint input_tex, GLuint output_fbo,
     int width, int height,
-    float brightness, float balance, float whitening) {
+    float brightness, float balance, float whitening,
+    GLuint lut_texture, float lut_intensity) {
 
 #if IRIS_SDK_GPU_AVAILABLE
+    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+
+#ifndef NDEBUG
     LOGI("CombinedColor: program=%u, fbo=%u, input=%u, brightness=%.2f",
          combined_color_program_, output_fbo, input_tex, brightness);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
 
     // FBO Completeness 체크 (디버깅)
     GLenum fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -714,9 +746,11 @@ void GPUBeautyBackend::executeCombinedColorPass(
     // 텍스처 유효성 확인
     GLboolean isValidTex = glIsTexture(input_tex);
     LOGI("CombinedColor: input_tex=%u valid=%d", input_tex, isValidTex);
+#endif
 
     glUseProgram(combined_color_program_);
 
+#ifndef NDEBUG
     // 프로그램 링크 상태 확인
     GLint linkStatus;
     glGetProgramiv(combined_color_program_, GL_LINK_STATUS, &linkStatus);
@@ -724,6 +758,7 @@ void GPUBeautyBackend::executeCombinedColorPass(
         LOGE("CombinedColor: program link failed!");
         return;
     }
+#endif
 
     // 캐시된 Uniform Location 사용
     glUniform1i(combined_color_uniforms_.uTexture, 0);
@@ -731,22 +766,42 @@ void GPUBeautyBackend::executeCombinedColorPass(
     glUniform1f(combined_color_uniforms_.uCombinedBalance, balance);
     glUniform1f(combined_color_uniforms_.uCombinedWhitening, whitening);
 
-    // GL 에러 체크
-    GLenum glErr = glGetError();
-    if (glErr != GL_NO_ERROR) {
-        LOGE("CombinedColor: GL error after uniforms: 0x%x", glErr);
-    }
+    // LUT: C++ controls activation - if no texture, force intensity to 0
+    float effective_lut_intensity = (lut_texture != 0) ? lut_intensity : 0.0f;
+    glUniform1f(combined_color_uniforms_.uCombinedLutIntensity, effective_lut_intensity);
+
+    // P0-FIX: sampler2D(unit0) / sampler3D(unit1) 충돌 방지
+    // uCombinedLutTexture는 LUT 활성 여부와 관계없이 항상 TEXTURE1에 바인딩.
+    // LUT 비활성 시 uniform 기본값(0)이 TEXTURE0을 가리키면
+    // sampler2D와 sampler3D가 동일 유닛을 공유 → GL_INVALID_OPERATION.
+    glUniform1i(combined_color_uniforms_.uCombinedLutTexture, 1);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
 
+    // TEXTURE1: LUT 텍스처 또는 neutral identity fallback
+    glActiveTexture(GL_TEXTURE1);
+    if (lut_texture != 0 && lut_intensity > 0.01f) {
+        glBindTexture(GL_TEXTURE_3D, lut_texture);
+    } else {
+        // Neutral 1x1x1 identity LUT로 sampler3D 경로 안정화
+        // glBindTexture(GL_TEXTURE_3D, 0) 대신 사용하여 드라이버 호환성 확보
+        glBindTexture(GL_TEXTURE_3D, neutral_lut_texture_);
+    }
+
     renderFullscreenQuad();
 
+    // Cleanup: TEXTURE1 해제
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_3D, 0);
+
+#ifndef NDEBUG
     // 렌더링 후 에러 체크
-    glErr = glGetError();
+    GLenum glErr = glGetError();
     if (glErr != GL_NO_ERROR) {
         LOGE("CombinedColor: GL error after render: 0x%x", glErr);
     }
+#endif
 
     glBindTexture(GL_TEXTURE_2D, 0);
 #else
@@ -757,6 +812,8 @@ void GPUBeautyBackend::executeCombinedColorPass(
     (void)brightness;
     (void)balance;
     (void)whitening;
+    (void)lut_texture;
+    (void)lut_intensity;
 #endif
 }
 
@@ -800,7 +857,9 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     uint32_t* output_texture,
     int width, int height,
     const BeautyFilterConfigV2& config,
-    const IrisResult* detection) {
+    const IrisResult* detection,
+    uint32_t lut_texture_id,
+    float lut_intensity) {
 
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -865,26 +924,32 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         roi.timestamp_ms = detection->timestamp_ms;
 
         if (detection->face_mesh_valid) {
-            BeautyROIManager::computeROI(
-                detection->face_mesh, 478,
-                width, height, config, roi
-            );
+            if (BeautyROIManager::computeROI(
+                    detection->face_mesh, 478,
+                    width, height, config, roi)) {
+                // computeROI outputs normalized (0~1) face_rect → convert to pixel
+                roi.face_rect.x *= width;
+                roi.face_rect.y *= height;
+                roi.face_rect.width *= width;
+                roi.face_rect.height *= height;
+            }
+            // 실패 시 line 871-888의 픽셀 좌표 ROI를 그대로 사용
         }
         roi_ptr = &roi;
     }
 
-    // DEBUG: 텍스처 풀 상태 로깅
-    auto stats_before = texture_pool_->getStats();
-    LOGI("TexturePool BEFORE release: total=%d, in_use=%d, available=%d",
-         stats_before.total_textures, stats_before.in_use, stats_before.available);
-
     // 이전 프레임의 출력 텍스처 반환 (텍스처 풀 관리)
-    // GPU 동기화: 이전 프레임의 렌더링이 완료될 때까지 대기
-    // 이 텍스처들이 아직 GPU에서 사용 중일 수 있음 (renderToScreen의 비동기 커맨드)
+    // GPU 동기화: glFenceSync로 이전 프레임 렌더링 완료 대기 (non-blocking)
     if (previous_output_ping_ != nullptr || previous_output_pong_ != nullptr) {
-        glFinish();  // GPU 동기화 (성능 영향 있음, 디버깅용)
-        LOGI("Releasing previous: ping=%p, pong=%p",
-             (void*)previous_output_ping_, (void*)previous_output_pong_);
+        if (previous_fence_ != nullptr) {
+            // 펜스가 시그널될 때까지 대기 (최대 16ms = 1프레임)
+            GLenum waitResult = glClientWaitSync(previous_fence_, GL_SYNC_FLUSH_COMMANDS_BIT, 16000000);
+            if (waitResult == GL_TIMEOUT_EXPIRED) {
+                LOGW("GPU fence wait timeout - previous frame still rendering");
+            }
+            glDeleteSync(previous_fence_);
+            previous_fence_ = nullptr;
+        }
     }
     if (previous_output_ping_ != nullptr) {
         texture_pool_->releaseTexture(previous_output_ping_);
@@ -895,27 +960,38 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         previous_output_pong_ = nullptr;
     }
 
-    // DEBUG: 해제 후 상태
-    auto stats_after_release = texture_pool_->getStats();
-    LOGI("TexturePool AFTER release: total=%d, in_use=%d, available=%d",
-         stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
+    // 활성 필터 수에 따라 동적으로 텍스처 할당
+    int active_filter_count = 0;
+    if (config.smoothing > 0.01f) active_filter_count++;
+    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
+    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
+    bool needsWhitening = config.whitening > 0.01f;
+    bool needsLut = (lut_texture_id != 0 && lut_intensity > 0.01f);
+    if (needsBrightness || needsBalance || needsWhitening || needsLut) active_filter_count++;
+    if (config.softFocus > 0.01f) active_filter_count++;
 
-    // Ping-Pong 버퍼 획득
-    TexturePool::TextureInfo* ping = nullptr;
-    TexturePool::TextureInfo* pong = nullptr;
-    if (!texture_pool_->acquirePingPongPair(width, height, ping, pong)) {
-        LOGE("Failed to acquire ping-pong buffers! Pool stats: total=%d, in_use=%d, available=%d",
-             stats_after_release.total_textures, stats_after_release.in_use, stats_after_release.available);
-        return IRIS_SDK_UNKNOWN;
+    // 필터 0개: 패스스루 (텍스처 할당 불필요)
+    if (active_filter_count == 0) {
+        *output_texture = input_tex_id;
+        return IRIS_SDK_OK;
     }
 
-    // DEBUG: 획득 후 상태
-    auto stats_after_acquire = texture_pool_->getStats();
-    LOGI("TexturePool AFTER acquire: total=%d, in_use=%d, available=%d",
-         stats_after_acquire.total_textures, stats_after_acquire.in_use, stats_after_acquire.available);
+    // 필터 1개: 단일 텍스처, 2개+: ping-pong 버퍼
+    TexturePool::TextureInfo* ping = nullptr;
+    TexturePool::TextureInfo* pong = nullptr;
 
-    LOGI("PingPong acquired: ping(tex=%u, fbo=%u), pong(tex=%u, fbo=%u), input=%u",
-         ping->texture_id, ping->fbo_id, pong->texture_id, pong->fbo_id, input_tex_id);
+    if (active_filter_count == 1) {
+        ping = texture_pool_->acquireRenderTarget(width, height);
+        if (!ping) {
+            LOGE("Failed to acquire render target");
+            return IRIS_SDK_UNKNOWN;
+        }
+    } else {
+        if (!texture_pool_->acquirePingPongPair(width, height, ping, pong)) {
+            LOGE("Failed to acquire ping-pong buffers");
+            return IRIS_SDK_UNKNOWN;
+        }
+    }
 
     GLuint current_input = input_tex_id;
     TexturePool::TextureInfo* current_output = ping;
@@ -924,6 +1000,63 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     glViewport(0, 0, width, height);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
+
+    // ROI passthrough: scissor 활성화 전에 출력 FBO를 원본으로 채움
+    // → scissor 외부 픽셀이 stale 데이터가 되는 것을 방지
+    if (roi_ptr && roi_ptr->valid) {
+        executeCombinedColorPass(input_tex_id, ping->fbo_id,
+                                 width, height,
+                                 1.0f, 0.0f, 0.0f, 0, 0.0f);
+        if (pong) {
+            executeCombinedColorPass(input_tex_id, pong->fbo_id,
+                                     width, height,
+                                     1.0f, 0.0f, 0.0f, 0, 0.0f);
+        }
+    }
+
+    // ROI glScissor 설정 (교집합 기반 — 프레임 경계를 넘는 ROI에도 안전)
+    bool scissor_active = false;
+    if (roi_ptr && roi_ptr->valid) {
+        // top-left 기준 ROI 사각형
+        int rect_x = static_cast<int>(std::floor(roi_ptr->face_rect.x));
+        int rect_y = static_cast<int>(std::floor(roi_ptr->face_rect.y));
+        int rect_w = static_cast<int>(std::ceil(roi_ptr->face_rect.width));
+        int rect_h = static_cast<int>(std::ceil(roi_ptr->face_rect.height));
+
+        // 프레임 영역 [0, width) × [0, height) 과의 교집합 (Intersection)
+        int intersect_l = std::max(0, rect_x);
+        int intersect_t = std::max(0, rect_y);
+        int intersect_r = std::min(width,  rect_x + rect_w);
+        int intersect_b = std::min(height, rect_y + rect_h);
+
+        int sw = intersect_r - intersect_l;
+        int sh = intersect_b - intersect_t;
+
+        if (sw > 0 && sh > 0) {
+            // GL bottom-left 좌표계로 변환
+            int sx = intersect_l;
+            int sy = height - intersect_b;
+
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(sx, sy, sw, sh);
+            scissor_active = true;
+
+            LOGD("ROI Scissor: (%d, %d, %d, %d) from face_rect(%.1f, %.1f, %.1f, %.1f)",
+                 sx, sy, sw, sh, roi_ptr->face_rect.x, roi_ptr->face_rect.y,
+                 roi_ptr->face_rect.width, roi_ptr->face_rect.height);
+        } else {
+            // roiOnly 정책: 교집합이 비어있으면 필터 처리를 건너뛰고
+            // pre-fill된 원본(passthrough)을 그대로 반환
+            LOGW("ROI Scissor skipped: intersection empty (rect=%d,%d,%d,%d frame=%dx%d)",
+                 rect_x, rect_y, rect_w, rect_h, width, height);
+            *output_texture = current_input;
+            if (ping) { previous_output_ping_ = ping; }
+            if (pong) { previous_output_pong_ = pong; }
+            previous_fence_ = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            return IRIS_SDK_OK;
+        }
+    }
 
     // 필터 체인 실행 (최적화됨 + 프로파일링)
     bool profiling = profiler_ && profiler_->isEnabled();
@@ -935,25 +1068,23 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                              width, height, config);
         if (profiling) profiler_->end("Smoothing");
         current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
+        if (pong) current_output = (current_output == ping) ? pong : ping;
     }
 
-    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
+    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening + LUT)
     //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
-    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
-    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
-    bool needsWhitening = config.whitening > 0.01f;
-
-    if (needsBrightness || needsBalance || needsWhitening) {
+    if (needsBrightness || needsBalance || needsWhitening || needsLut) {
         if (profiling) profiler_->begin("CombinedColor");
         executeCombinedColorPass(current_input, current_output->fbo_id,
                                  width, height,
                                  config.brightness,
                                  config.colorBalance,
-                                 config.whitening);
+                                 config.whitening,
+                                 static_cast<GLuint>(lut_texture_id),
+                                 lut_intensity);
         if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
+        if (pong) current_output = (current_output == ping) ? pong : ping;
     }
 
     // 3. 소프트 포커스 - 단독 패스 (blur 필요)
@@ -965,9 +1096,17 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         current_input = current_output->texture_id;
     }
 
+    // ROI Scissor 해제
+    if (scissor_active) {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
     *output_texture = current_input;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // GPU 펜스 삽입: 현재 프레임 커맨드가 완료될 때 시그널됨
+    previous_fence_ = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
     // Ping-Pong 버퍼를 다음 프레임에서 반환하도록 저장
     // (현재 프레임에서 즉시 반환하면 출력 텍스처가 사라짐)
@@ -979,11 +1118,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     if (profiling) {
         profiler_->frameEnd();
     }
-
-    (void)roi_ptr;  // TODO: ROI 마스킹 적용
 #else
     *output_texture = input_texture;
     (void)detection;
+    (void)lut_texture_id;
+    (void)lut_intensity;
 #endif
 
     return IRIS_SDK_OK;
@@ -1015,34 +1154,18 @@ IrisSdkError GPUBeautyBackend::applyFaceWarp(
         return IRIS_SDK_OK;
     }
 
-#if IRIS_SDK_GPU_AVAILABLE
-    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
-    if (render_context_) {
-        render_context_->makeCurrent();
-    }
+    // Face Warp 미구현 — P4에서 Face Mesh 기반 메시 워핑으로 구현 예정
+    LOGW("GPUBeautyBackend::applyFaceWarp() not supported. Will be implemented in P4.");
 
-    // TODO: Face Warp 셰이더 구현
-    // 현재는 입력 텍스처를 그대로 반환 (stub)
-    // Face Warp는 Face Mesh 랜드마크 기반 메시 워핑이 필요함
-
-    LOGW("Face Warp not yet implemented, returning input texture");
-    *output_texture = input_texture;
-
+    (void)input_texture;
+    (void)output_texture;
     (void)width;
     (void)height;
     (void)slim_face;
     (void)thin_chin;
     (void)enlarge_eyes;
-#else
-    *output_texture = input_texture;
-    (void)width;
-    (void)height;
-    (void)slim_face;
-    (void)thin_chin;
-    (void)enlarge_eyes;
-#endif
 
-    return IRIS_SDK_OK;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
 }
 
 void GPUBeautyBackend::releaseTexture(uint32_t texture) {
@@ -1053,21 +1176,18 @@ void GPUBeautyBackend::releaseTexture(uint32_t texture) {
     }
 
 #if IRIS_SDK_GPU_AVAILABLE
-    // GLSurfaceView 모드에서는 이미 EGL 컨텍스트가 바인딩되어 있음
     if (render_context_) {
         render_context_->makeCurrent();
     }
 
-    // 텍스처 풀에서 관리하는 텍스처인지 확인 후 반환
-    if (texture_pool_) {
-        // 텍스처 풀의 텍스처는 직접 삭제하지 않고 풀에 반환
-        // 외부에서 생성한 텍스처는 직접 삭제
-        GLuint tex_id = static_cast<GLuint>(texture);
+    GLuint tex_id = static_cast<GLuint>(texture);
 
-        // 텍스처 풀에 없는 경우에만 직접 삭제
-        // 참고: 실제 구현에서는 풀에서 관리 여부 확인 필요
+    // 풀 관리 텍스처는 풀에 반환, 외부 텍스처만 직접 삭제
+    if (texture_pool_ && texture_pool_->releaseTextureById(tex_id)) {
+        LOGI("Released pool-managed texture %u", tex_id);
+    } else {
         glDeleteTextures(1, &tex_id);
-        LOGI("Released texture %u", tex_id);
+        LOGI("Released external texture %u", tex_id);
     }
 #else
     (void)texture;
