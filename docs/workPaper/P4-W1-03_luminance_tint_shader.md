@@ -3,7 +3,7 @@
 ## 작업 개요
 - **Phase**: P4 (시각적 리얼리즘 — Visual Fidelity)
 - **기간**: 2026-02-13 ~
-- **상태**: ⏳ 대기
+- **상태**: ✅ 구현 완료 — 스모크 테스트 대기
 - **선행 조건**: P4-W1-01 완료 + P4-W1-02 Gate 1 PASS
 - **근거**: 브레인스토밍 Section 8, 10, 11, 13, 16, 17, 19, 22, 26 합의
 
@@ -294,9 +294,37 @@ override fun onResume() {
 2. 다양한 홍채 색상(어두운 갈색, 밝은 갈색, 파란색)에서 범용성 확인
 3. P4-W2-01: Sclera Protection + Contact Shadow 착수
 
+## 실행 내역
+
+### 구현 (2026-02-18)
+
+**수정 파일 4개**:
+
+| # | 파일 | 수정 내용 |
+|---|------|-----------|
+| 1 | `CameraGLRenderer.kt` | GLSL 3개 blend 함수 + `uAvgIrisLum` uniform + EMA 로직 + `resetTemporalState()` |
+| 2 | `CameraGLView.kt` | `setRawIrisLuminance()`, `resetTemporalState()` 프록시 메서드 |
+| 3 | `activity_gpu_render.xml` | RadioGroup+4 RadioButtons → Spinner 위젯 |
+| 4 | `GpuRenderActivity.kt` | Spinner 어댑터(7개 모드) + `sampleIrisLuminanceNv21()` + onResume 리셋 |
+
+**설계 결정 사항**:
+
+1. **GLSL bvec3 회피**: 작업 문서의 SoftLight 공식 `(blend <= vec3(0.5)) ? a : b`는 GLSL ES 3.1에서 bvec3 삼항이 불가. `mix(lo, hi, step(vec3(0.5), blend))` 패턴으로 대체.
+
+2. **Luminance 샘플링 위치 변경**: 작업 문서는 `CameraGLRenderer.setIrisResult()` 내부 샘플링을 명세했으나, 렌더러는 NV21 버퍼 접근 불가. → `GpuRenderActivity.processFrame()`에서 NV21 Y채널 샘플링 후 `CameraGLView.setRawIrisLuminance()` → `queueEvent` → GL 스레드 EMA 업데이트 구조로 변경.
+
+3. **좌표 역변환**: 검출 결과(rotated 좌표계) → NV21(센서 좌표계) 매핑을 위해 회전 역변환 구현 (90°, 180°, 270° 케이스).
+
+4. **Rate Limit 미적용**: `computeAdaptiveScale()` (dt 기반 rate limit)는 이번 구현에서 미적용. 셰이더 측 `clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5)`와 CPU EMA(α=0.1)가 충분한 스무딩 제공. 필요 시 후속 작업에서 추가.
+
+5. **GPU Tier Feature Flag 미적용**: GPU 분류 체계가 아직 없으므로 이번 구현에서 생략. 모든 디바이스에서 3개 모드 모두 사용 가능.
+
+**빌드 결과**: `BUILD SUCCESSFUL in 14s` (첫 시도 통과)
+
 ## 변경 이력
 
 | 날짜 | 내용 |
 |------|------|
 | 2026-02-13 | 작업 계획 문서 작성 |
 | 2026-02-13 | Codex 리뷰 반영: onResume() 리셋 렌더러 위임 명확화, blend 함수 시그니처 통일 |
+| 2026-02-18 | 구현 완료: GLSL 3 blend + uAvgIrisLum EMA + Spinner UI + NV21 luminance 샘플링 |

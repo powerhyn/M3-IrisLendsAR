@@ -291,7 +291,7 @@
 
                     </LinearLayout>
 
-                    <!-- 블렌드 모드 선택 -->
+                    <!-- 블렌드 모드 선택 (7개: Spinner) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -306,47 +306,14 @@
                             android:textColor="@android:color/white"
                             android:textSize="12sp" />
 
-                        <RadioGroup
-                            android:id="@+id/rgBlendMode"
+                        <Spinner
+                            android:id="@+id/spinnerBlendMode"
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="40dp"
                             android:layout_weight="1"
-                            android:orientation="horizontal">
-
-                            <RadioButton
-                                android:id="@+id/rbBlendNormal"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Normal"
-                                android:textColor="@android:color/white"
-                                android:textSize="10sp"
-                                android:checked="true" />
-
-                            <RadioButton
-                                android:id="@+id/rbBlendMultiply"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Multiply"
-                                android:textColor="@android:color/white"
-                                android:textSize="10sp" />
-
-                            <RadioButton
-                                android:id="@+id/rbBlendScreen"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Screen"
-                                android:textColor="@android:color/white"
-                                android:textSize="10sp" />
-
-                            <RadioButton
-                                android:id="@+id/rbBlendOverlay"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Overlay"
-                                android:textColor="@android:color/white"
-                                android:textSize="10sp" />
-
-                        </RadioGroup>
+                            android:background="#44FFFFFF"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
 
                     </LinearLayout>
 

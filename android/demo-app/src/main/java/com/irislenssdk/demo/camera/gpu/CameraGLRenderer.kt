@@ -58,6 +58,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 반경 데드밴드 (정규화 좌표 기준, detH=1920 시 ~0.5px)
         private const val RADIUS_DEADBAND = 0.0003f
 
+        // 얼굴 미검출 시 avgIrisLum 유지 → 기본값 리셋 타임아웃 (P4-W1-03)
+        private const val FACE_INVALID_TIMEOUT_MS = 2000L
+
         // 눈꺼풀 경계 페더링 범위 (픽셀 기반 동적 계산)
         private const val EYELID_FEATHER_MIN_PX = 2.0f
         private const val EYELID_FEATHER_MAX_PX = 6.0f
@@ -165,7 +168,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform float uOpacity;         // 투명도 (0~1)
             uniform float uLensScale;       // 크기 배율 (uScale은 vertex shader에서 사용됨)
             uniform float uEdgeFeather;     // 가장자리 페더링
-            uniform int uBlendMode;         // 블렌드 모드 (0=Normal, 1=Multiply, 2=Screen, 3=Overlay)
+            uniform int uBlendMode;         // 블렌드 모드 (0-6: Normal/Multiply/Screen/Overlay/LumTint/LumTintLinear/SoftLight)
             uniform int uApplyLeft;         // 왼쪽 눈 적용 여부
             uniform int uApplyRight;        // 오른쪽 눈 적용 여부
             uniform float uFrameAspect;     // 프레임 비율 (width / height)
@@ -176,6 +179,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform float uRightEyeTop;     // 오른쪽 눈 상단 Y
             uniform float uRightEyeBottom;  // 오른쪽 눈 하단 Y
             uniform float uEyelidFeather;   // 눈꺼풀 경계 페더링 (동적, 픽셀 기반)
+            uniform float uAvgIrisLum;      // 홍채 평균 밝기 (CPU EMA, 0.0~1.0)
 
             in vec2 vTexCoord;
             out vec4 fragColor;
@@ -202,6 +206,38 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                         result[i] = 1.0 - 2.0 * (1.0 - base[i]) * (1.0 - blend[i]);
                     }
                 }
+                return mix(base, result, opacity);
+            }
+
+            // Fast linearization helpers (pow(2.2) 대비 ~3-5x 빠름)
+            vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
+            vec3 toSRGBFast(vec3 linear) { return sqrt(max(linear, vec3(0.0))); }
+
+            // Mode 4: Luminance-preserving color tint (sRGB 근사)
+            vec3 blendLuminanceTint(vec3 base, vec3 blend, float opacity) {
+                float lum = dot(base, vec3(0.299, 0.587, 0.114));
+                float scale = clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5);
+                vec3 tinted = blend * lum * scale;
+                return mix(base, tinted, opacity);
+            }
+
+            // Mode 5: Luminance-preserving color tint (fast linear space + specular 복원)
+            vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
+                vec3 baseL = toLinearFast(base);
+                float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
+                float scale = clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5);
+                vec3 tinted = toLinearFast(blend) * lum * scale;
+                vec3 result = mix(baseL, tinted, opacity);
+                float realSpec = smoothstep(0.7, 0.95, lum);
+                result = mix(result, baseL, realSpec);
+                return toSRGBFast(result);
+            }
+
+            // Mode 6: Photoshop Soft Light
+            vec3 blendSoftLight(vec3 base, vec3 blend, float opacity) {
+                vec3 lo = base - (1.0 - 2.0 * blend) * base * (1.0 - base);
+                vec3 hi = base + (2.0 * blend - 1.0) * (sqrt(base) - base);
+                vec3 result = mix(lo, hi, step(vec3(0.5), blend));
                 return mix(base, result, opacity);
             }
 
@@ -251,8 +287,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                     blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
                 } else if (uBlendMode == 2) {
                     blended = blendScreen(camera.rgb, lens.rgb, finalAlpha);
-                } else {
+                } else if (uBlendMode == 3) {
                     blended = blendOverlay(camera.rgb, lens.rgb, finalAlpha);
+                } else if (uBlendMode == 4) {
+                    blended = blendLuminanceTint(camera.rgb, lens.rgb, finalAlpha);
+                } else if (uBlendMode == 5) {
+                    blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
+                } else {
+                    blended = blendSoftLight(camera.rgb, lens.rgb, finalAlpha);
                 }
 
                 return vec4(blended, camera.a);
@@ -317,6 +359,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uRightEyeTopLocation: Int = -1
     private var uRightEyeBottomLocation: Int = -1
     private var uEyelidFeatherLocation: Int = -1
+    private var uAvgIrisLumLocation: Int = -1
 
     // 풀스크린 쿼드 VAO/VBO
     private var quadVao: Int = 0
@@ -387,6 +430,10 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var cachedRightEyeTop: Float = 0.0f
     private var cachedRightEyeBottom: Float = 1.0f
     private var eyelidCacheValidFrames: Int = 0  // 캐시 유효 잔여 프레임 수
+
+    // === Adaptive Iris Luminance: EMA (P4-W1-03) ===
+    private var avgIrisLum = 0.35f           // EMA 평균 (어두운 홍채 기본값, 한국인 평균 근사)
+    private var lastValidFaceTimeMs = 0L
 
     // 렌즈 설정
     private var lensConfig: LensConfig = LensConfig()
@@ -461,6 +508,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uRightEyeTopLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeTop")
         uRightEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeBottom")
         uEyelidFeatherLocation = GLES31.glGetUniformLocation(lensProgram, "uEyelidFeather")
+        uAvgIrisLumLocation = GLES31.glGetUniformLocation(lensProgram, "uAvgIrisLum")
 
         // 풀스크린 쿼드 설정
         setupFullscreenQuad()
@@ -758,6 +806,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(uLensBlendModeLocation, lensConfig.blendMode)
         GLES31.glUniform1i(uApplyLeftLocation, if (lensConfig.applyLeft) 1 else 0)
         GLES31.glUniform1i(uApplyRightLocation, if (lensConfig.applyRight) 1 else 0)
+        GLES31.glUniform1f(uAvgIrisLumLocation, avgIrisLum)
 
         // 프레임 비율 전달
         val frameAspect = detW.toFloat() / detHf
@@ -1123,6 +1172,35 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setIrisResult(result: IrisResult?) {
         this.irisResult = result
+    }
+
+    /**
+     * 홍채 평균 밝기 업데이트 (EMA α=0.1)
+     *
+     * CPU 측에서 NV21 Y채널 샘플링 후 호출.
+     * @param rawLuminance 0.0~1.0 범위의 원시 밝기 (미검출 시 음수)
+     */
+    fun updateAvgIrisLum(rawLuminance: Float) {
+        val currentTimeMs = System.currentTimeMillis()
+        if (rawLuminance >= 0f) {
+            lastValidFaceTimeMs = currentTimeMs
+            avgIrisLum = avgIrisLum * 0.9f + rawLuminance * 0.1f
+            avgIrisLum = avgIrisLum.coerceIn(0.05f, 0.95f)
+        } else {
+            // Hold: 미검출 시 마지막 유효값 유지, 타임아웃 시 기본값 리셋
+            if (currentTimeMs - lastValidFaceTimeMs > FACE_INVALID_TIMEOUT_MS) {
+                avgIrisLum = 0.35f
+            }
+        }
+    }
+
+    /**
+     * Temporal 상태 리셋 (onResume 시 호출)
+     *
+     * resume 후 dt 기반 연산의 cold-start 폭주 방지.
+     */
+    fun resetTemporalState() {
+        lastValidFaceTimeMs = 0L
     }
 
     /**
