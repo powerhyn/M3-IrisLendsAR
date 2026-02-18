@@ -133,6 +133,19 @@
             android:backgroundTint="#66666666"
             style="@style/Widget.MaterialComponents.Button.TextButton" />
 
+        <Button
+            android:id="@+id/btnToggleLog"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Log"
+            android:textSize="10sp"
+            android:textAllCaps="false"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:minWidth="0dp"
+            android:backgroundTint="#66666666"
+            style="@style/Widget.MaterialComponents.Button.TextButton" />
+
     </LinearLayout>
 
     <!-- 컨트롤 패널 -->

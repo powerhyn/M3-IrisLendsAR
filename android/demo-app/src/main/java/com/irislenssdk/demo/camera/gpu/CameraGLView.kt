@@ -61,6 +61,29 @@ class CameraGLView @JvmOverloads constructor(
             glRenderer.onGpuFpsUpdated = value
         }
 
+    // StabilityLogger 콜백 (P4-W1-02)
+    // M-1 fix: GL 스레드에서만 접근하도록 queueEvent 사용
+    fun setStabilityFrameCallback(callback: ((
+        faceDetected: Boolean,
+        rawLeftCx: Float, rawLeftCy: Float, rawLeftR: Float,
+        filteredLeftCx: Float, filteredLeftCy: Float, filteredLeftR: Float,
+        rawRightCx: Float, rawRightCy: Float, rawRightR: Float,
+        filteredRightCx: Float, filteredRightCy: Float, filteredRightR: Float,
+        eyelidLt: Float, eyelidLb: Float, eyelidRt: Float, eyelidRb: Float,
+        holdActive: Boolean, holdRemaining: Int,
+        renderTimeUs: Long
+    ) -> Unit)?) {
+        queueEvent {
+            glRenderer.onStabilityFrame = callback
+        }
+    }
+
+    fun setStabilityLogEnabled(enabled: Boolean) {
+        queueEvent {
+            glRenderer.stabilityLogEnabled = enabled
+        }
+    }
+
     // 펜딩 SurfaceRequest (GL 초기화 전 Preview.setSurfaceProvider 호출 시)
     private var pendingSurfaceRequest: SurfaceRequest? = null
 

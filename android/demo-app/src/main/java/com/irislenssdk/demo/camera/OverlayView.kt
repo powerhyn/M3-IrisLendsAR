@@ -102,11 +102,12 @@ class OverlayView @JvmOverloads constructor(
         private const val DETECTION_TIMEOUT_MS = 1000L  // 1초 (mesh, debug info 등)
         private const val LENS_PERSISTENCE_TIMEOUT_MS = 2000L  // 2초 (렌즈 전용 - 더 긴 유지)
 
-        // One Euro Filter 파라미터 (빠른 반응 + 약간의 지터 방지)
-        // min_cutoff: 높을수록 반응 빠름 (15.0 = 빠른 반응 + 약간 스무딩)
-        // beta: 높을수록 빠른 움직임에 민감 (0.5 = 좋은 반응성)
-        private const val ONE_EURO_MIN_CUTOFF = 15.0f  // 빠른 반응 + 약간 스무딩
-        private const val ONE_EURO_BETA = 0.5f         // 빠른 반응 유지
+        // One Euro Filter 파라미터
+        // minCutoff: 정지 시 최소 컷오프 주파수. 낮을수록 스무딩 강함.
+        //   15.0 → α≈0.61 (pass-through), 1.5 → α≈0.14 (효과적 스무딩)
+        // beta: 높을수록 이동 시 필터가 빨리 풀림 (빠른 추적)
+        private const val ONE_EURO_MIN_CUTOFF = 3.0f   // 정지 시 스무딩 + 이동 초반 반응성 균형
+        private const val ONE_EURO_BETA = 7.0f         // 이동 시 필터 즉시 해제 수준
         private const val ONE_EURO_D_CUTOFF = 1.0f     // 미분 컷오프 주파수
 
         // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)

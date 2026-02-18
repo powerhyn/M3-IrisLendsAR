@@ -14,6 +14,7 @@ package com.irislenssdk.demo
 import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
+import android.opengl.GLES31
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
@@ -53,6 +54,7 @@ import com.irislenssdk.demo.lens.LensAdapter
 import com.irislenssdk.demo.lens.LensData
 import com.irislenssdk.demo.lens.LensManager
 import com.irislenssdk.demo.lens.NoLens
+import com.irislenssdk.demo.util.StabilityLogger
 import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -86,6 +88,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnToggleMesh: Button
     private lateinit var btnToggleDebug: Button
     private lateinit var btnToggleIris: Button
+    private lateinit var btnToggleLog: Button
 
     // 렌즈 탭 UI
     private lateinit var rvLenses: RecyclerView
@@ -138,6 +141,11 @@ class GpuRenderActivity : AppCompatActivity() {
 
     // 카메라 회전 (한 번만 설정)
     private var lastRotation: Int = -1
+
+    // StabilityLogger (P4-W1-02)
+    private var stabilityLogger: StabilityLogger? = null
+    @Volatile private var gpuTier: String = "UNKNOWN"
+    @Volatile private var gpuRendererName: String = ""
 
     // FPS 계산
     private var frameCount = 0
@@ -206,6 +214,8 @@ class GpuRenderActivity : AppCompatActivity() {
 
         // GPU 초기화 콜백 설정
         cameraGLView.onGpuInitialized = { success ->
+            // GPU tier 판별 (GL 컨텍스트 활성 상태)
+            detectGpuTier()
             runOnUiThread {
                 tvGpuStatus.text = "GPU: Available (init: $success)"
                 Log.d(TAG, "GPU initialized: $success")
@@ -613,6 +623,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnToggleMesh = findViewById(R.id.btnToggleMesh)
         btnToggleDebug = findViewById(R.id.btnToggleDebug)
         btnToggleIris = findViewById(R.id.btnToggleIris)
+        btnToggleLog = findViewById(R.id.btnToggleLog)
 
         // 버튼 상태 업데이트 헬퍼
         fun updateButtonColors() {
@@ -624,6 +635,9 @@ class GpuRenderActivity : AppCompatActivity() {
             )
             btnToggleIris.setTextColor(
                 if (overlayView.showFaceRect) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt()
+            )
+            btnToggleLog.setTextColor(
+                if (stabilityLogger?.isActive == true) 0xFFFF4444.toInt() else 0xFFAAAAAA.toInt()
             )
         }
 
@@ -645,7 +659,77 @@ class GpuRenderActivity : AppCompatActivity() {
             Toast.makeText(this, "Face Rect: ${if (overlayView.showFaceRect) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
 
+        // StabilityLogger 토글 (P4-W1-02)
+        btnToggleLog.setOnClickListener {
+            val logger = stabilityLogger
+            if (logger == null || !logger.isActive) {
+                startStabilityLog()
+            } else {
+                stopStabilityLog()
+            }
+            updateButtonColors()
+        }
+
         updateButtonColors()
+    }
+
+    // === StabilityLogger (P4-W1-02) ===
+
+    private fun detectGpuTier() {
+        cameraGLView.queueEvent {
+            gpuRendererName = GLES31.glGetString(GLES31.GL_RENDERER) ?: ""
+            // "(TM)" 등 상표 표기 제거 후 매칭 (e.g. "Adreno (TM) 740" → "Adreno 740")
+            val normalized = gpuRendererName.replace(Regex("\\s*\\(TM\\)\\s*", RegexOption.IGNORE_CASE), " ").trim()
+            gpuTier = when {
+                normalized.contains("Adreno 7", ignoreCase = true) -> "HIGH"
+                normalized.contains("Adreno 6", ignoreCase = true) -> "MID"
+                normalized.contains("Mali-G7", ignoreCase = true) -> "MID"
+                normalized.contains("Mali-G5", ignoreCase = true) -> "LOW"
+                else -> "MID"
+            }
+            Log.d(TAG, "GPU tier: $gpuTier ($gpuRendererName)")
+        }
+    }
+
+    private fun startStabilityLog() {
+        val logger = StabilityLogger(applicationContext, gpuTier, gpuRendererName)
+        val path = logger.start()
+        if (path != null) {
+            stabilityLogger = logger
+
+            // M-1 fix: queueEvent로 GL 스레드에서 콜백 연결
+            cameraGLView.setStabilityFrameCallback { faceDetected,
+                rawLCx, rawLCy, rawLR, fltLCx, fltLCy, fltLR,
+                rawRCx, rawRCy, rawRR, fltRCx, fltRCy, fltRR,
+                eLt, eLb, eRt, eRb,
+                holdActive, holdRemaining, renderTimeUs ->
+                logger.logFrame(
+                    faceDetected,
+                    rawLCx, rawLCy, rawLR, fltLCx, fltLCy, fltLR,
+                    rawRCx, rawRCy, rawRR, fltRCx, fltRCy, fltRR,
+                    eLt, eLb, eRt, eRb,
+                    holdActive, holdRemaining, renderTimeUs
+                )
+            }
+            cameraGLView.setStabilityLogEnabled(true)
+
+            Toast.makeText(this, "Logging started", Toast.LENGTH_SHORT).show()
+            Log.d(TAG, "StabilityLog started: $path")
+        } else {
+            Toast.makeText(this, "Log start failed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopStabilityLog() {
+        // M-2 fix: GL 스레드에서 먼저 비활성화 후 콜백 해제, 그 다음 writer 정리
+        cameraGLView.setStabilityLogEnabled(false)
+        cameraGLView.setStabilityFrameCallback(null)
+
+        val frames = stabilityLogger?.stop() ?: 0
+        val filePath = stabilityLogger?.getCurrentFilePath()
+
+        Toast.makeText(this, "Logged $frames frames → ${filePath?.substringAfterLast('/')}", Toast.LENGTH_LONG).show()
+        Log.d(TAG, "StabilityLog stopped: $frames frames → $filePath")
     }
 
     private fun initSDK() {
@@ -946,6 +1030,10 @@ class GpuRenderActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // StabilityLogger 정리 (H-1: 파일 누수 + 데이터 손실 방지)
+        if (stabilityLogger?.isActive == true) {
+            stopStabilityLog()
+        }
         super.onDestroy()
         cameraGLView.release()
         lensManager.release()

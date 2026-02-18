@@ -47,10 +47,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         private const val EYELID_HOLD_FRAMES = 5
 
         // One Euro Filter 파라미터 (GL 렌즈 경로용)
-        private const val GL_FILTER_MIN_CUTOFF = 15.0f  // 빠른 반응 + 스무딩
-        private const val GL_FILTER_BETA = 0.5f          // 빠른 움직임 민감도
-        private const val GL_FILTER_BETA_RADIUS = 0.25f  // 반경: 더 부드럽게
-        private const val GL_FILTER_BETA_EYELID = 0.3f   // 눈꺼풀: 중간 스무딩
+        // minCutoff: 정지 시 최소 컷오프 주파수. 낮을수록 스무딩 강함.
+        //   15.0 → α≈0.61 (pass-through), 1.5 → α≈0.14 (효과적 스무딩)
+        private const val GL_FILTER_MIN_CUTOFF = 3.0f    // 정지 시 스무딩 + 이동 초반 반응성 균형
+        private const val GL_FILTER_BETA = 7.0f          // 이동 시 필터 즉시 해제 수준
+        private const val GL_FILTER_BETA_RADIUS = 3.0f   // 반경: 거리 변화 빠른 추적
+        private const val GL_FILTER_BETA_EYELID = 5.0f   // 눈꺼풀: 깜빡임 즉시 반응
         private const val GL_FILTER_D_CUTOFF = 1.0f
 
         // 반경 데드밴드 (정규화 좌표 기준, detH=1920 시 ~0.5px)
@@ -400,6 +402,19 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     var onGpuInitialized: ((Boolean) -> Unit)? = null
     var onGpuFpsUpdated: ((Int) -> Unit)? = null
 
+    // StabilityLogger 콜백 (P4-W1-02: 안정성 측정)
+    var stabilityLogEnabled: Boolean = false
+    var onStabilityFrame: ((
+        faceDetected: Boolean,
+        rawLeftCx: Float, rawLeftCy: Float, rawLeftR: Float,
+        filteredLeftCx: Float, filteredLeftCy: Float, filteredLeftR: Float,
+        rawRightCx: Float, rawRightCy: Float, rawRightR: Float,
+        filteredRightCx: Float, filteredRightCy: Float, filteredRightR: Float,
+        eyelidLt: Float, eyelidLb: Float, eyelidRt: Float, eyelidRb: Float,
+        holdActive: Boolean, holdRemaining: Int,
+        renderTimeUs: Long
+    ) -> Unit)? = null
+
     //=========================================================================
     // GLSurfaceView.Renderer 구현
     //=========================================================================
@@ -504,6 +519,16 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         var currentTexture = rgbaTextureId
         if (lensEnabled && lensImageTextureId != 0 && irisResult?.detected == true) {
             currentTexture = renderLensOverlay(currentTexture)
+        } else if (stabilityLogEnabled && lensEnabled && lensImageTextureId != 0) {
+            // 렌즈 파이프라인 활성 상태에서 검출 실패 시에만 기록
+            // (렌즈 미선택/텍스처 미준비 시에는 기록하지 않음)
+            onStabilityFrame?.invoke(
+                irisResult?.detected ?: false,
+                0f, 0f, 0f, 0f, 0f, 0f,
+                0f, 0f, 0f, 0f, 0f, 0f,
+                0f, 1f, 0f, 1f,
+                eyelidCacheValidFrames > 0, eyelidCacheValidFrames, 0L
+            )
         }
 
         // 3단계: 펜딩 LUT 3D 텍스처 적용 (beauty 호출 전 준비)
@@ -625,6 +650,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * @return 출력 텍스처 ID
      */
     private fun renderLensOverlay(inputTexture: Int): Int {
+        val renderStartNs = if (stabilityLogEnabled) System.nanoTime() else 0L
         val result = irisResult ?: return inputTexture
 
         // 렌즈 FBO가 없으면 생성
@@ -745,6 +771,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1f(uEyelidFeatherLocation, eyelidFeatherNorm)
 
         // === 눈꺼풀 클리핑: 다중 랜드마크 + One Euro Filter ===
+        // StabilityLogger용: 필터 후 눈꺼풀 값 보존
+        var logEyelidLt = 0.0f
+        var logEyelidLb = 1.0f
+        var logEyelidRt = 0.0f
+        var logEyelidRb = 1.0f
+        var logHoldActive = false
+        var logHoldRemaining = 0
+
         val faceMesh = result.faceMesh
         if (result.faceMeshValid && faceMesh != null) {
             // 다중 랜드마크에서 median Y 추출 (노이즈 내성 향상)
@@ -783,6 +817,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glUniform1f(uLeftEyeBottomLocation, leftEyeBottom)
             GLES31.glUniform1f(uRightEyeTopLocation, rightEyeTop)
             GLES31.glUniform1f(uRightEyeBottomLocation, rightEyeBottom)
+
+            logEyelidLt = leftEyeTop
+            logEyelidLb = leftEyeBottom
+            logEyelidRt = rightEyeTop
+            logEyelidRb = rightEyeBottom
         } else if (eyelidCacheValidFrames > 0) {
             // FaceMesh 비유효: temporal hold + 점진적 감쇠(fade)
             eyelidCacheValidFrames--
@@ -793,6 +832,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glUniform1f(uLeftEyeBottomLocation, lerp(1.0f, cachedLeftEyeBottom, fadeAlpha))
             GLES31.glUniform1f(uRightEyeTopLocation, lerp(0.0f, cachedRightEyeTop, fadeAlpha))
             GLES31.glUniform1f(uRightEyeBottomLocation, lerp(1.0f, cachedRightEyeBottom, fadeAlpha))
+
+            logEyelidLt = lerp(0.0f, cachedLeftEyeTop, fadeAlpha)
+            logEyelidLb = lerp(1.0f, cachedLeftEyeBottom, fadeAlpha)
+            logEyelidRt = lerp(0.0f, cachedRightEyeTop, fadeAlpha)
+            logEyelidRb = lerp(1.0f, cachedRightEyeBottom, fadeAlpha)
+            logHoldActive = true
+            logHoldRemaining = eyelidCacheValidFrames
         } else {
             // 캐시 소진: 클리핑 비활성화 (전체 영역 허용)
             GLES31.glUniform1f(uLeftEyeTopLocation, 0.0f)
@@ -806,6 +852,21 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // FBO 언바인딩
         GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+
+        // === StabilityLogger 콜백 (P4-W1-02) ===
+        if (stabilityLogEnabled) {
+            val renderTimeUs = (System.nanoTime() - renderStartNs) / 1000L
+            onStabilityFrame?.invoke(
+                result.detected,
+                leftX, leftY, rawLeftRadius,
+                filteredLeftX, filteredLeftY, filteredLeftR,
+                rightX, rightY, rawRightRadius,
+                filteredRightX, filteredRightY, filteredRightR,
+                logEyelidLt, logEyelidLb, logEyelidRt, logEyelidRb,
+                logHoldActive, logHoldRemaining,
+                renderTimeUs
+            )
+        }
 
         return lensOutputTextureId
     }
