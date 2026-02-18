@@ -982,6 +982,10 @@ class GpuRenderActivity : AppCompatActivity() {
     /**
      * NV21 Y채널에서 홍채 영역 평균 밝기 샘플링
      *
+     * 각 눈을 개별 샘플링 후 밝기값을 평균합니다.
+     * 좌표를 평균하면 두 눈 사이(피부/배경)를 샘플링하게 되므로,
+     * 반드시 개별 샘플링 → 값 평균 순서를 따릅니다.
+     *
      * @return 0.0~1.0 밝기 (미검출 시 -1f)
      */
     private fun sampleIrisLuminanceNv21(
@@ -990,10 +994,29 @@ class GpuRenderActivity : AppCompatActivity() {
     ): Float {
         if (!result.detected || result.frameWidth <= 0 || result.frameHeight <= 0) return -1f
 
-        // 좌/우 홍채 평균 좌표 (정규화)
-        val nx = (result.leftIrisX + result.rightIrisX) / 2f
-        val ny = (result.leftIrisY + result.rightIrisY) / 2f
+        val leftLum = if (result.leftDetected) {
+            samplePointLuminanceNv21(nv21, sensorW, sensorH, result.leftIrisX, result.leftIrisY, rotation)
+        } else -1f
 
+        val rightLum = if (result.rightDetected) {
+            samplePointLuminanceNv21(nv21, sensorW, sensorH, result.rightIrisX, result.rightIrisY, rotation)
+        } else -1f
+
+        return when {
+            leftLum >= 0f && rightLum >= 0f -> (leftLum + rightLum) / 2f
+            leftLum >= 0f -> leftLum
+            rightLum >= 0f -> rightLum
+            else -> -1f
+        }
+    }
+
+    /**
+     * NV21 Y채널에서 단일 홍채 중심의 5점 크로스 샘플링
+     */
+    private fun samplePointLuminanceNv21(
+        nv21: ByteArray, sensorW: Int, sensorH: Int,
+        nx: Float, ny: Float, rotation: Int
+    ): Float {
         // 검출 좌표(회전 후) → 센서 좌표(회전 전) 역변환
         val (sx, sy) = when (rotation) {
             90 -> Pair(ny, 1f - nx)
