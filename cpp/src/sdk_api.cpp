@@ -142,6 +142,8 @@ iris_sdk::BlendMode convert_blend_mode(IrisBlendMode mode) {
             return iris_sdk::BlendMode::LuminanceTintLinear;
         case IRIS_BLEND_SOFT_LIGHT:
             return iris_sdk::BlendMode::SoftLight;
+        case IRIS_BLEND_COLOR_REPLACE:
+            return iris_sdk::BlendMode::ColorReplace;
         default:
             LOGW("Unknown blend mode: %d, falling back to Normal", static_cast<int>(mode));
             return iris_sdk::BlendMode::Normal;

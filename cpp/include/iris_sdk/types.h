@@ -28,7 +28,8 @@ enum class BlendMode : int {
     Overlay = 3,            ///< 오버레이 블렌딩
     LuminanceTint = 4,      ///< 휘도 보존 틴트 (sRGB 근사) @experimental
     LuminanceTintLinear = 5,///< 휘도 보존 틴트 (선형 색공간) @experimental
-    SoftLight = 6           ///< 소프트 라이트 블렌딩 @experimental
+    SoftLight = 6,          ///< 소프트 라이트 블렌딩 @experimental
+    ColorReplace = 7        ///< 색상 교체 블렌딩 (상대 밝기 정규화) @experimental
 };
 
 /**

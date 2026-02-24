@@ -318,6 +318,10 @@ TEST_F(BlendModeTest, EnumValues) {
     EXPECT_EQ(static_cast<int>(BlendMode::Multiply), 1);
     EXPECT_EQ(static_cast<int>(BlendMode::Screen), 2);
     EXPECT_EQ(static_cast<int>(BlendMode::Overlay), 3);
+    EXPECT_EQ(static_cast<int>(BlendMode::LuminanceTint), 4);
+    EXPECT_EQ(static_cast<int>(BlendMode::LuminanceTintLinear), 5);
+    EXPECT_EQ(static_cast<int>(BlendMode::SoftLight), 6);
+    EXPECT_EQ(static_cast<int>(BlendMode::ColorReplace), 7);
 }
 
 // ============================================================

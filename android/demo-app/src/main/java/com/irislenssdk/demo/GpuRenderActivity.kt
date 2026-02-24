@@ -20,11 +20,13 @@ import android.os.Bundle
 import android.util.Log
 import android.util.Size
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -95,7 +97,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var seekLensOpacity: SeekBar
     private lateinit var seekLensScale: SeekBar
     private lateinit var seekLensFeather: SeekBar
-    private lateinit var rgBlendMode: RadioGroup
+    private lateinit var spinnerBlendMode: Spinner
 
     // 뷰티 탭 UI
     private lateinit var btnToggleBeauty: Button
@@ -185,7 +187,7 @@ class GpuRenderActivity : AppCompatActivity() {
         seekLensOpacity = findViewById(R.id.seekLensOpacity)
         seekLensScale = findViewById(R.id.seekLensScale)
         seekLensFeather = findViewById(R.id.seekLensFeather)
-        rgBlendMode = findViewById(R.id.rgBlendMode)
+        spinnerBlendMode = findViewById(R.id.spinnerBlendMode)
 
         // 뷰티 탭 UI
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
@@ -347,17 +349,21 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // 블렌드 모드 선택
-        rgBlendMode.setOnCheckedChangeListener { _, checkedId ->
-            lensConfig.blendMode = when (checkedId) {
-                R.id.rbBlendNormal -> LensConfig.BLEND_NORMAL
-                R.id.rbBlendMultiply -> LensConfig.BLEND_MULTIPLY
-                R.id.rbBlendScreen -> LensConfig.BLEND_SCREEN
-                R.id.rbBlendOverlay -> LensConfig.BLEND_OVERLAY
-                else -> LensConfig.BLEND_NORMAL
+        // 블렌드 모드 선택 (Mode 5 비노출: ISS-005 B-2 존치 판정)
+        val blendModeEntries = arrayOf(
+            "Normal" to 0, "Multiply" to 1, "Screen" to 2, "Overlay" to 3,
+            "Luminance Tint" to 4, "Soft Light" to 6, "Color Replace" to 7
+        )
+        spinnerBlendMode.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item, blendModeEntries.map { it.first }.toTypedArray()
+        )
+        spinnerBlendMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                lensConfig.blendMode = blendModeEntries[position].second
+                cameraGLView.setLensConfig(lensConfig)
+                Log.d(TAG, "Blend mode changed: ${lensConfig.getBlendModeName()}")
             }
-            cameraGLView.setLensConfig(lensConfig)
-            Log.d(TAG, "Blend mode changed: ${lensConfig.getBlendModeName()}")
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 
@@ -884,6 +890,12 @@ class GpuRenderActivity : AppCompatActivity() {
             glIrisResult.copyFrom(irisResult)
             cameraGLView.setIrisResult(glIrisResult)
 
+            // P4-W1-03: 홍채 밝기 샘플링 → EMA (Luminance Tint 블렌드용)
+            val rawLum = sampleIrisLuminanceNv21(
+                nv21, imageProxy.width, imageProxy.height, irisResult, rotation
+            )
+            cameraGLView.setRawIrisLuminance(rawLum)
+
             // Detection Slot 업데이트 (lock-free → GL 스레드에서 읽음)
             if (detectResult == IrisLensSDK.OK) {
                 IrisLensSDK.updateDetectionSlot(irisResult)
@@ -967,6 +979,67 @@ class GpuRenderActivity : AppCompatActivity() {
         return nv21
     }
 
+    /**
+     * NV21 Y채널에서 홍채 영역 평균 밝기 샘플링
+     *
+     * 각 눈을 개별 샘플링 후 밝기값을 평균합니다.
+     * 좌표를 평균하면 두 눈 사이(피부/배경)를 샘플링하게 되므로,
+     * 반드시 개별 샘플링 → 값 평균 순서를 따릅니다.
+     *
+     * @return 0.0~1.0 밝기 (미검출 시 -1f)
+     */
+    private fun sampleIrisLuminanceNv21(
+        nv21: ByteArray, sensorW: Int, sensorH: Int,
+        result: IrisResult, rotation: Int
+    ): Float {
+        if (!result.detected || result.frameWidth <= 0 || result.frameHeight <= 0) return -1f
+
+        val leftLum = if (result.leftDetected) {
+            samplePointLuminanceNv21(nv21, sensorW, sensorH, result.leftIrisX, result.leftIrisY, rotation)
+        } else -1f
+
+        val rightLum = if (result.rightDetected) {
+            samplePointLuminanceNv21(nv21, sensorW, sensorH, result.rightIrisX, result.rightIrisY, rotation)
+        } else -1f
+
+        return when {
+            leftLum >= 0f && rightLum >= 0f -> (leftLum + rightLum) / 2f
+            leftLum >= 0f -> leftLum
+            rightLum >= 0f -> rightLum
+            else -> -1f
+        }
+    }
+
+    /**
+     * NV21 Y채널에서 단일 홍채 중심의 5점 크로스 샘플링
+     */
+    private fun samplePointLuminanceNv21(
+        nv21: ByteArray, sensorW: Int, sensorH: Int,
+        nx: Float, ny: Float, rotation: Int
+    ): Float {
+        // 검출 좌표(회전 후) → 센서 좌표(회전 전) 역변환
+        val (sx, sy) = when (rotation) {
+            90 -> Pair(ny, 1f - nx)
+            180 -> Pair(1f - nx, 1f - ny)
+            270 -> Pair(1f - ny, nx)
+            else -> Pair(nx, ny)
+        }
+
+        val cx = (sx * sensorW).toInt().coerceIn(0, sensorW - 1)
+        val cy = (sy * sensorH).toInt().coerceIn(0, sensorH - 1)
+
+        // Y채널 5점 크로스 샘플링 (center + 4방향)
+        val r = 3.coerceAtMost(minOf(cx, cy, sensorW - 1 - cx, sensorH - 1 - cy))
+        val offsets = intArrayOf(0, 0, 0, -r, 0, r, -r, 0, r, 0) // (dx,dy) 쌍
+        var sum = 0
+        for (i in offsets.indices step 2) {
+            val px = cx + offsets[i]
+            val py = cy + offsets[i + 1]
+            sum += (nv21[py * sensorW + px].toInt() and 0xFF)
+        }
+        return (sum / 5f) / 255f
+    }
+
     private fun updateFps() {
         frameCount++
         val currentTime = System.currentTimeMillis()
@@ -1022,6 +1095,7 @@ class GpuRenderActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         cameraGLView.onResume()
+        cameraGLView.resetTemporalState()  // P4-W1-03: resume jump 방지
     }
 
     override fun onPause() {

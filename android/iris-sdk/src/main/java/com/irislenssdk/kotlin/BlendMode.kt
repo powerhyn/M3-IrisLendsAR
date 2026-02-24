@@ -85,7 +85,17 @@ enum class BlendMode(val value: Int) {
      *
      * @experimental 이 모드는 실험적이며 동작이 변경될 수 있습니다.
      */
-    SOFT_LIGHT(JavaLensConfig.BLEND_SOFT_LIGHT);
+    SOFT_LIGHT(JavaLensConfig.BLEND_SOFT_LIGHT),
+
+    /**
+     * 색상 교체 블렌딩.
+     *
+     * 상대 밝기 정규화로 홍채 질감을 보존하면서 렌즈 색상을 완전히 발현합니다.
+     * 어두운 홍채에서도 렌즈 디자이너 의도대로 색상이 나타납니다.
+     *
+     * @experimental 이 모드는 실험적이며 동작이 변경될 수 있습니다.
+     */
+    COLOR_REPLACE(JavaLensConfig.BLEND_COLOR_REPLACE);
 
     companion object {
         /**

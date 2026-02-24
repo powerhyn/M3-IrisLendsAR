@@ -61,5 +61,6 @@
     "agent-orchestration@claude-code-workflows": true,
     "multi-platform-apps@claude-code-workflows": true,
     "comprehensive-review@claude-code-workflows": true
-  }
+  },
+  "plansDirectory": "./docs/plans"
 }

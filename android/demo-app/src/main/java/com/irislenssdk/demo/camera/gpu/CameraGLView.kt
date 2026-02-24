@@ -84,6 +84,25 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * 홍채 평균 밝기 업데이트 (P4-W1-03: Luminance Tint)
+     * CPU 측 NV21 Y채널 샘플링 결과를 GL 스레드로 전달.
+     */
+    fun setRawIrisLuminance(luminance: Float) {
+        queueEvent {
+            glRenderer.updateAvgIrisLum(luminance)
+        }
+    }
+
+    /**
+     * Temporal 상태 리셋 (onResume 시 호출)
+     */
+    fun resetTemporalState() {
+        queueEvent {
+            glRenderer.resetTemporalState()
+        }
+    }
+
     // 펜딩 SurfaceRequest (GL 초기화 전 Preview.setSurfaceProvider 호출 시)
     private var pendingSurfaceRequest: SurfaceRequest? = null
 

@@ -87,6 +87,13 @@ public class LensConfig {
      */
     public static final int BLEND_SOFT_LIGHT = 6;
 
+    /**
+     * 색상 교체 블렌딩.
+     * 상대 밝기 정규화로 홍채 질감을 보존하면서 렌즈 색상을 완전히 발현합니다.
+     * @experimental 동작이 변경될 수 있습니다.
+     */
+    public static final int BLEND_COLOR_REPLACE = 7;
+
     // ========================================================================
     // 필드 (JNI에서 직접 접근)
     // ========================================================================
@@ -200,7 +207,7 @@ public class LensConfig {
                 && offsetX >= -1.0f && offsetX <= 1.0f
                 && offsetY >= -1.0f && offsetY <= 1.0f
                 && rotation >= -(float) Math.PI && rotation <= (float) Math.PI
-                && blendMode >= BLEND_NORMAL && blendMode <= BLEND_SOFT_LIGHT
+                && blendMode >= BLEND_NORMAL && blendMode <= BLEND_COLOR_REPLACE
                 && edgeFeather >= 0.0f && edgeFeather <= 1.0f;
     }
 
@@ -213,7 +220,7 @@ public class LensConfig {
         offsetX = Math.max(-1.0f, Math.min(1.0f, offsetX));
         offsetY = Math.max(-1.0f, Math.min(1.0f, offsetY));
         rotation = Math.max(-(float) Math.PI, Math.min((float) Math.PI, rotation));
-        blendMode = Math.max(BLEND_NORMAL, Math.min(BLEND_SOFT_LIGHT, blendMode));
+        blendMode = Math.max(BLEND_NORMAL, Math.min(BLEND_COLOR_REPLACE, blendMode));
         edgeFeather = Math.max(0.0f, Math.min(1.0f, edgeFeather));
     }
 
@@ -253,6 +260,8 @@ public class LensConfig {
                 return "LUMINANCE_TINT_LINEAR";
             case BLEND_SOFT_LIGHT:
                 return "SOFT_LIGHT";
+            case BLEND_COLOR_REPLACE:
+                return "COLOR_REPLACE";
             default:
                 return "UNKNOWN";
         }

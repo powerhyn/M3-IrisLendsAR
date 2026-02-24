@@ -166,6 +166,8 @@ class LensManager(private val context: Context) {
             options.inSampleSize = calculateInSampleSize(options, TEXTURE_SIZE, TEXTURE_SIZE)
             options.inJustDecodeBounds = false
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
+            // NOTE: inPremultiplied=false는 createScaledBitmap(Canvas)과 호환 불가
+            // → ISS-005 EXP-A 보정은 셰이더 unpremultiply로 대체
 
             context.assets.open("$LENS_ASSETS_PATH/$fileName").use { stream ->
                 BitmapFactory.decodeStream(stream, null, options)?.let { bitmap ->
