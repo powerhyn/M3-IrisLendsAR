@@ -225,7 +225,8 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
                 vec3 baseL = toLinearFast(base);
                 float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
-                float scale = clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5);
+                float avgLumLinear = uAvgIrisLum * uAvgIrisLum;  // ISS-005 EXP-C: sRGB→linear 근사
+                float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
                 vec3 tinted = toLinearFast(blend) * lum * scale;
                 vec3 result = mix(baseL, tinted, opacity);
                 float realSpec = smoothstep(0.7, 0.95, lum);
