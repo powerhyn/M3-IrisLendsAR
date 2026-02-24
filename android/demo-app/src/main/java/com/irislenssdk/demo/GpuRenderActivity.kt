@@ -349,10 +349,10 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // 블렌드 모드 선택 (Spinner: 7개 모드)
+        // 블렌드 모드 선택 (Spinner: 8개 모드)
         val blendModes = arrayOf(
             "Normal", "Multiply", "Screen", "Overlay",
-            "Luminance Tint", "Lum Tint (Linear)", "Soft Light"
+            "Luminance Tint", "Lum Tint (Linear)", "Soft Light", "Color Replace"
         )
         spinnerBlendMode.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item, blendModes

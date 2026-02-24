@@ -168,7 +168,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform float uOpacity;         // 투명도 (0~1)
             uniform float uLensScale;       // 크기 배율 (uScale은 vertex shader에서 사용됨)
             uniform float uEdgeFeather;     // 가장자리 페더링
-            uniform int uBlendMode;         // 블렌드 모드 (0-6: Normal/Multiply/Screen/Overlay/LumTint/LumTintLinear/SoftLight)
+            uniform int uBlendMode;         // 블렌드 모드 (0-7: Normal/Multiply/Screen/Overlay/LumTint/LumTintLinear/SoftLight/ColorReplace)
             uniform int uApplyLeft;         // 왼쪽 눈 적용 여부
             uniform int uApplyRight;        // 오른쪽 눈 적용 여부
             uniform float uFrameAspect;     // 프레임 비율 (width / height)
@@ -241,6 +241,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 return mix(base, result, opacity);
             }
 
+            // Mode 7: Color Replace (상대 밝기 정규화)
+            vec3 blendColorReplace(vec3 base, vec3 blend, float opacity) {
+                float lum = dot(base, vec3(0.299, 0.587, 0.114));
+                float detail = lum / max(0.01, uAvgIrisLum);
+                detail = clamp(detail, 0.2, 2.5);
+                vec3 colored = blend * detail;
+                return mix(base, colored, opacity);
+            }
+
             // 렌즈 합성 함수 (눈꺼풀 클리핑 포함)
             vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio, float eyeTop, float eyeBottom) {
                 if (irisRadius <= 0.0) return camera;
@@ -293,8 +302,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                     blended = blendLuminanceTint(camera.rgb, lens.rgb, finalAlpha);
                 } else if (uBlendMode == 5) {
                     blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
-                } else {
+                } else if (uBlendMode == 6) {
                     blended = blendSoftLight(camera.rgb, lens.rgb, finalAlpha);
+                } else if (uBlendMode == 7) {
+                    blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha);
+                } else {
+                    blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
                 }
 
                 return vec4(blended, camera.a);

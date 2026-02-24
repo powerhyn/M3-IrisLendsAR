@@ -518,8 +518,8 @@ public:
             case BlendMode::LuminanceTint:
             case BlendMode::LuminanceTintLinear:
             case BlendMode::SoftLight:
-                // GPU 셰이더 전용 모드 (P4-W1-03에서 구현 예정)
-                // CPU 렌더러(Path B)에서는 Normal로 폴백
+            case BlendMode::ColorReplace:
+                // GPU 셰이더 전용 모드 — CPU 렌더러(Path B)에서는 Normal로 폴백
                 [[fallthrough]];
             case BlendMode::Normal:
             default:

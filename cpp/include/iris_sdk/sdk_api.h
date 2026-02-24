@@ -111,7 +111,8 @@ typedef enum IrisBlendMode {
     IRIS_BLEND_OVERLAY = 3,             /**< 오버레이 블렌딩 */
     IRIS_BLEND_LUMINANCE_TINT = 4,      /**< 휘도 보존 틴트 (sRGB 근사) @experimental */
     IRIS_BLEND_LUMINANCE_TINT_LINEAR = 5,/**< 휘도 보존 틴트 (선형 색공간) @experimental */
-    IRIS_BLEND_SOFT_LIGHT = 6           /**< 소프트 라이트 블렌딩 @experimental */
+    IRIS_BLEND_SOFT_LIGHT = 6,          /**< 소프트 라이트 블렌딩 @experimental */
+    IRIS_BLEND_COLOR_REPLACE = 7        /**< 색상 교체 블렌딩 (상대 밝기 정규화) @experimental */
 } IrisBlendMode;
 
 // ============================================================================
