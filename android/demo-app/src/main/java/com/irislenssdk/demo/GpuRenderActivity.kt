@@ -349,17 +349,17 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // 블렌드 모드 선택 (Spinner: 8개 모드)
-        val blendModes = arrayOf(
-            "Normal", "Multiply", "Screen", "Overlay",
-            "Luminance Tint", "Lum Tint (Linear)", "Soft Light", "Color Replace"
+        // 블렌드 모드 선택 (Mode 5 비노출: ISS-005 B-2 존치 판정)
+        val blendModeEntries = arrayOf(
+            "Normal" to 0, "Multiply" to 1, "Screen" to 2, "Overlay" to 3,
+            "Luminance Tint" to 4, "Soft Light" to 6, "Color Replace" to 7
         )
         spinnerBlendMode.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, blendModes
+            this, android.R.layout.simple_spinner_dropdown_item, blendModeEntries.map { it.first }.toTypedArray()
         )
         spinnerBlendMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                lensConfig.blendMode = position
+                lensConfig.blendMode = blendModeEntries[position].second
                 cameraGLView.setLensConfig(lensConfig)
                 Log.d(TAG, "Blend mode changed: ${lensConfig.getBlendModeName()}")
             }
