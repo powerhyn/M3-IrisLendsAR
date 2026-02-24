@@ -166,6 +166,7 @@ class LensManager(private val context: Context) {
             options.inSampleSize = calculateInSampleSize(options, TEXTURE_SIZE, TEXTURE_SIZE)
             options.inJustDecodeBounds = false
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
+            options.inPremultiplied = false  // ISS-005 EXP-A: Straight Alpha 디코딩 (이중 곱셈 방지)
 
             context.assets.open("$LENS_ASSETS_PATH/$fileName").use { stream ->
                 BitmapFactory.decodeStream(stream, null, options)?.let { bitmap ->
