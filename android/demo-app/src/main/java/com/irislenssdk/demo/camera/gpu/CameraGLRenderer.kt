@@ -268,8 +268,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 // 렌즈 텍스처 좌표 계산 (홍채 영역을 렌즈 전체에 매핑)
                 vec2 lensCoord = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
 
-                // 렌즈 텍스처 샘플링
+                // 렌즈 텍스처 샘플링 + unpremultiply (ISS-005 EXP-A)
+                // Android BitmapFactory는 premultiplied alpha로 디코딩하므로
+                // 셰이더에서 straight alpha를 복원하여 이중 곱셈을 방지
                 vec4 lens = texture(uLensTexture, lensCoord);
+                if (lens.a > 0.001) lens.rgb /= lens.a;
 
                 // 가장자리 페더링 (부드러운 경계)
                 float featherStart = 1.0 - uEdgeFeather;
