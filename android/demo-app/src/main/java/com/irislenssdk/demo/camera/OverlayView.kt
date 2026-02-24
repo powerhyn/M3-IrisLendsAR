@@ -106,8 +106,8 @@ class OverlayView @JvmOverloads constructor(
         // minCutoff: 정지 시 최소 컷오프 주파수. 낮을수록 스무딩 강함.
         //   15.0 → α≈0.61 (pass-through), 1.5 → α≈0.14 (효과적 스무딩)
         // beta: 높을수록 이동 시 필터가 빨리 풀림 (빠른 추적)
-        private const val ONE_EURO_MIN_CUTOFF = 3.0f   // 정지 시 스무딩 + 이동 초반 반응성 균형
-        private const val ONE_EURO_BETA = 7.0f         // 이동 시 필터 즉시 해제 수준
+        private const val ONE_EURO_MIN_CUTOFF = 4.0f   // 정지 시 스무딩 + 이동 초반 반응성 균형
+        private const val ONE_EURO_BETA = 15.0f        // 이동 시 필터 즉시 해제 수준
         private const val ONE_EURO_D_CUTOFF = 1.0f     // 미분 컷오프 주파수
 
         // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)

@@ -49,10 +49,10 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // One Euro Filter 파라미터 (GL 렌즈 경로용)
         // minCutoff: 정지 시 최소 컷오프 주파수. 낮을수록 스무딩 강함.
         //   15.0 → α≈0.61 (pass-through), 1.5 → α≈0.14 (효과적 스무딩)
-        private const val GL_FILTER_MIN_CUTOFF = 3.0f    // 정지 시 스무딩 + 이동 초반 반응성 균형
-        private const val GL_FILTER_BETA = 7.0f          // 이동 시 필터 즉시 해제 수준
-        private const val GL_FILTER_BETA_RADIUS = 3.0f   // 반경: 거리 변화 빠른 추적
-        private const val GL_FILTER_BETA_EYELID = 5.0f   // 눈꺼풀: 깜빡임 즉시 반응
+        private const val GL_FILTER_MIN_CUTOFF = 4.0f    // 정지 시 스무딩 + 이동 초반 반응성 균형
+        private const val GL_FILTER_BETA = 15.0f         // 이동 시 필터 즉시 해제 수준
+        private const val GL_FILTER_BETA_RADIUS = 5.0f   // 반경: 거리 변화 빠른 추적
+        private const val GL_FILTER_BETA_EYELID = 12.0f  // 눈꺼풀: 깜빡임 즉시 반응
         private const val GL_FILTER_D_CUTOFF = 1.0f
 
         // 반경 데드밴드 (정규화 좌표 기준, detH=1920 시 ~0.5px)
