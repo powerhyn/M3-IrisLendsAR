@@ -180,6 +180,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform float uRightEyeBottom;  // 오른쪽 눈 하단 Y
             uniform float uEyelidFeather;   // 눈꺼풀 경계 페더링 (동적, 픽셀 기반)
             uniform float uAvgIrisLum;      // 홍채 평균 밝기 (CPU EMA, 0.0~1.0)
+            uniform float uDetH;            // 검출 프레임 높이 (픽셀, shadow depth 계산용)
+
+            // Feature flags (P4-W2-01)
+            uniform int uScleraProtect;     // Sclera-Aware Alpha (0=OFF, 1=ON)
+            uniform int uContactShadow;     // Contact Shadow (0=OFF, 1=ON)
+            uniform float uShadowIntensity; // Shadow 강도 (0.0~0.25)
+            uniform float uMaxDetail;       // Color Replace 홍채 밝기 보정 상한 (0.9~1.2)
 
             in vec2 vTexCoord;
             out vec4 fragColor;
@@ -242,16 +249,52 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 return mix(base, result, opacity);
             }
 
-            // Mode 7: Color Replace (상대 밝기 정규화)
-            vec3 blendColorReplace(vec3 base, vec3 blend, float opacity) {
+            // Mode 7: Color Replace (홍채=빛반사 증폭 허용, 흰자위=최대 원본)
+            vec3 blendColorReplace(vec3 base, vec3 blend, float opacity, float maxDetail) {
                 float lum = dot(base, vec3(0.299, 0.587, 0.114));
                 float detail = lum / max(0.01, uAvgIrisLum);
-                detail = clamp(detail, 0.2, 2.5);
+                detail = clamp(detail, 0.2, maxDetail);
                 vec3 colored = blend * detail;
                 return mix(base, colored, opacity);
             }
 
-            // 렌즈 합성 함수 (눈꺼풀 클리핑 포함)
+            // Sclera-Aware Alpha (P4-W2-01): 흰자위 영역에서 렌즈 alpha 감쇠
+            float calcScleraFactor(vec3 cameraColor) {
+                float brightness = dot(cameraColor, vec3(0.299, 0.587, 0.114));
+                float maxC = max(cameraColor.r, max(cameraColor.g, cameraColor.b));
+                float minC = min(cameraColor.r, min(cameraColor.g, cameraColor.b));
+                float saturation = (maxC - minC) / max(maxC, 1e-4);
+
+                // 흰자위/밝은 피부: 밝고(>0.3) 채도 낮음(<0.3) → 렌즈 alpha 감쇠
+                float brightFactor = smoothstep(0.3, 0.5, brightness);
+                float lowSatFactor = 1.0 - smoothstep(0.1, 0.3, saturation);
+                return brightFactor * lowSatFactor;
+            }
+
+            // Contact Shadow (P4-W2-01): 상안검 경계 아래 부드러운 그림자
+            float calcContactShadow(float fragY, float minY, float eyelidFeather, float eyeOpening) {
+                float shadowDepthPx = 4.0;
+                float shadowDepth = shadowDepthPx / max(uDetH, 1.0);
+                float shadowIntensity = clamp(uShadowIntensity, 0.0, 0.25);
+
+                // shadow는 mask 전이 끝점 이후에서 시작 (이중 감쇠 방지)
+                float shadowZone = smoothstep(
+                    minY + eyelidFeather,
+                    minY + eyelidFeather + shadowDepth,
+                    fragY
+                );
+                float shadowFactor = (1.0 - shadowZone) * shadowIntensity;
+
+                // 눈이 닫히면 shadow 자동 비활성화
+                float shadowEnable = smoothstep(0.015, 0.025, eyeOpening);
+                shadowFactor *= shadowEnable;
+
+                // mask alpha와 곱하여 전이 구간에서 중복 방지
+                float maskAlpha = smoothstep(minY, minY + eyelidFeather, fragY);
+                return shadowFactor * maskAlpha;
+            }
+
+            // 렌즈 합성 함수 (눈꺼풀 클리핑 + Sclera/Shadow 포함)
             vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio, float eyeTop, float eyeBottom) {
                 if (irisRadius <= 0.0) return camera;
 
@@ -292,6 +335,20 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 // 최종 알파 계산 (눈꺼풀 마스크 적용)
                 float finalAlpha = lens.a * uOpacity * edgeAlpha * eyelidMask;
 
+                // Sclera Protection (P4-W2-01): 기하학적 + 색상 기반
+                // irisEdgeDist: 실제 홍채 경계 기준 (1.0 = 경계, >1.0 = 흰자위)
+                float irisEdgeDist = dist * uLensScale;
+                if (uScleraProtect == 1) {
+                    // 기하학적 감쇄: 홍채 경계(0.75)부터 점진적으로 렌즈 투명도 증가
+                    float geomFactor = smoothstep(0.75, 1.0, irisEdgeDist);
+                    float colorFactor = calcScleraFactor(camera.rgb);
+                    float scleraFade = 1.0 - geomFactor * (0.5 + 0.5 * colorFactor);
+                    finalAlpha *= scleraFade;
+                }
+
+                // Color Replace용: 홍채 내부 증폭 허용(uMaxDetail), 경계 밖 흰자위 증폭 차단(1.0)
+                float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
+
                 // 블렌드 모드에 따른 합성
                 vec3 blended;
                 if (uBlendMode == 0) {
@@ -309,9 +366,16 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 } else if (uBlendMode == 6) {
                     blended = blendSoftLight(camera.rgb, lens.rgb, finalAlpha);
                 } else if (uBlendMode == 7) {
-                    blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha);
+                    blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha, maxDetail);
                 } else {
                     blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
+                }
+
+                // Contact Shadow (P4-W2-01): 상안검 아래 그림자
+                if (uContactShadow == 1) {
+                    float eyeOpening = abs(maxY - minY);
+                    float shadow = calcContactShadow(vTexCoord.y, minY, eyelidFeather, eyeOpening);
+                    blended *= (1.0 - shadow);
                 }
 
                 return vec4(blended, camera.a);
@@ -377,6 +441,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uRightEyeBottomLocation: Int = -1
     private var uEyelidFeatherLocation: Int = -1
     private var uAvgIrisLumLocation: Int = -1
+    private var uDetHLocation: Int = -1
+    private var uScleraProtectLocation: Int = -1
+    private var uContactShadowLocation: Int = -1
+    private var uShadowIntensityLocation: Int = -1
+    private var uMaxDetailLocation: Int = -1
 
     // 풀스크린 쿼드 VAO/VBO
     private var quadVao: Int = 0
@@ -456,6 +525,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var lensConfig: LensConfig = LensConfig()
     private var lensEnabled: Boolean = false
 
+    // Feature flags (P4-W2-01: Sclera Protection + Contact Shadow)
+    private var scleraProtectEnabled: Boolean = true   // 기본 ON
+    private var contactShadowEnabled: Boolean = false   // 기본 OFF
+    private var shadowIntensity: Float = 0.15f          // 기본 강도
+    private var maxDetailValue: Float = 1.2f             // 홍채 밝기 보정 상한
+
     // GPU FPS 측정
     private var gpuFrameCount = 0
     private var lastGpuFpsTime = System.nanoTime()
@@ -526,6 +601,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uRightEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeBottom")
         uEyelidFeatherLocation = GLES31.glGetUniformLocation(lensProgram, "uEyelidFeather")
         uAvgIrisLumLocation = GLES31.glGetUniformLocation(lensProgram, "uAvgIrisLum")
+        uDetHLocation = GLES31.glGetUniformLocation(lensProgram, "uDetH")
+        uScleraProtectLocation = GLES31.glGetUniformLocation(lensProgram, "uScleraProtect")
+        uContactShadowLocation = GLES31.glGetUniformLocation(lensProgram, "uContactShadow")
+        uShadowIntensityLocation = GLES31.glGetUniformLocation(lensProgram, "uShadowIntensity")
+        uMaxDetailLocation = GLES31.glGetUniformLocation(lensProgram, "uMaxDetail")
 
         // 풀스크린 쿼드 설정
         setupFullscreenQuad()
@@ -824,6 +904,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(uApplyLeftLocation, if (lensConfig.applyLeft) 1 else 0)
         GLES31.glUniform1i(uApplyRightLocation, if (lensConfig.applyRight) 1 else 0)
         GLES31.glUniform1f(uAvgIrisLumLocation, avgIrisLum)
+        GLES31.glUniform1f(uDetHLocation, detHf)
+        GLES31.glUniform1i(uScleraProtectLocation, if (scleraProtectEnabled) 1 else 0)
+        GLES31.glUniform1i(uContactShadowLocation, if (contactShadowEnabled) 1 else 0)
+        GLES31.glUniform1f(uShadowIntensityLocation, shadowIntensity)
+        GLES31.glUniform1f(uMaxDetailLocation, maxDetailValue)
 
         // 프레임 비율 전달
         val frameAspect = detW.toFloat() / detHf
@@ -1232,6 +1317,28 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setLensEnabled(enabled: Boolean) {
         this.lensEnabled = enabled
+    }
+
+    /**
+     * Sclera Protection 활성화/비활성화 (P4-W2-01)
+     */
+    fun setScleraProtect(enabled: Boolean) {
+        this.scleraProtectEnabled = enabled
+    }
+
+    /**
+     * Contact Shadow 활성화/비활성화 (P4-W2-01)
+     */
+    fun setContactShadow(enabled: Boolean, intensity: Float = 0.15f) {
+        this.contactShadowEnabled = enabled
+        this.shadowIntensity = intensity.coerceIn(0.0f, 0.25f)
+    }
+
+    /**
+     * Color Replace 홍채 밝기 보정 상한 설정 (P4-W2-01)
+     */
+    fun setMaxDetail(value: Float) {
+        this.maxDetailValue = value.coerceIn(0.5f, 1.5f)
     }
 
     /**

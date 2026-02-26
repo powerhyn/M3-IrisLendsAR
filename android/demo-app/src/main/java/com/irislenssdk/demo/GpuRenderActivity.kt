@@ -83,7 +83,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var tvGpuStatus: TextView
     private lateinit var tvLensStatus: TextView
     private lateinit var tabLayout: TabLayout
-    private lateinit var lensTabContent: LinearLayout
+    private lateinit var lensTabContent: ScrollView
     private lateinit var beautyTabContent: ScrollView
 
     // 디버그 버튼
@@ -98,6 +98,10 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var seekLensScale: SeekBar
     private lateinit var seekLensFeather: SeekBar
     private lateinit var spinnerBlendMode: Spinner
+    private lateinit var btnToggleSclera: Button
+    private lateinit var btnToggleShadow: Button
+    private lateinit var seekMaxDetail: SeekBar
+    private lateinit var tvMaxDetailValue: TextView
 
     // 뷰티 탭 UI
     private lateinit var btnToggleBeauty: Button
@@ -188,6 +192,10 @@ class GpuRenderActivity : AppCompatActivity() {
         seekLensScale = findViewById(R.id.seekLensScale)
         seekLensFeather = findViewById(R.id.seekLensFeather)
         spinnerBlendMode = findViewById(R.id.spinnerBlendMode)
+        btnToggleSclera = findViewById(R.id.btnToggleSclera)
+        btnToggleShadow = findViewById(R.id.btnToggleShadow)
+        seekMaxDetail = findViewById(R.id.seekMaxDetail)
+        tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
         // 뷰티 탭 UI
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
@@ -365,6 +373,35 @@ class GpuRenderActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+
+        // Sclera Protection 토글 (P4-W2-01, 기본 ON)
+        var scleraOn = true
+        btnToggleSclera.setOnClickListener {
+            scleraOn = !scleraOn
+            cameraGLView.setScleraProtect(scleraOn)
+            btnToggleSclera.text = if (scleraOn) "Sclera: ON" else "Sclera: OFF"
+            btnToggleSclera.setBackgroundColor(if (scleraOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+        }
+
+        // Contact Shadow 토글 (P4-W2-01, 기본 OFF)
+        var shadowOn = false
+        btnToggleShadow.setOnClickListener {
+            shadowOn = !shadowOn
+            cameraGLView.setContactShadow(shadowOn)
+            btnToggleShadow.text = if (shadowOn) "Shadow: ON" else "Shadow: OFF"
+            btnToggleShadow.setBackgroundColor(if (shadowOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+        }
+
+        // 홍채 밝기 보정 슬라이더 (P4-W2-01, 0.8~1.4 / 0.1 스텝 / 기본 1.2)
+        seekMaxDetail.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val value = 0.8f + progress * 0.1f
+                tvMaxDetailValue.text = String.format("%.1f", value)
+                cameraGLView.setMaxDetail(value)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
     }
 
     private fun setupBeautyControls() {

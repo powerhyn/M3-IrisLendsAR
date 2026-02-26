@@ -191,13 +191,17 @@
             android:layout_height="280dp">
 
             <!-- 렌즈 탭 콘텐츠 -->
-            <LinearLayout
+            <ScrollView
                 android:id="@+id/lensTabContent"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="visible">
+
+              <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="12dp"
-                android:visibility="visible">
+                android:padding="12dp">
 
                 <!-- 렌즈 선택 RecyclerView -->
                 <androidx.recyclerview.widget.RecyclerView
@@ -317,9 +321,77 @@
 
                     </LinearLayout>
 
+                    <!-- Sclera Protection / Contact Shadow 토글 (P4-W2-01) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp">
+
+                        <Button
+                            android:id="@+id/btnToggleSclera"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="4dp"
+                            android:text="Sclera: ON"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:background="#4400CC00" />
+
+                        <Button
+                            android:id="@+id/btnToggleShadow"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="4dp"
+                            android:text="Shadow: OFF"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:background="#44FF0000" />
+
+                    </LinearLayout>
+
+                    <!-- 홍채 밝기 보정 (Color Replace maxDetail) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="밝기"
+                            android:textColor="#CCCCCC"
+                            android:textSize="11sp" />
+
+                        <SeekBar
+                            android:id="@+id/seekMaxDetail"
+                            android:layout_width="0dp"
+                            android:layout_height="32dp"
+                            android:layout_weight="1"
+                            android:layout_marginHorizontal="6dp"
+                            android:max="6"
+                            android:progress="4" />
+
+                        <TextView
+                            android:id="@+id/tvMaxDetailValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="1.2"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp"
+                            android:minWidth="28dp"
+                            android:gravity="end" />
+
+                    </LinearLayout>
+
                 </LinearLayout>
 
-            </LinearLayout>
+              </LinearLayout>
+            </ScrollView>
 
             <!-- 뷰티 탭 콘텐츠 -->
             <ScrollView

@@ -292,6 +292,33 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * Sclera Protection 활성화/비활성화 (P4-W2-01)
+     */
+    fun setScleraProtect(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setScleraProtect(enabled)
+        }
+    }
+
+    /**
+     * Contact Shadow 활성화/비활성화 (P4-W2-01)
+     */
+    fun setContactShadow(enabled: Boolean, intensity: Float = 0.15f) {
+        queueEvent {
+            glRenderer.setContactShadow(enabled, intensity)
+        }
+    }
+
+    /**
+     * Color Replace 홍채 밝기 보정 상한 설정 (P4-W2-01)
+     */
+    fun setMaxDetail(value: Float) {
+        queueEvent {
+            glRenderer.setMaxDetail(value)
+        }
+    }
+
+    /**
      * LUT 필터 강도 설정 (0.0 ~ 1.0)
      */
     fun setLutIntensity(intensity: Float) {
