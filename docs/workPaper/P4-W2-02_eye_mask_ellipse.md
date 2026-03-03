@@ -3,7 +3,7 @@
 ## 작업 개요
 - **Phase**: P4 (시각적 리얼리즘 — Visual Fidelity)
 - **기간**: TBD
-- **상태**: ⏳ 대기
+- **상태**: ✅ 완료
 - **선행 조건**: P4-W2-01 완료 + 렌즈 경계 누출이 여전히 거슬릴 경우 진행
 - **근거**: 브레인스토밍 Section 3, 7, 10, 11, 13 합의
 
@@ -190,3 +190,23 @@ rxOuter = distance(center, outerCorner) × 1.0   // 그대로
 |------|------|
 | 2026-02-13 | 작업 계획 문서 작성 |
 | 2026-02-13 | Codex 리뷰 반영: 역순 smoothstep UB 수정, 내/외안각 인덱스 충돌 해소 |
+| 2026-02-26 | 구현 완료: GLSL 비대칭 타원 SDF + CPU fitEyeEllipse + 12 OneEuro Filter + UI 토글 |
+
+## 실행 내역
+
+### 수정 파일
+| 파일 | 변경 내용 |
+|------|-----------|
+| `CameraGLRenderer.kt` | GLSL: `asymmetricEllipseMask()` 함수, 7 uniforms, feature flag 분기 |
+| `CameraGLRenderer.kt` | Kotlin: `fitEyeEllipse()` (16점→타원 피팅), 12 OneEuro Filter, ellipse 캐시/hold, uniform 전달, `setEllipseMask()` setter |
+| `CameraGLView.kt` | `setEllipseMask()` 래퍼 |
+| `GpuRenderActivity.kt` | Ellipse 토글 버튼 바인딩 + 리스너 |
+| `activity_gpu_render.xml` | Ellipse 토글 버튼 추가 (Sclera/Shadow와 동일 행) |
+| `P4-W2-02_eye_mask_ellipse.md` | 실행 내역 기록 |
+
+### 구현 상세
+1. **GLSL**: `asymmetricEllipseMask(uv, center, radii, rotation, feather)` — 회전 적용 후 내안각/외안각 비대칭 rx 사용, SDF 기반 smoothstep
+2. **CPU fitEyeEllipse**: 16점 mean→중심, inner/outer corner→rotation, 내안각 rx×0.85 (caruncle 보호), 회전 좌표계 maxAbsY→ry
+3. **좌표 변환**: Y-flip + mirror (cx flip, rotation mirror, rxI/rxO swap, 좌우 교환) — eyelid 패턴과 동일
+4. **Temporal hold**: eyelid 캐시와 동일 패턴 (EYELID_HOLD_FRAMES=5), 캐시 소진 시 ry=0 전달하여 셰이더 fallback
+5. **Feature flag**: `uUseEllipseMask` uniform (기본 OFF), UI 토글로 ON/OFF

@@ -71,6 +71,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         private val RIGHT_UPPER_EYELID_INDICES = intArrayOf(386, 385, 384)
         private val RIGHT_LOWER_EYELID_INDICES = intArrayOf(374, 373, 380)
 
+        // 16점 눈 윤곽 랜드마크 (P4-W2-02: 비대칭 타원 Eye Mask)
+        private val LEFT_EYE_CONTOUR_INDICES = intArrayOf(33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7)
+        private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249)
+        private const val LEFT_INNER_CORNER = 33     // 좌안 내안각 (코 쪽)
+        private const val LEFT_OUTER_CORNER = 133    // 좌안 외안각 (귀 쪽)
+        private const val RIGHT_INNER_CORNER = 263   // 우안 내안각 (코 쪽)
+        private const val RIGHT_OUTER_CORNER = 362   // 우안 외안각 (귀 쪽)
+
         // 풀스크린 쿼드 좌표 (NDC + 텍스처 좌표)
         // SurfaceTexture.getTransformMatrix()가 필요한 변환을 포함하므로
         // 텍스처 좌표는 표준 좌표 사용
@@ -188,6 +196,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform float uShadowIntensity; // Shadow 강도 (0.0~0.25)
             uniform float uMaxDetail;       // Color Replace 홍채 밝기 보정 상한 (0.9~1.2)
 
+            // P4-W2-02: 비대칭 타원 Eye Mask
+            uniform int uUseEllipseMask;        // 0=Y-slab, 1=ellipse
+            uniform vec2 uLeftEyeEllipseCenter; // 좌안 타원 중심
+            uniform vec3 uLeftEyeEllipseRadii;  // (rxInner, rxOuter, ry)
+            uniform float uLeftEyeEllipseRot;   // 좌안 회전 (rad)
+            uniform vec2 uRightEyeEllipseCenter;
+            uniform vec3 uRightEyeEllipseRadii;
+            uniform float uRightEyeEllipseRot;
+
             in vec2 vTexCoord;
             out vec4 fragColor;
 
@@ -258,6 +275,21 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 return mix(base, colored, opacity);
             }
 
+            // 비대칭 타원 Eye Mask (P4-W2-02)
+            // 내안각(d.x<0) vs 외안각(d.x>=0)에 다른 반경 적용
+            float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
+                vec2 d = uv - center;
+                // 회전 적용 (inner→outer 축 정렬)
+                float cosR = cos(rotation);
+                float sinR = sin(rotation);
+                d = vec2(d.x * cosR + d.y * sinR, -d.x * sinR + d.y * cosR);
+                // 비대칭 반경: 내안각(d.x<0) = radii.x, 외안각(d.x>=0) = radii.y
+                float rx = (d.x < 0.0) ? radii.x : radii.y;
+                float ry = radii.z;
+                float ellipseDist = length(vec2(d.x / max(rx, 1e-5), d.y / max(ry, 1e-5)));
+                return smoothstep(1.0, 1.0 - feather, ellipseDist);
+            }
+
             // Sclera-Aware Alpha (P4-W2-01): 흰자위 영역에서 렌즈 alpha 감쇠
             float calcScleraFactor(vec3 cameraColor) {
                 float brightness = dot(cameraColor, vec3(0.299, 0.587, 0.114));
@@ -295,7 +327,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             }
 
             // 렌즈 합성 함수 (눈꺼풀 클리핑 + Sclera/Shadow 포함)
-            vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio, float eyeTop, float eyeBottom) {
+            vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
+                           float eyeTop, float eyeBottom,
+                           vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot) {
                 if (irisRadius <= 0.0) return camera;
 
                 // 원형 유지를 위한 좌표 보정 (x를 aspectRatio로 스케일)
@@ -321,16 +355,21 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 float featherStart = 1.0 - uEdgeFeather;
                 float edgeAlpha = smoothstep(1.0, featherStart, dist);
 
-                // 눈꺼풀 클리핑 (Y축 뒤집힘 고려: top < bottom after flip)
+                // 눈꺼풀 클리핑
                 float eyelidFeather = uEyelidFeather;
                 float minY = min(eyeTop, eyeBottom);
                 float maxY = max(eyeTop, eyeBottom);
-                // topClip: minY 아래쪽에서 1.0 (눈 안쪽), minY 위쪽에서 0.0 (눈꺼풀 밖)
-                float topClip = smoothstep(minY - eyelidFeather, minY + eyelidFeather, vTexCoord.y);
-                // bottomClip: maxY 위쪽에서 1.0 (눈 안쪽), maxY 아래쪽에서 0.0 (눈꺼풀 밖)
-                // 주의: smoothstep(edge0, edge1, x)는 edge0 < edge1 필수 (GLSL spec)
-                float bottomClip = 1.0 - smoothstep(maxY - eyelidFeather, maxY + eyelidFeather, vTexCoord.y);
-                float eyelidMask = topClip * bottomClip;
+                float eyelidMask;
+
+                if (uUseEllipseMask == 1 && ellipseRadii.z > 0.0) {
+                    // P4-W2-02: 비대칭 타원 마스크
+                    eyelidMask = asymmetricEllipseMask(vTexCoord, ellipseCenter, ellipseRadii, ellipseRot, eyelidFeather * 3.0);
+                } else {
+                    // 기존 Y-slab 마스킹
+                    float topClip = smoothstep(minY - eyelidFeather, minY + eyelidFeather, vTexCoord.y);
+                    float bottomClip = 1.0 - smoothstep(maxY - eyelidFeather, maxY + eyelidFeather, vTexCoord.y);
+                    eyelidMask = topClip * bottomClip;
+                }
 
                 // 최종 알파 계산 (눈꺼풀 마스크 적용)
                 float finalAlpha = lens.a * uOpacity * edgeAlpha * eyelidMask;
@@ -390,12 +429,16 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
                 // 왼쪽 눈 렌즈 적용
                 if (uApplyLeft == 1 && uLeftIrisRadius > 0.0) {
-                    result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio, uLeftEyeTop, uLeftEyeBottom);
+                    result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio,
+                                       uLeftEyeTop, uLeftEyeBottom,
+                                       uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot);
                 }
 
                 // 오른쪽 눈 렌즈 적용
                 if (uApplyRight == 1 && uRightIrisRadius > 0.0) {
-                    result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio, uRightEyeTop, uRightEyeBottom);
+                    result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio,
+                                       uRightEyeTop, uRightEyeBottom,
+                                       uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot);
                 }
 
                 fragColor = result;
@@ -446,6 +489,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uContactShadowLocation: Int = -1
     private var uShadowIntensityLocation: Int = -1
     private var uMaxDetailLocation: Int = -1
+
+    // P4-W2-02: 비대칭 타원 Eye Mask uniform locations
+    private var uUseEllipseMaskLocation: Int = -1
+    private var uLeftEyeEllipseCenterLocation: Int = -1
+    private var uLeftEyeEllipseRadiiLocation: Int = -1
+    private var uLeftEyeEllipseRotLocation: Int = -1
+    private var uRightEyeEllipseCenterLocation: Int = -1
+    private var uRightEyeEllipseRadiiLocation: Int = -1
+    private var uRightEyeEllipseRotLocation: Int = -1
 
     // 풀스크린 쿼드 VAO/VBO
     private var quadVao: Int = 0
@@ -530,6 +582,30 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var contactShadowEnabled: Boolean = false   // 기본 OFF
     private var shadowIntensity: Float = 0.15f          // 기본 강도
     private var maxDetailValue: Float = 1.2f             // 홍채 밝기 보정 상한
+    private var ellipseMaskEnabled: Boolean = false      // P4-W2-02: 기본 OFF (기존 Y-slab 유지)
+
+    // P4-W2-02: 타원 파라미터 캐시 (temporal hold, eyelid 캐시와 동일 패턴)
+    private var cachedLeftEllipseCx = 0f; private var cachedLeftEllipseCy = 0f
+    private var cachedLeftEllipseRxI = 0f; private var cachedLeftEllipseRxO = 0f
+    private var cachedLeftEllipseRy = 0f; private var cachedLeftEllipseRot = 0f
+    private var cachedRightEllipseCx = 0f; private var cachedRightEllipseCy = 0f
+    private var cachedRightEllipseRxI = 0f; private var cachedRightEllipseRxO = 0f
+    private var cachedRightEllipseRy = 0f; private var cachedRightEllipseRot = 0f
+    private var ellipseCacheValidFrames: Int = 0
+
+    // P4-W2-02: 타원 파라미터 One Euro Filter (눈 1개당 cx, cy, rxI, rxO, ry, rot = 6)
+    private val glLeftEllipseCxFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseCyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRxIFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRxOFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRotFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseCxFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseCyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRxIFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRxOFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRotFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
 
     // GPU FPS 측정
     private var gpuFrameCount = 0
@@ -606,6 +682,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uContactShadowLocation = GLES31.glGetUniformLocation(lensProgram, "uContactShadow")
         uShadowIntensityLocation = GLES31.glGetUniformLocation(lensProgram, "uShadowIntensity")
         uMaxDetailLocation = GLES31.glGetUniformLocation(lensProgram, "uMaxDetail")
+        uUseEllipseMaskLocation = GLES31.glGetUniformLocation(lensProgram, "uUseEllipseMask")
+        uLeftEyeEllipseCenterLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeEllipseCenter")
+        uLeftEyeEllipseRadiiLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeEllipseRadii")
+        uLeftEyeEllipseRotLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeEllipseRot")
+        uRightEyeEllipseCenterLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeEllipseCenter")
+        uRightEyeEllipseRadiiLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeEllipseRadii")
+        uRightEyeEllipseRotLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeEllipseRot")
 
         // 풀스크린 쿼드 설정
         setupFullscreenQuad()
@@ -998,6 +1081,85 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glUniform1f(uRightEyeBottomLocation, 1.0f)
         }
 
+        // === P4-W2-02: 비대칭 타원 Eye Mask ===
+        GLES31.glUniform1i(uUseEllipseMaskLocation, if (ellipseMaskEnabled) 1 else 0)
+
+        if (ellipseMaskEnabled) {
+            val faceMeshE = result.faceMesh
+            if (result.faceMeshValid && faceMeshE != null) {
+                // CPU 측 16점 → 타원 피팅
+                var leftEllipse = fitEyeEllipse(faceMeshE, LEFT_EYE_CONTOUR_INDICES, LEFT_INNER_CORNER, LEFT_OUTER_CORNER)
+                var rightEllipse = fitEyeEllipse(faceMeshE, RIGHT_EYE_CONTOUR_INDICES, RIGHT_INNER_CORNER, RIGHT_OUTER_CORNER)
+
+                // Y-flip (FaceMesh는 top=0, GL은 top=1)
+                leftEllipse[1] = 1.0f - leftEllipse[1]   // cy
+                rightEllipse[1] = 1.0f - rightEllipse[1]
+                // rotation도 Y-flip에 의해 부호 반전
+                leftEllipse[5] = -leftEllipse[5]
+                rightEllipse[5] = -rightEllipse[5]
+
+                // 미러링 시 좌/우 교환
+                if (isMirror) {
+                    leftEllipse[0] = 1.0f - leftEllipse[0]  // cx mirror
+                    rightEllipse[0] = 1.0f - rightEllipse[0]
+                    // rotation mirror: pi - rot
+                    leftEllipse[5] = Math.PI.toFloat() - leftEllipse[5]
+                    rightEllipse[5] = Math.PI.toFloat() - rightEllipse[5]
+                    // 미러 시 내/외안각 반경 스왑
+                    val tmpRxI = leftEllipse[2]; leftEllipse[2] = leftEllipse[3]; leftEllipse[3] = tmpRxI
+                    val tmpRxI2 = rightEllipse[2]; rightEllipse[2] = rightEllipse[3]; rightEllipse[3] = tmpRxI2
+                    // 좌/우 교환
+                    val tmp = leftEllipse; leftEllipse = rightEllipse; rightEllipse = tmp
+                }
+
+                // One Euro Filter 적용
+                val fLCx = glLeftEllipseCxFilter.filter(leftEllipse[0], now)
+                val fLCy = glLeftEllipseCyFilter.filter(leftEllipse[1], now)
+                val fLRxI = glLeftEllipseRxIFilter.filter(leftEllipse[2], now)
+                val fLRxO = glLeftEllipseRxOFilter.filter(leftEllipse[3], now)
+                val fLRy = glLeftEllipseRyFilter.filter(leftEllipse[4], now)
+                val fLRot = glLeftEllipseRotFilter.filter(leftEllipse[5], now)
+
+                val fRCx = glRightEllipseCxFilter.filter(rightEllipse[0], now)
+                val fRCy = glRightEllipseCyFilter.filter(rightEllipse[1], now)
+                val fRRxI = glRightEllipseRxIFilter.filter(rightEllipse[2], now)
+                val fRRxO = glRightEllipseRxOFilter.filter(rightEllipse[3], now)
+                val fRRy = glRightEllipseRyFilter.filter(rightEllipse[4], now)
+                val fRRot = glRightEllipseRotFilter.filter(rightEllipse[5], now)
+
+                // 캐시 갱신
+                cachedLeftEllipseCx = fLCx; cachedLeftEllipseCy = fLCy
+                cachedLeftEllipseRxI = fLRxI; cachedLeftEllipseRxO = fLRxO
+                cachedLeftEllipseRy = fLRy; cachedLeftEllipseRot = fLRot
+                cachedRightEllipseCx = fRCx; cachedRightEllipseCy = fRCy
+                cachedRightEllipseRxI = fRRxI; cachedRightEllipseRxO = fRRxO
+                cachedRightEllipseRy = fRRy; cachedRightEllipseRot = fRRot
+                ellipseCacheValidFrames = EYELID_HOLD_FRAMES
+
+                // Uniform 전달
+                GLES31.glUniform2f(uLeftEyeEllipseCenterLocation, fLCx, fLCy)
+                GLES31.glUniform3f(uLeftEyeEllipseRadiiLocation, fLRxI, fLRxO, fLRy)
+                GLES31.glUniform1f(uLeftEyeEllipseRotLocation, fLRot)
+                GLES31.glUniform2f(uRightEyeEllipseCenterLocation, fRCx, fRCy)
+                GLES31.glUniform3f(uRightEyeEllipseRadiiLocation, fRRxI, fRRxO, fRRy)
+                GLES31.glUniform1f(uRightEyeEllipseRotLocation, fRRot)
+
+            } else if (ellipseCacheValidFrames > 0) {
+                // FaceMesh 비유효: temporal hold (캐시 사용)
+                ellipseCacheValidFrames--
+                GLES31.glUniform2f(uLeftEyeEllipseCenterLocation, cachedLeftEllipseCx, cachedLeftEllipseCy)
+                GLES31.glUniform3f(uLeftEyeEllipseRadiiLocation, cachedLeftEllipseRxI, cachedLeftEllipseRxO, cachedLeftEllipseRy)
+                GLES31.glUniform1f(uLeftEyeEllipseRotLocation, cachedLeftEllipseRot)
+                GLES31.glUniform2f(uRightEyeEllipseCenterLocation, cachedRightEllipseCx, cachedRightEllipseCy)
+                GLES31.glUniform3f(uRightEyeEllipseRadiiLocation, cachedRightEllipseRxI, cachedRightEllipseRxO, cachedRightEllipseRy)
+                GLES31.glUniform1f(uRightEyeEllipseRotLocation, cachedRightEllipseRot)
+            } else {
+                // 캐시 소진: 타원 비활성화 (ry=0 → 셰이더에서 Y-slab fallback)
+                GLES31.glUniform3f(uLeftEyeEllipseRadiiLocation, 0f, 0f, 0f)
+                GLES31.glUniform3f(uRightEyeEllipseRadiiLocation, 0f, 0f, 0f)
+            }
+        }
+
         // 풀스크린 쿼드 렌더링
         renderFullscreenQuad()
 
@@ -1263,6 +1425,63 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     }
 
     /**
+     * P4-W2-02: 16점 눈 윤곽 랜드마크 → 비대칭 타원 파라미터 피팅
+     *
+     * @param mesh faceMesh FloatArray (468 × 3)
+     * @param contourIndices 16점 눈 윤곽 인덱스
+     * @param innerCornerIdx 내안각 랜드마크 인덱스
+     * @param outerCornerIdx 외안각 랜드마크 인덱스
+     * @return FloatArray(6): [cx, cy, rxInner, rxOuter, ry, rotation]
+     *         좌표는 FaceMesh 원본 (0~1), Y-flip/mirror는 호출부에서 처리
+     */
+    private fun fitEyeEllipse(
+        mesh: FloatArray,
+        contourIndices: IntArray,
+        innerCornerIdx: Int,
+        outerCornerIdx: Int
+    ): FloatArray {
+        // 1. 16점의 중심 (mean)
+        var sumX = 0f; var sumY = 0f
+        for (idx in contourIndices) {
+            sumX += mesh[idx * 3]
+            sumY += mesh[idx * 3 + 1]
+        }
+        val cx = sumX / contourIndices.size
+        val cy = sumY / contourIndices.size
+
+        // 2. inner/outer corner로 회전각 결정
+        val innerX = mesh[innerCornerIdx * 3]
+        val innerY = mesh[innerCornerIdx * 3 + 1]
+        val outerX = mesh[outerCornerIdx * 3]
+        val outerY = mesh[outerCornerIdx * 3 + 1]
+        val rotation = kotlin.math.atan2(outerY - innerY, outerX - innerX)
+
+        // 3. 비대칭 반경 계산
+        //    내안각 쪽: center → innerCorner 거리 × 0.85 (caruncle 보호)
+        //    외안각 쪽: center → outerCorner 거리 × 1.0
+        val dxI = innerX - cx; val dyI = innerY - cy
+        val rxInner = kotlin.math.sqrt(dxI * dxI + dyI * dyI) * 0.85f
+
+        val dxO = outerX - cx; val dyO = outerY - cy
+        val rxOuter = kotlin.math.sqrt(dxO * dxO + dyO * dyO) * 1.0f
+
+        // 4. Y 반경: 상/하 랜드마크의 median Y 편차
+        val cosR = kotlin.math.cos(rotation); val sinR = kotlin.math.sin(rotation)
+        var maxAbsLocalY = 0f
+        for (idx in contourIndices) {
+            val dx = mesh[idx * 3] - cx
+            val dy = mesh[idx * 3 + 1] - cy
+            // 회전 좌표계에서 y성분만 추출
+            val localY = -dx * sinR + dy * cosR
+            val absY = kotlin.math.abs(localY)
+            if (absY > maxAbsLocalY) maxAbsLocalY = absY
+        }
+        val ry = maxAbsLocalY
+
+        return floatArrayOf(cx, cy, rxInner, rxOuter, ry, rotation)
+    }
+
+    /**
      * 선형 보간 (a → b, t=0이면 a, t=1이면 b)
      */
     private fun lerp(a: Float, b: Float, t: Float): Float {
@@ -1339,6 +1558,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setMaxDetail(value: Float) {
         this.maxDetailValue = value.coerceIn(0.5f, 1.5f)
+    }
+
+    /**
+     * 비대칭 타원 Eye Mask 활성화/비활성화 (P4-W2-02)
+     * OFF 시 기존 Y-slab 마스킹 사용
+     */
+    fun setEllipseMask(enabled: Boolean) {
+        this.ellipseMaskEnabled = enabled
     }
 
     /**

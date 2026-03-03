@@ -319,6 +319,15 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * 비대칭 타원 Eye Mask 활성화/비활성화 (P4-W2-02)
+     */
+    fun setEllipseMask(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setEllipseMask(enabled)
+        }
+    }
+
+    /**
      * LUT 필터 강도 설정 (0.0 ~ 1.0)
      */
     fun setLutIntensity(intensity: Float) {
