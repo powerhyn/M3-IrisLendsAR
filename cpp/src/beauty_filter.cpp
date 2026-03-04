@@ -519,4 +519,45 @@ IRIS_SDK_EXPORT bool iris_sdk_beauty_using_gpu(void) {
     return g_config_v2.useGpu && iris_sdk_beauty_gpu_available();
 }
 
+// ============================================================================
+// skinQuality 편의 API
+// ============================================================================
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_skin_quality(float quality) {
+    if (quality < 0.0f || quality > 1.0f) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+    ensureV2ConfigInitialized();
+    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+    g_config_v2.skinQuality = quality;
+    return IRIS_SDK_OK;
+}
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_get_skin_quality(float* out_quality) {
+    if (out_quality == nullptr) {
+        return IRIS_SDK_NULL_POINTER;
+    }
+    ensureV2ConfigInitialized();
+    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+    *out_quality = g_config_v2.skinQuality;
+    return IRIS_SDK_OK;
+}
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_beauty_preset(IrisBeautyPreset preset) {
+    float quality = 0.0f;
+    switch (preset) {
+        case IRIS_BEAUTY_PRESET_NATURAL:  quality = 0.3f; break;
+        case IRIS_BEAUTY_PRESET_MODERATE: quality = 0.5f; break;
+        case IRIS_BEAUTY_PRESET_STRONG:   quality = 0.8f; break;
+        case IRIS_BEAUTY_PRESET_CUSTOM:
+            return IRIS_SDK_OK;  // 현재 skinQuality 유지
+        default:
+            return IRIS_SDK_INVALID_PARAM;
+    }
+    ensureV2ConfigInitialized();
+    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+    g_config_v2.skinQuality = quality;
+    return IRIS_SDK_OK;
+}
+
 }  /* extern "C" */

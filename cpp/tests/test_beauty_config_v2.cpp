@@ -385,5 +385,88 @@ TEST(FreqSepParamsTest, OverRangeSkinQualityClampedInternally) {
     EXPECT_FLOAT_EQ(params.high_freq_preserve, params_max.high_freq_preserve);
 }
 
+//=============================================================================
+// skinQuality C API 테스트
+//=============================================================================
+
+TEST(SkinQualityCAPITest, SetAndGetRoundTrip) {
+    IrisSdkError err = iris_sdk_set_skin_quality(0.6f);
+    EXPECT_EQ(err, IRIS_SDK_OK);
+
+    float quality = -1.0f;
+    err = iris_sdk_get_skin_quality(&quality);
+    EXPECT_EQ(err, IRIS_SDK_OK);
+    EXPECT_FLOAT_EQ(quality, 0.6f);
+}
+
+TEST(SkinQualityCAPITest, SetRejectsOutOfRange) {
+    EXPECT_EQ(iris_sdk_set_skin_quality(-0.5f), IRIS_SDK_INVALID_PARAM);
+    EXPECT_EQ(iris_sdk_set_skin_quality(1.5f), IRIS_SDK_INVALID_PARAM);
+}
+
+TEST(SkinQualityCAPITest, SetAcceptsBoundaryValues) {
+    EXPECT_EQ(iris_sdk_set_skin_quality(0.0f), IRIS_SDK_OK);
+    EXPECT_EQ(iris_sdk_set_skin_quality(1.0f), IRIS_SDK_OK);
+}
+
+TEST(SkinQualityCAPITest, GetRejectsNullptr) {
+    EXPECT_EQ(iris_sdk_get_skin_quality(nullptr), IRIS_SDK_NULL_POINTER);
+}
+
+TEST(SkinQualityCAPITest, ZeroBypassesFreqSep) {
+    // skinQuality=0 -> 기존 Bilateral 경로 (하위 호환)
+    EXPECT_EQ(iris_sdk_set_skin_quality(0.0f), IRIS_SDK_OK);
+    float quality = -1.0f;
+    iris_sdk_get_skin_quality(&quality);
+    EXPECT_FLOAT_EQ(quality, 0.0f);
+}
+
+//=============================================================================
+// 프리셋 API 테스트
+//=============================================================================
+
+TEST(BeautyPresetTest, NaturalPresetSetsSkinQuality) {
+    IrisSdkError err = iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_NATURAL);
+    EXPECT_EQ(err, IRIS_SDK_OK);
+    float quality = -1.0f;
+    iris_sdk_get_skin_quality(&quality);
+    EXPECT_FLOAT_EQ(quality, 0.3f);
+}
+
+TEST(BeautyPresetTest, ModeratePresetSetsSkinQuality) {
+    iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_MODERATE);
+    float quality = -1.0f;
+    iris_sdk_get_skin_quality(&quality);
+    EXPECT_FLOAT_EQ(quality, 0.5f);
+}
+
+TEST(BeautyPresetTest, StrongPresetSetsSkinQuality) {
+    iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_STRONG);
+    float quality = -1.0f;
+    iris_sdk_get_skin_quality(&quality);
+    EXPECT_FLOAT_EQ(quality, 0.8f);
+}
+
+TEST(BeautyPresetTest, CustomPresetKeepsCurrentValue) {
+    iris_sdk_set_skin_quality(0.42f);
+    IrisSdkError err = iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_CUSTOM);
+    EXPECT_EQ(err, IRIS_SDK_OK);
+    float quality = -1.0f;
+    iris_sdk_get_skin_quality(&quality);
+    EXPECT_FLOAT_EQ(quality, 0.42f);  // 변경 없음
+}
+
+TEST(BeautyPresetTest, InvalidPresetReturnsError) {
+    IrisSdkError err = iris_sdk_set_beauty_preset(static_cast<IrisBeautyPreset>(99));
+    EXPECT_EQ(err, IRIS_SDK_INVALID_PARAM);
+}
+
+TEST(BeautyPresetTest, BackwardCompatDefaultZero) {
+    // 기존 API만 사용 (프리셋 미사용) -> skinQuality는 기본 0.0
+    BeautyFilterConfigV2 config = {};
+    iris_sdk_default_beauty_config_v2(&config);
+    EXPECT_FLOAT_EQ(config.skinQuality, 0.0f);
+}
+
 } // namespace testing
 } // namespace iris_sdk
