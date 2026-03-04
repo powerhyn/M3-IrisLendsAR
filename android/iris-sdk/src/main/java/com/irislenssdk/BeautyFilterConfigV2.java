@@ -100,6 +100,13 @@ public class BeautyFilterConfigV2 {
      */
     public float wrinkleRemove;
 
+    /**
+     * 피부 품질 개선 (0.0 ~ 1.0).
+     * Frequency Separation 기반 고급 피부 보정을 활성화합니다.
+     * 0.0 = 비활성 (기존 Bilateral 경로), 0.0 초과 = Freq Sep 활성화
+     */
+    public float skinQuality;
+
     // ========================================================================
     // 얼굴 형태 보정
     // ========================================================================
@@ -169,6 +176,7 @@ public class BeautyFilterConfigV2 {
     public static final float DEFAULT_WHITENING = 0.0f;
     public static final float DEFAULT_COLOR_BALANCE = 0.0f;
     public static final float DEFAULT_WRINKLE_REMOVE = 0.0f;
+    public static final float DEFAULT_SKIN_QUALITY = 0.0f;
     public static final float DEFAULT_SLIM_FACE = 0.0f;
     public static final float DEFAULT_ENLARGE_EYES = 0.0f;
     public static final float DEFAULT_THIN_CHIN = 0.0f;
@@ -203,6 +211,7 @@ public class BeautyFilterConfigV2 {
         this.whitening = other.whitening;
         this.colorBalance = other.colorBalance;
         this.wrinkleRemove = other.wrinkleRemove;
+        this.skinQuality = other.skinQuality;
         this.slimFace = other.slimFace;
         this.enlargeEyes = other.enlargeEyes;
         this.thinChin = other.thinChin;
@@ -229,6 +238,7 @@ public class BeautyFilterConfigV2 {
         whitening = DEFAULT_WHITENING;
         colorBalance = DEFAULT_COLOR_BALANCE;
         wrinkleRemove = DEFAULT_WRINKLE_REMOVE;
+        skinQuality = DEFAULT_SKIN_QUALITY;
         slimFace = DEFAULT_SLIM_FACE;
         enlargeEyes = DEFAULT_ENLARGE_EYES;
         thinChin = DEFAULT_THIN_CHIN;
@@ -286,6 +296,7 @@ public class BeautyFilterConfigV2 {
                 && whitening >= 0.0f && whitening <= 1.0f
                 && colorBalance >= -1.0f && colorBalance <= 1.0f
                 && wrinkleRemove >= 0.0f && wrinkleRemove <= 1.0f
+                && skinQuality >= 0.0f && skinQuality <= 1.0f
                 && slimFace >= 0.0f && slimFace <= 1.0f
                 && enlargeEyes >= 0.0f && enlargeEyes <= 1.0f
                 && thinChin >= 0.0f && thinChin <= 1.0f
@@ -303,6 +314,7 @@ public class BeautyFilterConfigV2 {
         whitening = clampFloat(whitening, 0.0f, 1.0f);
         colorBalance = clampFloat(colorBalance, -1.0f, 1.0f);
         wrinkleRemove = clampFloat(wrinkleRemove, 0.0f, 1.0f);
+        skinQuality = clampFloat(skinQuality, 0.0f, 1.0f);
         slimFace = clampFloat(slimFace, 0.0f, 1.0f);
         enlargeEyes = clampFloat(enlargeEyes, 0.0f, 1.0f);
         thinChin = clampFloat(thinChin, 0.0f, 1.0f);
@@ -329,6 +341,7 @@ public class BeautyFilterConfigV2 {
                 ", whitening=" + whitening +
                 ", colorBalance=" + colorBalance +
                 ", wrinkleRemove=" + wrinkleRemove +
+                ", skinQuality=" + skinQuality +
                 ", slimFace=" + slimFace +
                 ", enlargeEyes=" + enlargeEyes +
                 ", thinChin=" + thinChin +
@@ -401,6 +414,11 @@ public class BeautyFilterConfigV2 {
 
         public Builder wrinkleRemove(float wrinkleRemove) {
             config.wrinkleRemove = wrinkleRemove;
+            return this;
+        }
+
+        public Builder skinQuality(float skinQuality) {
+            config.skinQuality = skinQuality;
             return this;
         }
 

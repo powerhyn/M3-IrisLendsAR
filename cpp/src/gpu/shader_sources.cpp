@@ -424,5 +424,85 @@ void main() {
 }
 )glsl";
 
+//=============================================================================
+// Frequency Separation Gaussian Blur 프래그먼트 셰이더
+// Separable 1D Gaussian — adaptive radius for low-frequency extraction
+//=============================================================================
+const char* FREQ_SEP_GAUSSIAN_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+uniform sampler2D uTexture;
+uniform vec2 uDirection;        // (1/w, 0) or (0, 1/h)
+uniform int uRadius;            // adaptive radius (6~28)
+
+void main() {
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+    float sigma = float(uRadius) * 0.4;
+
+    for (int i = -uRadius; i <= uRadius; i++) {
+        vec2 offset = uDirection * float(i);
+        vec3 s = texture(uTexture, vTexCoord + offset).rgb;
+        float w = exp(-float(i * i) / (2.0 * sigma * sigma));
+        sum += s * w;
+        weightSum += w;
+    }
+
+    fragColor = vec4(sum / weightSum, 1.0);
+}
+)glsl";
+
+//=============================================================================
+// Frequency Separation Composite 프래그먼트 셰이더
+// High Frequency inline extraction + non-linear attenuation + mask blending
+//=============================================================================
+const char* FREQ_SEP_COMPOSITE_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+uniform sampler2D uSmoothedLow;   // Pass 2b result (additionally blurred low freq)
+uniform sampler2D uLowFreq;       // Pass 1b result (original low freq — high freq extraction basis)
+uniform sampler2D uOriginal;      // Original frame
+uniform sampler2D uSkinMask;      // ROI mask texture
+
+uniform float uHighFreqPreserve;   // Internal mapped value (0.1~1.0)
+uniform float uAttenuationLow;     // smoothstep lower bound (default 0.02)
+uniform float uAttenuationHigh;    // smoothstep upper bound (default 0.15)
+
+void main() {
+    vec3 smoothLow = texture(uSmoothedLow, vTexCoord).rgb;
+    vec3 low       = texture(uLowFreq, vTexCoord).rgb;
+    vec3 orig      = texture(uOriginal, vTexCoord).rgb;
+    float mask     = texture(uSkinMask, vTexCoord).r;
+
+    // High Frequency inline extraction (ALU operation, no separate pass/texture)
+    vec3 high = orig - low;
+
+    // Y(luminance) based high-freq magnitude
+    float magnitude = dot(abs(high), vec3(0.299, 0.587, 0.114));
+
+    // Non-linear attenuation: large changes (blemishes) → strong attenuation, small changes (skin texture) → preserve
+    float blemishFactor = smoothstep(uAttenuationLow, uAttenuationHigh, magnitude);
+    float preserve = mix(uHighFreqPreserve, 1.0, 1.0 - blemishFactor);
+
+    vec3 adjusted_high = high * preserve;
+
+    // Re-synthesis
+    vec3 beauty = smoothLow + adjusted_high;
+
+    // Blend with original using skin mask
+    vec3 result = mix(orig, beauty, mask);
+
+    fragColor = vec4(result, 1.0);
+}
+)glsl";
+
 } // namespace shaders
 } // namespace iris_sdk

@@ -13,9 +13,11 @@
 #include "iris_sdk/gpu/shader_manager.h"
 #include "iris_sdk/gpu/texture_pool.h"
 #include "iris_sdk/gpu/gpu_profiler.h"
+#include "iris_sdk/one_euro_filter.h"
 
 #include <memory>
 #include <mutex>
+#include <vector>
 
 // Forward declarations
 namespace iris_sdk {
@@ -219,6 +221,23 @@ public:
      */
     void releaseTexture(uint32_t texture);
 
+    //=========================================================================
+    // Frequency Separation
+    //=========================================================================
+
+    /// Freq Sep 내부 파라미터
+    struct FreqSepParams {
+        int blur_radius = 15;
+        float high_freq_preserve = 0.45f;
+        float low_freq_smooth_radius_ratio = 0.5f;
+        float attenuation_low = 0.02f;
+        float attenuation_high = 0.15f;
+        bool enabled = false;
+    };
+
+    /// skinQuality → FreqSepParams 매핑
+    static FreqSepParams mapSkinQuality(float skin_quality, int face_width);
+
 private:
     //=========================================================================
     // 초기화 헬퍼
@@ -274,6 +293,29 @@ private:
                                   float brightness, float balance, float whitening,
                                   GLuint lut_texture = 0, float lut_intensity = 0.0f);
 
+    /// Frequency Separation Gaussian blur 셰이더 초기화
+    bool initializeFreqSepShaders();
+
+    /// Frequency Separation 5서브패스 파이프라인
+    /// @return true: 파이프라인 정상 완료, false: 텍스처 할당 실패 등 (호출자가 fallback 처리)
+    bool executeFreqSepPipeline(
+        GLuint input_tex,
+        GLuint mask_tex,
+        GLuint output_fbo,
+        int width, int height,
+        const FreqSepParams& params);
+
+    /// CPU combined_mask → GPU 텍스처 업로드
+    GLuint uploadSkinMask(
+        const std::vector<uint8_t>& combined_mask,
+        int mask_width, int mask_height);
+
+    /// Freq Sep 불가 시 Bilateral fallback (공통 최소 강도 정책)
+    void executeSmoothingWithFallbackStrength(
+        GLuint input_tex, GLuint output_fbo,
+        int width, int height,
+        const BeautyFilterConfigV2& config);
+
     //=========================================================================
     // 멤버 변수
     //=========================================================================
@@ -301,6 +343,15 @@ private:
     GLuint brightness_program_ = 0;
     GLuint masking_program_ = 0;
     GLuint combined_color_program_ = 0;  // 통합 Color Adjustment (최적화)
+
+    // Freq Sep 셰이더 프로그램
+    GLuint freq_sep_gaussian_program_ = 0;
+    GLuint freq_sep_composite_program_ = 0;
+
+    // Skin mask GPU 텍스처
+    GLuint skin_mask_texture_ = 0;
+    int skin_mask_width_ = 0;
+    int skin_mask_height_ = 0;
 
     //=========================================================================
     // Uniform Location 캐시 (성능 최적화)
@@ -351,6 +402,27 @@ private:
     UniformLocations brightness_uniforms_;
     UniformLocations masking_uniforms_;
     UniformLocations combined_color_uniforms_;  // 통합 Color Adjustment
+
+    // Freq Sep Gaussian Uniform 캐시
+    struct FreqSepGaussianUniforms {
+        GLint uTexture = -1;
+        GLint uDirection = -1;
+        GLint uRadius = -1;
+    } freq_sep_gaussian_uniforms_;
+
+    // Freq Sep Composite Uniform 캐시
+    struct FreqSepCompositeUniforms {
+        GLint uSmoothedLow = -1;
+        GLint uLowFreq = -1;
+        GLint uOriginal = -1;
+        GLint uSkinMask = -1;
+        GLint uHighFreqPreserve = -1;
+        GLint uAttenuationLow = -1;
+        GLint uAttenuationHigh = -1;
+    } freq_sep_composite_uniforms_;
+
+    // Temporal stability용 One Euro Filter (P4-W3-04에서 사용)
+    OneEuroFilter skin_radius_filter_{0.5f, 0.01f, 1.0f};
 
     /// Uniform Location 캐싱 (초기화 시 호출)
     void cacheUniformLocations();

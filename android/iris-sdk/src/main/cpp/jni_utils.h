@@ -374,6 +374,7 @@ struct JniCache {
     jfieldID beautyConfigV2_whitening = nullptr;
     jfieldID beautyConfigV2_colorBalance = nullptr;
     jfieldID beautyConfigV2_wrinkleRemove = nullptr;
+    jfieldID beautyConfigV2_skinQuality = nullptr;
     jfieldID beautyConfigV2_slimFace = nullptr;
     jfieldID beautyConfigV2_enlargeEyes = nullptr;
     jfieldID beautyConfigV2_thinChin = nullptr;

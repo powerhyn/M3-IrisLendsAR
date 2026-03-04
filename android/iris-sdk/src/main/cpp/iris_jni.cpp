@@ -152,6 +152,7 @@ bool JniCache::init(JNIEnv* env) {
     beautyConfigV2_whitening = env->GetFieldID(beautyConfigV2Class, "whitening", "F");
     beautyConfigV2_colorBalance = env->GetFieldID(beautyConfigV2Class, "colorBalance", "F");
     beautyConfigV2_wrinkleRemove = env->GetFieldID(beautyConfigV2Class, "wrinkleRemove", "F");
+    beautyConfigV2_skinQuality = env->GetFieldID(beautyConfigV2Class, "skinQuality", "F");
     beautyConfigV2_slimFace = env->GetFieldID(beautyConfigV2Class, "slimFace", "F");
     beautyConfigV2_enlargeEyes = env->GetFieldID(beautyConfigV2Class, "enlargeEyes", "F");
     beautyConfigV2_thinChin = env->GetFieldID(beautyConfigV2Class, "thinChin", "F");
@@ -164,7 +165,8 @@ bool JniCache::init(JNIEnv* env) {
     // 필드 ID 검증
     if (!beautyConfigV2_enabled || !beautyConfigV2_intensity || !beautyConfigV2_smoothing ||
         !beautyConfigV2_brightness || !beautyConfigV2_softFocus || !beautyConfigV2_whitening ||
-        !beautyConfigV2_colorBalance || !beautyConfigV2_wrinkleRemove || !beautyConfigV2_slimFace ||
+        !beautyConfigV2_colorBalance || !beautyConfigV2_wrinkleRemove || !beautyConfigV2_skinQuality ||
+        !beautyConfigV2_slimFace ||
         !beautyConfigV2_enlargeEyes || !beautyConfigV2_thinChin || !beautyConfigV2_useGpu ||
         !beautyConfigV2_roiOnly || !beautyConfigV2_protectEyes || !beautyConfigV2_protectLips ||
         !beautyConfigV2_downscaleFactor) {
@@ -419,6 +421,7 @@ bool copyBeautyConfigV2FromJava(JNIEnv* env, jobject src, IrisBeautyConfigV2& de
     dest.whitening = env->GetFloatField(src, g_jniCache.beautyConfigV2_whitening);
     dest.color_balance = env->GetFloatField(src, g_jniCache.beautyConfigV2_colorBalance);
     dest.wrinkle_remove = env->GetFloatField(src, g_jniCache.beautyConfigV2_wrinkleRemove);
+    dest.skin_quality = env->GetFloatField(src, g_jniCache.beautyConfigV2_skinQuality);
     dest.slim_face = env->GetFloatField(src, g_jniCache.beautyConfigV2_slimFace);
     dest.enlarge_eyes = env->GetFloatField(src, g_jniCache.beautyConfigV2_enlargeEyes);
     dest.thin_chin = env->GetFloatField(src, g_jniCache.beautyConfigV2_thinChin);
@@ -446,6 +449,7 @@ bool copyBeautyConfigV2ToJava(JNIEnv* env, const IrisBeautyConfigV2& src, jobjec
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_whitening, src.whitening);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_colorBalance, src.color_balance);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_wrinkleRemove, src.wrinkle_remove);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_skinQuality, src.skin_quality);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_slimFace, src.slim_face);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_enlargeEyes, src.enlarge_eyes);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_thinChin, src.thin_chin);
