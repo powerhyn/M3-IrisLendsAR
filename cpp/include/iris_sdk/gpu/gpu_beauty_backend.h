@@ -408,6 +408,7 @@ private:
         GLint uTexture = -1;
         GLint uDirection = -1;
         GLint uRadius = -1;
+        GLint uWeights = -1;
     } freq_sep_gaussian_uniforms_;
 
     // Freq Sep Composite Uniform 캐시

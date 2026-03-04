@@ -27,6 +27,26 @@
 
 namespace iris_sdk {
 
+#if IRIS_SDK_GPU_AVAILABLE
+// CPU-side Gaussian weight precomputation (symmetric half-kernel)
+// weights[i] = exp(-i*i / (2*sigma*sigma)), normalized so full kernel sums to 1.0
+static void computeGaussianWeights(int radius, float weights[29]) {
+    float sigma = radius * 0.4f;
+    float sum = 0.0f;
+    for (int i = 0; i <= radius; i++) {
+        weights[i] = std::exp(-(float)(i * i) / (2.0f * sigma * sigma));
+        sum += weights[i] * (i == 0 ? 1.0f : 2.0f); // center once, sides twice
+    }
+    for (int i = 0; i <= radius; i++) {
+        weights[i] /= sum;
+    }
+    // Zero out unused entries
+    for (int i = radius + 1; i < 29; i++) {
+        weights[i] = 0.0f;
+    }
+}
+#endif
+
 // 셰이더 소스 extern 선언
 namespace shaders {
 extern const char* FULLSCREEN_QUAD_VERTEX;
@@ -298,6 +318,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
         freq_sep_gaussian_uniforms_.uTexture = glGetUniformLocation(freq_sep_gaussian_program_, "uTexture");
         freq_sep_gaussian_uniforms_.uDirection = glGetUniformLocation(freq_sep_gaussian_program_, "uDirection");
         freq_sep_gaussian_uniforms_.uRadius = glGetUniformLocation(freq_sep_gaussian_program_, "uRadius");
+        freq_sep_gaussian_uniforms_.uWeights = glGetUniformLocation(freq_sep_gaussian_program_, "uWeights[0]");
     }
 
     // Freq Sep Composite Uniforms
@@ -1013,12 +1034,17 @@ bool GPUBeautyBackend::executeFreqSepPipeline(
 
     bool profiling = profiler_ && profiler_->isEnabled();
 
+    // Precompute Gaussian weights for blur_radius (Pass 1a/1b)
+    float weights[29];
+    computeGaussianWeights(params.blur_radius, weights);
+
     // Pass 1a: Horizontal Gaussian → temp
     if (profiling) profiler_->begin("FreqSep_GaussianH");
     glUseProgram(freq_sep_gaussian_program_);
     glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
     glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / width, 0.0f);
     glUniform1i(freq_sep_gaussian_uniforms_.uRadius, params.blur_radius);
+    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
     glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
@@ -1034,13 +1060,17 @@ bool GPUBeautyBackend::executeFreqSepPipeline(
     renderFullscreenQuad();
     if (profiling) profiler_->end("FreqSep_GaussianV");
 
+    // Precompute Gaussian weights for low_radius (Pass 2a/2b)
+    int low_radius = std::max(3, static_cast<int>(params.blur_radius * params.low_freq_smooth_radius_ratio));
+    computeGaussianWeights(low_radius, weights);
+
     // Pass 2a: Low Freq additional Gaussian H → temp
     if (profiling) profiler_->begin("FreqSep_LowSmoothH");
-    int low_radius = std::max(3, static_cast<int>(params.blur_radius * params.low_freq_smooth_radius_ratio));
     glUseProgram(freq_sep_gaussian_program_);
     glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
     glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / width, 0.0f);
     glUniform1i(freq_sep_gaussian_uniforms_.uRadius, low_radius);
+    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
     glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
@@ -1360,6 +1390,16 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     }
     FreqSepParams freq_sep_params = mapSkinQuality(config.skinQuality, face_w);
 
+    // Bilateral fallback 헬퍼 (FreqSep 실패 시 공통 경로)
+    auto runBilateralFallback = [&]() {
+        if (profiling) profiler_->begin("Smoothing_Fallback");
+        executeSmoothingWithFallbackStrength(current_input, current_output->fbo_id,
+                                              width, height, config);
+        if (profiling) profiler_->end("Smoothing_Fallback");
+        current_input = current_output->texture_id;
+        if (pong) current_output = (current_output == ping) ? pong : ping;
+    };
+
     if (freq_sep_params.enabled
         && freq_sep_gaussian_program_ != 0 && freq_sep_composite_program_ != 0
         && roi_ptr && roi_ptr->valid && !roi_ptr->combined_mask.empty()) {
@@ -1373,11 +1413,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
             if (scissor_active) {
                 glDisable(GL_SCISSOR_TEST);
             }
-            if (profiling) profiler_->begin("FreqSep");
+            // NOTE: 외부 "FreqSep" 래퍼 타이머 제거 — GL_TIME_ELAPSED_EXT는
+            // 중첩을 허용하지 않으므로 내부 서브패스 타이머(FreqSep_GaussianH 등)만 사용
             bool freq_sep_ok = executeFreqSepPipeline(current_input, mask_tex,
                                    current_output->fbo_id,
                                    width, height, freq_sep_params);
-            if (profiling) profiler_->end("FreqSep");
             // Scissor 복원
             if (scissor_active) {
                 glEnable(GL_SCISSOR_TEST);
@@ -1387,30 +1427,16 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                 if (pong) current_output = (current_output == ping) ? pong : ping;
             } else {
                 // FreqSep 파이프라인 실패 (텍스처 할당 등) → Bilateral fallback
-                if (profiling) profiler_->begin("Smoothing_Fallback");
-                executeSmoothingWithFallbackStrength(current_input, current_output->fbo_id,
-                                                      width, height, config);
-                if (profiling) profiler_->end("Smoothing_Fallback");
-                current_input = current_output->texture_id;
-                if (pong) current_output = (current_output == ping) ? pong : ping;
+                runBilateralFallback();
             }
         } else {
             // mask upload failed → Bilateral fallback
-            if (profiling) profiler_->begin("Smoothing_Fallback");
-            executeSmoothingWithFallbackStrength(current_input, current_output->fbo_id,
-                                                  width, height, config);
-            if (profiling) profiler_->end("Smoothing_Fallback");
-            current_input = current_output->texture_id;
-            if (pong) current_output = (current_output == ping) ? pong : ping;
+            runBilateralFallback();
         }
-    } else if (freq_sep_params.enabled && (!roi_ptr || !roi_ptr->valid || roi_ptr->combined_mask.empty())) {
-        // skinQuality > 0 but no valid ROI → Bilateral fallback with minimum strength
-        if (profiling) profiler_->begin("Smoothing_Fallback");
-        executeSmoothingWithFallbackStrength(current_input, current_output->fbo_id,
-                                              width, height, config);
-        if (profiling) profiler_->end("Smoothing_Fallback");
-        current_input = current_output->texture_id;
-        if (pong) current_output = (current_output == ping) ? pong : ping;
+    } else if (freq_sep_params.enabled) {
+        // skinQuality > 0 but FreqSep cannot run (shader not compiled / no valid ROI/mask)
+        // → Bilateral fallback with minimum strength
+        runBilateralFallback();
     } else if (config.smoothing > 0.01f) {
         // Original Bilateral path (skinQuality = 0)
         if (profiling) profiler_->begin("Smoothing");

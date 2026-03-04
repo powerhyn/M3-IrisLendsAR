@@ -438,21 +438,18 @@ out vec4 fragColor;
 uniform sampler2D uTexture;
 uniform vec2 uDirection;        // (1/w, 0) or (0, 1/h)
 uniform int uRadius;            // adaptive radius (6~28)
+uniform float uWeights[29];     // CPU-precomputed normalized half-kernel weights
 
 void main() {
     vec3 sum = vec3(0.0);
-    float weightSum = 0.0;
-    float sigma = float(uRadius) * 0.4;
 
     for (int i = -uRadius; i <= uRadius; i++) {
         vec2 offset = uDirection * float(i);
         vec3 s = texture(uTexture, vTexCoord + offset).rgb;
-        float w = exp(-float(i * i) / (2.0 * sigma * sigma));
-        sum += s * w;
-        weightSum += w;
+        sum += s * uWeights[abs(i)];
     }
 
-    fragColor = vec4(sum / weightSum, 1.0);
+    fragColor = vec4(sum, 1.0);
 }
 )glsl";
 
@@ -480,7 +477,7 @@ void main() {
     vec3 smoothLow = texture(uSmoothedLow, vTexCoord).rgb;
     vec3 low       = texture(uLowFreq, vTexCoord).rgb;
     vec3 orig      = texture(uOriginal, vTexCoord).rgb;
-    float mask     = texture(uSkinMask, vTexCoord).r;
+    float mask     = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - vTexCoord.y)).r;
 
     // High Frequency inline extraction (ALU operation, no separate pass/texture)
     vec3 high = orig - low;
