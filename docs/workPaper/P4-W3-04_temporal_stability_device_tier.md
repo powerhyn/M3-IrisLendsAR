@@ -336,3 +336,4 @@ if (profiling) profiler_->end("FreqSep_Total");
 | 2026-03-04 | Codex 리뷰 반영: "mask 경계값" One Euro 필터링 구현 구체화 — face_rect center(cx, cy)를 필터링 대상으로 확정 (§1.1, §3.1, §3.2), feather_radius는 15px 고정이므로 필터 불필요 확인 | Claude |
 | 2026-03-04 | Gemini 3차 리뷰 반영: §4.3 MID tier를 5서브패스로 업데이트 — Extract 패스 삭제, lowFreq 보존, smoothedLow 별도 할당, highFreq_full 텍스처 불필요. §5.2 테스트/§7 리스크 반영 | Claude |
 | 2026-03-04 | **구현 완료**: One Euro Filter temporal stability (blur_radius + mask center cx/cy), DeviceTier 판정 (Adreno/Mali/Apple/Desktop), MID tier 하이브리드 해상도 파이프라인, LOW tier Bilateral fallback, 코드 리뷰 반영 (Adreno 파싱 안전성, computeGaussianWeights 경계 보호, half-res 0 나누기 방지) | Claude |
+| 2026-03-04 | **Codex 리뷰 피드백 반영**: (1) 마스크 중심 스무딩을 scissor 이전으로 이동 (효과 무효화 버그 수정), (2) OneEuroFilter release()/얼굴 추적 끊김 시 reset 추가, (3) std::stoi → std::strtol 교체 (예외 안전성), (4) detectDeviceTier() static public → private 인스턴스 메서드 변경. 미수정 항목(Q2/A2 파이프라인 중복 ~140줄)은 P4-W3-04-R1으로 분리 | Claude |
