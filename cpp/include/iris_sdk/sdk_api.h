@@ -599,6 +599,7 @@ typedef struct IrisBeautyConfigV2 {
     float whitening;        /**< 피부톤 화이트닝 (0.0~1.0) */
     float color_balance;    /**< 컬러 밸런스 (-1.0~1.0, 음수=쿨톤, 양수=웜톤) */
     float wrinkle_remove;   /**< 주름 제거 (0.0~1.0) */
+    float skin_quality;     /**< 피부 품질 개선 (0.0~1.0, Freq Sep 활성화) */
 
     /* V2 확장 - 얼굴 형태 보정 */
     float slim_face;        /**< 얼굴 슬림화 (0.0~1.0) */

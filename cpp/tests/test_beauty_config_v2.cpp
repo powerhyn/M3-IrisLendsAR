@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "iris_sdk/beauty_filter.h"
+#include "iris_sdk/gpu/gpu_beauty_backend.h"
 
 namespace iris_sdk {
 namespace testing {
@@ -25,6 +26,7 @@ TEST(BeautyFilterConfigV2Test, DefaultValuesFromHelper) {
     EXPECT_FLOAT_EQ(config.whitening, 0.0f);
     EXPECT_FLOAT_EQ(config.colorBalance, 0.0f);
     EXPECT_FLOAT_EQ(config.wrinkleRemove, 0.0f);
+    EXPECT_FLOAT_EQ(config.skinQuality, 0.0f);
     EXPECT_FLOAT_EQ(config.slimFace, 0.0f);
     EXPECT_FLOAT_EQ(config.enlargeEyes, 0.0f);
     EXPECT_FLOAT_EQ(config.thinChin, 0.0f);
@@ -267,6 +269,120 @@ TEST(BeautyFilterConfigV2CAPI, UsingGpuReflectsConfig) {
     config.useGpu = false;
     iris_sdk_set_beauty_filter_v2(&config);
     EXPECT_FALSE(iris_sdk_beauty_using_gpu());
+}
+
+//=============================================================================
+// skinQuality validation 테스트
+//=============================================================================
+
+TEST(BeautyFilterConfigV2Test, IsValidRejectsOutOfRangeSkinQuality) {
+    auto config = BeautyFilterConfigV2Helper::defaults();
+
+    config.skinQuality = 1.5f;  // Out of range (max 1.0)
+    EXPECT_FALSE(BeautyFilterConfigV2Helper::isValid(config));
+
+    config.skinQuality = -0.1f;  // Out of range (min 0.0)
+    EXPECT_FALSE(BeautyFilterConfigV2Helper::isValid(config));
+}
+
+TEST(BeautyFilterConfigV2Test, ClampCorrectsSkinQuality) {
+    BeautyFilterConfigV2 config = BeautyFilterConfigV2Helper::defaults();
+    config.skinQuality = 2.0f;
+    BeautyFilterConfigV2Helper::clamp(config);
+    EXPECT_FLOAT_EQ(config.skinQuality, 1.0f);
+
+    config.skinQuality = -1.0f;
+    BeautyFilterConfigV2Helper::clamp(config);
+    EXPECT_FLOAT_EQ(config.skinQuality, 0.0f);
+}
+
+//=============================================================================
+// mapSkinQuality 테스트 (GPUBeautyBackend::FreqSepParams)
+//=============================================================================
+
+TEST(FreqSepParamsTest, DisabledWhenSkinQualityZero) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.0f, 200);
+    EXPECT_FALSE(params.enabled);
+}
+
+TEST(FreqSepParamsTest, DisabledWhenSkinQualityNegative) {
+    auto params = GPUBeautyBackend::mapSkinQuality(-0.5f, 200);
+    EXPECT_FALSE(params.enabled);
+}
+
+TEST(FreqSepParamsTest, EnabledWhenSkinQualityPositive) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.01f, 200);
+    EXPECT_TRUE(params.enabled);
+}
+
+TEST(FreqSepParamsTest, EnabledAtHalfQuality) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 200);
+    EXPECT_TRUE(params.enabled);
+    EXPECT_GE(params.blur_radius, 6);
+    EXPECT_LE(params.blur_radius, 28);
+    EXPECT_GT(params.high_freq_preserve, 0.0f);
+    EXPECT_LE(params.high_freq_preserve, 1.0f);
+}
+
+TEST(FreqSepParamsTest, EnabledAtFullQuality) {
+    auto params = GPUBeautyBackend::mapSkinQuality(1.0f, 200);
+    EXPECT_TRUE(params.enabled);
+    // At max quality, high_freq_preserve should be near minimum (~0.10)
+    EXPECT_LE(params.high_freq_preserve, 0.15f);
+}
+
+TEST(FreqSepParamsTest, RadiusClampedToMinimum) {
+    // face_width=50 → 50*0.05=2.5 → clamped to 6
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 50);
+    EXPECT_EQ(params.blur_radius, 6);
+}
+
+TEST(FreqSepParamsTest, RadiusClampedToMaximum) {
+    // face_width=800 → 800*0.05=40 → clamped to 28
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 800);
+    EXPECT_EQ(params.blur_radius, 28);
+}
+
+TEST(FreqSepParamsTest, RadiusProportionalToFaceWidth) {
+    // face_width=300 → 300*0.05=15 → within range
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 300);
+    EXPECT_EQ(params.blur_radius, 15);
+}
+
+TEST(FreqSepParamsTest, ZeroFaceWidthClampedToMinRadius) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 0);
+    EXPECT_EQ(params.blur_radius, 6);
+}
+
+TEST(FreqSepParamsTest, HighFreqPreserveDecreasesWithQuality) {
+    auto low_q = GPUBeautyBackend::mapSkinQuality(0.2f, 200);
+    auto mid_q = GPUBeautyBackend::mapSkinQuality(0.5f, 200);
+    auto high_q = GPUBeautyBackend::mapSkinQuality(0.9f, 200);
+
+    // Higher quality → lower preserve (more smoothing)
+    EXPECT_GT(low_q.high_freq_preserve, mid_q.high_freq_preserve);
+    EXPECT_GT(mid_q.high_freq_preserve, high_q.high_freq_preserve);
+}
+
+TEST(FreqSepParamsTest, AttenuationRangeValid) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 200);
+    EXPECT_GT(params.attenuation_high, params.attenuation_low);
+    EXPECT_GT(params.attenuation_low, 0.0f);
+}
+
+TEST(FreqSepParamsTest, LowFreqSmoothRatioInRange) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 200);
+    EXPECT_GE(params.low_freq_smooth_radius_ratio, 0.4f);
+    EXPECT_LE(params.low_freq_smooth_radius_ratio, 0.6f);
+}
+
+TEST(FreqSepParamsTest, OverRangeSkinQualityClampedInternally) {
+    // skinQuality > 1.0 should be clamped internally
+    auto params = GPUBeautyBackend::mapSkinQuality(2.0f, 200);
+    EXPECT_TRUE(params.enabled);
+    // Should behave same as 1.0 due to clamp
+    auto params_max = GPUBeautyBackend::mapSkinQuality(1.0f, 200);
+    EXPECT_FLOAT_EQ(params.high_freq_preserve, params_max.high_freq_preserve);
 }
 
 } // namespace testing

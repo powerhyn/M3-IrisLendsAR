@@ -44,7 +44,8 @@
       "Bash(grep:*)",
       "Bash(adb install:*)",
       "mcp__serena__replace_symbol_body",
-      "Bash(./bin/test_sdk_api:*)"
+      "Bash(./bin/test_sdk_api:*)",
+      "Bash(./bin/test_gpu_beauty_backend:*)"
     ]
   },
   "enabledPlugins": {

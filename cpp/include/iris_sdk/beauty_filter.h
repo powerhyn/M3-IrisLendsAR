@@ -81,6 +81,8 @@ typedef struct BeautyFilterConfigV2 {
     float colorBalance;
     /** @brief 주름 제거 (0.0~1.0, 기본값 0.0) */
     float wrinkleRemove;
+    /** @brief 피부 품질 개선 (0~1, 기본 0.0, Freq Sep 활성화) */
+    float skinQuality;
 
     //===== 얼굴 형태 보정 =====
     /** @brief 얼굴 슬림화 (0.0~1.0, 기본값 0.0) */
@@ -279,6 +281,7 @@ struct BeautyFilterConfigV2Helper {
         v2.whitening = 0.0f;
         v2.colorBalance = 0.0f;
         v2.wrinkleRemove = 0.0f;
+        v2.skinQuality = 0.0f;
         v2.slimFace = 0.0f;
         v2.enlargeEyes = 0.0f;
         v2.thinChin = 0.0f;
@@ -314,6 +317,7 @@ struct BeautyFilterConfigV2Helper {
                (cfg.whitening >= 0.0f && cfg.whitening <= 1.0f) &&
                (cfg.colorBalance >= -1.0f && cfg.colorBalance <= 1.0f) &&
                (cfg.wrinkleRemove >= 0.0f && cfg.wrinkleRemove <= 1.0f) &&
+               (cfg.skinQuality >= 0.0f && cfg.skinQuality <= 1.0f) &&
                (cfg.slimFace >= 0.0f && cfg.slimFace <= 1.0f) &&
                (cfg.enlargeEyes >= 0.0f && cfg.enlargeEyes <= 1.0f) &&
                (cfg.thinChin >= 0.0f && cfg.thinChin <= 1.0f) &&
@@ -334,6 +338,7 @@ struct BeautyFilterConfigV2Helper {
         cfg.whitening = clampf(cfg.whitening, 0.0f, 1.0f);
         cfg.colorBalance = clampf(cfg.colorBalance, -1.0f, 1.0f);
         cfg.wrinkleRemove = clampf(cfg.wrinkleRemove, 0.0f, 1.0f);
+        cfg.skinQuality = clampf(cfg.skinQuality, 0.0f, 1.0f);
         cfg.slimFace = clampf(cfg.slimFace, 0.0f, 1.0f);
         cfg.enlargeEyes = clampf(cfg.enlargeEyes, 0.0f, 1.0f);
         cfg.thinChin = clampf(cfg.thinChin, 0.0f, 1.0f);
@@ -354,6 +359,7 @@ struct BeautyFilterConfigV2Helper {
         cfg.whitening = 0.0f;
         cfg.colorBalance = 0.0f;
         cfg.wrinkleRemove = 0.0f;
+        cfg.skinQuality = 0.0f;
         cfg.slimFace = 0.0f;
         cfg.enlargeEyes = 0.0f;
         cfg.thinChin = 0.0f;

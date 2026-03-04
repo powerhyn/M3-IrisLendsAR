@@ -66,6 +66,7 @@ BeautyFilterConfigV2 toCppConfigV2(const IrisBeautyConfigV2* c_config) {
     config.whitening = c_config->whitening;
     config.colorBalance = c_config->color_balance;
     config.wrinkleRemove = c_config->wrinkle_remove;
+    config.skinQuality = c_config->skin_quality;
     config.slimFace = c_config->slim_face;
     config.enlargeEyes = c_config->enlarge_eyes;
     config.thinChin = c_config->thin_chin;
@@ -92,6 +93,7 @@ void fromCppConfigV2(const BeautyFilterConfigV2& cpp_config, IrisBeautyConfigV2*
     c_config->whitening = cpp_config.whitening;
     c_config->color_balance = cpp_config.colorBalance;
     c_config->wrinkle_remove = cpp_config.wrinkleRemove;
+    c_config->skin_quality = cpp_config.skinQuality;
     c_config->slim_face = cpp_config.slimFace;
     c_config->enlarge_eyes = cpp_config.enlargeEyes;
     c_config->thin_chin = cpp_config.thinChin;
@@ -140,6 +142,7 @@ void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* config) {
     config->whitening = 0.0f;
     config->color_balance = 0.0f;
     config->wrinkle_remove = 0.0f;
+    config->skin_quality = 0.0f;
     config->slim_face = 0.0f;
     config->enlarge_eyes = 0.0f;
     config->thin_chin = 0.0f;
