@@ -1032,6 +1032,73 @@ Week 2까지 완료되면 조기 릴리즈 가능. Week 3는 보험.
 
 ---
 
+## 16. 작업별 검증 가이드 (눈으로 확인할 수 있는 것)
+
+### 16.1 P4-W3-02 (Freq Sep 셰이더 + 파이프라인) — ✅ 구현 완료
+
+**데모 앱에서 바로 확인 불가**. UI에 `skinQuality` 슬라이더가 아직 없고, 프리셋에도 값이 설정되지 않았음.
+
+| 구현 완료 항목 | 상태 |
+|----------------|------|
+| C++ 코어 파이프라인 (5패스 셰이더 실행) | ✅ |
+| mapSkinQuality 매핑 함수 (S-curve) | ✅ 테스트 35개 통과 |
+| C++ → C → JNI → Java 4계층 skinQuality 필드 | ✅ |
+| CPU 사전 가중치 계산 (셰이더 exp() 제거) | ✅ |
+| 4단계 Bilateral fallback 체계 | ✅ |
+| skin mask Y축 반전 보정 | ✅ |
+
+**빠른 확인 방법** (하드코딩):
+```kotlin
+// GpuRenderActivity.kt의 resetBeautyConfig() 또는 원하는 위치에 추가
+beautyConfig.skinQuality = 0.5f
+cameraGLView.setBeautyConfig(beautyConfig)
+```
+이 한 줄로 FreqSep 파이프라인이 활성화되어 카메라 영상에서 피부 스무딩 효과를 즉시 확인할 수 있음.
+
+**확인 포인트**:
+- `skinQuality=0.0` → 기존과 동일 (Bilateral 또는 무처리)
+- `skinQuality=0.5` → 피부 잡티 감소 + 눈/코/입술 윤곽 유지
+- `skinQuality=1.0` → 최대 스무딩 (피부결까지 강하게 감쇠)
+- FreqSep 셰이더 미지원 기기 → 자동 Bilateral fallback (앱 크래시 없음)
+
+---
+
+### 16.2 P4-W3-03 (skinQuality API + 프리셋) — ⏳ 대기
+
+**이 작업 완료 후 데모 앱에서 처음으로 정상적 UI 확인 가능.**
+
+| 확인 가능 항목 | 방법 |
+|----------------|------|
+| skinQuality 슬라이더 | 뷰티 탭에 추가된 슬라이더를 0→1로 조작 |
+| 프리셋 반영 | Natural/Studio/Glamour 프리셋 선택 시 skinQuality 자동 적용 |
+| 하위 호환 | `skinQuality=0` 상태에서 기존 smoothing 동작 변함 없음 |
+| Bilateral → FreqSep 실시간 전환 | 슬라이더를 0↔0.5로 왔다갔다하며 비교 |
+
+---
+
+### 16.3 P4-W3-04 (Temporal Stability + Device Tier) — ⏳ 대기
+
+| 확인 가능 항목 | 방법 |
+|----------------|------|
+| 스무딩 경계 떨림 제거 | 얼굴을 천천히 좌우로 움직이며 마스크 경계 관찰 |
+| 자동 Bilateral fallback | 저사양 기기(또는 에뮬레이터)에서 skinQuality>0 설정 → 크래시 없이 Bilateral 동작 |
+| 하프 해상도 블러 | 중사양 기기에서 GPUProfiler 로그로 블러 패스 시간 확인 |
+| 파라미터 안정성 | 같은 자세 유지 시 스무딩 강도가 프레임 간 흔들리지 않음 |
+
+---
+
+### 16.4 P4-W3-05 (튜닝 + 테스트 + 릴리즈) — ⏳ 대기
+
+| 확인 가능 항목 | 방법 |
+|----------------|------|
+| A/B 비교 | 기존 Bilateral vs FreqSep 나란히 비교 (스크린샷/영상) |
+| 피부톤별 품질 | 밝음/중간/어두움 피부톤에서 균등한 보정 결과 |
+| 실기기 30fps | 5대 이상 기기에서 GPUProfiler로 프레임 타임 측정 |
+| 블라인드 평가 | FreqSep vs Bilateral 선호도 > 70% |
+| 릴리즈 게이트 | §15.1.3의 정량/정성 게이트 전항목 통과 |
+
+---
+
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 작성자 |
@@ -1047,3 +1114,4 @@ Week 2까지 완료되면 조기 릴리즈 가능. Week 3는 보험.
 | 2026-03-03 | 승격 심사 2차 4건 수정 — ①문서상태 '완료'로 통일, ②skinSmooth잔류→skinQuality 전수 교체, ③프리셋 skinQuality 기준으로 수정, ④다음단계 P4-W3-02 단일 경로 확정 | Claude |
 | 2026-03-04 | Gemini 리뷰 반영: §8.2 YCrCb 셰이더에 "MVP 미포함" 주석 추가, §12.4 Temporal Stabilization에 "스칼라 파라미터 필터링" 명확화 주석 추가 | Claude |
 | 2026-03-04 | Codex 리뷰 반영: §15.1.1 radius 수식에 "브레인스토밍 초안" 주석 추가 — 정본은 P4-W3-02 §4.6 mapSkinQuality() | Claude |
+| 2026-03-04 | 16장 작업별 검증 가이드 추가 — 각 작업 단계별 눈으로 확인 가능한 항목 및 방법 정리 | Claude |

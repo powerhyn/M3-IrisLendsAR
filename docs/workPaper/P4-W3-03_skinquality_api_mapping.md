@@ -4,7 +4,7 @@
 |------|------|
 | **작업 ID** | P4-W3-03 |
 | **유형** | 구현 |
-| **상태** | ⏳ 대기 |
+| **상태** | ✅ 완료 |
 | **근거 문서** | P4-W3-01 (브레인스토밍), P4-W3-02 (셰이더/파이프라인/매핑) |
 | **선행 조건** | P4-W3-02 완료 (Freq Sep 파이프라인 + mapSkinQuality 동작) |
 | **작성일** | 2026-03-03 |
@@ -23,12 +23,12 @@
 
 ### 1.1 완료 조건
 
-- [ ] `BeautyFilterConfigV2`에 `skinQuality` 필드 추가 (기본값 0.0)
-- [ ] C API 함수 추가: `iris_sdk_set_skin_quality()`, `iris_sdk_get_skin_quality()`
-- [ ] 프리셋 enum + API 추가
-- [ ] `applyTextureId()`에서 `config.skinQuality` → `GPUBeautyBackend::mapSkinQuality()` 호출 연결
-- [ ] `skinQuality=0` → 기존 Bilateral 경로 (하위 호환 확인)
-- [ ] `skinQuality>0` → Freq Sep 경로 활성화 확인
+- [x] `BeautyFilterConfigV2`에 `skinQuality` 필드 추가 (기본값 0.0) — P4-W3-02에서 완료
+- [x] C API 함수 추가: `iris_sdk_set_skin_quality()`, `iris_sdk_get_skin_quality()`
+- [x] 프리셋 enum + API 추가 (`IrisBeautyPreset`, `iris_sdk_set_beauty_preset()`)
+- [x] `applyTextureId()`에서 `config.skinQuality` → `GPUBeautyBackend::mapSkinQuality()` 호출 연결 — P4-W3-02에서 완료
+- [x] `skinQuality=0` → 기존 Bilateral 경로 (하위 호환 확인) — 테스트 검증 완료
+- [x] `skinQuality>0` → Freq Sep 경로 활성화 확인 — 테스트 검증 완료
 
 ### 1.2 실패 기준 (No-Go)
 
@@ -180,3 +180,41 @@ if (config.skinQuality > 0.0f && roi_ptr && roi_ptr->isValid()) {
 | 2026-03-03 | 리뷰 반영: mapSkinQuality를 GPUBeautyBackend로 이동 (P4-W3-02), beauty_processor.h/cpp 변경 대상에서 제거, applyTextureId() 연결 로직 추가 (§3.5) | Claude |
 | 2026-03-03 | 리뷰 2차 반영: §3.5 roi_ptr null/validity 체크 추가, §3.1 ABI pre-release 안정성 노트 추가 | Claude |
 | 2026-03-03 | 리뷰 3차 반영: §3.2/§3.4 C API 시그니처를 IRIS_SDK_EXPORT + IrisSdkError 패턴으로 수정, getter를 out 파라미터 패턴으로 변경 | Claude |
+| 2026-03-04 | 구현 완료: C API 3개 함수 + IrisBeautyPreset enum + 단위/통합 테스트 11개 추가 (전체 46개 PASSED) | Claude |
+
+---
+
+## 7. 실행 내역
+
+### 7.1 구현 산출물
+
+| 파일 | 변경 내용 | 라인 |
+|------|----------|------|
+| `beauty_filter.h` | `IrisBeautyPreset` enum + C API 선언 3개 | 255~297 |
+| `beauty_filter.cpp` | C API 구현 3개 함수 | 522~561 |
+| `test_beauty_config_v2.cpp` | 단위/통합 테스트 11개 추가 | 신규 테스트 수트 2개 |
+
+### 7.2 테스트 결과
+
+| 테스트 수트 | 테스트 수 | 결과 |
+|------------|----------|------|
+| BeautyFilterConfigV2Test | 14 | ✅ PASSED |
+| BeautyFilterConfigV2CAPI | 8 | ✅ PASSED |
+| FreqSepParamsTest | 13 | ✅ PASSED |
+| SkinQualityCAPITest (신규) | 5 | ✅ PASSED |
+| BeautyPresetTest (신규) | 6 | ✅ PASSED |
+| **합계** | **46** | **✅ 전체 PASSED** |
+
+### 7.3 검증 결과
+
+| 검증 항목 | 결과 |
+|----------|------|
+| skinQuality=0 → Bilateral 하위호환 | ✅ `BackwardCompatDefaultZero`, `ZeroBypassesFreqSep` |
+| skinQuality>0 → Freq Sep 활성화 | ✅ `EnabledWhenSkinQualityPositive` |
+| set/get round-trip 일치 | ✅ `SetAndGetRoundTrip` |
+| 범위 초과 거부 | ✅ `SetRejectsOutOfRange` |
+| 경계값 수용 (0.0, 1.0) | ✅ `SetAcceptsBoundaryValues` |
+| nullptr 안전성 | ✅ `GetRejectsNullptr` |
+| 프리셋 매핑 (NATURAL→0.3, MODERATE→0.5, STRONG→0.8) | ✅ 각각 테스트 통과 |
+| CUSTOM 프리셋 → 값 유지 | ✅ `CustomPresetKeepsCurrentValue` |
+| 유효하지 않은 프리셋 거부 | ✅ `InvalidPresetReturnsError` |

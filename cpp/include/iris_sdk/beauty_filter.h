@@ -252,6 +252,50 @@ IRIS_SDK_EXPORT bool iris_sdk_beauty_gpu_available(void);
  */
 IRIS_SDK_EXPORT bool iris_sdk_beauty_using_gpu(void);
 
+// ============================================================================
+// 프리셋 및 skinQuality 편의 API
+// ============================================================================
+
+/**
+ * @brief 뷰티 프리셋 (skinQuality 사전 설정)
+ */
+typedef enum IrisBeautyPreset {
+    IRIS_BEAUTY_PRESET_NATURAL  = 0,   /**< 자연스러운 보정 (skinQuality=0.3) */
+    IRIS_BEAUTY_PRESET_MODERATE = 1,   /**< 적절한 보정 (skinQuality=0.5) */
+    IRIS_BEAUTY_PRESET_STRONG   = 2,   /**< 강한 보정 (skinQuality=0.8) */
+    IRIS_BEAUTY_PRESET_CUSTOM   = 3    /**< 사용자 직접 설정 */
+} IrisBeautyPreset;
+
+/**
+ * @brief 피부 품질 개선 강도 설정 (Frequency Separation)
+ *
+ * skinQuality > 0이면 Freq Sep 파이프라인이 활성화됩니다.
+ * skinQuality = 0이면 기존 Bilateral 경로로 동작합니다 (하위 호환).
+ *
+ * @param quality 피부 품질 강도 (0.0~1.0, 0.0=비활성)
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_INVALID_PARAM 범위 초과
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_skin_quality(float quality);
+
+/**
+ * @brief 현재 피부 품질 개선 강도 조회
+ *
+ * @param out_quality 결과를 저장할 포인터 (NULL 불가)
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_NULL_POINTER out_quality가 NULL인 경우
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_get_skin_quality(float* out_quality);
+
+/**
+ * @brief 뷰티 프리셋 적용
+ *
+ * 프리셋에 따라 skinQuality 값이 자동 설정됩니다.
+ * IRIS_BEAUTY_PRESET_CUSTOM 선택 시 skinQuality 값이 변경되지 않습니다.
+ *
+ * @param preset 적용할 프리셋
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_INVALID_PARAM 유효하지 않은 프리셋
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_beauty_preset(IrisBeautyPreset preset);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
