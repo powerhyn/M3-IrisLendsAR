@@ -4,7 +4,7 @@
 |------|------|
 | **작업 ID** | P4-W3-04 |
 | **유형** | 구현 |
-| **상태** | ⏳ 대기 |
+| **상태** | ✅ 완료 |
 | **근거 문서** | P4-W3-01 (브레인스토밍), P4-W3-02 (셰이더/파이프라인/매핑), P4-W3-03 (API) |
 | **선행 조건** | P4-W3-03 완료 (skinQuality API 동작) |
 | **작성일** | 2026-03-03 |
@@ -19,12 +19,12 @@ One Euro Filter로 Freq Sep 파라미터의 temporal stability를 확보하고, 
 
 ### 1.1 완료 조건
 
-- [ ] One Euro Filter로 `blur_radius` 프레임 간 안정화
-- [ ] One Euro Filter로 mask 중심 좌표(face_rect center) 안정화 → 경계 flicker 방지
-- [ ] DeviceTier 판정 로직 (HIGH/MID/LOW) 구현
-- [ ] MID tier: 하이브리드 해상도 Freq Sep 경로 구현 (블러 half-res, Composite full-res)
-- [ ] LOW tier: Bilateral fallback 분기 확인
-- [ ] tier별 성능 프로파일링 (GPUProfiler)
+- [x] One Euro Filter로 `blur_radius` 프레임 간 안정화
+- [x] One Euro Filter로 mask 중심 좌표(face_rect center) 안정화 → 경계 flicker 방지
+- [x] DeviceTier 판정 로직 (HIGH/MID/LOW) 구현
+- [x] MID tier: 하이브리드 해상도 Freq Sep 경로 구현 (블러 half-res, Composite full-res)
+- [x] LOW tier: Bilateral fallback 분기 확인
+- [x] tier별 성능 프로파일링 (GPUProfiler)
 
 ### 1.2 실패 기준 (No-Go)
 
@@ -335,3 +335,4 @@ if (profiling) profiler_->end("FreqSep_Total");
 | 2026-03-04 | Gemini 2차 리뷰 반영: MID tier 전체 half-res→upscale 설계를 하이브리드 해상도(블러 half-res, Extract/Composite full-res)로 전면 재설계 (§4.3), 완료 조건/실패 기준 업데이트 (§1.1, §1.2), tier 테이블 수정 (§4.2), 테스트 케이스 하이브리드 반영 (§5.2), 리스크 갱신 (§7), 랜드마크 레벨 안정화 별도 작업 노트 추가 (§3.2) | Claude |
 | 2026-03-04 | Codex 리뷰 반영: "mask 경계값" One Euro 필터링 구현 구체화 — face_rect center(cx, cy)를 필터링 대상으로 확정 (§1.1, §3.1, §3.2), feather_radius는 15px 고정이므로 필터 불필요 확인 | Claude |
 | 2026-03-04 | Gemini 3차 리뷰 반영: §4.3 MID tier를 5서브패스로 업데이트 — Extract 패스 삭제, lowFreq 보존, smoothedLow 별도 할당, highFreq_full 텍스처 불필요. §5.2 테스트/§7 리스크 반영 | Claude |
+| 2026-03-04 | **구현 완료**: One Euro Filter temporal stability (blur_radius + mask center cx/cy), DeviceTier 판정 (Adreno/Mali/Apple/Desktop), MID tier 하이브리드 해상도 파이프라인, LOW tier Bilateral fallback, 코드 리뷰 반영 (Adreno 파싱 안전성, computeGaussianWeights 경계 보호, half-res 0 나누기 방지) | Claude |

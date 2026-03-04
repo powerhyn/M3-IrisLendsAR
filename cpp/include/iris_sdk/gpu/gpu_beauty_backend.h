@@ -238,6 +238,16 @@ public:
     /// skinQuality → FreqSepParams 매핑
     static FreqSepParams mapSkinQuality(float skin_quality, int face_width);
 
+    /// GPU 디바이스 성능 등급
+    enum class DeviceTier {
+        HIGH,   ///< Adreno 7xx, Mali-G710+, Apple GPU, Desktop GPU
+        MID,    ///< Adreno 6xx, Mali-G7x, PowerVR
+        LOW     ///< 기타 저사양 GPU
+    };
+
+    /// GPU 렌더러 문자열 기반 디바이스 등급 감지
+    static DeviceTier detectDeviceTier();
+
 private:
     //=========================================================================
     // 초기화 헬퍼
@@ -299,6 +309,16 @@ private:
     /// Frequency Separation 5서브패스 파이프라인
     /// @return true: 파이프라인 정상 완료, false: 텍스처 할당 실패 등 (호출자가 fallback 처리)
     bool executeFreqSepPipeline(
+        GLuint input_tex,
+        GLuint mask_tex,
+        GLuint output_fbo,
+        int width, int height,
+        const FreqSepParams& params);
+
+    /// Frequency Separation MID 디바이스 하프 해상도 파이프라인
+    /// blur 패스는 half-res, composite 패스는 full-res로 실행
+    /// @return true: 파이프라인 정상 완료
+    bool executeFreqSepPipelineHalfRes(
         GLuint input_tex,
         GLuint mask_tex,
         GLuint output_fbo,
@@ -422,8 +442,13 @@ private:
         GLint uAttenuationHigh = -1;
     } freq_sep_composite_uniforms_;
 
-    // Temporal stability용 One Euro Filter (P4-W3-04에서 사용)
+    // Temporal stability용 One Euro Filter (P4-W3-04)
     OneEuroFilter skin_radius_filter_{0.5f, 0.01f, 1.0f};
+    OneEuroFilter mask_center_x_filter_{1.0f, 0.02f, 1.0f};  ///< 마스크 중심 X 안정화
+    OneEuroFilter mask_center_y_filter_{1.0f, 0.02f, 1.0f};  ///< 마스크 중심 Y 안정화
+
+    // 디바이스 성능 등급 (P4-W3-04)
+    DeviceTier device_tier_ = DeviceTier::HIGH;
 
     /// Uniform Location 캐싱 (초기화 시 호출)
     void cacheUniformLocations();

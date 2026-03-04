@@ -7,7 +7,9 @@
 #include "iris_sdk/gpu/render_context.h"
 #include "iris_sdk/beauty_roi_manager.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <string>
 
 #if IRIS_SDK_GPU_AVAILABLE
 #include "iris_sdk/gpu/gles_render_context.h"
@@ -31,6 +33,8 @@ namespace iris_sdk {
 // CPU-side Gaussian weight precomputation (symmetric half-kernel)
 // weights[i] = exp(-i*i / (2*sigma*sigma)), normalized so full kernel sums to 1.0
 static void computeGaussianWeights(int radius, float weights[29]) {
+    // 경계 보호: 배열 크기 29이므로 최대 인덱스는 28
+    radius = std::clamp(radius, 1, 28);
     float sigma = radius * 0.4f;
     float sum = 0.0f;
     for (int i = 0; i <= radius; i++) {
@@ -153,6 +157,12 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
         LOGI("Neutral 1x1x1 identity LUT created: id=%u", neutral_lut_texture_);
     }
 #endif
+
+    // 디바이스 성능 등급 감지 (P4-W3-04)
+    device_tier_ = detectDeviceTier();
+    LOGI("Device tier detected: %s",
+         device_tier_ == DeviceTier::HIGH ? "HIGH" :
+         device_tier_ == DeviceTier::MID ? "MID" : "LOW");
 
     initialized_ = true;
     LOGI("GPUBeautyBackend initialized successfully");
@@ -1138,6 +1148,217 @@ bool GPUBeautyBackend::executeFreqSepPipeline(
 #endif
 }
 
+// =============================================================================
+// Device Tier 감지 (P4-W3-04)
+// =============================================================================
+
+GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
+#if IRIS_SDK_GPU_AVAILABLE
+    const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    if (!renderer) return DeviceTier::LOW;
+
+    std::string gpu(renderer);
+
+    // Adreno GPU (e.g. "Adreno (TM) 750", "Adreno 640")
+    if (gpu.find("Adreno") != std::string::npos) {
+        auto pos = gpu.find("Adreno") + 6; // "Adreno" 이후
+        // 비숫자 문자 스킵 (공백, "(TM)" 등)
+        while (pos < gpu.size() && !std::isdigit(static_cast<unsigned char>(gpu[pos]))) ++pos;
+        // 첫 번째 연속 숫자 블록만 수집
+        std::string digits;
+        while (pos < gpu.size() && std::isdigit(static_cast<unsigned char>(gpu[pos]))) {
+            digits += gpu[pos++];
+        }
+        if (!digits.empty()) {
+            int num = std::stoi(digits);
+            if (num >= 700) return DeviceTier::HIGH;
+            if (num >= 600) return DeviceTier::MID;
+            return DeviceTier::LOW;
+        }
+    }
+
+    // Mali GPU
+    if (gpu.find("Mali-G") != std::string::npos) {
+        auto pos = gpu.find("Mali-G") + 6;
+        std::string digits;
+        for (size_t i = pos; i < gpu.size() && std::isdigit(static_cast<unsigned char>(gpu[i])); ++i) {
+            digits += gpu[i];
+        }
+        if (!digits.empty()) {
+            int num = std::stoi(digits);
+            if (num >= 710) return DeviceTier::HIGH;
+            if (num >= 70) return DeviceTier::MID;
+            return DeviceTier::LOW;
+        }
+    }
+
+    // Apple GPU → HIGH
+    if (gpu.find("Apple") != std::string::npos) return DeviceTier::HIGH;
+    // PowerVR → MID
+    if (gpu.find("PowerVR") != std::string::npos) return DeviceTier::MID;
+
+    // Desktop GPU → HIGH
+    if (gpu.find("NVIDIA") != std::string::npos ||
+        gpu.find("AMD") != std::string::npos ||
+        gpu.find("Intel") != std::string::npos) {
+        return DeviceTier::HIGH;
+    }
+
+    return DeviceTier::LOW;
+#else
+    return DeviceTier::HIGH;
+#endif
+}
+
+// =============================================================================
+// MID 디바이스 하프 해상도 FreqSep 파이프라인 (P4-W3-04)
+// =============================================================================
+
+bool GPUBeautyBackend::executeFreqSepPipelineHalfRes(
+    GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
+    int width, int height, const FreqSepParams& params) {
+#if IRIS_SDK_GPU_AVAILABLE
+    int half_w = width / 2;
+    int half_h = height / 2;
+
+    // 최소 해상도 보장 (0 나누기 방지)
+    if (half_w < 1 || half_h < 1) {
+        LOGW("FreqSep HalfRes: resolution too small (%dx%d → half %dx%d)", width, height, half_w, half_h);
+        return false;
+    }
+
+    // 하프 해상도 렌더 타겟 확보
+    auto* lowFreq_half = texture_pool_->acquireRenderTarget(half_w, half_h);
+    auto* smoothedLow_half = texture_pool_->acquireRenderTarget(half_w, half_h);
+    auto* temp_half = texture_pool_->acquireRenderTarget(half_w, half_h);
+
+    if (!lowFreq_half || !smoothedLow_half || !temp_half) {
+        LOGE("FreqSep HalfRes: Failed to acquire render targets");
+        if (lowFreq_half) texture_pool_->releaseTexture(lowFreq_half);
+        if (smoothedLow_half) texture_pool_->releaseTexture(smoothedLow_half);
+        if (temp_half) texture_pool_->releaseTexture(temp_half);
+        return false;
+    }
+
+    bool profiling = profiler_ && profiler_->isEnabled();
+
+    // 하프 해상도 blur radius (물리적 blur 범위 보존)
+    int half_radius = std::max(3, params.blur_radius / 2);
+
+    // Gaussian weights 사전 계산
+    float weights[29];
+    computeGaussianWeights(half_radius, weights);
+
+    // Pass 1a: Horizontal Gaussian (half-res)
+    if (profiling) profiler_->begin("FreqSep_GaussianH_Half");
+    glUseProgram(freq_sep_gaussian_program_);
+    glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / half_w, 0.0f);
+    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, half_radius);
+    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
+    glViewport(0, 0, half_w, half_h);
+    glBindFramebuffer(GL_FRAMEBUFFER, temp_half->fbo_id);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, input_tex);
+    renderFullscreenQuad();
+    if (profiling) profiler_->end("FreqSep_GaussianH_Half");
+
+    // Pass 1b: Vertical Gaussian (half-res) → lowFreq_half
+    if (profiling) profiler_->begin("FreqSep_GaussianV_Half");
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / half_h);
+    glBindFramebuffer(GL_FRAMEBUFFER, lowFreq_half->fbo_id);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, temp_half->texture_id);
+    renderFullscreenQuad();
+    if (profiling) profiler_->end("FreqSep_GaussianV_Half");
+
+    // Pass 2 weights 사전 계산
+    int low_radius = std::max(3,
+        static_cast<int>(half_radius * params.low_freq_smooth_radius_ratio));
+    computeGaussianWeights(low_radius, weights);
+
+    // Pass 2a: Low Freq additional Gaussian H (half-res)
+    if (profiling) profiler_->begin("FreqSep_LowSmoothH_Half");
+    glUseProgram(freq_sep_gaussian_program_);
+    glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / half_w, 0.0f);
+    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, low_radius);
+    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
+    glBindFramebuffer(GL_FRAMEBUFFER, temp_half->fbo_id);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, lowFreq_half->texture_id);
+    renderFullscreenQuad();
+    if (profiling) profiler_->end("FreqSep_LowSmoothH_Half");
+
+    // Pass 2b: Low Freq additional Gaussian V (half-res) → smoothedLow_half
+    if (profiling) profiler_->begin("FreqSep_LowSmoothV_Half");
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / half_h);
+    glBindFramebuffer(GL_FRAMEBUFFER, smoothedLow_half->fbo_id);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, temp_half->texture_id);
+    renderFullscreenQuad();
+    if (profiling) profiler_->end("FreqSep_LowSmoothV_Half");
+
+    // Full-res viewport 복원 (Composite)
+    glViewport(0, 0, width, height);
+
+    // Pass 3: Composite (full-res)
+    // smoothedLow_half, lowFreq_half → GL_LINEAR bilinear upsampling
+    if (profiling) profiler_->begin("FreqSep_Composite_Full");
+
+    // 하프 해상도 텍스처에 GL_LINEAR 설정 (부드러운 업샘플링)
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, smoothedLow_half->texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, lowFreq_half->texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glUseProgram(freq_sep_composite_program_);
+    glUniform1f(freq_sep_composite_uniforms_.uHighFreqPreserve, params.high_freq_preserve);
+    glUniform1f(freq_sep_composite_uniforms_.uAttenuationLow, params.attenuation_low);
+    glUniform1f(freq_sep_composite_uniforms_.uAttenuationHigh, params.attenuation_high);
+
+    glUniform1i(freq_sep_composite_uniforms_.uSmoothedLow, 0);
+    glUniform1i(freq_sep_composite_uniforms_.uLowFreq, 1);
+    glUniform1i(freq_sep_composite_uniforms_.uOriginal, 2);
+    glUniform1i(freq_sep_composite_uniforms_.uSkinMask, 3);
+
+    // smoothedLow_half → unit 0, lowFreq_half → unit 1 (이미 바인딩됨)
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, input_tex);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, mask_tex);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+    renderFullscreenQuad();
+
+    // 텍스처 바인딩 정리
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    if (profiling) profiler_->end("FreqSep_Composite_Full");
+
+    // 하프 해상도 텍스처 반환
+    texture_pool_->releaseTexture(lowFreq_half);
+    texture_pool_->releaseTexture(smoothedLow_half);
+    texture_pool_->releaseTexture(temp_half);
+    return true;
+#else
+    (void)input_tex; (void)mask_tex; (void)output_fbo;
+    (void)width; (void)height; (void)params;
+    return false;
+#endif
+}
+
 void GPUBeautyBackend::onMemoryPressure(int level) {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -1390,6 +1611,27 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     }
     FreqSepParams freq_sep_params = mapSkinQuality(config.skinQuality, face_w);
 
+    // Temporal stability: One Euro Filter for blur_radius (P4-W3-04)
+    if (freq_sep_params.enabled) {
+        float raw_radius = static_cast<float>(freq_sep_params.blur_radius);
+        float filtered_radius = skin_radius_filter_.filter(raw_radius);
+        freq_sep_params.blur_radius = static_cast<int>(std::round(filtered_radius));
+        freq_sep_params.blur_radius = std::max(3, freq_sep_params.blur_radius);
+    }
+
+    // Temporal stability: One Euro Filter for mask center (P4-W3-04)
+    // face_rect 지터링 → 피부 마스크 플리커 방지
+    if (roi_ptr && roi_ptr->valid) {
+        float cx = roi_ptr->face_rect.x + roi_ptr->face_rect.width * 0.5f;
+        float cy = roi_ptr->face_rect.y + roi_ptr->face_rect.height * 0.5f;
+        float stable_cx = mask_center_x_filter_.filter(cx);
+        float stable_cy = mask_center_y_filter_.filter(cy);
+        float dx = stable_cx - cx;
+        float dy = stable_cy - cy;
+        roi_ptr->face_rect.x += dx;
+        roi_ptr->face_rect.y += dy;
+    }
+
     // Bilateral fallback 헬퍼 (FreqSep 실패 시 공통 경로)
     auto runBilateralFallback = [&]() {
         if (profiling) profiler_->begin("Smoothing_Fallback");
@@ -1403,35 +1645,51 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     if (freq_sep_params.enabled
         && freq_sep_gaussian_program_ != 0 && freq_sep_composite_program_ != 0
         && roi_ptr && roi_ptr->valid && !roi_ptr->combined_mask.empty()) {
-        // Freq Sep path: upload skin mask and run pipeline
-        GLuint mask_tex = uploadSkinMask(
-            roi_ptr->combined_mask,
-            roi_ptr->mask_width, roi_ptr->mask_height);
-        if (mask_tex != 0) {
-            // FreqSep 멀티패스 Gaussian은 전체 프레임 중간 텍스처가 필요하므로
-            // ROI scissor를 비활성화 (Composite 셰이더의 uSkinMask가 ROI 마스킹 담당)
-            if (scissor_active) {
-                glDisable(GL_SCISSOR_TEST);
-            }
-            // NOTE: 외부 "FreqSep" 래퍼 타이머 제거 — GL_TIME_ELAPSED_EXT는
-            // 중첩을 허용하지 않으므로 내부 서브패스 타이머(FreqSep_GaussianH 등)만 사용
-            bool freq_sep_ok = executeFreqSepPipeline(current_input, mask_tex,
-                                   current_output->fbo_id,
-                                   width, height, freq_sep_params);
-            // Scissor 복원
-            if (scissor_active) {
-                glEnable(GL_SCISSOR_TEST);
-            }
-            if (freq_sep_ok) {
-                current_input = current_output->texture_id;
-                if (pong) current_output = (current_output == ping) ? pong : ping;
+
+        // LOW tier: FreqSep 전체 건너뛰기 → Bilateral fallback
+        if (device_tier_ == DeviceTier::LOW) {
+            runBilateralFallback();
+        } else {
+            // HIGH 또는 MID: skin mask 업로드 후 파이프라인 실행
+            GLuint mask_tex = uploadSkinMask(
+                roi_ptr->combined_mask,
+                roi_ptr->mask_width, roi_ptr->mask_height);
+            if (mask_tex != 0) {
+                // FreqSep 멀티패스 Gaussian은 전체 프레임 중간 텍스처가 필요하므로
+                // ROI scissor를 비활성화 (Composite 셰이더의 uSkinMask가 ROI 마스킹 담당)
+                if (scissor_active) {
+                    glDisable(GL_SCISSOR_TEST);
+                }
+
+                bool freq_sep_ok = false;
+                if (device_tier_ == DeviceTier::MID) {
+                    // MID: blur half-res, composite full-res (하이브리드 해상도)
+                    freq_sep_ok = executeFreqSepPipelineHalfRes(
+                        current_input, mask_tex,
+                        current_output->fbo_id,
+                        width, height, freq_sep_params);
+                } else {
+                    // HIGH: full resolution
+                    freq_sep_ok = executeFreqSepPipeline(
+                        current_input, mask_tex,
+                        current_output->fbo_id,
+                        width, height, freq_sep_params);
+                }
+
+                // Scissor 복원
+                if (scissor_active) {
+                    glEnable(GL_SCISSOR_TEST);
+                }
+                if (freq_sep_ok) {
+                    current_input = current_output->texture_id;
+                    if (pong) current_output = (current_output == ping) ? pong : ping;
+                } else {
+                    runBilateralFallback();
+                }
             } else {
-                // FreqSep 파이프라인 실패 (텍스처 할당 등) → Bilateral fallback
+                // mask upload failed → Bilateral fallback
                 runBilateralFallback();
             }
-        } else {
-            // mask upload failed → Bilateral fallback
-            runBilateralFallback();
         }
     } else if (freq_sep_params.enabled) {
         // skinQuality > 0 but FreqSep cannot run (shader not compiled / no valid ROI/mask)
