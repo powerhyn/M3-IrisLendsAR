@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 #if IRIS_SDK_GPU_AVAILABLE
@@ -463,6 +464,11 @@ void GPUBeautyBackend::release() {
 
     render_context_ = nullptr;
     initialized_ = false;
+
+    // Temporal filter 리셋 (재초기화 시 stale state 방지)
+    skin_radius_filter_.reset();
+    mask_center_x_filter_.reset();
+    mask_center_y_filter_.reset();
 
     // 프로그램 ID 초기화
     passthrough_program_ = 0;
@@ -1170,10 +1176,13 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
             digits += gpu[pos++];
         }
         if (!digits.empty()) {
-            int num = std::stoi(digits);
-            if (num >= 700) return DeviceTier::HIGH;
-            if (num >= 600) return DeviceTier::MID;
-            return DeviceTier::LOW;
+            long val = std::strtol(digits.c_str(), nullptr, 10);
+            if (val > 0 && val <= 99999) {
+                int num = static_cast<int>(val);
+                if (num >= 700) return DeviceTier::HIGH;
+                if (num >= 600) return DeviceTier::MID;
+                return DeviceTier::LOW;
+            }
         }
     }
 
@@ -1185,10 +1194,13 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
             digits += gpu[i];
         }
         if (!digits.empty()) {
-            int num = std::stoi(digits);
-            if (num >= 710) return DeviceTier::HIGH;
-            if (num >= 70) return DeviceTier::MID;
-            return DeviceTier::LOW;
+            long val = std::strtol(digits.c_str(), nullptr, 10);
+            if (val > 0 && val <= 99999) {
+                int num = static_cast<int>(val);
+                if (num >= 710) return DeviceTier::HIGH;
+                if (num >= 70) return DeviceTier::MID;
+                return DeviceTier::LOW;
+            }
         }
     }
 
@@ -1556,6 +1568,25 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         }
     }
 
+    // Temporal stability: One Euro Filter for mask center (P4-W3-04)
+    // face_rect 지터링 → 피부 마스크 플리커 방지
+    // NOTE: scissor 계산 전에 수행하여 안정화된 좌표가 scissor 영역에도 반영됨
+    if (roi_ptr && roi_ptr->valid) {
+        float cx = roi_ptr->face_rect.x + roi_ptr->face_rect.width * 0.5f;
+        float cy = roi_ptr->face_rect.y + roi_ptr->face_rect.height * 0.5f;
+        float stable_cx = mask_center_x_filter_.filter(cx);
+        float stable_cy = mask_center_y_filter_.filter(cy);
+        float dx = stable_cx - cx;
+        float dy = stable_cy - cy;
+        roi_ptr->face_rect.x += dx;
+        roi_ptr->face_rect.y += dy;
+    } else {
+        // 얼굴 추적 끊김 → 필터 리셋 (재획득 시 이전 상태 잔류 방지)
+        skin_radius_filter_.reset();
+        mask_center_x_filter_.reset();
+        mask_center_y_filter_.reset();
+    }
+
     // ROI glScissor 설정 (교집합 기반 — 프레임 경계를 넘는 ROI에도 안전)
     bool scissor_active = false;
     if (roi_ptr && roi_ptr->valid) {
@@ -1617,19 +1648,6 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         float filtered_radius = skin_radius_filter_.filter(raw_radius);
         freq_sep_params.blur_radius = static_cast<int>(std::round(filtered_radius));
         freq_sep_params.blur_radius = std::max(3, freq_sep_params.blur_radius);
-    }
-
-    // Temporal stability: One Euro Filter for mask center (P4-W3-04)
-    // face_rect 지터링 → 피부 마스크 플리커 방지
-    if (roi_ptr && roi_ptr->valid) {
-        float cx = roi_ptr->face_rect.x + roi_ptr->face_rect.width * 0.5f;
-        float cy = roi_ptr->face_rect.y + roi_ptr->face_rect.height * 0.5f;
-        float stable_cx = mask_center_x_filter_.filter(cx);
-        float stable_cy = mask_center_y_filter_.filter(cy);
-        float dx = stable_cx - cx;
-        float dy = stable_cy - cy;
-        roi_ptr->face_rect.x += dx;
-        roi_ptr->face_rect.y += dy;
     }
 
     // Bilateral fallback 헬퍼 (FreqSep 실패 시 공통 경로)
