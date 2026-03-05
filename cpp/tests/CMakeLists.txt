@@ -626,3 +626,23 @@ target_link_libraries(test_device_tier PRIVATE
 )
 
 gtest_discover_tests(test_device_tier DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P4-W3-05: 품질 측정/튜닝 모듈 테스트
+# (QualityMetrics, TemporalAnalyzer, ABCompare, ReleaseGate, ParamTuner)
+# ============================================================
+add_executable(test_quality_tuning test_quality_tuning.cpp)
+target_include_directories(test_quality_tuning PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_quality_tuning PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (QualityMetrics, ABCompare에 필수)
+if(OpenCV_FOUND)
+    target_link_libraries(test_quality_tuning PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_quality_tuning PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+gtest_discover_tests(test_quality_tuning DISCOVERY_TIMEOUT 120)

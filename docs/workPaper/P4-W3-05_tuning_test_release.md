@@ -4,7 +4,7 @@
 |------|------|
 | **작업 ID** | P4-W3-05 |
 | **유형** | 검증/릴리즈 |
-| **상태** | ⏳ 대기 |
+| **상태** | 🔄 진행 중 |
 | **근거 문서** | P4-W3-01 (브레인스토밍), P4-W3-02~04 (구현) |
 | **선행 조건** | P4-W3-04 완료 (Temporal + Tier 동작) |
 | **작성일** | 2026-03-03 |
@@ -248,3 +248,32 @@ A방식(연동형)은 품질 문제 발견 시 대안으로 비교 검증한다.
 | 2026-03-04 | 리뷰 4차 반영: §5.4 정량 1개+ 미달 → NO-GO로 수정 (판정 gap 해소), 정량 완화 불가 원칙 명시 | Claude |
 | 2026-03-04 | Gemini 리뷰 반영: §2.2.1 blur_radius 독립성 A/B 비교 항목 추가, §7 리스크에 Gaussian halo/고ISO attenuation/6→5패스 최적화/MID half-res 품질 추가 | Claude |
 | 2026-03-04 | Gemini 3차 리뷰 반영: §2.2.1 A/B 기본값 전환 — B(고정 ratio)를 기본 구현으로 채택, A(연동형)는 품질 gap 시 대안. §7 Extract 패스 리스크 해결 처리, MID tier 리스크 설명 보정 | Claude |
+| 2026-03-05 | **구현 착수**: 튜닝/테스트/릴리즈 인프라 코드 구현 — QualityMetrics (Laplacian/SSIM/Halo/Temporal), ABCompare (Bilateral vs FreqSep A/B 비교), ReleaseGate (3-tier 판정 자동화), ParamTuner (attenuation 그리드 서치 + 프리셋 추천 + B방식 blur_radius 독립성 검증). 단위 테스트 32건 전 PASS | Claude |
+
+---
+
+## 실행 내역
+
+### Day 9 (2026-03-05) — 튜닝/테스트 인프라 구현
+
+#### 산출물
+
+| 파일 | 유형 | 설명 |
+|------|------|------|
+| `cpp/include/iris_sdk/quality_metrics.h` | 헤더 | Laplacian variance, SSIM, Halo 검출, TemporalAnalyzer |
+| `cpp/src/quality_metrics.cpp` | 구현 | Wang et al. SSIM, Sobel 기반 Halo, 종합 Gate 판정 |
+| `cpp/include/iris_sdk/ab_compare.h` | 헤더 | A/B 비교 프레임워크 (피부톤별 요약) |
+| `cpp/src/ab_compare.cpp` | 구현 | FreqSep vs Bilateral 비교 + JSON 리포트 |
+| `cpp/include/iris_sdk/release_gate.h` | 헤더 | 3-tier 릴리즈 게이트 (HardStop/Quantitative/Qualitative) |
+| `cpp/src/release_gate.cpp` | 구현 | GO/CONDITIONAL_GO/NO_GO 판정 로직 |
+| `cpp/include/iris_sdk/param_tuner.h` | 헤더 | 그리드 서치 + 프리셋 추천 + B방식 검증 |
+| `cpp/src/param_tuner.cpp` | 구현 | 가중 점수 계산, blur_radius 독립성 검증 |
+| `cpp/tests/test_quality_tuning.cpp` | 테스트 | 5그룹 32건 단위 테스트 |
+
+#### 검증 결과
+
+| 항목 | 결과 |
+|------|------|
+| 컴파일 | ✅ 성공 (libiris_sdk에 정상 포함) |
+| 단위 테스트 | ✅ 32/32 PASS (144ms) |
+| 기존 테스트 호환성 | ✅ 기존 테스트에 영향 없음 |
