@@ -22,20 +22,22 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #include <cstdio>
-#define LOGD(...) printf("[GPUBeautyBackend DEBUG] " __VA_ARGS__); printf("\n")
-#define LOGI(...) printf("[GPUBeautyBackend INFO] " __VA_ARGS__); printf("\n")
-#define LOGW(...) printf("[GPUBeautyBackend WARN] " __VA_ARGS__); printf("\n")
-#define LOGE(...) printf("[GPUBeautyBackend ERROR] " __VA_ARGS__); printf("\n")
+#define LOGD(...) do { printf("[GPUBeautyBackend DEBUG] " __VA_ARGS__); printf("\n"); } while(0)
+#define LOGI(...) do { printf("[GPUBeautyBackend INFO] " __VA_ARGS__); printf("\n"); } while(0)
+#define LOGW(...) do { printf("[GPUBeautyBackend WARN] " __VA_ARGS__); printf("\n"); } while(0)
+#define LOGE(...) do { printf("[GPUBeautyBackend ERROR] " __VA_ARGS__); printf("\n"); } while(0)
 #endif
 
 namespace iris_sdk {
 
 #if IRIS_SDK_GPU_AVAILABLE
+// Gaussian half-kernel: center + kMaxGaussianRadius sides = 29 entries
+constexpr int kMaxGaussianRadius = 28;
+
 // CPU-side Gaussian weight precomputation (symmetric half-kernel)
 // weights[i] = exp(-i*i / (2*sigma*sigma)), normalized so full kernel sums to 1.0
-static void computeGaussianWeights(int radius, float weights[29]) {
-    // 경계 보호: 배열 크기 29이므로 최대 인덱스는 28
-    radius = std::clamp(radius, 1, 28);
+static void computeGaussianWeights(int radius, float weights[kMaxGaussianRadius + 1]) {
+    radius = std::clamp(radius, 1, kMaxGaussianRadius);
     float sigma = radius * 0.4f;
     float sum = 0.0f;
     for (int i = 0; i <= radius; i++) {
@@ -46,7 +48,7 @@ static void computeGaussianWeights(int radius, float weights[29]) {
         weights[i] /= sum;
     }
     // Zero out unused entries
-    for (int i = radius + 1; i < 29; i++) {
+    for (int i = radius + 1; i <= kMaxGaussianRadius; i++) {
         weights[i] = 0.0f;
     }
 }
@@ -465,10 +467,7 @@ void GPUBeautyBackend::release() {
     render_context_ = nullptr;
     initialized_ = false;
 
-    // Temporal filter 리셋 (재초기화 시 stale state 방지)
-    skin_radius_filter_.reset();
-    mask_center_x_filter_.reset();
-    mask_center_y_filter_.reset();
+    resetTemporalFilters();
 
     // 프로그램 ID 초기화
     passthrough_program_ = 0;
@@ -483,6 +482,12 @@ void GPUBeautyBackend::release() {
     freq_sep_composite_program_ = 0;
 
     LOGI("GPUBeautyBackend released");
+}
+
+void GPUBeautyBackend::resetTemporalFilters() {
+    skin_radius_filter_.reset();
+    mask_center_x_filter_.reset();
+    mask_center_y_filter_.reset();
 }
 
 bool GPUBeautyBackend::isInitialized() const {
@@ -1051,7 +1056,7 @@ bool GPUBeautyBackend::executeFreqSepPipeline(
     bool profiling = profiler_ && profiler_->isEnabled();
 
     // Precompute Gaussian weights for blur_radius (Pass 1a/1b)
-    float weights[29];
+    float weights[kMaxGaussianRadius + 1];
     computeGaussianWeights(params.blur_radius, weights);
 
     // Pass 1a: Horizontal Gaussian → temp
@@ -1187,6 +1192,10 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
     }
 
     // Mali GPU
+    // NOTE: Adreno와 분류 기준이 비대칭적임.
+    //   Adreno: 100 단위 시리즈 (6xx=MID, 7xx=HIGH)
+    //   Mali-G: 2자리 vs 3자리 모델 번호 (G7x=MID, G710+=HIGH)
+    //   예) Mali-G78(MID) vs Mali-G710(HIGH) — G710은 Valhall 아키텍처 전환 세대
     if (gpu.find("Mali-G") != std::string::npos) {
         auto pos = gpu.find("Mali-G") + 6;
         std::string digits;
@@ -1197,8 +1206,8 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
             long val = std::strtol(digits.c_str(), nullptr, 10);
             if (val > 0 && val <= 99999) {
                 int num = static_cast<int>(val);
-                if (num >= 710) return DeviceTier::HIGH;
-                if (num >= 70) return DeviceTier::MID;
+                if (num >= 710) return DeviceTier::HIGH;  // Valhall+: G710, G715, G720
+                if (num >= 70) return DeviceTier::MID;    // Bifrost/Valhall: G71~G78
                 return DeviceTier::LOW;
             }
         }
@@ -1258,7 +1267,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineHalfRes(
     int half_radius = std::max(3, params.blur_radius / 2);
 
     // Gaussian weights 사전 계산
-    float weights[29];
+    float weights[kMaxGaussianRadius + 1];
     computeGaussianWeights(half_radius, weights);
 
     // Pass 1a: Horizontal Gaussian (half-res)
@@ -1568,23 +1577,28 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         }
     }
 
-    // Temporal stability: One Euro Filter for mask center (P4-W3-04)
-    // face_rect 지터링 → 피부 마스크 플리커 방지
-    // NOTE: scissor 계산 전에 수행하여 안정화된 좌표가 scissor 영역에도 반영됨
+    // Temporal stability: One Euro Filter for face_rect center (P4-W3-04)
+    // 효과 범위: scissor 영역 안정화 (face_rect jitter에 의한 scissor 경계 흔들림 방지)
+    // 제한사항: FreqSep 마스크 내용에는 영향 없음 (마스크는 computeROI()에서 face mesh
+    //   랜드마크 기반으로 생성되고, composite 셰이더에서 UV 직접 샘플링)
+    // TODO(P4-W3-04-R2): 진짜 마스크 안정화가 필요하면 uSkinMask 샘플링에
+    //   프레임별 UV offset 도입 또는 computeROI() 이전 단계에서 안정화 적용 검토
+    // 동일 프레임 내 모든 OEF가 같은 타임스탬프를 공유하도록 캡처
+    auto frame_now = std::chrono::steady_clock::now();
+    double frame_ts = std::chrono::duration<double>(frame_now.time_since_epoch()).count();
+
     if (roi_ptr && roi_ptr->valid) {
         float cx = roi_ptr->face_rect.x + roi_ptr->face_rect.width * 0.5f;
         float cy = roi_ptr->face_rect.y + roi_ptr->face_rect.height * 0.5f;
-        float stable_cx = mask_center_x_filter_.filter(cx);
-        float stable_cy = mask_center_y_filter_.filter(cy);
+        float stable_cx = mask_center_x_filter_.filter(cx, frame_ts);
+        float stable_cy = mask_center_y_filter_.filter(cy, frame_ts);
         float dx = stable_cx - cx;
         float dy = stable_cy - cy;
         roi_ptr->face_rect.x += dx;
         roi_ptr->face_rect.y += dy;
     } else {
         // 얼굴 추적 끊김 → 필터 리셋 (재획득 시 이전 상태 잔류 방지)
-        skin_radius_filter_.reset();
-        mask_center_x_filter_.reset();
-        mask_center_y_filter_.reset();
+        resetTemporalFilters();
     }
 
     // ROI glScissor 설정 (교집합 기반 — 프레임 경계를 넘는 ROI에도 안전)
@@ -1643,9 +1657,10 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     FreqSepParams freq_sep_params = mapSkinQuality(config.skinQuality, face_w);
 
     // Temporal stability: One Euro Filter for blur_radius (P4-W3-04)
+    // frame_ts는 위에서 캡처된 동일 프레임 타임스탬프
     if (freq_sep_params.enabled) {
         float raw_radius = static_cast<float>(freq_sep_params.blur_radius);
-        float filtered_radius = skin_radius_filter_.filter(raw_radius);
+        float filtered_radius = skin_radius_filter_.filter(raw_radius, frame_ts);
         freq_sep_params.blur_radius = static_cast<int>(std::round(filtered_radius));
         freq_sep_params.blur_radius = std::max(3, freq_sep_params.blur_radius);
     }
