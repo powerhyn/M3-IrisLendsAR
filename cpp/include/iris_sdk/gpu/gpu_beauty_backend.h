@@ -34,19 +34,23 @@ class GLESRenderContext;
 namespace iris_sdk {
 
 /**
- * @brief GPU 기반 뷰티 필터 백엔드
+ * @brief GPU 기반 뷰티 필터 백엔드 (OpenGL ES 3.1)
  *
- * OpenGL ES 3.1 셰이더를 사용하여 실시간 뷰티 필터를 적용합니다.
+ * 실시간 뷰티 필터를 GPU 셰이더로 적용합니다.
  *
- * 지원 기능:
- * - 피부 스무딩 (Bilateral Filter)
- * - 피부톤 화이트닝
- * - 컬러 밸런스
- * - 소프트 포커스
- * - 밝기 조정
- * - ROI 마스킹
+ * **파이프라인 구조**:
+ * - Frequency Separation (skinQuality > 0): 5-subpass GPU 파이프라인
+ *   - DeviceTier::HIGH → full-res, MID → hybrid half-res blur
+ * - Bilateral Filter (skinQuality == 0 또는 FreqSep 실패 시 fallback)
+ * - Combined Color Pass (brightness + balance + whitening + LUT)
  *
- * Thread-safe: 모든 public 메서드는 mutex로 보호됩니다.
+ * **Temporal Stability** (P4-W3-04):
+ * - One Euro Filter로 blur_radius 및 face_rect center jitter 억제
+ * - DeviceTier 기반 half-res 분기 (GPU 렌더러 문자열 파싱)
+ *
+ * **Thread Safety**: 모든 public 메서드는 mutex_로 보호됩니다.
+ *
+ * @see FreqSepParams, DeviceTier, OneEuroFilter
  */
 class GPUBeautyBackend : public IBeautyBackend {
 public:
@@ -238,10 +242,39 @@ public:
     /// skinQuality → FreqSepParams 매핑
     static FreqSepParams mapSkinQuality(float skin_quality, int face_width);
 
+    /**
+     * @brief GPU 디바이스 성능 등급
+     *
+     * GL_RENDERER 문자열을 파싱하여 결정됩니다 (detectDeviceTier()).
+     *
+     * 파이프라인 동작 차이:
+     * - HIGH: FreqSep full-res 5-subpass (blur + composite 모두 원본 해상도)
+     * - MID:  FreqSep hybrid half-res (blur는 1/2 해상도, composite는 full-res)
+     * - LOW:  FreqSep 비활성 → Bilateral fallback
+     *
+     * @note Mali 분류 비대칭: Adreno는 100 단위 시리즈(6xx/7xx),
+     *       Mali-G는 2자리 vs 3자리(G7x/G710+)로 분류 기준이 다름.
+     *       Mali-G78은 MID, Mali-G710은 HIGH로 분류됨.
+     */
+    enum class DeviceTier {
+        HIGH,   ///< Adreno 7xx, Mali-G710+, Apple GPU, Desktop GPU
+        MID,    ///< Adreno 6xx, Mali-G7x (G71~G78), PowerVR
+        LOW     ///< 기타 저사양 GPU
+    };
+
+    /// GPU 렌더러 문자열 기반 디바이스 등급 분류 (GL 컨텍스트 불필요, 단위 테스트용)
+    static DeviceTier classifyGpuRenderer(const std::string& renderer_str);
+
 private:
     //=========================================================================
     // 초기화 헬퍼
     //=========================================================================
+
+    /// GPU 렌더러 문자열 기반 디바이스 등급 감지 (GL 컨텍스트 활성 상태에서만 호출)
+    DeviceTier detectDeviceTier();
+
+    /// Temporal filter 일괄 리셋 (release/얼굴 추적 끊김 시 공통 호출)
+    void resetTemporalFilters();
 
     /// 셰이더 프로그램 초기화
     bool initializeShaders();
@@ -296,7 +329,15 @@ private:
     /// Frequency Separation Gaussian blur 셰이더 초기화
     bool initializeFreqSepShaders();
 
-    /// Frequency Separation 5서브패스 파이프라인
+    /// FreqSep 파이프라인 실행 설정 (full-res / half-res 분기 매개변수화)
+    struct FreqSepExecConfig {
+        int res_divisor;                       ///< 1 = full-res, 2 = half-res
+        bool linear_upsample;                  ///< true: composite 입력에 GL_LINEAR 설정
+        const char* blur_profiler_suffix;      ///< "" 또는 "_Half"
+        const char* composite_profiler_suffix; ///< "" 또는 "_Full"
+    };
+
+    /// Frequency Separation 5서브패스 파이프라인 (full-res)
     /// @return true: 파이프라인 정상 완료, false: 텍스처 할당 실패 등 (호출자가 fallback 처리)
     bool executeFreqSepPipeline(
         GLuint input_tex,
@@ -304,6 +345,23 @@ private:
         GLuint output_fbo,
         int width, int height,
         const FreqSepParams& params);
+
+    /// Frequency Separation MID 디바이스 하프 해상도 파이프라인
+    /// blur 패스는 half-res, composite 패스는 full-res로 실행
+    /// @return true: 파이프라인 정상 완료
+    bool executeFreqSepPipelineHalfRes(
+        GLuint input_tex,
+        GLuint mask_tex,
+        GLuint output_fbo,
+        int width, int height,
+        const FreqSepParams& params);
+
+    /// FreqSep 공통 구현 (full-res / half-res 통합)
+    bool executeFreqSepPipelineImpl(
+        GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
+        int width, int height,
+        const FreqSepParams& params,
+        const FreqSepExecConfig& exec_cfg);
 
     /// CPU combined_mask → GPU 텍스처 업로드
     GLuint uploadSkinMask(
@@ -422,8 +480,20 @@ private:
         GLint uAttenuationHigh = -1;
     } freq_sep_composite_uniforms_;
 
-    // Temporal stability용 One Euro Filter (P4-W3-04에서 사용)
+    // Temporal stability용 One Euro Filter (P4-W3-04)
+    // 모든 필터는 mutex_ lock 하에서만 접근 (applyTextureId → public → lock_guard)
+    //
+    // 파라미터 선택 근거:
+    //   skin_radius: min_cutoff=0.5 (강한 스무딩 — radius 변화가 급격하면 블러 플리커 발생)
+    //                beta=0.01 (느린 추종 — radius는 급변할 이유가 없음)
+    //   face_rect center: min_cutoff=1.0 (적당한 스무딩 — 자연스러운 이동 허용)
+    //                     beta=0.02 (빠른 머리 움직임에 약간 반응)
     OneEuroFilter skin_radius_filter_{0.5f, 0.01f, 1.0f};
+    OneEuroFilter mask_center_x_filter_{1.0f, 0.02f, 1.0f};  ///< face_rect 중심 X 안정화
+    OneEuroFilter mask_center_y_filter_{1.0f, 0.02f, 1.0f};  ///< face_rect 중심 Y 안정화
+
+    // 디바이스 성능 등급 (P4-W3-04)
+    DeviceTier device_tier_ = DeviceTier::HIGH;
 
     /// Uniform Location 캐싱 (초기화 시 호출)
     void cacheUniformLocations();

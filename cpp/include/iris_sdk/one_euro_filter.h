@@ -17,6 +17,9 @@
 
 namespace iris_sdk {
 
+/// 컴파일 타임 파이 상수 (M_PI 대체 — C++ 표준 미보장 매크로 의존 제거)
+constexpr float kPi = 3.14159265358979323846f;
+
 /**
  * @brief 저역 통과 필터 (Low-Pass Filter)
  */
@@ -135,7 +138,7 @@ public:
 
 private:
     static float computeAlpha(float cutoff, double dt = 1.0 / 60.0) {
-        float tau = 1.0f / (2.0f * static_cast<float>(M_PI) * cutoff);
+        float tau = 1.0f / (2.0f * kPi * cutoff);
         return 1.0f / (1.0f + tau / static_cast<float>(dt));
     }
 
