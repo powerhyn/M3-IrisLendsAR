@@ -601,3 +601,28 @@ if(OpenCV_FOUND)
 endif()
 
 gtest_discover_tests(test_profiler DISCOVERY_TIMEOUT 120)
+
+# ============================================================
+# P4-W3-04: OneEuroFilter 단위 테스트
+# ============================================================
+add_executable(test_one_euro_filter test_one_euro_filter.cpp)
+target_include_directories(test_one_euro_filter PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_one_euro_filter PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_one_euro_filter DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P4-W3-04: DeviceTier 분류 + FreqSep 매핑 테스트
+# ============================================================
+add_executable(test_device_tier test_device_tier.cpp)
+target_include_directories(test_device_tier PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_device_tier PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_device_tier DISCOVERY_TIMEOUT 60)

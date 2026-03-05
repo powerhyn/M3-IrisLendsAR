@@ -242,7 +242,6 @@ public:
     /// skinQuality → FreqSepParams 매핑
     static FreqSepParams mapSkinQuality(float skin_quality, int face_width);
 
-private:
     /**
      * @brief GPU 디바이스 성능 등급
      *
@@ -262,6 +261,11 @@ private:
         MID,    ///< Adreno 6xx, Mali-G7x (G71~G78), PowerVR
         LOW     ///< 기타 저사양 GPU
     };
+
+    /// GPU 렌더러 문자열 기반 디바이스 등급 분류 (GL 컨텍스트 불필요, 단위 테스트용)
+    static DeviceTier classifyGpuRenderer(const std::string& renderer_str);
+
+private:
     //=========================================================================
     // 초기화 헬퍼
     //=========================================================================

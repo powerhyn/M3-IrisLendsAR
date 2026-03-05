@@ -8,7 +8,6 @@
 #include "iris_sdk/beauty_roi_manager.h"
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdlib>
 #include <string>
 
@@ -1163,12 +1162,9 @@ bool GPUBeautyBackend::executeFreqSepPipeline(
 // Device Tier 감지 (P4-W3-04)
 // =============================================================================
 
-GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
-#if IRIS_SDK_GPU_AVAILABLE
-    const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
-    if (!renderer) return DeviceTier::LOW;
-
-    std::string gpu(renderer);
+GPUBeautyBackend::DeviceTier
+GPUBeautyBackend::classifyGpuRenderer(const std::string& gpu) {
+    if (gpu.empty()) return DeviceTier::LOW;
 
     // Adreno GPU (e.g. "Adreno (TM) 750", "Adreno 640")
     if (gpu.find("Adreno") != std::string::npos) {
@@ -1189,6 +1185,8 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
                 return DeviceTier::LOW;
             }
         }
+        // "Adreno" 키워드가 있지만 숫자가 없으면 LOW
+        return DeviceTier::LOW;
     }
 
     // Mali GPU
@@ -1211,6 +1209,8 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
                 return DeviceTier::LOW;
             }
         }
+        // "Mali-G" 키워드가 있지만 숫자가 없으면 LOW
+        return DeviceTier::LOW;
     }
 
     // Apple GPU → HIGH
@@ -1226,6 +1226,14 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
     }
 
     return DeviceTier::LOW;
+}
+
+GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
+#if IRIS_SDK_GPU_AVAILABLE
+    const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    if (!renderer) return DeviceTier::LOW;
+    LOGI("GPU Renderer: %s", renderer);
+    return classifyGpuRenderer(std::string(renderer));
 #else
     return DeviceTier::HIGH;
 #endif
