@@ -1032,130 +1032,10 @@ void GPUBeautyBackend::executeSmoothingWithFallbackStrength(
 }
 
 bool GPUBeautyBackend::executeFreqSepPipeline(
-    GLuint input_tex,
-    GLuint mask_tex,
-    GLuint output_fbo,
-    int width, int height,
-    const FreqSepParams& params) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    // Acquire intermediate buffers from texture pool
-    auto* lowFreq = texture_pool_->acquireRenderTarget(width, height);
-    auto* smoothedLow = texture_pool_->acquireRenderTarget(width, height);
-    auto* temp = texture_pool_->acquireRenderTarget(width, height);
-
-    if (!lowFreq || !smoothedLow || !temp) {
-        LOGE("FreqSep: Failed to acquire render targets");
-        if (lowFreq) texture_pool_->releaseTexture(lowFreq);
-        if (smoothedLow) texture_pool_->releaseTexture(smoothedLow);
-        if (temp) texture_pool_->releaseTexture(temp);
-        return false;
-    }
-
-    bool profiling = profiler_ && profiler_->isEnabled();
-
-    // Precompute Gaussian weights for blur_radius (Pass 1a/1b)
-    float weights[kMaxGaussianRadius + 1];
-    computeGaussianWeights(params.blur_radius, weights);
-
-    // Pass 1a: Horizontal Gaussian → temp
-    if (profiling) profiler_->begin("FreqSep_GaussianH");
-    glUseProgram(freq_sep_gaussian_program_);
-    glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / width, 0.0f);
-    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, params.blur_radius);
-    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
-    glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_GaussianH");
-
-    // Pass 1b: Vertical Gaussian → lowFreq (preserved until Composite)
-    if (profiling) profiler_->begin("FreqSep_GaussianV");
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / height);
-    glBindFramebuffer(GL_FRAMEBUFFER, lowFreq->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, temp->texture_id);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_GaussianV");
-
-    // Precompute Gaussian weights for low_radius (Pass 2a/2b)
-    int low_radius = std::max(3, static_cast<int>(params.blur_radius * params.low_freq_smooth_radius_ratio));
-    computeGaussianWeights(low_radius, weights);
-
-    // Pass 2a: Low Freq additional Gaussian H → temp
-    if (profiling) profiler_->begin("FreqSep_LowSmoothH");
-    glUseProgram(freq_sep_gaussian_program_);
-    glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / width, 0.0f);
-    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, low_radius);
-    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
-    glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_LowSmoothH");
-
-    // Pass 2b: Low Freq additional Gaussian V → smoothedLow
-    if (profiling) profiler_->begin("FreqSep_LowSmoothV");
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / height);
-    glBindFramebuffer(GL_FRAMEBUFFER, smoothedLow->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, temp->texture_id);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_LowSmoothV");
-
-    // Pass 3: Composite — re-synthesis + mask blending → output
-    if (profiling) profiler_->begin("FreqSep_Composite");
-    glUseProgram(freq_sep_composite_program_);
-    glUniform1f(freq_sep_composite_uniforms_.uHighFreqPreserve, params.high_freq_preserve);
-    glUniform1f(freq_sep_composite_uniforms_.uAttenuationLow, params.attenuation_low);
-    glUniform1f(freq_sep_composite_uniforms_.uAttenuationHigh, params.attenuation_high);
-
-    // Bind textures: unit0=smoothedLow, unit1=lowFreq, unit2=original, unit3=skinMask
-    glUniform1i(freq_sep_composite_uniforms_.uSmoothedLow, 0);
-    glUniform1i(freq_sep_composite_uniforms_.uLowFreq, 1);
-    glUniform1i(freq_sep_composite_uniforms_.uOriginal, 2);
-    glUniform1i(freq_sep_composite_uniforms_.uSkinMask, 3);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, smoothedLow->texture_id);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, mask_tex);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    renderFullscreenQuad();
-
-    // Cleanup texture bindings
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    if (profiling) profiler_->end("FreqSep_Composite");
-
-    // Release textures back to pool
-    texture_pool_->releaseTexture(lowFreq);
-    texture_pool_->releaseTexture(smoothedLow);
-    texture_pool_->releaseTexture(temp);
-    return true;
-#else
-    (void)input_tex;
-    (void)mask_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-    (void)params;
-    return false;
-#endif
+    GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
+    int width, int height, const FreqSepParams& params) {
+    return executeFreqSepPipelineImpl(input_tex, mask_tex, output_fbo,
+        width, height, params, {1, false, "", ""});
 }
 
 // =============================================================================
@@ -1246,105 +1126,135 @@ GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
 bool GPUBeautyBackend::executeFreqSepPipelineHalfRes(
     GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
     int width, int height, const FreqSepParams& params) {
+    return executeFreqSepPipelineImpl(input_tex, mask_tex, output_fbo,
+        width, height, params, {2, true, "_Half", "_Full"});
+}
+
+// =============================================================================
+// FreqSep 공통 구현 (full-res / half-res 통합)
+// =============================================================================
+
+bool GPUBeautyBackend::executeFreqSepPipelineImpl(
+    GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
+    int width, int height,
+    const FreqSepParams& params,
+    const FreqSepExecConfig& cfg) {
 #if IRIS_SDK_GPU_AVAILABLE
-    int half_w = width / 2;
-    int half_h = height / 2;
+    const int blur_w = width / cfg.res_divisor;
+    const int blur_h = height / cfg.res_divisor;
 
     // 최소 해상도 보장 (0 나누기 방지)
-    if (half_w < 1 || half_h < 1) {
-        LOGW("FreqSep HalfRes: resolution too small (%dx%d → half %dx%d)", width, height, half_w, half_h);
+    if (blur_w < 1 || blur_h < 1) {
+        LOGW("FreqSep: resolution too small (%dx%d, divisor=%d)", width, height, cfg.res_divisor);
         return false;
     }
 
-    // 하프 해상도 렌더 타겟 확보
-    auto* lowFreq_half = texture_pool_->acquireRenderTarget(half_w, half_h);
-    auto* smoothedLow_half = texture_pool_->acquireRenderTarget(half_w, half_h);
-    auto* temp_half = texture_pool_->acquireRenderTarget(half_w, half_h);
+    // Acquire intermediate buffers from texture pool
+    auto* lowFreq = texture_pool_->acquireRenderTarget(blur_w, blur_h);
+    auto* smoothedLow = texture_pool_->acquireRenderTarget(blur_w, blur_h);
+    auto* temp = texture_pool_->acquireRenderTarget(blur_w, blur_h);
 
-    if (!lowFreq_half || !smoothedLow_half || !temp_half) {
-        LOGE("FreqSep HalfRes: Failed to acquire render targets");
-        if (lowFreq_half) texture_pool_->releaseTexture(lowFreq_half);
-        if (smoothedLow_half) texture_pool_->releaseTexture(smoothedLow_half);
-        if (temp_half) texture_pool_->releaseTexture(temp_half);
+    if (!lowFreq || !smoothedLow || !temp) {
+        LOGE("FreqSep: Failed to acquire render targets");
+        if (lowFreq) texture_pool_->releaseTexture(lowFreq);
+        if (smoothedLow) texture_pool_->releaseTexture(smoothedLow);
+        if (temp) texture_pool_->releaseTexture(temp);
         return false;
     }
 
     bool profiling = profiler_ && profiler_->isEnabled();
 
-    // 하프 해상도 blur radius (물리적 blur 범위 보존)
-    int half_radius = std::max(3, params.blur_radius / 2);
+    // blur_radius: half-res일 때 물리적 blur 범위 보존을 위해 축소
+    const int blur_radius = (cfg.res_divisor == 1)
+        ? params.blur_radius
+        : std::max(3, params.blur_radius / cfg.res_divisor);
 
-    // Gaussian weights 사전 계산
+    // Precompute Gaussian weights (Pass 1a/1b)
     float weights[kMaxGaussianRadius + 1];
-    computeGaussianWeights(half_radius, weights);
+    computeGaussianWeights(blur_radius, weights);
 
-    // Pass 1a: Horizontal Gaussian (half-res)
-    if (profiling) profiler_->begin("FreqSep_GaussianH_Half");
+    // half-res일 때 blur 패스 viewport 축소
+    if (cfg.res_divisor > 1) {
+        glViewport(0, 0, blur_w, blur_h);
+    }
+
+    // Profiler 태그 버퍼 (고정 크기, 스택 할당)
+    char tag[48];
+
+    // Pass 1a: Horizontal Gaussian → temp
+    std::snprintf(tag, sizeof(tag), "FreqSep_GaussianH%s", cfg.blur_profiler_suffix);
+    if (profiling) profiler_->begin(tag);
     glUseProgram(freq_sep_gaussian_program_);
     glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / half_w, 0.0f);
-    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, half_radius);
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / blur_w, 0.0f);
+    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, blur_radius);
     glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
-    glViewport(0, 0, half_w, half_h);
-    glBindFramebuffer(GL_FRAMEBUFFER, temp_half->fbo_id);
+    glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
     renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_GaussianH_Half");
+    if (profiling) profiler_->end(tag);
 
-    // Pass 1b: Vertical Gaussian (half-res) → lowFreq_half
-    if (profiling) profiler_->begin("FreqSep_GaussianV_Half");
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / half_h);
-    glBindFramebuffer(GL_FRAMEBUFFER, lowFreq_half->fbo_id);
+    // Pass 1b: Vertical Gaussian → lowFreq
+    std::snprintf(tag, sizeof(tag), "FreqSep_GaussianV%s", cfg.blur_profiler_suffix);
+    if (profiling) profiler_->begin(tag);
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / blur_h);
+    glBindFramebuffer(GL_FRAMEBUFFER, lowFreq->fbo_id);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, temp_half->texture_id);
+    glBindTexture(GL_TEXTURE_2D, temp->texture_id);
     renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_GaussianV_Half");
+    if (profiling) profiler_->end(tag);
 
-    // Pass 2 weights 사전 계산
+    // Precompute Gaussian weights for low_radius (Pass 2a/2b)
     int low_radius = std::max(3,
-        static_cast<int>(half_radius * params.low_freq_smooth_radius_ratio));
+        static_cast<int>(blur_radius * params.low_freq_smooth_radius_ratio));
     computeGaussianWeights(low_radius, weights);
 
-    // Pass 2a: Low Freq additional Gaussian H (half-res)
-    if (profiling) profiler_->begin("FreqSep_LowSmoothH_Half");
+    // Pass 2a: Low Freq additional Gaussian H → temp
+    std::snprintf(tag, sizeof(tag), "FreqSep_LowSmoothH%s", cfg.blur_profiler_suffix);
+    if (profiling) profiler_->begin(tag);
     glUseProgram(freq_sep_gaussian_program_);
     glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / half_w, 0.0f);
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / blur_w, 0.0f);
     glUniform1i(freq_sep_gaussian_uniforms_.uRadius, low_radius);
     glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
-    glBindFramebuffer(GL_FRAMEBUFFER, temp_half->fbo_id);
+    glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, lowFreq_half->texture_id);
+    glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
     renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_LowSmoothH_Half");
+    if (profiling) profiler_->end(tag);
 
-    // Pass 2b: Low Freq additional Gaussian V (half-res) → smoothedLow_half
-    if (profiling) profiler_->begin("FreqSep_LowSmoothV_Half");
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / half_h);
-    glBindFramebuffer(GL_FRAMEBUFFER, smoothedLow_half->fbo_id);
+    // Pass 2b: Low Freq additional Gaussian V → smoothedLow
+    std::snprintf(tag, sizeof(tag), "FreqSep_LowSmoothV%s", cfg.blur_profiler_suffix);
+    if (profiling) profiler_->begin(tag);
+    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / blur_h);
+    glBindFramebuffer(GL_FRAMEBUFFER, smoothedLow->fbo_id);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, temp_half->texture_id);
+    glBindTexture(GL_TEXTURE_2D, temp->texture_id);
     renderFullscreenQuad();
-    if (profiling) profiler_->end("FreqSep_LowSmoothV_Half");
+    if (profiling) profiler_->end(tag);
 
-    // Full-res viewport 복원 (Composite)
-    glViewport(0, 0, width, height);
+    // Composite 전 full-res viewport 복원
+    if (cfg.res_divisor > 1) {
+        glViewport(0, 0, width, height);
+    }
 
-    // Pass 3: Composite (full-res)
-    // smoothedLow_half, lowFreq_half → GL_LINEAR bilinear upsampling
-    if (profiling) profiler_->begin("FreqSep_Composite_Full");
+    // Pass 3: Composite — re-synthesis + mask blending → output
+    std::snprintf(tag, sizeof(tag), "FreqSep_Composite%s", cfg.composite_profiler_suffix);
+    if (profiling) profiler_->begin(tag);
 
-    // 하프 해상도 텍스처에 GL_LINEAR 설정 (부드러운 업샘플링)
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, smoothedLow_half->texture_id);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // GL_LINEAR 업샘플링 (half-res → full-res composite 입력)
+    if (cfg.linear_upsample) {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, smoothedLow->texture_id);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, lowFreq_half->texture_id);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    }
 
     glUseProgram(freq_sep_composite_program_);
     glUniform1f(freq_sep_composite_uniforms_.uHighFreqPreserve, params.high_freq_preserve);
@@ -1356,7 +1266,15 @@ bool GPUBeautyBackend::executeFreqSepPipelineHalfRes(
     glUniform1i(freq_sep_composite_uniforms_.uOriginal, 2);
     glUniform1i(freq_sep_composite_uniforms_.uSkinMask, 3);
 
-    // smoothedLow_half → unit 0, lowFreq_half → unit 1 (이미 바인딩됨)
+    if (!cfg.linear_upsample) {
+        // full-res: 텍스처 바인딩 필요
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, smoothedLow->texture_id);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
+    }
+    // linear_upsample 경로에서는 unit0/unit1 이미 바인딩됨
+
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, input_tex);
     glActiveTexture(GL_TEXTURE3);
@@ -1365,7 +1283,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineHalfRes(
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     renderFullscreenQuad();
 
-    // 텍스처 바인딩 정리
+    // Cleanup texture bindings
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE2);
@@ -1374,16 +1292,16 @@ bool GPUBeautyBackend::executeFreqSepPipelineHalfRes(
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, 0);
-    if (profiling) profiler_->end("FreqSep_Composite_Full");
+    if (profiling) profiler_->end(tag);
 
-    // 하프 해상도 텍스처 반환
-    texture_pool_->releaseTexture(lowFreq_half);
-    texture_pool_->releaseTexture(smoothedLow_half);
-    texture_pool_->releaseTexture(temp_half);
+    // Release textures back to pool
+    texture_pool_->releaseTexture(lowFreq);
+    texture_pool_->releaseTexture(smoothedLow);
+    texture_pool_->releaseTexture(temp);
     return true;
 #else
     (void)input_tex; (void)mask_tex; (void)output_fbo;
-    (void)width; (void)height; (void)params;
+    (void)width; (void)height; (void)params; (void)cfg;
     return false;
 #endif
 }

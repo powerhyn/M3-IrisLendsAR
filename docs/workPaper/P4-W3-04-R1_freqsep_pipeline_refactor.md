@@ -4,7 +4,7 @@
 |------|------|
 | **작업 ID** | P4-W3-04-R1 |
 | **유형** | 리팩터링 |
-| **상태** | ⏳ 대기 |
+| **상태** | ✅ 완료 |
 | **근거** | P4-W3-04 Codex 리뷰 (Q2/A2), Comprehensive Review Phase 1 |
 | **선행 조건** | P4-W3-04 완료 |
 | **작성일** | 2026-03-04 |
@@ -32,10 +32,10 @@ P4-W3-04에서 MID tier 하이브리드 해상도 파이프라인(`executeFreqSe
 
 ### 2.1 완료 조건
 
-- [ ] `executeFreqSepPipeline()`과 `executeFreqSepPipelineHalfRes()`를 공통 `executeFreqSepPipelineImpl()`로 통합
-- [ ] 해상도 파라미터(blur 해상도, viewport 전환 여부)를 매개변수로 추출
-- [ ] 기존 동작(HIGH full-res, MID half-res, LOW bilateral) 유지 확인
-- [ ] `applyTextureId()`의 temporal filtering 로직을 헬퍼로 추출 검토
+- [x] `executeFreqSepPipeline()`과 `executeFreqSepPipelineHalfRes()`를 공통 `executeFreqSepPipelineImpl()`로 통합
+- [x] 해상도 파라미터(blur 해상도, viewport 전환 여부)를 매개변수로 추출
+- [x] 기존 동작(HIGH full-res, MID half-res, LOW bilateral) 유지 확인
+- [ ] `applyTextureId()`의 temporal filtering 로직을 헬퍼로 추출 검토 (별도 작업으로 분리)
 
 ### 2.2 비목표 (Not in Scope)
 
@@ -47,43 +47,41 @@ P4-W3-04에서 MID tier 하이브리드 해상도 파이프라인(`executeFreqSe
 
 ## 3. 설계
 
-### 3.1 공통 파이프라인 함수
+### 3.1 공통 파이프라인 함수 (구현 완료)
 
 ```cpp
-struct FreqSepPipelineConfig {
-    int blur_width;           // 블러 패스 해상도 (full 또는 half)
-    int blur_height;
-    int composite_width;      // Composite 패스 해상도 (항상 full)
-    int composite_height;
-    bool needs_viewport_switch;  // half-res 시 viewport 전환 필요
+/// FreqSep 파이프라인 실행 설정 (full-res / half-res 분기 매개변수화)
+struct FreqSepExecConfig {
+    int res_divisor;                       // 1 = full-res, 2 = half-res
+    bool linear_upsample;                  // true: composite 입력에 GL_LINEAR 설정
+    const char* blur_profiler_suffix;      // "" 또는 "_Half"
+    const char* composite_profiler_suffix; // "" 또는 "_Full"
 };
 
 bool executeFreqSepPipelineImpl(
     GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
     int width, int height,
     const FreqSepParams& params,
-    const FreqSepPipelineConfig& pipeline_config);
+    const FreqSepExecConfig& exec_cfg);
 ```
 
-### 3.2 호출 패턴
+### 3.2 호출 패턴 (구현 완료)
 
 ```cpp
-// HIGH tier (full-res)
-FreqSepPipelineConfig high_config{width, height, width, height, false};
-executeFreqSepPipelineImpl(input, mask, output, w, h, params, high_config);
+// HIGH tier (full-res) — 3줄 래퍼
+bool executeFreqSepPipeline(...) {
+    return executeFreqSepPipelineImpl(..., {1, false, "", ""});
+}
 
-// MID tier (hybrid half-res)
-FreqSepPipelineConfig mid_config{width/2, height/2, width, height, true};
-executeFreqSepPipelineImpl(input, mask, output, w, h, params, mid_config);
+// MID tier (hybrid half-res) — 3줄 래퍼
+bool executeFreqSepPipelineHalfRes(...) {
+    return executeFreqSepPipelineImpl(..., {2, true, "_Half", "_Full"});
+}
 ```
 
-### 3.3 applyTextureId() 헬퍼 추출 (선택적)
+### 3.3 applyTextureId() 헬퍼 추출 (별도 작업으로 분리)
 
-```cpp
-// Temporal filtering 분리
-void stabilizeFreqSepParams(FreqSepParams& params);
-void stabilizeFaceRect(BeautyROI* roi_ptr);
-```
+temporal filtering 추출은 별도 리팩터링 작업으로 분리.
 
 ---
 
@@ -134,3 +132,4 @@ void stabilizeFaceRect(BeautyROI* roi_ptr);
 | 날짜 | 변경 내용 | 작성자 |
 |------|----------|--------|
 | 2026-03-04 | 초기 작성 (P4-W3-04 Codex 리뷰 피드백 기반) | Claude |
+| 2026-03-05 | 구현 완료: FreqSepExecConfig + executeFreqSepPipelineImpl 통합, ~130줄 순감소 | Claude |

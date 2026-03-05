@@ -329,7 +329,15 @@ private:
     /// Frequency Separation Gaussian blur 셰이더 초기화
     bool initializeFreqSepShaders();
 
-    /// Frequency Separation 5서브패스 파이프라인
+    /// FreqSep 파이프라인 실행 설정 (full-res / half-res 분기 매개변수화)
+    struct FreqSepExecConfig {
+        int res_divisor;                       ///< 1 = full-res, 2 = half-res
+        bool linear_upsample;                  ///< true: composite 입력에 GL_LINEAR 설정
+        const char* blur_profiler_suffix;      ///< "" 또는 "_Half"
+        const char* composite_profiler_suffix; ///< "" 또는 "_Full"
+    };
+
+    /// Frequency Separation 5서브패스 파이프라인 (full-res)
     /// @return true: 파이프라인 정상 완료, false: 텍스처 할당 실패 등 (호출자가 fallback 처리)
     bool executeFreqSepPipeline(
         GLuint input_tex,
@@ -347,6 +355,13 @@ private:
         GLuint output_fbo,
         int width, int height,
         const FreqSepParams& params);
+
+    /// FreqSep 공통 구현 (full-res / half-res 통합)
+    bool executeFreqSepPipelineImpl(
+        GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
+        int width, int height,
+        const FreqSepParams& params,
+        const FreqSepExecConfig& exec_cfg);
 
     /// CPU combined_mask → GPU 텍스처 업로드
     GLuint uploadSkinMask(
