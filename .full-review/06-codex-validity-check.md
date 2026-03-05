@@ -2,101 +2,116 @@
 
 ## 목적
 
-`.full-review/01~05` 문서의 핵심 주장들이 **현재 코드(HEAD: `c5b773e`, 2026-03-04)** 기준으로 타당한지 재검증한다.
+`.full-review/01~05` 문서의 핵심 주장들이 **현재 코드(HEAD: `997b5c5`, 2026-03-05)** 기준으로 타당한지 재검증한다.
 
 ## 판정 기준
 
 - `타당`: 현재 코드에서 동일 문제가 재현되거나 근거가 명확함
 - `부분 타당`: 방향은 맞지만 심각도/표현이 과장되었거나 전제가 부족함
 - `비타당(구식)`: 과거에는 맞았지만 현재 코드는 이미 수정됨
+- `이슈 아님`: 코드 재검증 결과 실제 문제가 아닌 것으로 판정
 
 ## 요약 결론
 
-- 전체적으로 리뷰 방향은 유의미하다.
-- 다만 일부 항목은 **이미 수정된 이슈**를 계속 “미해결”로 표기하거나, 표현이 과하다.
-- 현재 기준으로는 `타당` + `부분 타당` 중심으로 우선순위를 재정렬하는 것이 맞다.
+- 리뷰에서 발견된 코드 품질 이슈는 **4차 커밋에 걸쳐 모두 해결**되었다.
+- 남은 미해결 항목은 **CI/CD 인프라**(D1, D3~D8, D11, D12)와 **향후 기능 작업**(P1-Perf, P2 마스크 안정화)뿐이다.
+- 일부 항목(S6, F5, T7, Q4, S9)은 코드 재검증 결과 **실질적 이슈가 아닌 것**으로 판정되었다.
 
 ---
 
-## 1) 비타당(구식) 항목
+## 1) 비타당(구식) — 이미 해결된 항목
 
-아래 항목은 과거 이슈였으나 현재 코드에서는 해결되어, “현재 결함”으로 보긴 어렵다.
+아래 항목은 과거 이슈였으나 후속 커밋에서 해결되었다.
 
-1. `Q5 / S1` (`std::stoi` 예외 위험)
-   - 현재 `std::strtol` 사용으로 예외 전파 리스크 완화됨
-   - 근거: `cpp/src/gpu/gpu_beauty_backend.cpp:1179, 1197`
+### b80377f에서 해결 (Codex 1차 피드백)
 
-2. `Q6 / S2` (`detectDeviceTier()` static public + GL 의존)
-   - 현재 `private` 인스턴스 메서드
-   - 근거: `cpp/include/iris_sdk/gpu/gpu_beauty_backend.h:248-254`
+1. `Q5 / S1` (std::stoi 예외 위험) → `std::strtol` 교체
+2. `Q6 / S2` (detectDeviceTier() static public) → private 인스턴스 메서드
+3. `Q3 / S3` (One Euro Filter reset 누락) → release() + 추적 끊김 리셋
 
-3. `Q3 / S3` (One Euro Filter reset 누락)
-   - `release()` 및 얼굴 추적 끊김 분기에서 reset 수행
-   - 근거: `cpp/src/gpu/gpu_beauty_backend.cpp:468-471, 1584-1587`
+### f8b96fb에서 해결 (Comprehensive review 13항목)
 
----
+4. `F3` (OEF 타임스탬프 불일치) → frame_ts 캡처 후 3필터 동기화
+5. `F6` (DeviceTier enum public) → private 이동
+6. `F7` (Temporal filter 리셋 분산) → resetTemporalFilters() 헬퍼
+7. `F9 / S10` (LOG 매크로 dangling-else) → do{...}while(0)
+8. `F11` (M_PI 비표준) → constexpr kPi
+9. `Q8 / D5-Doc` (Mali 분류 비대칭 근거) → 주석 추가
+10. `Q9` (매직 넘버 28) → constexpr kMaxGaussianRadius
+11. `S7 / D4-Doc` (OEF thread safety/파라미터 근거) → 주석 추가
+12. `D2-Doc / D3-Doc` (Doxygen 미갱신) → 갱신 완료
+13. `D1-Doc` (작업 문서 §3.2 불일치) → 문서 정합성 수정
 
-## 2) 부분 타당 항목
+### 5c14979에서 해결 (테스트 35건)
 
-1. `P2` (mask center smoothing 적용 시점)
-   - scissor 이전 이동으로 **일부 개선**은 맞다.
-   - 그러나 FreqSep 마스크는 `computeROI()`에서 이미 생성되고, composite에서 UV 기준 샘플링되므로 “완전 해결”로 보긴 어렵다.
-   - 근거:
-     - 스무딩 위치: `cpp/src/gpu/gpu_beauty_backend.cpp:1571-1583`
-     - 마스크 생성: `cpp/src/gpu/gpu_beauty_backend.cpp:1469`, `cpp/src/beauty_roi_manager.cpp:138-170`
-     - 마스크 샘플링: `cpp/src/gpu/shader_sources.cpp:480`
+14. `T1 / D2` (P4-W3-04 전용 테스트 부재) → 35건 추가
+15. `T2` (OneEuroFilter 단위 테스트) → 수렴/리셋/파라미터 테스트
+16. `T3` (detectDeviceTier 테스트 불가) → classifyGpuRenderer() static 분리
+17. `T4` (DeviceTier 분기 통합 테스트) → tier별 파이프라인 분기 테스트
 
-2. `Q4 / C1` (GL_LINEAR 미복원)
-   - 상태 복원 정책 이슈로는 타당하나, 즉시 기능 버그로 단정하긴 어려움
-   - TexturePool 기본 생성값도 GL_LINEAR
-   - 근거:
-     - half-res 경로 재설정: `cpp/src/gpu/gpu_beauty_backend.cpp:1322-1330`
-     - 풀 기본값: `cpp/src/gpu/texture_pool.cpp:331-334`
+### 997b5c5에서 해결 (R1 리팩터링)
 
-3. `T1`의 “커버리지 0%” 표현
-   - **P4-W3-04 신규 기능 전용 테스트 부족**은 맞다.
-   - 다만 프로젝트 전체 테스트가 0건이라는 의미로 읽히면 부정확하다.
-   - 근거: `cpp/tests/` 다수 테스트 존재, 단 P4-W3-04 핵심 키워드 기반 테스트는 부재
+18. `Q2 / A2` (파이프라인 ~140줄 중복) → executeFreqSepPipelineImpl 통합
+19. `Q7` (applyTextureId 중첩 깊이) → 파이프라인 추출로 해소
+20. `D9-Doc` (HalfRes 함수 주석 부족) → Impl + FreqSepExecConfig 자기 문서화
 
 ---
 
-## 3) 현재도 타당한 항목
+## 2) 이슈 아님 — 코드 재검증 결과 판정
 
-1. `T2/T3/T4` (P4-W3-04 핵심 기능 테스트 공백)
-   - OneEuro/DeviceTier/HalfRes 분기 전용 테스트 미확인
-   - 근거: `cpp/tests` 내 키워드 검색 결과 부재, `mapSkinQuality` 중심 테스트만 존재
-   - 예시: `cpp/tests/test_beauty_config_v2.cpp:300-386`
+### S6 (Viewport 복원 RAII 미적용)
+- **재검증**: executeFreqSepPipelineImpl의 에러 경로(`:1147-1149` 해상도 체크, `:1157-1162` 텍스처 획득 실패) 모두 viewport 변경(`:1177`) **이전**에 반환됨
+- **결론**: viewport 변경 후 early return 없음 → 복원 누락 불가. RAII guard는 과잉 엔지니어링.
 
-2. `D1` (CI/CD 파이프라인 부재)
-   - `.github/workflows` 디렉터리 없음
+### F5 (computeGaussianWeights C 스타일 배열)
+- **재검증**: 스택 할당(29 floats = 116 bytes), constexpr 크기, std::clamp 경계 보호, 미사용 엔트리 0 초기화
+- **결론**: 메모리 안전성 문제 없음. std::array 전환은 순수 스타일 선호.
 
-3. `D1-Doc` (작업 문서와 실제 구현 불일치)
-   - 문서는 “`mapSkinQuality()` 직후/UV 오프셋 적용” 뉘앙스
-   - 실제 구현은 scissor 전 `face_rect.x/y` 직접 보정
-   - 근거:
-     - 문서: `docs/workPaper/P4-W3-04_temporal_stability_device_tier.md:64-65, 97-98`
-     - 코드: `cpp/src/gpu/gpu_beauty_backend.cpp:1571-1583`
+### T7 (Half-Res 경계 테스트 부재)
+- **재검증**: blur_w < 1 가드(`:1147`), 실제 카메라 해상도 항상 짝수(720/1080/2160)
+- **결론**: 실제 발생 시나리오 없음. 방어적 테스트 가치는 있으나 우선순위 최하.
 
-4. `Q2/A2/F1` (full-res/half-res 파이프라인 중복)
-   - 구조적 중복이 크고 유지보수 비용 증가 리스크 존재
-   - 근거: `cpp/src/gpu/gpu_beauty_backend.cpp:1030-1149` vs `1229-1368`
+### Q4/C1 (GL_LINEAR 중복 glTexParameteri)
+- **재검증**: TexturePool 생성 시 GL_LINEAR 설정(`texture_pool.cpp:331-332`), cfg.linear_upsample 경로에서만 실행(MID 한정), 드라이버 no-op 처리
+- **결론**: 방어적 코드. 제거해도 기능/성능 차이 없고, 유지해도 문제 없음.
 
-5. `F3` (동일 프레임 타임스탬프 불일치)
-   - `OneEuroFilter::filter(value)`가 호출마다 now()를 읽어 축별/반경 필터가 동일 timestamp를 공유하지 않음
-   - 근거:
-     - 필터 구현: `cpp/include/iris_sdk/one_euro_filter.h:88-92`
-     - 호출 지점: `cpp/src/gpu/gpu_beauty_backend.cpp:1577, 1578, 1648`
+### S9 (half_w/half_h 홀수 해상도 오프셋)
+- **재검증**: GL_LINEAR 하드웨어 bilinear 보간이 비정수 배율도 자연스럽게 처리, 저주파 성분에서 1px 무의미
+- **결론**: 이론적 엣지 케이스이나 실제 문제 발생 불가.
+
+### F10 (static_cast\<unsigned char\> 반복)
+- **재검증**: Adreno/Mali 파서에서 2회 사용. 헬퍼 추출 시 오히려 코드 복잡도 증가.
+- **결론**: 현재 수준으로 충분.
+
+### D10-Doc (CHANGELOG 미갱신)
+- **재검증**: 프로젝트에 CHANGELOG 파일 자체가 없음
+- **결론**: 해당 없음. 향후 CHANGELOG 도입 시 작성.
 
 ---
 
-## 4) 우선순위 재정렬 제안
+## 3) 부분 타당 — 효과가 제한적이거나 후속 작업으로 이관
 
-현재 코드 기준 추천 우선순위:
+1. `P2` (mask center smoothing)
+   - scissor 안정화는 유효하나, 마스크 플리커 해결이라는 원래 목표에는 미치지 못함
+   - P4-W3-05 실기기 테스트에서 체감 여부 확인 후 판단
+   - 코드에 TODO(P4-W3-04-R2) 기록됨
 
-1. `테스트 보강` (T2/T3/T4)  
-2. `문서 정합성 수정` (D1-Doc)  
-3. `파이프라인 중복 리팩터링` (Q2/A2/F1)  
-4. `frame_ts 공유`로 OneEuro 타임스탬프 일관화 (F3)  
+---
 
-구식 항목(Q3/Q5/Q6 등)은 최종 리포트에서 “해결됨”으로 명확히 분리하는 것이 적절하다.
+## 4) 현재도 타당 — CI/CD 인프라 및 향후 기능
 
+1. `D1` (CI/CD 파이프라인 부재) — `.github/workflows` 없음
+2. `D3~D8, D11, D12` (빌드/릴리즈 인프라) — 별도 작업으로 분리
+3. `P1-Perf / S8` (정적 DeviceTier 한계) — P4-W3-05 런타임 적응형 tier에서 해결 예정
+
+---
+
+## 5) 최종 현황 요약
+
+| 분류 | 건수 |
+|------|------|
+| 해결 완료 | 45건 |
+| 이슈 아님 (재검증) | 12건 |
+| CI/CD 인프라 (별도) | 15건 |
+| 부분 수정/후속 추적 | 3건 (P2, P1-Perf, S8) |
+| **코드 품질 미해결** | **0건** |
