@@ -135,14 +135,16 @@ public:
     /// @brief 총 비교 수
     [[nodiscard]] std::size_t resultCount() const noexcept;
 
+    /// @brief SkinToneGroup을 문자열로 변환
+    static const char* skinToneToString(SkinToneGroup group) noexcept;
+
 private:
+    static constexpr std::size_t kMaxResults = 1000;
+
     std::vector<ComparisonResult> results_;
 
     /// @brief GateVerdict를 정수 점수로 변환 (GO=2, CONDITIONAL=1, NO_GO=0)
     static int verdictScore(GateVerdict v) noexcept;
-
-    /// @brief SkinToneGroup을 문자열로 변환
-    static const char* skinToneToString(SkinToneGroup group) noexcept;
 
     /// @brief FreqSep이 Bilateral보다 우수한지 판정
     static bool isFreqSepPreferred(

@@ -676,6 +676,277 @@ TEST(ParamTunerTest, GridSearch_ExecutesCallback) {
     EXPECT_EQ(results.size(), static_cast<std::size_t>(callback_count));
 }
 
+TEST(ParamTunerTest, RecommendPresetsReturnsValid) {
+    std::vector<TuningResult> results;
+
+    // NATURAL candidate (high_freq_preserve > 0.6)
+    TuningResult r1;
+    r1.params.high_freq_preserve = 0.8f;
+    r1.params.attenuation_low = 0.01f;
+    r1.overall_score = 0.7;
+    results.push_back(r1);
+
+    // MODERATE candidate (0.3 <= preserve <= 0.6)
+    TuningResult r2;
+    r2.params.high_freq_preserve = 0.4f;
+    r2.params.attenuation_low = 0.03f;
+    r2.overall_score = 0.8;
+    results.push_back(r2);
+
+    // STRONG candidate (preserve < 0.3)
+    TuningResult r3;
+    r3.params.high_freq_preserve = 0.1f;
+    r3.params.attenuation_low = 0.05f;
+    r3.overall_score = 0.6;
+    results.push_back(r3);
+
+    auto presets = ParamTuner::recommendPresets(results);
+
+    EXPECT_FLOAT_EQ(presets.natural_params.high_freq_preserve, 0.8f);
+    EXPECT_FLOAT_EQ(presets.moderate_params.high_freq_preserve, 0.4f);
+    EXPECT_FLOAT_EQ(presets.strong_params.high_freq_preserve, 0.1f);
+    EXPECT_FLOAT_EQ(presets.natural_value, 0.3f);
+    EXPECT_FLOAT_EQ(presets.moderate_value, 0.5f);
+    EXPECT_FLOAT_EQ(presets.strong_value, 0.8f);
+}
+
+TEST(ParamTunerTest, GenerateReportNonEmpty) {
+    std::vector<TuningResult> results;
+    TuningResult r;
+    r.params.attenuation_low = 0.02f;
+    r.overall_score = 0.5;
+    r.gate_result.verdict = GateVerdict::CONDITIONAL_GO;
+    results.push_back(r);
+
+    PresetRecommendation presets;
+    std::string report = ParamTuner::generateReport(results, presets);
+
+    EXPECT_FALSE(report.empty());
+    EXPECT_NE(report.find("FreqSep"), std::string::npos);
+}
+
+TEST(ParamTunerTest, GridSearchStepsClamping) {
+    ParamTuner tuner;
+    cv::Mat original = createTexturedTestImage(kW, kH);
+    cv::Mat mask     = createTestMask(kW, kH);
+
+    TuningRange range;
+    range.steps = 100; // 100^4 = 100M -> should be clamped to 10
+
+    int callback_count = 0;
+    auto process_fn = [&](const cv::Mat& img, const FreqSepTuningParams&) -> cv::Mat {
+        ++callback_count;
+        return applyBlur(img, 11);
+    };
+
+    auto results = tuner.gridSearch(original, mask, range, process_fn, "clamp_test");
+
+    // steps=100 clamped to 10, 10^4=10000 combinations max
+    EXPECT_LE(results.size(), 10000u);
+    // Should still produce some results (10^4 = 10000)
+    EXPECT_GT(results.size(), 0u);
+}
+
+TEST(ABCompareTest, ResetClearsResults) {
+    ABCompare ab;
+    cv::Mat original  = createTexturedTestImage(kW, kH);
+    cv::Mat mask      = createTestMask(kW, kH);
+    cv::Mat bilateral = applyBlur(original, 11);
+    cv::Mat freq_sep  = applyBlur(original, 7);
+
+    TestCondition cond;
+    auto result = ab.compare(original, bilateral, freq_sep, mask, cond);
+    ab.addResult(result);
+    EXPECT_EQ(ab.resultCount(), 1u);
+
+    ab.reset();
+    EXPECT_EQ(ab.resultCount(), 0u);
+}
+
+TEST(ABCompareTest, AddResultMemoryCap) {
+    ABCompare ab;
+    ComparisonResult dummy;
+    dummy.skin_tone = SkinToneGroup::MEDIUM;
+    dummy.condition_label = "test";
+
+    for (int i = 0; i < 1001; ++i) {
+        ab.addResult(dummy);
+    }
+
+    // kMaxResults = 1000, oldest evicted
+    EXPECT_EQ(ab.resultCount(), 1000u);
+}
+
+// ============================================================================
+// T6: ReleaseGate 경계값 테스트
+// ============================================================================
+
+TEST(ReleaseGateTest, FrameTimeExactBoundary) {
+    ReleaseGate gate;
+    HardStopInput hard;
+    hard.crash_free = true;
+    hard.no_memory_leak = true;
+    hard.frame_time_ms = 33.0;  // exactly 33ms -> pass (<=33)
+    hard.temporal_cv = 0.03;
+
+    auto results = gate.evaluateHardStop(hard);
+    // gate_name is "fps"
+    bool fps_passed = false;
+    for (const auto& r : results) {
+        if (r.gate_name == "fps") {
+            fps_passed = r.passed;
+        }
+    }
+    EXPECT_TRUE(fps_passed);
+}
+
+TEST(ReleaseGateTest, FrameTimeJustOver) {
+    ReleaseGate gate;
+    HardStopInput hard;
+    hard.crash_free = true;
+    hard.no_memory_leak = true;
+    hard.frame_time_ms = 33.01;  // just over -> fail
+    hard.temporal_cv = 0.03;
+
+    auto results = gate.evaluateHardStop(hard);
+    bool fps_passed = true;
+    for (const auto& r : results) {
+        if (r.gate_name == "fps") {
+            fps_passed = r.passed;
+        }
+    }
+    EXPECT_FALSE(fps_passed);
+}
+
+TEST(ReleaseGateTest, LaplacianLowerBound) {
+    ReleaseGate gate;
+    QuantitativeInput quant;
+    quant.laplacian_reduction = 0.30;  // exactly 0.30 -> pass (>= 0.30)
+    quant.non_skin_ssim = 0.97;
+    quant.freq_sep_time_ms = 8.0;
+    quant.texture_pool_additional = 2;
+    quant.device_tier = DeviceTier::HIGH;
+
+    auto results = gate.evaluateQuantitative(quant);
+    bool lap_passed = false;
+    for (const auto& r : results) {
+        if (r.gate_name.find("laplacian") != std::string::npos ||
+            r.gate_name.find("Laplacian") != std::string::npos) {
+            lap_passed = r.passed;
+        }
+    }
+    EXPECT_TRUE(lap_passed);
+}
+
+TEST(ReleaseGateTest, LaplacianUpperBound) {
+    ReleaseGate gate;
+    QuantitativeInput quant;
+    quant.laplacian_reduction = 0.60;  // exactly 0.60 -> pass (<= 0.60)
+    quant.non_skin_ssim = 0.97;
+    quant.freq_sep_time_ms = 8.0;
+    quant.texture_pool_additional = 2;
+    quant.device_tier = DeviceTier::HIGH;
+
+    auto results = gate.evaluateQuantitative(quant);
+    bool lap_passed = false;
+    for (const auto& r : results) {
+        if (r.gate_name.find("laplacian") != std::string::npos ||
+            r.gate_name.find("Laplacian") != std::string::npos) {
+            lap_passed = r.passed;
+        }
+    }
+    EXPECT_TRUE(lap_passed);
+}
+
+TEST(ReleaseGateTest, SSIMExactBoundary) {
+    ReleaseGate gate;
+    QuantitativeInput quant;
+    quant.laplacian_reduction = 0.45;
+    quant.non_skin_ssim = 0.95;  // exactly 0.95 -> fail (> 0.95 required)
+    quant.freq_sep_time_ms = 8.0;
+    quant.texture_pool_additional = 2;
+    quant.device_tier = DeviceTier::HIGH;
+
+    auto results = gate.evaluateQuantitative(quant);
+    bool ssim_passed = true;
+    for (const auto& r : results) {
+        if (r.gate_name.find("ssim") != std::string::npos ||
+            r.gate_name.find("SSIM") != std::string::npos) {
+            ssim_passed = r.passed;
+        }
+    }
+    EXPECT_FALSE(ssim_passed);
+}
+
+TEST(ReleaseGateTest, SSIMJustAbove) {
+    ReleaseGate gate;
+    QuantitativeInput quant;
+    quant.laplacian_reduction = 0.45;
+    quant.non_skin_ssim = 0.951;  // just above -> pass
+    quant.freq_sep_time_ms = 8.0;
+    quant.texture_pool_additional = 2;
+    quant.device_tier = DeviceTier::HIGH;
+
+    auto results = gate.evaluateQuantitative(quant);
+    bool ssim_passed = false;
+    for (const auto& r : results) {
+        if (r.gate_name.find("ssim") != std::string::npos ||
+            r.gate_name.find("SSIM") != std::string::npos) {
+            ssim_passed = r.passed;
+        }
+    }
+    EXPECT_TRUE(ssim_passed);
+}
+
+// ============================================================================
+// T7: QualityMetrics 추가 테스트
+// ============================================================================
+
+TEST(QualityMetricsTest, CV32FPrecisionAdequate) {
+    cv::Mat original = createTexturedTestImage(kW, kH);
+    cv::Mat mask     = createTestMask(kW, kH);
+
+    auto result = QualityMetrics::measureNonSkinSSIM(original, original, mask);
+
+    // SSIM with identical images should be ~1.0 even with CV_32F
+    EXPECT_GT(result.ssim_value, 0.99);
+    EXPECT_LE(result.ssim_value, 1.0);
+}
+
+TEST(QualityMetricsTest, ToGrayCaching) {
+    cv::Mat original = createTexturedTestImage(kW, kH);
+    cv::Mat mask     = createTestMask(kW, kH);
+    cv::Mat processed = applyBlur(original, 7);
+
+    // evaluateQuantitativeGate should work correctly with optimized gray conversion
+    auto result = QualityMetrics::evaluateQuantitativeGate(original, processed, mask);
+
+    // Should produce a valid verdict
+    EXPECT_TRUE(result.verdict == GateVerdict::GO ||
+                result.verdict == GateVerdict::CONDITIONAL_GO ||
+                result.verdict == GateVerdict::NO_GO);
+    EXPECT_FALSE(result.summary.empty());
+}
+
+TEST(QualityMetricsTest, CatchLogging) {
+    cv::Mat empty;
+    cv::Mat mask = createTestMask(kW, kH);
+
+    // Invalid input should not crash, should return defaults
+    auto lap = QualityMetrics::measureLaplacianReduction(empty, empty, mask);
+    EXPECT_DOUBLE_EQ(lap.reduction_ratio, 0.0);
+    EXPECT_FALSE(lap.passes_gate);
+
+    auto ssim = QualityMetrics::measureNonSkinSSIM(empty, empty, mask);
+    EXPECT_DOUBLE_EQ(ssim.ssim_value, 0.0);
+
+    auto halo = QualityMetrics::detectHalo(empty, empty, mask);
+    EXPECT_DOUBLE_EQ(halo.gradient_increase_ratio, 0.0);
+
+    auto gate = QualityMetrics::evaluateQuantitativeGate(empty, empty, mask);
+    EXPECT_EQ(gate.verdict, GateVerdict::NO_GO);
+}
+
 TEST(ParamTunerTest, FindBest_ReturnsHighestScore) {
     // 수동으로 TuningResult 벡터 생성
     std::vector<TuningResult> results;

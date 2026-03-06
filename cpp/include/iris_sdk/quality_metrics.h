@@ -13,6 +13,7 @@
 #pragma once
 
 #include <opencv2/core.hpp>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -80,6 +81,16 @@ enum class GateVerdict {
     CONDITIONAL_GO,  ///< 일부 미통과, 허용 범위
     NO_GO            ///< 핵심 메트릭 미통과
 };
+
+/// @brief GateVerdict를 문자열로 변환
+inline const char* gateVerdictToString(GateVerdict v) noexcept {
+    switch (v) {
+        case GateVerdict::GO:             return "GO";
+        case GateVerdict::CONDITIONAL_GO: return "CONDITIONAL_GO";
+        case GateVerdict::NO_GO:          return "NO_GO";
+    }
+    return "UNKNOWN";
+}
 
 /**
  * @brief 종합 게이트 결과
@@ -206,6 +217,18 @@ private:
         const cv::Mat& img1,
         const cv::Mat& img2,
         const cv::Mat& mask) noexcept;
+
+    /// @brief Laplacian reduction 측정 (gray Mat 직접 입력)
+    static double measureLaplacianReductionImpl(
+        const cv::Mat& originalGray,
+        const cv::Mat& processedGray,
+        const cv::Mat& mask) noexcept;
+
+    /// @brief Halo 검출 (gray Mat 직접 입력)
+    static double detectHaloImpl(
+        const cv::Mat& originalGray,
+        const cv::Mat& processedGray,
+        const cv::Mat& mask) noexcept;
 };
 
 // ============================================================================
@@ -217,6 +240,10 @@ private:
  *
  * 연속 프레임의 Laplacian reduction ratio를 수집하여
  * 변동 계수(CV)를 산출한다. CV < 5%이면 안정적.
+ *
+ * @note This class is NOT thread-safe. External synchronization is required
+ *       if accessed from multiple threads. All methods including addFrame()
+ *       modify internal state (reduction_ratios_, frame_count_).
  *
  * 사용법:
  * @code
@@ -235,6 +262,8 @@ public:
      * @brief 프레임 쌍 추가
      *
      * 원본/처리 프레임의 Laplacian reduction ratio를 기록한다.
+     * 매 프레임 Laplacian 연산을 수행하므로 (~2-5ms/frame),
+     * 호출자가 이미 ratio를 알고 있다면 addReductionRatio()를 사용한다.
      *
      * @param original   원본 프레임 (CV_8UC3 BGR)
      * @param processed  처리된 프레임 (CV_8UC3 BGR)
@@ -244,6 +273,17 @@ public:
         const cv::Mat& original,
         const cv::Mat& processed,
         const cv::Mat& skin_mask) noexcept;
+
+    /**
+     * @brief 미리 계산된 reduction ratio를 직접 추가
+     *
+     * 호출자가 이미 Laplacian reduction ratio를 알고 있을 때
+     * 불필요한 재계산 없이 직접 기록한다.
+     * evaluateQuantitativeGate() 등에서 이미 ratio를 얻은 경우 유용.
+     *
+     * @param ratio Laplacian reduction ratio (0~1 범위 외 값은 무시)
+     */
+    void addReductionRatio(double ratio) noexcept;
 
     /**
      * @brief 시간적 변동 분석 결과 산출
@@ -266,7 +306,7 @@ public:
     [[nodiscard]] std::size_t frameCount() const noexcept;
 
 private:
-    std::vector<double> reduction_ratios_; ///< 프레임별 Laplacian reduction ratio
+    std::deque<double> reduction_ratios_; ///< 프레임별 Laplacian reduction ratio (deque: O(1) pop_front)
 };
 
 } // namespace iris_sdk

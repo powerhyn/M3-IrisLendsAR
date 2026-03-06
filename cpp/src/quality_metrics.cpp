@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <numeric>
 #include <sstream>
 
@@ -59,6 +60,7 @@ cv::Mat QualityMetrics::toGray(const cv::Mat& src) noexcept {
         cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
         return gray;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::toGray: unknown exception\n");
         return {};
     }
 }
@@ -97,7 +99,7 @@ double QualityMetrics::computeMaskedLaplacianVariance(
         if (cv::countNonZero(mask) < kMinMaskPixels) return 0.0;
 
         cv::Mat laplacian;
-        cv::Laplacian(gray, laplacian, CV_64F);
+        cv::Laplacian(gray, laplacian, CV_32F);
 
         cv::Scalar mean_val, stddev_val;
         cv::meanStdDev(laplacian, mean_val, stddev_val, mask);
@@ -105,6 +107,7 @@ double QualityMetrics::computeMaskedLaplacianVariance(
         // variance = stddev^2
         return stddev_val[0] * stddev_val[0];
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::computeMaskedLaplacianVariance: unknown exception\n");
         return 0.0;
     }
 }
@@ -120,8 +123,8 @@ double QualityMetrics::computeSSIMChannel(
 
         // float 변환
         cv::Mat i1, i2;
-        img1_gray.convertTo(i1, CV_64F);
-        img2_gray.convertTo(i2, CV_64F);
+        img1_gray.convertTo(i1, CV_32F);
+        img2_gray.convertTo(i2, CV_32F);
 
         // NOTE: Simplified global SSIM (not windowed). Uses whole-region statistics
         // instead of Wang et al.'s 11x11 Gaussian window for computational efficiency.
@@ -139,28 +142,31 @@ double QualityMetrics::computeSSIMChannel(
         // 마스크 영역의 평균 계산
         const cv::Scalar mu1_s = cv::mean(i1, mask);
         const cv::Scalar mu2_s = cv::mean(i2, mask);
-        const double mu1 = mu1_s[0];
-        const double mu2 = mu2_s[0];
+        const float mu1 = static_cast<float>(mu1_s[0]);
+        const float mu2 = static_cast<float>(mu2_s[0]);
 
         const cv::Scalar sigma1_sq_s = cv::mean(i1_sq, mask);
         const cv::Scalar sigma2_sq_s = cv::mean(i2_sq, mask);
         const cv::Scalar sigma12_s   = cv::mean(i1_i2, mask);
 
         // 분산 = E[X^2] - E[X]^2
-        const double sigma1_sq = sigma1_sq_s[0] - mu1 * mu1;
-        const double sigma2_sq = sigma2_sq_s[0] - mu2 * mu2;
-        const double sigma12   = sigma12_s[0] - mu1 * mu2;
+        const float sigma1_sq = static_cast<float>(sigma1_sq_s[0]) - mu1 * mu1;
+        const float sigma2_sq = static_cast<float>(sigma2_sq_s[0]) - mu2 * mu2;
+        const float sigma12   = static_cast<float>(sigma12_s[0]) - mu1 * mu2;
 
         // SSIM
-        const double numerator   = (2.0 * mu1 * mu2 + kSSIM_C1) *
-                                   (2.0 * sigma12 + kSSIM_C2);
-        const double denominator = (mu1 * mu1 + mu2 * mu2 + kSSIM_C1) *
-                                   (sigma1_sq + sigma2_sq + kSSIM_C2);
+        constexpr float c1 = static_cast<float>(kSSIM_C1);
+        constexpr float c2 = static_cast<float>(kSSIM_C2);
+        const float numerator   = (2.0f * mu1 * mu2 + c1) *
+                                  (2.0f * sigma12 + c2);
+        const float denominator = (mu1 * mu1 + mu2 * mu2 + c1) *
+                                  (sigma1_sq + sigma2_sq + c2);
 
-        if (std::abs(denominator) < 1e-12) return 1.0;
+        if (std::abs(denominator) < 1e-12f) return 1.0;
 
-        return std::clamp(numerator / denominator, 0.0, 1.0);
+        return std::clamp(static_cast<double>(numerator / denominator), 0.0, 1.0);
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::computeSSIMChannel: unknown exception\n");
         return 0.0;
     }
 }
@@ -185,6 +191,7 @@ cv::Mat QualityMetrics::createBoundaryMask(
 
         return boundary;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::createBoundaryMask: unknown exception\n");
         return {};
     }
 }
@@ -198,8 +205,8 @@ double QualityMetrics::computeMaskedGradientMagnitude(
         if (cv::countNonZero(mask) < kMinMaskPixels) return 0.0;
 
         cv::Mat grad_x, grad_y;
-        cv::Sobel(gray, grad_x, CV_64F, 1, 0, 3);
-        cv::Sobel(gray, grad_y, CV_64F, 0, 1, 3);
+        cv::Sobel(gray, grad_x, CV_32F, 1, 0, 3);
+        cv::Sobel(gray, grad_y, CV_32F, 0, 1, 3);
 
         cv::Mat magnitude;
         cv::magnitude(grad_x, grad_y, magnitude);
@@ -207,6 +214,7 @@ double QualityMetrics::computeMaskedGradientMagnitude(
         const cv::Scalar mean_val = cv::mean(magnitude, mask);
         return mean_val[0];
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::computeMaskedGradientMagnitude: unknown exception\n");
         return 0.0;
     }
 }
@@ -214,6 +222,37 @@ double QualityMetrics::computeMaskedGradientMagnitude(
 // ============================================================================
 // QualityMetrics - public static methods
 // ============================================================================
+
+double QualityMetrics::measureLaplacianReductionImpl(
+    const cv::Mat& originalGray,
+    const cv::Mat& processedGray,
+    const cv::Mat& mask) noexcept
+{
+    const double orig_var = computeMaskedLaplacianVariance(originalGray, mask);
+    const double proc_var = computeMaskedLaplacianVariance(processedGray, mask);
+    if (orig_var > 1e-12) {
+        return std::clamp(1.0 - (proc_var / orig_var), 0.0, 1.0);
+    }
+    return 0.0;
+}
+
+double QualityMetrics::detectHaloImpl(
+    const cv::Mat& originalGray,
+    const cv::Mat& processedGray,
+    const cv::Mat& mask) noexcept
+{
+    const double orig_grad = computeMaskedGradientMagnitude(originalGray, mask);
+    const double proc_grad = computeMaskedGradientMagnitude(processedGray, mask);
+    if (orig_grad > 1e-12) {
+        return (proc_grad - orig_grad) / orig_grad;
+    }
+    // 원본 gradient ≈ 0 (평탄 영역): 처리 후 새 edge가 생기면 halo로 간주
+    // proc_grad가 유의미하면 100% 증가로 보고 (kHaloMaxIncreaseRatio=0.15 초과 → fail)
+    if (proc_grad > 1.0) {
+        return 1.0;
+    }
+    return 0.0;
+}
 
 LaplacianResult QualityMetrics::measureLaplacianReduction(
     const cv::Mat& original,
@@ -245,6 +284,7 @@ LaplacianResult QualityMetrics::measureLaplacianReduction(
 
         return result;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::measureLaplacianReduction: unknown exception\n");
         return {};
     }
 }
@@ -293,6 +333,7 @@ SSIMResult QualityMetrics::measureNonSkinSSIM(
 
         return result;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::measureNonSkinSSIM: unknown exception\n");
         return {};
     }
 }
@@ -336,6 +377,7 @@ HaloResult QualityMetrics::detectHalo(
 
         return result;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::detectHalo: unknown exception\n");
         return {};
     }
 }
@@ -348,9 +390,43 @@ GateResult QualityMetrics::evaluateQuantitativeGate(
     try {
         GateResult result{};
 
-        result.laplacian = measureLaplacianReduction(original, processed, skin_mask);
-        result.ssim      = measureNonSkinSSIM(original, processed, skin_mask);
-        result.halo      = detectHalo(original, processed, skin_mask);
+        if (!validateInputs(original, processed, skin_mask)) {
+            return result;
+        }
+
+        // toGray 중복 호출 방지: 한 번만 변환
+        const cv::Mat origGray = toGray(original);
+        const cv::Mat procGray = toGray(processed);
+
+        // Laplacian (Impl 직접 호출)
+        result.laplacian.original_variance  = computeMaskedLaplacianVariance(origGray, skin_mask);
+        result.laplacian.processed_variance = computeMaskedLaplacianVariance(procGray, skin_mask);
+        if (result.laplacian.original_variance > 1e-12) {
+            result.laplacian.reduction_ratio = 1.0 -
+                (result.laplacian.processed_variance / result.laplacian.original_variance);
+            result.laplacian.reduction_ratio = std::clamp(result.laplacian.reduction_ratio, 0.0, 1.0);
+        }
+        result.laplacian.passes_gate =
+            (result.laplacian.reduction_ratio >= kLaplacianMinReduction) &&
+            (result.laplacian.reduction_ratio <= kLaplacianMaxReduction);
+
+        // SSIM (채널 분리가 필요하므로 기존 메서드 호출)
+        result.ssim = measureNonSkinSSIM(original, processed, skin_mask);
+
+        // Halo (Impl 직접 호출)
+        const cv::Mat boundary_mask = createBoundaryMask(skin_mask, 5);
+        if (boundary_mask.empty() || cv::countNonZero(boundary_mask) < kMinMaskPixels) {
+            result.halo.passes_gate = true;
+        } else {
+            result.halo.original_boundary_gradient  = computeMaskedGradientMagnitude(origGray, boundary_mask);
+            result.halo.processed_boundary_gradient = computeMaskedGradientMagnitude(procGray, boundary_mask);
+            if (result.halo.original_boundary_gradient > 1e-12) {
+                result.halo.gradient_increase_ratio =
+                    (result.halo.processed_boundary_gradient - result.halo.original_boundary_gradient) /
+                    result.halo.original_boundary_gradient;
+            }
+            result.halo.passes_gate = (result.halo.gradient_increase_ratio < kHaloMaxIncreaseRatio);
+        }
 
         // 통과 수 계산
         int pass_count = 0;
@@ -369,12 +445,7 @@ GateResult QualityMetrics::evaluateQuantitativeGate(
 
         // 요약 문자열 생성
         std::ostringstream oss;
-        oss << "Gate: ";
-        switch (result.verdict) {
-            case GateVerdict::GO:             oss << "GO";             break;
-            case GateVerdict::CONDITIONAL_GO: oss << "CONDITIONAL_GO"; break;
-            case GateVerdict::NO_GO:          oss << "NO_GO";          break;
-        }
+        oss << "Gate: " << gateVerdictToString(result.verdict);
         oss << " (" << pass_count << "/3 passed) | "
             << "Laplacian=" << static_cast<int>(result.laplacian.reduction_ratio * 100)
             << "% [" << (result.laplacian.passes_gate ? "OK" : "FAIL") << "] | "
@@ -387,6 +458,7 @@ GateResult QualityMetrics::evaluateQuantitativeGate(
 
         return result;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] QualityMetrics::evaluateQuantitativeGate: unknown exception\n");
         return {};
     }
 }
@@ -409,13 +481,24 @@ void TemporalAnalyzer::addFrame(
             // Keep only last 300 frames (10 seconds at 30fps) to prevent unbounded growth
             constexpr std::size_t kMaxFrames = 300;
             if (reduction_ratios_.size() >= kMaxFrames) {
-                reduction_ratios_.erase(reduction_ratios_.begin());
+                reduction_ratios_.pop_front();
             }
             reduction_ratios_.push_back(lap.reduction_ratio);
         }
     } catch (...) {
-        // OpenCV exception 또는 allocation failure 시 무시
+        std::fprintf(stderr, "[IrisSDK] TemporalAnalyzer::addFrame: unknown exception\n");
     }
+}
+
+void TemporalAnalyzer::addReductionRatio(double ratio) noexcept {
+    // 유효 범위 외 값은 무시
+    if (ratio < 0.0 || ratio > 1.0) return;
+
+    constexpr std::size_t kMaxFrames = 300;
+    if (reduction_ratios_.size() >= kMaxFrames) {
+        reduction_ratios_.pop_front();
+    }
+    reduction_ratios_.push_back(ratio);
 }
 
 TemporalResult TemporalAnalyzer::computeTemporalVariance() const noexcept {

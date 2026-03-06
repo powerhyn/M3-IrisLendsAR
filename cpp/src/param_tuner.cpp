@@ -44,15 +44,29 @@ std::vector<TuningResult> ParamTuner::gridSearch(
             return results;
         }
 
+        // steps 상한 적용 (조합 폭발 방지)
+        const int clamped_steps = std::clamp(range.steps, 1, 10);
+        const std::size_t total_combinations =
+            static_cast<std::size_t>(clamped_steps) *
+            static_cast<std::size_t>(clamped_steps) *
+            static_cast<std::size_t>(clamped_steps) *
+            static_cast<std::size_t>(clamped_steps);
+        if (total_combinations > 10000) {
+            std::fprintf(stderr,
+                "[IrisSDK] gridSearch: combination overflow (%zu), skipped\n",
+                total_combinations);
+            return results;
+        }
+
         // 각 파라미터에 대한 그리드 값 생성
         const auto a_low_steps  = generateSteps(
-            range.attenuation_low_min, range.attenuation_low_max, range.steps);
+            range.attenuation_low_min, range.attenuation_low_max, clamped_steps);
         const auto a_high_steps = generateSteps(
-            range.attenuation_high_min, range.attenuation_high_max, range.steps);
+            range.attenuation_high_min, range.attenuation_high_max, clamped_steps);
         const auto sigma_steps  = generateSteps(
-            range.sigma_ratio_min, range.sigma_ratio_max, range.steps);
+            range.sigma_ratio_min, range.sigma_ratio_max, clamped_steps);
         const auto preserve_steps = generateSteps(
-            range.high_freq_preserve_min, range.high_freq_preserve_max, range.steps);
+            range.high_freq_preserve_min, range.high_freq_preserve_max, clamped_steps);
 
         // 총 조합 수 예약
         const auto total = a_low_steps.size() * a_high_steps.size()
@@ -97,6 +111,7 @@ std::vector<TuningResult> ParamTuner::gridSearch(
 
         return results;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] ParamTuner::gridSearch: unknown exception\n");
         return {};
     }
 }

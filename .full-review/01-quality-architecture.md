@@ -1,71 +1,70 @@
 # Phase 1: Code Quality & Architecture Review
 
-## Code Quality Findings
+## Code Quality Findings (21건)
 
-### Critical (1건)
+### High (6건)
+| ID | 카테고리 | 위치 | 요약 |
+|----|----------|------|------|
+| CX-1 | 복잡도 | param_tuner.cpp:63-96 | 4중 중첩 루프 (gridSearch) |
+| MT-1 | 유지보수 | 여러 파일 | 매직 넘버/임계값 중복 정의 (0.30, 0.95, 0.05 등) |
+| MT-2 | 유지보수 | release_gate.h:32 | DeviceTier enum 중복 선언 (gpu_beauty_backend.h와) |
+| TD-1 | 기술부채 | quality_metrics.cpp:411 | vector::erase(begin()) O(n) — 실시간 성능 영향 |
+| TD-2 | 기술부채 | 12+ 위치 | catch(...) 무음 예외 삼킴 — 디버깅 불가 |
+| TC-1 | 테스트 | test_quality_tuning.cpp | recommendPresets 테스트 미작성 |
 
-| # | 이슈 | 위치 | 설명 |
-|---|------|------|------|
-| Q1 | ROI 포인터 직접 수정 | `gpu_beauty_backend.cpp:1622-1624` | `roi_ptr->face_rect.x/y`를 직접 변경하여 같은 메서드 내 후속 코드가 원본 face_rect를 기대하면 예상치 못한 동작 발생. 로컬 복사본을 사용해야 함 |
+### Medium (13건)
+| ID | 카테고리 | 위치 | 요약 |
+|----|----------|------|------|
+| CX-2 | 복잡도 | ab_compare.cpp:263-277 | GateVerdict switch 반복 |
+| MT-3 | 유지보수 | ab_compare.cpp:219-290 | JSON 수동 조립, 이스케이프 없음 |
+| CL-1 | 설계 | quality_metrics.h:107-209 | 전체 static 클래스 (향후 유연성 제한) |
+| CL-2 | 설계 | param_tuner.cpp:209-235 | validateBlurRadiusIndependence 무의미한 검증 |
+| CL-3 | 설계 | param_tuner.cpp:108-134 | 게이트 미통과 시 점수 0 절벽 |
+| DU-1 | 중복 | ab_compare.cpp | SkinToneGroup 문자열 변환 중복 |
+| DU-2 | 중복 | test_quality_tuning.cpp:398-571 | 테스트 입력 구조체 반복 |
+| TD-3 | 기술부채 | ab_compare.cpp:155 | addResult 바운드 체크 없음 |
+| EH-1 | 에러처리 | quality_metrics.cpp:66-89 | 중복 타입 검증 |
+| EH-2 | 에러처리 | param_tuner.cpp:74 | 콜백 예외 시 전체 결과 소실 |
+| PF-1 | 성능 | quality_metrics.cpp:275-290 | 불필요한 Mat 할당 |
+| TC-2 | 테스트 | test_quality_tuning.cpp | generateReport 테스트 없음 |
+| TC-3 | 테스트 | test_quality_tuning.cpp | 디바이스 티어별 테스트 없음 |
+
+### Low (4건)
+| ID | 카테고리 | 위치 | 요약 |
+|----|----------|------|------|
+| MT-4 | 유지보수 | param_tuner.cpp, release_gate.cpp | snprintf 버퍼 크기 하드코딩 |
+| DU-3 | 중복 | release_gate.cpp:256-293 | formatReport 섹션 반복 패턴 |
+| EH-3 | 에러처리 | quality_metrics.cpp:343-392 | 빈 마스크와 품질 실패 미구분 |
+| PF-2 | 성능 | param_tuner.cpp:258-262 | 전체 벡터 복사 후 정렬 |
+
+## Architecture Findings (10건)
 
 ### High (2건)
+| ID | 카테고리 | 위치 | 요약 |
+|----|----------|------|------|
+| A1-1 | 컴포넌트 경계 | release_gate.h:32, gpu_beauty_backend.h:259 | DeviceTier 중복 정의 → ODR 위반 위험 |
+| A3-1 | API 설계 | 12+ 위치 | noexcept + catch(...) 패턴 → 오류 추적 불가 |
 
-| # | 이슈 | 위치 | 설명 |
-|---|------|------|------|
-| Q2 | 파이프라인 코드 ~140줄 중복 | `gpu_beauty_backend.cpp:1216-1362` vs `1024-1149` | `executeFreqSepPipelineHalfRes`와 `executeFreqSepPipeline`이 구조적으로 거의 동일. 해상도 매개변수만 다름. 공통 `executeFreqSepPipelineImpl()`로 추출 권장 |
-| Q3 | One Euro Filter 리셋 누락 | `gpu_beauty_backend.h:446-448` | 얼굴 추적 끊김→재획득 시 필터에 이전 상태가 남아 비정상적 전환 발생. `roi_ptr` 무효 시 `filter.reset()` 호출 필요 |
+### Medium (7건)
+| ID | 카테고리 | 위치 | 요약 |
+|----|----------|------|------|
+| A1-2 | 컴포넌트 경계 | QualityMetrics ↔ ReleaseGate | 통합 편의 메서드 누락 |
+| A2-2 | 의존성 | sdk_api.h | 4개 모듈의 C API 미노출 |
+| A3-2 | API 설계 | quality_metrics.cpp, release_gate.cpp | 임계값 하드코딩, 설정 불가 |
+| A3-4 | API 설계 | ab_compare.cpp:219-290 | 수동 JSON 생성 → 이스케이핑 미처리 |
+| A4-1 | 데이터 모델 | quality_metrics.cpp:411 | vector::erase(begin()) O(n) |
+| A4-3 | 데이터 모델 | param_tuner.h | blur_radius grid search 미사용 혼란 |
+| A6-2 | 일관성 | 4개 모듈 전체 | Pimpl 패턴 미적용 (프로젝트 규칙) |
 
-### Medium (5건)
-
-| # | 이슈 | 위치 | 설명 |
-|---|------|------|------|
-| Q4 | GL_LINEAR 텍스처 필터 미복원 | `gpu_beauty_backend.cpp:1296-1305` | half-res 텍스처에 GL_LINEAR 설정 후 풀 반환 시 원래 필터 모드 미복원 |
-| Q5 | std::stoi 예외 미처리 | `gpu_beauty_backend.cpp:1172, 1186` | 비정상 GPU 문자열에서 std::out_of_range 크래시 가능 |
-| Q6 | static 메서드의 GL 컨텍스트 의존 | `gpu_beauty_backend.h:249` | detectDeviceTier()가 static이지만 glGetString() 호출. 테스트 불가, 오용 가능 |
-| Q7 | applyTextureId 중첩 깊이 증가 | `gpu_beauty_backend.cpp:1645-1690` | tier 분기 추가로 4단계 중첩. 전략 선택 함수 추출 권장 |
-| Q8 | Mali 분류 기준값 비대칭 | `gpu_beauty_backend.cpp:1183-1188` | 2자리/3자리 혼재, 향후 G800 시리즈 대응 주석 필요 |
-
-### Low (2건)
-
-| # | 이슈 | 위치 | 설명 |
-|---|------|------|------|
-| Q9 | 매직 넘버 28 | `gpu_beauty_backend.cpp:36` | `constexpr kMaxGaussianRadius = 28`로 명명 권장 |
-| Q10 | DeviceTier public 노출 | `gpu_beauty_backend.h:242-248` | 내부 구현 세부사항이 불필요하게 public API에 노출 |
-
----
-
-## Architecture Findings
-
-### High (2건)
-
-| # | 이슈 | 아키텍처 영향 | 설명 |
-|---|------|-------------|------|
-| A1 | API 표면 불완전 | High | DeviceTier enum은 public이지만 getter 없음. static 메서드의 GL 컨텍스트 의존이 계약에 미반영. 테스트용 오버라이드 불가 |
-| A2 | Temporal filtering 관심사 분리 | High | `applyTextureId()` (200줄+ 오케스트레이션) 내에 temporal filtering이 인라인. `stabilizeFreqSepParams()`, `stabilizeFaceRect()` 헬퍼로 추출 권장 |
-
-### Medium (3건)
-
-| # | 이슈 | 아키텍처 영향 | 설명 |
-|---|------|-------------|------|
-| A3 | DeviceTier 배치 | Medium | 현재 GPUBeautyBackend에 적절하나, 다른 GPU 컴포넌트에서 사용 시 별도 헤더 분리 필요 |
-| A4 | 티어 기반 분기 패턴 | Medium | 현재 3경로에서 적절. 5개+ 경로 시 Strategy 패턴 리팩터링 검토 |
-| A5 | Half-res GL 상태 오염 | Medium | 텍스처 풀 반환 시 필터 상태 리셋 정책 확인 필요 |
-
-### Positive (잘 된 부분)
-
-- TexturePool acquire/release 패턴 일관성 양호
-- Profiler begin/end 통합 정확 (`_Half` 접미사로 구분)
-- RAII 패턴: 텍스처 획득 실패 시 이미 획득한 텍스처 정리
-- `#if IRIS_SDK_GPU_AVAILABLE` 가드 일관 적용
-- `computeGaussianWeights`의 radius 경계 보호 추가
-
----
+### Low (긍정적 평가 포함, 4건)
+- 의존성 방향 올바름 (순환 없음)
+- QualityMetrics/TemporalAnalyzer SRP 분리 적절
+- 코드 스타일 프로젝트 규칙 준수
+- ABCompare Builder-like 패턴 적절
 
 ## Critical Issues for Phase 2 Context
 
-Phase 2 (Security & Performance) 리뷰에서 주목할 사항:
-
-1. **성능**: `executeFreqSepPipelineHalfRes`에서 GL_LINEAR 텍스처 파라미터 변경이 프레임당 반복되면서 GPU 상태 전환 오버헤드 유발 가능
-2. **성능**: `detectDeviceTier()`의 문자열 파싱이 `initialize()`에서만 호출되는지 확인 (반복 호출 시 성능 저하)
-3. **안전성**: `std::stoi` 예외가 초기화 경로에서 발생하면 전체 SDK 초기화 실패
-4. **메모리**: One Euro Filter 3개 인스턴스의 추가 메모리 영향 (무시 가능하나 확인)
+1. **catch(...) 무음 처리**: 보안/메모리 오류 은닉 가능성 → Security 리뷰에서 점검 필요
+2. **vector::erase(begin()) O(n)**: 실시간 처리 성능 영향 → Performance 리뷰에서 점검 필요
+3. **addResult 바운드 체크 없음**: 메모리 무한 증가 가능 → Performance/Security 리뷰에서 점검 필요
+4. **매직 넘버 중복**: 임계값 불일치 시 보안 게이트 우회 가능 → Security 리뷰에서 점검 필요

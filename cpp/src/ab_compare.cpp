@@ -7,23 +7,43 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <numeric>
 #include <sstream>
 
 namespace iris_sdk {
+
+namespace {
+
+std::string escapeJson(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20)
+                    out += ' ';
+                else
+                    out += c;
+        }
+    }
+    return out;
+}
+
+} // namespace
 
 // ============================================================================
 // TestCondition
 // ============================================================================
 
 std::string TestCondition::label() const noexcept {
-    const char* tone_str = "MEDIUM";
-    switch (skin_tone) {
-        case SkinToneGroup::LIGHT:  tone_str = "LIGHT";  break;
-        case SkinToneGroup::MEDIUM: tone_str = "MEDIUM"; break;
-        case SkinToneGroup::DARK:   tone_str = "DARK";   break;
-    }
-    return std::string(tone_str) + "/" + lighting + "/" + distance + "/" + skin_state;
+    return std::string(ABCompare::skinToneToString(skin_tone)) +
+        "/" + lighting + "/" + distance + "/" + skin_state;
 }
 
 // ============================================================================
@@ -148,12 +168,16 @@ ComparisonResult ABCompare::compare(
 
         return result;
     } catch (...) {
+        std::fprintf(stderr, "[IrisSDK] ABCompare::compare: unknown exception\n");
         return {};
     }
 }
 
 void ABCompare::addResult(const ComparisonResult& result) noexcept {
     results_.push_back(result);
+    if (results_.size() > kMaxResults) {
+        results_.erase(results_.begin());
+    }
 }
 
 void ABCompare::reset() noexcept {
@@ -252,30 +276,15 @@ std::string ABCompare::generateReport() const noexcept {
     for (std::size_t i = 0; i < results_.size(); ++i) {
         const auto& r = results_[i];
         os << "    {\n";
-        os << "      \"condition\": \"" << r.condition_label << "\",\n";
+        os << "      \"condition\": \"" << escapeJson(r.condition_label) << "\",\n";
         os << "      \"skin_tone\": \"" << skinToneToString(r.skin_tone) << "\",\n";
         os << "      \"freq_sep_preferred\": " << (r.freq_sep_preferred ? "true" : "false") << ",\n";
         os << "      \"laplacian_improvement\": " << r.laplacian_improvement << ",\n";
         os << "      \"ssim_improvement\": " << r.ssim_improvement << ",\n";
         os << "      \"halo_improvement\": " << r.halo_improvement << ",\n";
 
-        // Bilateral gate verdict
-        const char* b_verdict = "NO_GO";
-        switch (r.bilateral_gate.verdict) {
-            case GateVerdict::GO:             b_verdict = "GO"; break;
-            case GateVerdict::CONDITIONAL_GO: b_verdict = "CONDITIONAL_GO"; break;
-            case GateVerdict::NO_GO:          b_verdict = "NO_GO"; break;
-        }
-        os << "      \"bilateral_verdict\": \"" << b_verdict << "\",\n";
-
-        // FreqSep gate verdict
-        const char* f_verdict = "NO_GO";
-        switch (r.freq_sep_gate.verdict) {
-            case GateVerdict::GO:             f_verdict = "GO"; break;
-            case GateVerdict::CONDITIONAL_GO: f_verdict = "CONDITIONAL_GO"; break;
-            case GateVerdict::NO_GO:          f_verdict = "NO_GO"; break;
-        }
-        os << "      \"freq_sep_verdict\": \"" << f_verdict << "\"\n";
+        os << "      \"bilateral_verdict\": \"" << gateVerdictToString(r.bilateral_gate.verdict) << "\",\n";
+        os << "      \"freq_sep_verdict\": \"" << gateVerdictToString(r.freq_sep_gate.verdict) << "\"\n";
 
         os << "    }";
         if (i + 1 < results_.size()) {

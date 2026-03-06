@@ -46,7 +46,16 @@
       "mcp__serena__replace_symbol_body",
       "Bash(./bin/test_sdk_api:*)",
       "Bash(./bin/test_gpu_beauty_backend:*)",
-      "Bash(./bin/test_beauty_config_v2:*)"
+      "Bash(./bin/test_beauty_config_v2:*)",
+      "Bash(./bin/test_release_gate:*)",
+      "Bash(./bin/test_quality_tuning:*)",
+      "Bash(\"$COUNCIL_SCRIPT\" status:*)",
+      "Bash(\"$COUNCIL_SCRIPT\" wait:*)",
+      "Bash(\"$COUNCIL_SCRIPT\" results:*)",
+      "Bash(\"$COUNCIL_SCRIPT\" clean:*)",
+      "Bash(export:*)",
+      "Bash(/Users/seokhahyeon/.claude/plugins/cache/team-attention-plugins/agent-council/1.0.0/skills/agent-council/scripts/council.sh:*)",
+      "Bash(source:*)"
     ]
   },
   "enabledPlugins": {
@@ -62,7 +71,8 @@
     "machine-learning-ops@claude-code-workflows": true,
     "agent-orchestration@claude-code-workflows": true,
     "multi-platform-apps@claude-code-workflows": true,
-    "comprehensive-review@claude-code-workflows": true
+    "comprehensive-review@claude-code-workflows": true,
+    "agent-council@team-attention-plugins": true
   },
   "plansDirectory": "./docs/plans"
 }
