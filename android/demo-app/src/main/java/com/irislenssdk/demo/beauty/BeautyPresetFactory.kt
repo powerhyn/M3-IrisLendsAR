@@ -115,15 +115,41 @@ object BeautyPresetFactory {
     }
 
     /**
+     * Custom 프리셋 생성.
+     * 잡티 보정(FreqSep)만 활성화된 상태로, 다른 효과는 모두 무효화.
+     * 개별 효과를 독립적으로 테스트할 때 사용합니다.
+     */
+    fun createCustomPreset(): BeautyFilterConfigV2 {
+        return BeautyFilterConfigV2.Builder()
+            .enabled(true)
+            .intensity(1.0f)          // 마스터 강도 100% (감쇠 없이 그대로 전달)
+            .smoothing(0.0f)          // Bilateral 스무딩 OFF
+            .brightness(1.0f)         // 밝기 변경 없음
+            .whitening(0.0f)          // 화이트닝 OFF
+            .colorBalance(0.0f)       // 컬러 밸런스 중립
+            .softFocus(0.0f)          // 소프트 포커스 OFF
+            .skinQuality(0.5f)        // 잡티 보정만 중간 강도로 활성화
+            .wrinkleRemove(0.0f)      // 주름 제거 OFF
+            .slimFace(0.0f)           // 얼굴 슬림 OFF
+            .enlargeEyes(0.0f)        // 눈 확대 OFF
+            .thinChin(0.0f)           // 턱 축소 OFF
+            .protectEyes(true)
+            .protectLips(true)
+            .useGpu(true)
+            .roiOnly(false)
+            .build()
+    }
+
+    /**
      * 프리셋 종류에 따라 BeautyFilterConfigV2를 생성합니다.
-     * CUSTOM인 경우 현재 설정을 그대로 반환합니다.
+     * CUSTOM인 경우 현재 설정이 있으면 그대로, 없으면 잡티 보정만 활성화된 기본값을 반환합니다.
      */
     fun createPreset(preset: BeautyPreset, current: BeautyFilterConfigV2? = null): BeautyFilterConfigV2 {
         return when (preset) {
             BeautyPreset.NATURAL -> createNaturalPreset()
             BeautyPreset.STUDIO -> createStudioPreset()
             BeautyPreset.GLAMOUR -> createGlamourPreset()
-            BeautyPreset.CUSTOM -> current?.let { BeautyFilterConfigV2(it) } ?: BeautyFilterConfigV2()
+            BeautyPreset.CUSTOM -> current?.let { BeautyFilterConfigV2(it) } ?: createCustomPreset()
         }
     }
 

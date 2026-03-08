@@ -131,7 +131,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private var lensConfig = LensConfig()
 
     // 뷰티 설정
-    private var beautyConfig = BeautyFilterConfigV2()
+    private var beautyConfig = BeautyPresetFactory.createCustomPreset()
     private var beautyEnabled = true
     private var currentPreset = BeautyPreset.CUSTOM
     private var isUpdatingSliders = false
