@@ -1,94 +1,84 @@
 # Phase 2: Security & Performance Review
 
-## Security Findings
+## Security Findings (15건)
 
-### High (2건)
+### Critical (1건)
+| ID | CWE | 위치 | 요약 |
+|----|-----|------|------|
+| SEC-01 | CWE-400 | ab_compare.cpp:155-157 | ABCompare::addResult() 무제한 메모리 성장 |
 
-| # | 이슈 | 위치 | 설명 |
-|---|------|------|------|
-| S1 | std::stoi 예외 미처리 | `gpu_beauty_backend.cpp:1173, 1188` | GPU 렌더러 문자열 파싱 시 int 범위 초과 → std::out_of_range 예외 → SDK 초기화 크래시. `std::strtol` 또는 try-catch로 교체 필요 |
-| S2 | detectDeviceTier() static public + GL 의존 | `gpu_beauty_backend.h:249` | static public이라 GL 컨텍스트 없이 외부 호출 가능. glGetString() UB 발생. private 인스턴스 메서드로 변경 필요 |
+### High (4건)
+| ID | CWE | 위치 | 요약 |
+|----|-----|------|------|
+| SEC-02 | CWE-755 | 12+ 위치 | catch(...) 보안 관련 실패 무시 (bad_alloc, cv::Exception 등) |
+| SEC-03 | CWE-400 | param_tuner.cpp:32-102 | gridSearch() steps 상한 미검증 → CPU/메모리 고갈 |
+| SEC-04 | CWE-407 | quality_metrics.cpp:411-413 | vector::erase(begin()) O(n) → 프레임 드롭 가능 |
+| SEC-05 | CWE-116 | ab_compare.cpp:255-256 | JSON 문자열 이스케이핑 미처리 |
 
-### Medium (5건)
+### Medium (6건)
+| ID | CWE | 위치 | 요약 |
+|----|-----|------|------|
+| SEC-06 | CWE-190 | param_tuner.cpp:58-59 | 32비트 플랫폼 size_t 곱셈 오버플로우 |
+| SEC-07 | CWE-1078 | quality_metrics.cpp, release_gate.cpp | 매직 넘버 중복 → 게이트 우회 위험 |
+| SEC-08 | CWE-120 | param_tuner.cpp:268-275 | snprintf 버퍼 잘림 가능성 |
+| SEC-09 | CWE-20 | quality_metrics.cpp:66-89 | cv::Mat 이미지 크기 상한 미검증 → OOM |
+| SEC-10 | CWE-20 | release_gate.cpp:55-140 | NaN/Inf 입력 미검증 |
+| SEC-11 | CWE-20 | param_tuner.cpp:377-381 | 음수 face_width 미처리 |
 
-| # | 이슈 | 위치 | 설명 |
-|---|------|------|------|
-| S3 | One Euro Filter release() 미리셋 | `gpu_beauty_backend.h:446-448` | release() 후 재초기화 시 stale state로 첫 프레임 ROI 왜곡 |
-| S4 | device_tier_ release() 미리셋 | `gpu_beauty_backend.h:451` | 기본값 HIGH로 남아 부분 접근 경로에서 오분류 가능 |
-| S5 | ROI face_rect 직접 수정 → Scissor 타이밍 불일치 | `gpu_beauty_backend.cpp:1631-1632` | Scissor가 temporal filtering 이전에 설정되어 mask 중심과 scissor 영역 불일치 |
-| S6 | Viewport 복원 RAII 미적용 | `gpu_beauty_backend.cpp:1259, 1303` | 현재 에러 경로에선 문제없으나, 향후 early return 추가 시 viewport half-res 잔류 위험 |
-| S7 | OneEuroFilter thread safety 주석 부재 | `gpu_beauty_backend.h:446-448` | mutex_ 하에서만 접근 가능함을 명시하는 주석 필요 |
+### Low (4건)
+- SEC-12: DeviceTier enum 중복 (ODR 위험)
+- SEC-13: generateReport() 전체 벡터 복사
+- SEC-14: toGray() 얕은 복사 (참조 공유)
+- SEC-15: 테스트 코드 고정 시드 RNG (영향 없음)
 
-### Low (3건)
-
-| # | 이슈 | 위치 | 설명 |
-|---|------|------|------|
-| S8 | GPU 렌더러 문자열 파싱 휴리스틱 한계 | `gpu_beauty_backend.cpp:1162-1207` | Mali-G78(HIGH급)이 MID로 분류, 미인식 GPU는 LOW |
-| S9 | half_w/half_h 홀수 해상도 오프셋 | `gpu_beauty_backend.cpp:1221-1222` | 시각적 영향 미미. 기존 방어 코드 충분 |
-| S10 | LOGD 매크로 do-while 미적용 | `gpu_beauty_backend.cpp:23-27` | if-else 내 dangling-else 가능. do-while(0) 래핑 권장 |
-
-### Positive Observations
-
-- 방어적 null 체크 (glGetString 반환값)
-- 텍스처 할당 실패 시 정리 및 false 반환
-- half_w/half_h 최소값 가드 (< 1 체크)
-- blur_radius 하한값 std::max(3, ...) 적용
-- Mutex 일관성 (모든 public 메서드)
-- Copy/Move 삭제 (Rule of Five)
-- Scissor 교집합 기반 ROI 안전 처리
+### 긍정적 보안 소견
+- noexcept 정책 일관 적용, snprintf 사용, clamp 적용
+- 온디바이스 처리 원칙 준수 (네트워크 전송 코드 없음)
+- TemporalAnalyzer kMaxFrames=300 제한 적용
 
 ---
 
-## Performance Findings
+## Performance Findings (13건)
 
-### High (1건)
+### Critical (2건)
+| ID | 컴포넌트 | Frame-path | 예상 영향 |
+|----|----------|------------|-----------|
+| PF-1 | TemporalAnalyzer | Yes | vector::erase(begin()) O(n), 매 프레임 |
+| PF-2 | TemporalAnalyzer | Yes | addFrame에서 매 프레임 Laplacian 연산 (~2-5ms/frame, 예산 6-15%) |
 
-| # | 이슈 | 추정 영향 | 설명 |
-|---|------|-----------|------|
-| P1 | 정적 DeviceTier - 열 스로틀링 미대응 | 과열 시 프레임 드롭 | GPU 클럭 동적 하강 시에도 HIGH tier full-res 유지. 런타임 적응형 tier 전환 필요 (P4-W3-05) |
+### High (3건)
+| ID | 컴포넌트 | Frame-path | 예상 영향 |
+|----|----------|------------|-----------|
+| PF-3 | QualityMetrics | Indirect | SSIM 21개 전체 이미지 Mat 할당 (~336MB peak, 100MB 제한 초과) |
+| PF-4 | QualityMetrics | Indirect | cv::split 채널 분리 (~12MB 추가/call) |
+| PF-5 | ParamTuner | Offline | Grid search steps^4 조합 폭발 (steps=5에서 ~10초) |
 
-### Medium (3건)
+### Medium (5건)
+| ID | 컴포넌트 | 예상 영향 |
+|----|----------|-----------|
+| PF-6 | ParamTuner | generateReport 전체 벡터 복사+정렬 |
+| PF-7 | QualityMetrics | 중복 toGray 4회 호출 (~4ms/call 낭비) |
+| PF-8 | QualityMetrics | Sobel CV_64F 전체 이미지 (~48MB/call) |
+| PF-9 | ABCompare | compare()에서 gate 2회 호출 (개선폭 2배 증폭) |
+| PF-10 | QualityMetrics | Laplacian CV_64F (~16MB/call) |
 
-| # | 이슈 | 추정 영향 | 설명 |
-|---|------|-----------|------|
-| P2 | 중복 glTexParameteri 4회/프레임 | <0.05ms | TexturePool 기본값과 동일한 GL_LINEAR 재설정. 제거 + 주석 권장 |
-| P3 | Half-res 텍스처 풀 모니터링 부재 | 추가 6.22MB | full-res + half-res 혼재 시 풀 크기 증가. PoolStats 로깅 권장 |
-| P4 | Viewport 에러 경로 안전성 | 현재 0 (잠재적) | RAII ViewportGuard 고려 |
+### Low (2건)
+- PF-11: TemporalAnalyzer thread safety (잠재적 data race)
+- PF-12: ABCompare results_ 무제한 성장
 
-### Low (4건)
-
-| # | 이슈 | 추정 영향 | 설명 |
-|---|------|-----------|------|
-| P5 | 중복 glUseProgram 1회/프레임 | <0.01ms | 가독성 위해 유지 합리적 |
-| P6 | One Euro Filter 메모리 | 144 bytes | 무시 가능 |
-| P7 | detectDeviceTier() 파싱 비용 | 0.01ms (1회) | initialize()에서만 호출, 캐싱됨 |
-| P8 | roi_ptr 직접 변이 | 잠재적 리스크 | 로컬 복사본 고려 |
-
-### Frame Budget Analysis
-
-**MID Tier 1080p 기준 (Adreno 6xx)**:
-- FreqSep Half-Res: ~8.9ms
-- 후속 패스 (Combined Color, Masking, etc.): ~6.0ms
-- **총 파이프라인: ~14.9ms** (33ms 버짓의 45%)
-
-**대역폭 절감**: HIGH 대비 **-54.6%** (91.3MB → 41.5MB/프레임)
-**GPU 메모리 절감**: HIGH 대비 **-75%** (24.88MB → 6.22MB)
-
-### Positive Design Patterns
-
-- detectDeviceTier() 1회 호출 + 결과 캐싱
-- Gaussian weights CPU 사전 계산
-- 셰이더 전환 최소화 (5패스 중 1회)
-- Bilinear 하드웨어 보간으로 별도 업샘플링 패스 불필요
-- TexturePool acquire/release로 GPU 메모리 할당 오버헤드 제거
-- Bilateral fallback 안전망
-- GL_LINEAR 필터 미복원 이슈: TexturePool 기본값이 GL_LINEAR이므로 **문제 아님** 확인
+### 예상 최적화 효과
+| 메트릭 | Before | After (Phase 1+2) |
+|--------|--------|-------------------|
+| addFrame 비용 | ~2-5ms | ~0ms |
+| SSIM 메모리 peak | ~336MB | ~0 추가 할당 |
+| evaluateQuantitativeGate | ~8-15ms | ~4-7ms |
+| Grid search (steps=5) | ~9.4s | ~2.4s (coarse-to-fine) |
 
 ---
 
 ## Critical Issues for Phase 3 Context
 
-1. **테스트**: detectDeviceTier()가 static + GL 의존이라 단위 테스트 불가. private 인스턴스 메서드로 변경 또는 테스트용 오버라이드 필요
-2. **테스트**: std::stoi 예외 처리 로직의 에지 케이스 테스트 필요
-3. **문서**: DeviceTier 분류 기준, One Euro Filter 파라미터 선택 근거 문서화 필요
-4. **테스트**: 열 스로틀링 시나리오 재현 테스트 방법론 검토 필요
+1. **테스트 커버리지**: PF-2(addReductionRatio 오버로드)와 ring buffer 교체 후 기존 테스트 수정 필요
+2. **SSIM 구현 교체**: zero-allocation 버전의 정밀도 검증 테스트 필요
+3. **gridSearch 상한 검증**: steps 제한에 대한 경계값 테스트 추가 필요
+4. **문서화**: TemporalAnalyzer thread safety 정책 명시, 각 메서드의 성능 특성 문서화 필요

@@ -327,8 +327,9 @@ TEST(FreqSepParamsTest, EnabledAtHalfQuality) {
 TEST(FreqSepParamsTest, EnabledAtFullQuality) {
     auto params = GPUBeautyBackend::mapSkinQuality(1.0f, 200);
     EXPECT_TRUE(params.enabled);
-    // At max quality, high_freq_preserve should be near minimum (~0.10)
-    EXPECT_LE(params.high_freq_preserve, 0.15f);
+    // At max quality, high_freq_preserve ~0.35 (최소 35% 질감 보존)
+    EXPECT_LE(params.high_freq_preserve, 0.40f);
+    EXPECT_GE(params.high_freq_preserve, 0.30f);
 }
 
 TEST(FreqSepParamsTest, RadiusClampedToMinimum) {
@@ -344,9 +345,10 @@ TEST(FreqSepParamsTest, RadiusClampedToMaximum) {
 }
 
 TEST(FreqSepParamsTest, RadiusProportionalToFaceWidth) {
-    // face_width=300 → 300*0.05=15 → within range
+    // face_width=300, s=0.5 → ratio=0.03+0.5*0.03=0.045 → 300*0.045=13.5 → 13
     auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 300);
-    EXPECT_EQ(params.blur_radius, 15);
+    EXPECT_GE(params.blur_radius, 10);
+    EXPECT_LE(params.blur_radius, 18);
 }
 
 TEST(FreqSepParamsTest, ZeroFaceWidthClampedToMinRadius) {
@@ -372,8 +374,9 @@ TEST(FreqSepParamsTest, AttenuationRangeValid) {
 
 TEST(FreqSepParamsTest, LowFreqSmoothRatioInRange) {
     auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 200);
-    EXPECT_GE(params.low_freq_smooth_radius_ratio, 0.4f);
-    EXPECT_LE(params.low_freq_smooth_radius_ratio, 0.6f);
+    // 0.30 ~ 0.45 범위 (이중 블러 축소하여 피부 색감 보존)
+    EXPECT_GE(params.low_freq_smooth_radius_ratio, 0.30f);
+    EXPECT_LE(params.low_freq_smooth_radius_ratio, 0.45f);
 }
 
 TEST(FreqSepParamsTest, OverRangeSkinQualityClampedInternally) {

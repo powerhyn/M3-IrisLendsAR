@@ -73,6 +73,14 @@ set(IRIS_SDK_SOURCES
     # Warp module
     src/warp/grid_mesh.cpp
     src/warp/face_warp_controller.cpp
+    # Quality metrics
+    src/quality_metrics.cpp
+    # A/B comparison framework
+    src/ab_compare.cpp
+    # Release gate
+    src/release_gate.cpp
+    # Parameter tuning
+    src/param_tuner.cpp
 )
 
 set(IRIS_SDK_HEADERS
@@ -99,6 +107,14 @@ set(IRIS_SDK_HEADERS
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
     include/iris_sdk/warp/face_warp_controller.h
+    # Quality metrics headers
+    include/iris_sdk/quality_metrics.h
+    # A/B comparison framework headers
+    include/iris_sdk/ab_compare.h
+    # Release gate headers
+    include/iris_sdk/release_gate.h
+    # Parameter tuning headers
+    include/iris_sdk/param_tuner.h
 )
 
 # =============================================================================
