@@ -115,6 +115,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var seekWhitening: SeekBar
     private lateinit var seekColorBalance: SeekBar
     private lateinit var seekSoftFocus: SeekBar
+    private lateinit var seekSkinQuality: SeekBar
     private lateinit var lutIntensityPanel: LinearLayout
     private lateinit var seekLutIntensity: SeekBar
     private lateinit var lutPresetButtons: List<Button>
@@ -210,6 +211,7 @@ class GpuRenderActivity : AppCompatActivity() {
         seekWhitening = findViewById(R.id.seekWhitening)
         seekColorBalance = findViewById(R.id.seekColorBalance)
         seekSoftFocus = findViewById(R.id.seekSoftFocus)
+        seekSkinQuality = findViewById(R.id.seekSkinQuality)
         lutIntensityPanel = findViewById(R.id.lutIntensityPanel)
         seekLutIntensity = findViewById(R.id.seekLutIntensity)
         lutPresetButtons = listOf(
@@ -489,12 +491,25 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // SkinQuality (잡티 보정 / Frequency Separation) 슬라이더
+        seekSkinQuality.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                // 0-100 → 0.0-1.0
+                beautyConfig.skinQuality = progress / 100f
+                if (fromUser) onSliderManualChange()
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         // 초기값
         seekSmoothing.progress = 50
         seekBrightness.progress = 50
         seekWhitening.progress = 0
         seekColorBalance.progress = 50  // 중립 (0.0)
         seekSoftFocus.progress = 30     // 기본값 0.3f
+        seekSkinQuality.progress = 0    // 기본값 0.0 (비활성)
 
         // 초기 버튼 상태 표시 (ON = 뷰티 활성화)
         btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
@@ -540,6 +555,7 @@ class GpuRenderActivity : AppCompatActivity() {
         // colorBalance: -1.0~1.0 → 0~100 (50 = 중립)
         seekColorBalance.progress = ((beautyConfig.colorBalance * 50) + 50).toInt()
         seekSoftFocus.progress = (beautyConfig.softFocus * 100).toInt()
+        seekSkinQuality.progress = (beautyConfig.skinQuality * 100).toInt()
 
         isUpdatingSliders = false
     }

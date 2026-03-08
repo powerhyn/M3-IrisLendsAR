@@ -52,6 +52,7 @@ object BeautyPresetFactory {
             .whitening(0.08f)
             .colorBalance(0.10f)
             .softFocus(0.10f)
+            .skinQuality(0.2f)      // 자연스러운 잡티 보정
             .wrinkleRemove(0.0f)
             .slimFace(0.08f)
             .enlargeEyes(0.05f)
@@ -76,6 +77,7 @@ object BeautyPresetFactory {
             .whitening(0.18f)
             .colorBalance(0.05f)
             .softFocus(0.20f)
+            .skinQuality(0.4f)      // 중간 잡티 보정
             .wrinkleRemove(0.0f)
             .slimFace(0.15f)
             .enlargeEyes(0.12f)
@@ -100,6 +102,7 @@ object BeautyPresetFactory {
             .whitening(0.30f)
             .colorBalance(0.15f)
             .softFocus(0.35f)
+            .skinQuality(0.6f)      // 강한 잡티 보정
             .wrinkleRemove(0.0f)
             .slimFace(0.22f)
             .enlargeEyes(0.20f)

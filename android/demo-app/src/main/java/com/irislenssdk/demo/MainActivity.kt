@@ -303,6 +303,7 @@ class MainActivity : AppCompatActivity() {
             beautyConfigV2.softFocus = 0.3f
             beautyConfigV2.whitening = 0.0f
             beautyConfigV2.colorBalance = 0.0f
+            beautyConfigV2.skinQuality = 0.0f   // 잡티 보정 (Freq Sep)
             // Face Warp 기본값
             beautyConfigV2.slimFace = 0.0f
             beautyConfigV2.enlargeEyes = 0.0f
@@ -951,6 +952,10 @@ class MainActivity : AppCompatActivity() {
 
         addSlider("화이트닝 (Whitening)", beautyConfigV2.whitening) { v ->
             beautyConfigV2.whitening = v
+        }
+
+        addSlider("잡티 보정 (Skin Quality)", beautyConfigV2.skinQuality) { v ->
+            beautyConfigV2.skinQuality = v
         }
 
         // ========== Face Warp 섹션 ==========
