@@ -20,8 +20,8 @@
 | # | 카테고리 | 위치 | 이슈 | 영향 |
 |---|----------|------|------|------|
 | 1 | Security | ab_compare.cpp:155 | ~~`addResult()` 무제한 메모리 성장 (CWE-400)~~ **[P4-W3-06 해결]** kMaxResults=1000 상한 | 장시간 세션 시 OOM 크래시 |
-| 2 | Performance | quality_metrics.cpp:404 | `addFrame()` 매 프레임 Laplacian 연산 (~2-5ms/frame) | 프레임 예산 6-15% 소비 |
-| 3 | Performance | quality_metrics.cpp:411 | `vector::erase(begin())` O(n) 패턴 | 구조적 결함, ring buffer로 교체 필요 |
+| 2 | Performance | quality_metrics.cpp:404 | ~~`addFrame()` 매 프레임 Laplacian 연산 (~2-5ms/frame)~~ **[P4-W3-06 해결]** addReductionRatio() 오버로드 추가 | 프레임 예산 6-15% 소비 |
+| 3 | Performance | quality_metrics.cpp:411 | ~~`vector::erase(begin())` O(n) 패턴~~ **[P4-W3-06 해결]** std::deque + pop_front() O(1) | 구조적 결함, ring buffer로 교체 필요 |
 
 ### High Priority (P1 — 다음 릴리즈 전 수정)
 
@@ -38,45 +38,45 @@
 | 12 | Performance | quality_metrics.cpp:200-206 | ~~Sobel/Laplacian CV_64F 과도한 정밀도~~ **[P4-W3-06 해결]** CV_32F 전환 | ~64MB 추가 할당/call |
 | 13 | Testing | test_quality_tuning.cpp | ~~`recommendPresets()`, `generateReport()`, `reset()` 미테스트~~ **[P4-W3-06 해결]** 15건 테스트 추가 | 핵심 로직 미검증 |
 | 14 | Testing | test_quality_tuning.cpp | ~~ReleaseGate 경계값(33.0ms, 0.30, 0.60 등) 미테스트~~ **[P4-W3-06 해결]** 6건 경계값 테스트 | off-by-one 회귀 위험 |
-| 15 | Documentation | 전체 | 임계값(0.30/0.60/0.95 등) 도출 근거 완전 부재 | 유지보수 시 의사결정 불가 |
+| 15 | Documentation | 전체 | ~~임계값(0.30/0.60/0.95 등) 도출 근거 완전 부재~~ **[P4-W3-06 해결]** 근거 주석 추가 | 유지보수 시 의사결정 불가 |
 | 16 | Documentation | quality_metrics.h | ~~TemporalAnalyzer 스레드 안전성 미명시~~ **[P4-W3-06 해결]** @note 추가 | 멀티스레드 사용 시 data race |
 
 ### Medium Priority (P2 — 다음 스프린트 계획)
 
 | # | 카테고리 | 이슈 | 비고 |
 |---|----------|------|------|
-| 17 | Correctness | `detectHalo` zero-gradient baseline 미처리 | 원본 gradient≈0이면 ratio=0.0 → 항상 halo-free 판정, 평탄 영역에 새 edge 생겨도 무시 |
+| 17 | Correctness | ~~`detectHalo` zero-gradient baseline 미처리~~ **[P4-W3-06 해결]** orig_grad≈0일 때 proc_grad>1.0이면 halo 판정 | 원본 gradient≈0이면 ratio=0.0 → 항상 halo-free 판정, 평탄 영역에 새 edge 생겨도 무시 |
 | 18 | Quality | `validateBlurRadiusIndependence` 무의미한 검증 | 순수 함수에 동일 입력 3회 → 항상 true |
 | 19 | Quality | `computeScore()` 게이트 미통과 시 점수 0 절벽 | "거의 통과"하는 세트를 완전 무시 |
-| 20 | Quality | `GateVerdict` switch 반복 3곳 | `toString()` 공통 함수 필요 |
-| 21 | Quality | `SkinToneGroup` 문자열 변환 중복 | `skinToneToString` 재사용 |
+| 20 | Quality | ~~`GateVerdict` switch 반복 3곳~~ **[P4-W3-06 해결]** gateVerdictToString() 공통 함수 | `toString()` 공통 함수 필요 |
+| 21 | Quality | ~~`SkinToneGroup` 문자열 변환 중복~~ **[P4-W3-06 해결]** skinToneToString public 재사용 | `skinToneToString` 재사용 |
 | 22 | Security | 32비트 플랫폼 size_t 곱셈 오버플로우 (CWE-190) | steps 상한으로 해결 가능 |
 | 23 | Security | cv::Mat 이미지 크기 상한 미검증 | 대형 이미지 OOM |
-| 24 | Security | ReleaseGate NaN/Inf 입력 미검증 | 혼란스러운 리포트 |
-| 25 | Security | computeBlurRadius() 음수 face_width | clamp로 6 반환 (의미적 오류) |
-| 26 | Performance | `generateReport()` 전체 벡터 복사+정렬 | `partial_sort` 사용 권장 |
+| 24 | Security | ~~ReleaseGate NaN/Inf 입력 미검증~~ **[P4-W3-06 해결]** sanitize() fail-safe 적용 | 혼란스러운 리포트 |
+| 25 | Security | ~~computeBlurRadius() 음수 face_width~~ **[P4-W3-06 해결]** <=0 early return 6 | clamp로 6 반환 (의미적 오류) |
+| 26 | Performance | ~~`generateReport()` 전체 벡터 복사+정렬~~ **[P4-W3-06 해결]** partial_sort 적용 | `partial_sort` 사용 권장 |
 | 27 | Performance | Grid search steps^4 조합 폭발 | coarse-to-fine 2단계 탐색 권장 |
 | 28 | Architecture | QualityMetrics-ReleaseGate 통합 편의 메서드 누락 | 수동 값 전사 필요 |
 | 29 | Architecture | 4개 모듈 C API(sdk_api.h) 미노출 | 내부 도구 의도 문서화 필요 |
 | 30 | Architecture | blur_radius grid search 미사용 혼란 | 문서화 또는 분리 |
 | 31 | Best Practice | `noexcept` + `push_back` → `bad_alloc` 시 terminate | noexcept 재검토 |
-| 32 | Best Practice | `std::clamp` vs `max/min` 체인 혼용 | `std::clamp` 통일 |
+| 32 | Best Practice | ~~`std::clamp` vs `max/min` 체인 혼용~~ **[P4-W3-06 해결]** std::clamp 통일 | `std::clamp` 통일 |
 | 33 | Best Practice | `snprintf` + `ostringstream` 혼용 | 포맷팅 방식 통일 |
 | 34 | Best Practice | All-static class → namespace 함수 고려 | C++ Core Guidelines C.4 |
-| 35 | Testing | NaN/Inf, 300프레임 순환 버퍼, CONDITIONAL_GO 경로 | 엣지 케이스 미검증 |
-| 36 | Testing | MID/LOW 디바이스 티어 미테스트 | HIGH 티어만 검증 |
+| 35 | Testing | ~~NaN/Inf, 300프레임 순환 버퍼, CONDITIONAL_GO 경로~~ **[P4-W3-06 해결]** 5건 엣지 케이스 테스트 추가 | 엣지 케이스 미검증 |
+| 36 | Testing | ~~MID/LOW 디바이스 티어 미테스트~~ **[P4-W3-06 해결]** MID/LOW 티어 2건 테스트 추가 | HIGH 티어만 검증 |
 | 37 | Testing | 성능 회귀 테스트 0건 | SSIM/Laplacian 시간 제한 필요 |
 | 38 | Testing | 테스트 픽스처(TEST_F) 미사용 → DRY 위반 | 구조체 반복 초기화 |
 | 39 | Documentation | 모듈 간 협력 관계 아키텍처 설명 부재 | 데이터 흐름 다이어그램 필요 |
-| 40 | Documentation | catch(...) 정책 ABCompare/ReleaseGate/ParamTuner 미명시 | QualityMetrics에만 기재 |
-| 41 | Documentation | computeScore() 가중치 0.4/0.3/0.3 근거 없음 | 경험적 판단 기록 필요 |
+| 40 | Documentation | ~~catch(...) 정책 ABCompare/ReleaseGate/ParamTuner 미명시~~ **[P4-W3-06 해결]** @note 예외 정책 추가 | QualityMetrics에만 기재 |
+| 41 | Documentation | ~~computeScore() 가중치 0.4/0.3/0.3 근거 없음~~ **[P4-W3-06 해결]** 근거 주석 추가 | 경험적 판단 기록 필요 |
 | 42 | Documentation | 워크 페이퍼 §2.1 high_freq_preserve 변수 누락 | 4번째 튜닝 변수 미반영 |
 
 ### Low Priority (P3 — 백로그)
 
 | # | 카테고리 | 이슈 |
 |---|----------|------|
-| 43 | Correctness | ABCompare halo_improvement: b_halo≤0 시 delta 무시 — Bilateral smoothing으로 ratio≤0이면 improvement=0.0 강제, A/B 리포트 왜곡 |
+| 43 | Correctness | ~~ABCompare halo_improvement: b_halo≤0 시 delta 무시~~ **[P4-W3-06 해결]** 절대 차이(delta) 비교로 변경 |
 | 44 | Quality | snprintf 버퍼 크기 하드코딩 |
 | 45 | Quality | formatReport 섹션 반복 패턴 |
 | 46 | Quality | 빈 마스크와 품질 실패 미구분 |

@@ -68,23 +68,31 @@ Agent Council (Codex + Gemini + Claude) 합의에 따른 품질 도구 모듈 �
 ## 테스트 결과
 
 - 기존 31개 테스트: 전체 통과
-- 신규 15개 테스트: 전체 통과
-- 총 46개 테스트 통과 (0 실패)
+- 신규 25개 테스트: 전체 통과
+- 총 56개 테스트 통과 (0 실패)
+- ctest 전체: 692건 중 687건 통과 (5건 기존 실패, 회귀 없음)
 
 ## 변경 파일 목록
 
 | 파일 | 변경 내용 |
 |------|-----------|
-| `cpp/include/iris_sdk/ab_compare.h` | kMaxResults 상수 추가 |
-| `cpp/include/iris_sdk/quality_metrics.h` | Impl 메서드 선언, TemporalAnalyzer 스레드 안전성 문서 |
-| `cpp/src/ab_compare.cpp` | addResult 메모리 상한, escapeJson, catch 로그 |
-| `cpp/src/param_tuner.cpp` | gridSearch steps clamp + 조합 상한, catch 로그 |
-| `cpp/src/quality_metrics.cpp` | CV_32F 전환, toGray 중복 제거, catch 로그 12곳 |
-| `cpp/tests/test_quality_tuning.cpp` | 신규 테스트 15건 추가 |
+| `cpp/include/iris_sdk/ab_compare.h` | kMaxResults 상수, skinToneToString public 이동 |
+| `cpp/include/iris_sdk/quality_metrics.h` | Impl 메서드, addReductionRatio, deque 전환, gateVerdictToString, 스레드 안전성 |
+| `cpp/src/ab_compare.cpp` | 메모리 상한, escapeJson, catch 로그, toString 재사용, halo b_halo<=0 수정 |
+| `cpp/src/param_tuner.cpp` | steps clamp, catch 로그, std::clamp 통일, partial_sort, 음수 face_width, 가중치 근거 |
+| `cpp/src/quality_metrics.cpp` | CV_32F, toGray 중복 제거, catch 로그, deque pop_front, addReductionRatio, zero-gradient halo, 임계값 근거 |
+| `cpp/src/release_gate.cpp` | NaN/Inf sanitize |
+| `cpp/tests/test_quality_tuning.cpp` | 신규 테스트 25건 추가 |
+
+## 수정 이슈 총괄 (24건 / 51건 해결)
+
+Phase 1: #1, #4, #5, #6, #8, #11, #12, #13, #14, #16
+Phase 2: #2, #3, #15, #17, #20, #21, #24, #25, #26, #32, #35, #36, #40, #41, #43
 
 ## 변경 이력
 
 | 날짜 | 상태 | 내용 |
 |------|------|------|
 | 2026-03-06 | 🔄 진행 중 | 수정 계획 수립 및 구현 시작 |
-| 2026-03-06 | ✅ 완료 | 전체 6 Phase 구현 완료, 46개 테스트 통과 |
+| 2026-03-06 | ✅ 완료 | Phase 1: 10건 구현, 46개 테스트 통과 |
+| 2026-03-06 | ✅ 완료 | Phase 2: 14건 추가 구현, 56개 테스트 통과 |

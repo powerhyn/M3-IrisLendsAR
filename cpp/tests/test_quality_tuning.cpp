@@ -21,6 +21,7 @@
 
 #include <opencv2/imgproc.hpp>
 #include <cmath>
+#include <limits>
 #include <string>
 
 using namespace iris_sdk;
@@ -945,6 +946,160 @@ TEST(QualityMetricsTest, CatchLogging) {
 
     auto gate = QualityMetrics::evaluateQuantitativeGate(empty, empty, mask);
     EXPECT_EQ(gate.verdict, GateVerdict::NO_GO);
+}
+
+// ============================================================================
+// T8: TemporalAnalyzer addReductionRatio 직접 추가
+// ============================================================================
+
+TEST(TemporalAnalyzerTest, AddReductionRatio_Direct) {
+    TemporalAnalyzer analyzer;
+
+    // 직접 ratio 추가 (Laplacian 재계산 없이)
+    for (int i = 0; i < 10; ++i) {
+        analyzer.addReductionRatio(0.45);
+    }
+    EXPECT_EQ(analyzer.frameCount(), 10u);
+
+    auto result = analyzer.computeTemporalVariance();
+    EXPECT_NEAR(result.mean_strength, 0.45, 0.01);
+    EXPECT_NEAR(result.coefficient_of_variation, 0.0, 0.001);
+    EXPECT_TRUE(result.passes_gate);
+}
+
+TEST(TemporalAnalyzerTest, AddReductionRatio_InvalidRange) {
+    TemporalAnalyzer analyzer;
+
+    // 범위 밖 값은 무시됨
+    analyzer.addReductionRatio(-0.1);
+    analyzer.addReductionRatio(1.5);
+    EXPECT_EQ(analyzer.frameCount(), 0u);
+
+    // 경계값은 허용
+    analyzer.addReductionRatio(0.0);
+    analyzer.addReductionRatio(1.0);
+    EXPECT_EQ(analyzer.frameCount(), 2u);
+}
+
+TEST(TemporalAnalyzerTest, DequePopFront_300Frames) {
+    TemporalAnalyzer analyzer;
+
+    // 350개 추가 → 300개만 유지 (ring buffer)
+    for (int i = 0; i < 350; ++i) {
+        analyzer.addReductionRatio(0.40 + (i % 2) * 0.01);
+    }
+    EXPECT_EQ(analyzer.frameCount(), 300u);
+}
+
+// ============================================================================
+// T9: GateVerdict toString 헬퍼
+// ============================================================================
+
+TEST(QualityMetricsTest, GateVerdictToString) {
+    EXPECT_STREQ(gateVerdictToString(GateVerdict::GO), "GO");
+    EXPECT_STREQ(gateVerdictToString(GateVerdict::CONDITIONAL_GO), "CONDITIONAL_GO");
+    EXPECT_STREQ(gateVerdictToString(GateVerdict::NO_GO), "NO_GO");
+}
+
+// ============================================================================
+// T10: ReleaseGate MID/LOW 디바이스 티어
+// ============================================================================
+
+TEST(ReleaseGateTest, MidTierFreqSepTime) {
+    ReleaseGate gate;
+    QuantitativeInput quant;
+    quant.laplacian_reduction = 0.45;
+    quant.non_skin_ssim = 0.97;
+    quant.freq_sep_time_ms = 11.0;  // MID: <= 12ms
+    quant.texture_pool_additional = 2;
+    quant.device_tier = DeviceTier::MID;
+
+    auto results = gate.evaluateQuantitative(quant);
+    bool time_passed = false;
+    for (const auto& r : results) {
+        if (r.gate_name == "freq_sep_time") {
+            time_passed = r.passed;
+        }
+    }
+    EXPECT_TRUE(time_passed);
+}
+
+TEST(ReleaseGateTest, LowTierFreqSepTime) {
+    ReleaseGate gate;
+    QuantitativeInput quant;
+    quant.laplacian_reduction = 0.45;
+    quant.non_skin_ssim = 0.97;
+    quant.freq_sep_time_ms = 7.0;  // LOW: <= 6ms → fail
+    quant.texture_pool_additional = 2;
+    quant.device_tier = DeviceTier::LOW;
+
+    auto results = gate.evaluateQuantitative(quant);
+    bool time_passed = true;
+    for (const auto& r : results) {
+        if (r.gate_name == "freq_sep_time") {
+            time_passed = r.passed;
+        }
+    }
+    EXPECT_FALSE(time_passed);
+}
+
+// ============================================================================
+// T11: NaN/Inf 입력 처리
+// ============================================================================
+
+TEST(ReleaseGateTest, NaNInputFrameTime) {
+    ReleaseGate gate;
+    HardStopInput hard;
+    hard.crash_free = true;
+    hard.no_memory_leak = true;
+    hard.frame_time_ms = std::numeric_limits<double>::quiet_NaN();
+    hard.temporal_cv = 0.03;
+
+    auto results = gate.evaluateHardStop(hard);
+    bool fps_passed = true;
+    for (const auto& r : results) {
+        if (r.gate_name == "fps") {
+            fps_passed = r.passed;
+        }
+    }
+    // NaN → sanitized to 999.0 → fail
+    EXPECT_FALSE(fps_passed);
+}
+
+TEST(ReleaseGateTest, InfInputSSIM) {
+    ReleaseGate gate;
+    QuantitativeInput quant;
+    quant.laplacian_reduction = 0.45;
+    quant.non_skin_ssim = std::numeric_limits<double>::infinity();
+    quant.freq_sep_time_ms = 8.0;
+    quant.texture_pool_additional = 2;
+    quant.device_tier = DeviceTier::HIGH;
+
+    auto results = gate.evaluateQuantitative(quant);
+    bool ssim_passed = true;
+    for (const auto& r : results) {
+        if (r.gate_name == "non_skin_ssim") {
+            ssim_passed = r.passed;
+        }
+    }
+    // Inf → sanitized to 0.0 → fail
+    EXPECT_FALSE(ssim_passed);
+}
+
+// ============================================================================
+// T12: ParamTuner 음수 face_width
+// ============================================================================
+
+TEST(ParamTunerTest, BlurRadius_NegativeFaceWidth) {
+    auto result = ParamTuner::validateBlurRadiusIndependence(-100);
+    EXPECT_EQ(result.radius_at_low, 6);  // 최소값 반환
+    EXPECT_TRUE(result.independent);
+}
+
+TEST(ParamTunerTest, BlurRadius_ZeroFaceWidth) {
+    auto result = ParamTuner::validateBlurRadiusIndependence(0);
+    EXPECT_EQ(result.radius_at_low, 6);
+    EXPECT_TRUE(result.independent);
 }
 
 TEST(ParamTunerTest, FindBest_ReturnsHighestScore) {

@@ -1,6 +1,10 @@
 /**
  * @file ab_compare.cpp
  * @brief Bilateral Filter vs FreqSep A/B 비교 프레임워크 구현
+ *
+ * @note 예외 정책: noexcept 계약을 유지하며, 내부 예외는 catch(...)로 포착 후
+ *       fprintf(stderr)로 최소 로그를 남기고 기본값을 반환한다.
+ *       SDK 내부 로거가 없으므로 stderr 사용.
  */
 
 #include <iris_sdk/ab_compare.h>
@@ -156,11 +160,15 @@ ComparisonResult ABCompare::compare(
             : 0.0;
 
         // Halo: gradient 증가율이 낮을수록 좋음 (감소가 개선)
+        // b_halo ≤ 0 이면 Bilateral이 이미 halo-free → 직접 차이(delta)로 비교
         const double b_halo = result.bilateral_gate.halo.gradient_increase_ratio;
         const double f_halo = result.freq_sep_gate.halo.gradient_increase_ratio;
-        result.halo_improvement = (b_halo > 1e-9)
-            ? (b_halo - f_halo) / b_halo
-            : 0.0;
+        if (b_halo > 1e-9) {
+            result.halo_improvement = (b_halo - f_halo) / b_halo;
+        } else {
+            // Bilateral halo ≈ 0: 절대 차이로 비교 (FreqSep도 halo-free면 0)
+            result.halo_improvement = b_halo - f_halo;
+        }
 
         // FreqSep 선호 여부 판정
         result.freq_sep_preferred = isFreqSepPreferred(

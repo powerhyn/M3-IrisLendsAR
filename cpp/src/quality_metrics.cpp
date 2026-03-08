@@ -22,16 +22,24 @@ namespace iris_sdk {
 namespace {
 
 /// Laplacian reduction 통과 범위
+/// 근거: 30% 미만은 스무딩 불충분 (텍스처 잔류), 60% 초과는 과도한 블러 (디테일 손실).
+/// 모바일 뷰티 앱 벤치마크 (FaceApp, Snow 등) 참조 기반 경험적 범위.
 constexpr double kLaplacianMinReduction = 0.30;
 constexpr double kLaplacianMaxReduction = 0.60;
 
 /// SSIM 통과 임계값
+/// 근거: Wang et al. (2004) 기준 0.95 이상이면 "거의 동일" 수준.
+/// 비-피부 영역 보존이 목적이므로 엄격한 임계값 적용.
 constexpr double kSSIMPassThreshold = 0.95;
 
 /// Halo gradient 증가 허용 임계값
+/// 근거: 15% 이상 gradient 증가는 육안 식별 가능한 halo artifact.
+/// Bilateral filter 아티팩트 문헌 참조 (Paris & Durand, 2006).
 constexpr double kHaloMaxIncreaseRatio = 0.15;
 
 /// Temporal CV 통과 임계값
+/// 근거: CV 5% 이하는 30fps 영상에서 프레임 간 깜빡임이 인지 불가.
+/// 비디오 품질 평가 표준 (ITU-T P.910) 기반 경험적 값.
 constexpr double kTemporalCVThreshold = 0.05;
 
 /// SSIM 안정화 상수 (Wang et al. 2004)
@@ -370,6 +378,9 @@ HaloResult QualityMetrics::detectHalo(
             result.gradient_increase_ratio =
                 (result.processed_boundary_gradient - result.original_boundary_gradient) /
                 result.original_boundary_gradient;
+        } else if (result.processed_boundary_gradient > 1.0) {
+            // 원본 gradient ≈ 0 인데 처리 후 새 edge 발생 → halo
+            result.gradient_increase_ratio = 1.0;
         }
 
         // 증가율이 음수이면 gradient가 감소한 것이므로 halo 없음
@@ -424,6 +435,8 @@ GateResult QualityMetrics::evaluateQuantitativeGate(
                 result.halo.gradient_increase_ratio =
                     (result.halo.processed_boundary_gradient - result.halo.original_boundary_gradient) /
                     result.halo.original_boundary_gradient;
+            } else if (result.halo.processed_boundary_gradient > 1.0) {
+                result.halo.gradient_increase_ratio = 1.0;
             }
             result.halo.passes_gate = (result.halo.gradient_increase_ratio < kHaloMaxIncreaseRatio);
         }

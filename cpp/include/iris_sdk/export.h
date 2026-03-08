@@ -9,15 +9,15 @@
 #  ifndef IRIS_SDK_EXPORT
 #    ifdef iris_sdk_EXPORTS
         /* We are building this library */
-#      define IRIS_SDK_EXPORT __attribute__((visibility("default")))
+#      define IRIS_SDK_EXPORT 
 #    else
         /* We are using this library */
-#      define IRIS_SDK_EXPORT __attribute__((visibility("default")))
+#      define IRIS_SDK_EXPORT 
 #    endif
 #  endif
 
 #  ifndef IRIS_SDK_NO_EXPORT
-#    define IRIS_SDK_NO_EXPORT __attribute__((visibility("hidden")))
+#    define IRIS_SDK_NO_EXPORT 
 #  endif
 #endif
 
@@ -33,7 +33,6 @@
 #  define IRIS_SDK_DEPRECATED_NO_EXPORT IRIS_SDK_NO_EXPORT IRIS_SDK_DEPRECATED
 #endif
 
-/* NOLINTNEXTLINE(readability-avoid-unconditional-preprocessor-if) */
 #if 0 /* DEFINE_NO_DEPRECATED */
 #  ifndef IRIS_SDK_NO_DEPRECATED
 #    define IRIS_SDK_NO_DEPRECATED

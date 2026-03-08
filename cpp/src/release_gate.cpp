@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <sstream>
 
 namespace iris_sdk {
@@ -20,6 +21,12 @@ namespace iris_sdk {
 // ============================================================================
 
 namespace {
+
+/// @brief NaN/Inf를 안전한 기본값으로 치환
+double sanitize(double v, double fallback) noexcept {
+    if (std::isnan(v) || std::isinf(v)) return fallback;
+    return v;
+}
 
 /// @brief 소수점 2자리 문자열 변환
 std::string fmt2(double v) noexcept {
@@ -73,20 +80,23 @@ std::vector<GateCheckResult> ReleaseGate::evaluateHardStop(
     });
 
     // 3. FPS (frame_time <= 33ms = 30fps)
-    const bool fps_pass = input.frame_time_ms <= 33.0;
+    // NaN/Inf → 999.0 (fail-safe)
+    const double frame_time = sanitize(input.frame_time_ms, 999.0);
+    const bool fps_pass = frame_time <= 33.0;
     results.push_back({
         "fps",
         fps_pass,
-        fmt2(input.frame_time_ms) + "ms " +
+        fmt2(frame_time) + "ms " +
             (fps_pass ? "<= " : "> ") + "33ms"
     });
 
     // 4. Temporal CV (< 0.05)
-    const bool cv_pass = input.temporal_cv < 0.05;
+    const double temporal_cv = sanitize(input.temporal_cv, 1.0);
+    const bool cv_pass = temporal_cv < 0.05;
     results.push_back({
         "temporal_cv",
         cv_pass,
-        fmt2(input.temporal_cv) + (cv_pass ? " < " : " >= ") + "0.05"
+        fmt2(temporal_cv) + (cv_pass ? " < " : " >= ") + "0.05"
     });
 
     return results;
@@ -98,33 +108,34 @@ std::vector<GateCheckResult> ReleaseGate::evaluateQuantitative(
     std::vector<GateCheckResult> results;
     results.reserve(4);
 
+    // NaN/Inf sanitization (fail-safe defaults)
+    const double lap_red = sanitize(input.laplacian_reduction, 0.0);
+    const double ns_ssim = sanitize(input.non_skin_ssim, 0.0);
+    const double fs_time = sanitize(input.freq_sep_time_ms, 999.0);
+
     // 1. Laplacian reduction (0.3 ~ 0.6)
-    const bool lap_pass =
-        input.laplacian_reduction >= 0.30 &&
-        input.laplacian_reduction <= 0.60;
+    const bool lap_pass = lap_red >= 0.30 && lap_red <= 0.60;
     results.push_back({
         "laplacian",
         lap_pass,
-        fmt2(input.laplacian_reduction) +
-            (lap_pass ? " in " : " not in ") + "[0.30, 0.60]"
+        fmt2(lap_red) + (lap_pass ? " in " : " not in ") + "[0.30, 0.60]"
     });
 
     // 2. Non-skin SSIM (> 0.95)
-    const bool ssim_pass = input.non_skin_ssim > 0.95;
+    const bool ssim_pass = ns_ssim > 0.95;
     results.push_back({
         "non_skin_ssim",
         ssim_pass,
-        fmt2(input.non_skin_ssim) + (ssim_pass ? " > " : " <= ") + "0.95"
+        fmt2(ns_ssim) + (ssim_pass ? " > " : " <= ") + "0.95"
     });
 
     // 3. FreqSep time (tier-specific)
     const double max_time = getMaxFreqSepTimeMs(input.device_tier);
-    const bool time_pass = input.freq_sep_time_ms <= max_time;
+    const bool time_pass = fs_time <= max_time;
     results.push_back({
         "freq_sep_time",
         time_pass,
-        fmt2(input.freq_sep_time_ms) + "ms " +
-            (time_pass ? "<= " : "> ") + fmt2(max_time) + "ms"
+        fmt2(fs_time) + "ms " + (time_pass ? "<= " : "> ") + fmt2(max_time) + "ms"
     });
 
     // 4. TexturePool additional (<= 3)
