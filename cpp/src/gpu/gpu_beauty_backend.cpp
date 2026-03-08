@@ -993,22 +993,23 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     float t = std::clamp(skin_quality, 0.0f, 1.0f);
     float s = t * t * (3.0f - 2.0f * t);  // smoothstep
 
-    // blur_radius: fixed 5% of face_width → clamp(6, 28)
-    const float ratio = 0.05f;
+    // blur_radius: 3~6% of face_width, scales with quality → clamp(6, 28)
+    // 낮은 값에서는 작은 블러로 자연스러움 유지
+    const float ratio = 0.03f + s * 0.03f;
     p.blur_radius = std::clamp(
         static_cast<int>(face_width * ratio),
         6, 28
     );
 
-    // high_freq_preserve: 1.0 → 0.10 (higher quality = smoother)
-    p.high_freq_preserve = 1.0f - s * 0.90f;
+    // high_freq_preserve: 1.0 → 0.35 (질감을 최소 35% 보존하여 플라스틱 방지)
+    p.high_freq_preserve = 1.0f - s * 0.65f;
 
-    // low_freq_smooth: 40~60% of blur_radius
-    p.low_freq_smooth_radius_ratio = 0.4f + s * 0.2f;
+    // low_freq_smooth: 30~45% of blur_radius (이중 블러 축소 → 피부 색감 보존)
+    p.low_freq_smooth_radius_ratio = 0.30f + s * 0.15f;
 
-    // attenuation range (blemish detection threshold)
-    p.attenuation_low = 0.02f;
-    p.attenuation_high = 0.10f + s * 0.10f;  // 0.10 ~ 0.20
+    // attenuation range: 임계값 상향 → 진짜 잡티만 감쇠, 자연스러운 피부 변화 보존
+    p.attenuation_low = 0.04f;
+    p.attenuation_high = 0.15f + s * 0.15f;  // 0.15 ~ 0.30
 
     return p;
 }
