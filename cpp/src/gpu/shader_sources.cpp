@@ -496,8 +496,11 @@ void main() {
 
     vec3 adjusted_high = high * preserve;
 
-    // Re-synthesis
-    vec3 beauty = smoothLow + adjusted_high;
+    // Soft Light 합성 (Pegtop variant)
+    // blend = 0.5 + adjusted_high: 고주파 0이면 blend=0.5 → identity
+    vec3 blend = clamp(vec3(0.5) + adjusted_high, 0.0, 1.0);
+    vec3 beauty = (vec3(1.0) - 2.0 * blend) * smoothLow * smoothLow
+                + 2.0 * blend * smoothLow;
 
     // Blend with original using skin mask
     vec3 result = mix(orig, beauty, mask);

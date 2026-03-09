@@ -1,7 +1,7 @@
 # P4-W4-01b: Soft Light 합성 전환
 
 > **상위 문서**: `P4-W4-01_freqsep_quality_improvement.md`
-> **상태**: ⏳ 대기
+> **상태**: ✅ 완료
 > **난이도**: 낮음 | **추가 GPU 비용**: ALU only (패스 추가 없음)
 > **선행 조건**: Step 1 (Linear RGB) 완료 후 적용 — Linear 공간에서 Soft Light 수식이 정확
 
@@ -246,8 +246,8 @@ Pegtop Soft Light에서 base ∈ [0,1], blend ∈ [0,1]이면:
 
 ## 5. 완료 기준
 
-- [ ] FREQ_SEP_COMPOSITE_FRAGMENT에서 Additive → Soft Light 전환
-- [ ] `blend = clamp(0.5 + adjusted_high, 0, 1)` 매핑 구현
-- [ ] high_freq_preserve 재튜닝 (Step 1과 함께)
+- [x] FREQ_SEP_COMPOSITE_FRAGMENT에서 Additive → Soft Light 전환
+- [x] `blend = clamp(0.5 + adjusted_high, 0, 1)` 매핑 구현
+- [x] high_freq_preserve 재튜닝 (Step 1과 함께) — 0.65 → 0.70
 - [ ] Android 디바이스에서 플라스틱 감소 시각적 확인
 - [ ] skinQuality 0.2/0.5/1.0 전 범위 자연스러움 확인
