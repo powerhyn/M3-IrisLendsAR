@@ -2,143 +2,108 @@
 
 ## Review Target
 
-**P4-W3-05**: 튜닝/테스트/릴리즈 인프라 구현 — QualityMetrics + ABCompare + ReleaseGate + ParamTuner
-**커밋**: 0bf8432 (feature/P4-W3-05 브랜치)
-**파일**: 4 헤더, 4 소스, 1 테스트, 2 빌드 파일 (총 12개, ~3,100행)
-**프레임워크**: C++17
+**P4-W4-01b**: Soft Light 합성 전환 — FreqSep Composite 셰이더 Additive→Soft Light(Pegtop) + 감쇠 계수 재튜닝
+
+**브랜치**: `feature/P4-W4-01b` (develop 기준 1커밋, 3파일, +11/-8)
+
+**리뷰 범위**: 이번 브랜치에서 변경된 코드만 대상. 기존 코드(P4-W4-01a 등)의 이슈는 "참고 사항"으로 분리.
+
+---
 
 ## Executive Summary
 
-4개 모듈은 전반적으로 잘 구조화된 품질 인프라를 제공한다. 의존성 방향이 올바르고, 코드 스타일이 프로젝트 규칙에 부합하며, noexcept 정책과 Doxygen 문서화가 일관적이다. 그러나 **실시간 성능 경로에서 SSIM 메모리 초과(336MB vs 100MB 제한)**, **catch(...) 무음 예외 삼킴**, **DeviceTier 중복 정의** 등 수정이 필요한 이슈가 있다. 특히 TemporalAnalyzer::addFrame()이 매 프레임 Laplacian 연산을 수행하는 점은 프레임 예산의 6-15%를 소비하므로 즉시 개선이 필요하다.
+Soft Light (Pegtop variant) 수식은 **수학적으로 정확하게** 구현되었으며, 아키텍처 변경 없이 셰이더 ALU만 교체하는 깔끔한 변경입니다. 그러나 **1건의 Critical 이슈**가 식별되었습니다:
+
+- **P2 (gain 손실)**: Soft Light의 본질적 특성으로 고주파 디테일의 50~90%가 손실됨. `2a(1-a)` gain 계수가 최대 0.5이므로 `uHighFreqPreserve=1.0`에서도 절반 이상 손실. 0.65→0.70 조정(5%p)으로는 보상 불가. skinQuality 전 범위에서 사용자 체감 블러 회귀 위험.
 
 ---
 
-## Findings by Priority
+## 변경 사항 요약
 
-### Critical Issues (P0 — 즉시 수정)
-
-| # | 카테고리 | 위치 | 이슈 | 영향 |
-|---|----------|------|------|------|
-| 1 | Security | ab_compare.cpp:155 | ~~`addResult()` 무제한 메모리 성장 (CWE-400)~~ **[P4-W3-06 해결]** kMaxResults=1000 상한 | 장시간 세션 시 OOM 크래시 |
-| 2 | Performance | quality_metrics.cpp:404 | ~~`addFrame()` 매 프레임 Laplacian 연산 (~2-5ms/frame)~~ **[P4-W3-06 해결]** addReductionRatio() 오버로드 추가 | 프레임 예산 6-15% 소비 |
-| 3 | Performance | quality_metrics.cpp:411 | ~~`vector::erase(begin())` O(n) 패턴~~ **[P4-W3-06 해결]** std::deque + pop_front() O(1) | 구조적 결함, ring buffer로 교체 필요 |
-
-### High Priority (P1 — 다음 릴리즈 전 수정)
-
-| # | 카테고리 | 위치 | 이슈 | 영향 |
-|---|----------|------|------|------|
-| 4 | Performance | quality_metrics.cpp:122-293 | ~~SSIM 21개 Mat 할당 (~336MB peak)~~ **[P4-W3-06 해결]** CV_32F 전환으로 메모리 절반 | SDK 100MB 제한 3배 초과 |
-| 5 | Security | param_tuner.cpp:32-102 | ~~`gridSearch()` steps 상한 미검증 (CWE-400)~~ **[P4-W3-06 해결]** clamp(1,10)+10000 상한 | CPU/메모리 고갈 |
-| 6 | Quality | 12+ 위치 | ~~`catch(...)` 무음 예외 삼킴 (CWE-755)~~ **[P4-W3-06 해결]** fprintf(stderr) 로그 12곳 | 디버깅 불가, 오류 은닉 |
-| 7 | Architecture | release_gate.h:32 | `DeviceTier` enum 중복 정의 | ODR 위반 위험, 불일치 가능 |
-| 8 | Quality | ab_compare.cpp:255 | ~~JSON 이스케이핑 미처리 (CWE-116)~~ **[P4-W3-06 해결]** escapeJson() | malformed JSON 생성 |
-| 9 | Quality | 여러 파일 | 매직 넘버/임계값 중복 정의 | 임계값 불일치 시 게이트 우회 |
-| 10 | Best Practice | 전체 공개 헤더 | Pimpl 패턴 미적용 | ABI 불안정, 프로젝트 컨벤션 위반 |
-| 11 | Performance | quality_metrics.cpp:343-392 | ~~중복 toGray 4회 호출~~ **[P4-W3-06 해결]** evaluateQuantitativeGate 1회 변환 | ~4ms/call 낭비 |
-| 12 | Performance | quality_metrics.cpp:200-206 | ~~Sobel/Laplacian CV_64F 과도한 정밀도~~ **[P4-W3-06 해결]** CV_32F 전환 | ~64MB 추가 할당/call |
-| 13 | Testing | test_quality_tuning.cpp | ~~`recommendPresets()`, `generateReport()`, `reset()` 미테스트~~ **[P4-W3-06 해결]** 15건 테스트 추가 | 핵심 로직 미검증 |
-| 14 | Testing | test_quality_tuning.cpp | ~~ReleaseGate 경계값(33.0ms, 0.30, 0.60 등) 미테스트~~ **[P4-W3-06 해결]** 6건 경계값 테스트 | off-by-one 회귀 위험 |
-| 15 | Documentation | 전체 | ~~임계값(0.30/0.60/0.95 등) 도출 근거 완전 부재~~ **[P4-W3-06 해결]** 근거 주석 추가 | 유지보수 시 의사결정 불가 |
-| 16 | Documentation | quality_metrics.h | ~~TemporalAnalyzer 스레드 안전성 미명시~~ **[P4-W3-06 해결]** @note 추가 | 멀티스레드 사용 시 data race |
-
-### Medium Priority (P2 — 다음 스프린트 계획)
-
-| # | 카테고리 | 이슈 | 비고 |
-|---|----------|------|------|
-| 17 | Correctness | ~~`detectHalo` zero-gradient baseline 미처리~~ **[P4-W3-06 해결]** orig_grad≈0일 때 proc_grad>1.0이면 halo 판정 | 원본 gradient≈0이면 ratio=0.0 → 항상 halo-free 판정, 평탄 영역에 새 edge 생겨도 무시 |
-| 18 | Quality | `validateBlurRadiusIndependence` 무의미한 검증 | 순수 함수에 동일 입력 3회 → 항상 true |
-| 19 | Quality | `computeScore()` 게이트 미통과 시 점수 0 절벽 | "거의 통과"하는 세트를 완전 무시 |
-| 20 | Quality | ~~`GateVerdict` switch 반복 3곳~~ **[P4-W3-06 해결]** gateVerdictToString() 공통 함수 | `toString()` 공통 함수 필요 |
-| 21 | Quality | ~~`SkinToneGroup` 문자열 변환 중복~~ **[P4-W3-06 해결]** skinToneToString public 재사용 | `skinToneToString` 재사용 |
-| 22 | Security | 32비트 플랫폼 size_t 곱셈 오버플로우 (CWE-190) | steps 상한으로 해결 가능 |
-| 23 | Security | cv::Mat 이미지 크기 상한 미검증 | 대형 이미지 OOM |
-| 24 | Security | ~~ReleaseGate NaN/Inf 입력 미검증~~ **[P4-W3-06 해결]** sanitize() fail-safe 적용 | 혼란스러운 리포트 |
-| 25 | Security | ~~computeBlurRadius() 음수 face_width~~ **[P4-W3-06 해결]** <=0 early return 6 | clamp로 6 반환 (의미적 오류) |
-| 26 | Performance | ~~`generateReport()` 전체 벡터 복사+정렬~~ **[P4-W3-06 해결]** partial_sort 적용 | `partial_sort` 사용 권장 |
-| 27 | Performance | Grid search steps^4 조합 폭발 | coarse-to-fine 2단계 탐색 권장 |
-| 28 | Architecture | QualityMetrics-ReleaseGate 통합 편의 메서드 누락 | 수동 값 전사 필요 |
-| 29 | Architecture | 4개 모듈 C API(sdk_api.h) 미노출 | 내부 도구 의도 문서화 필요 |
-| 30 | Architecture | blur_radius grid search 미사용 혼란 | 문서화 또는 분리 |
-| 31 | Best Practice | `noexcept` + `push_back` → `bad_alloc` 시 terminate | noexcept 재검토 |
-| 32 | Best Practice | ~~`std::clamp` vs `max/min` 체인 혼용~~ **[P4-W3-06 해결]** std::clamp 통일 | `std::clamp` 통일 |
-| 33 | Best Practice | `snprintf` + `ostringstream` 혼용 | 포맷팅 방식 통일 |
-| 34 | Best Practice | All-static class → namespace 함수 고려 | C++ Core Guidelines C.4 |
-| 35 | Testing | ~~NaN/Inf, 300프레임 순환 버퍼, CONDITIONAL_GO 경로~~ **[P4-W3-06 해결]** 5건 엣지 케이스 테스트 추가 | 엣지 케이스 미검증 |
-| 36 | Testing | ~~MID/LOW 디바이스 티어 미테스트~~ **[P4-W3-06 해결]** MID/LOW 티어 2건 테스트 추가 | HIGH 티어만 검증 |
-| 37 | Testing | 성능 회귀 테스트 0건 | SSIM/Laplacian 시간 제한 필요 |
-| 38 | Testing | 테스트 픽스처(TEST_F) 미사용 → DRY 위반 | 구조체 반복 초기화 |
-| 39 | Documentation | 모듈 간 협력 관계 아키텍처 설명 부재 | 데이터 흐름 다이어그램 필요 |
-| 40 | Documentation | ~~catch(...) 정책 ABCompare/ReleaseGate/ParamTuner 미명시~~ **[P4-W3-06 해결]** @note 예외 정책 추가 | QualityMetrics에만 기재 |
-| 41 | Documentation | ~~computeScore() 가중치 0.4/0.3/0.3 근거 없음~~ **[P4-W3-06 해결]** 근거 주석 추가 | 경험적 판단 기록 필요 |
-| 42 | Documentation | 워크 페이퍼 §2.1 high_freq_preserve 변수 누락 | 4번째 튜닝 변수 미반영 |
-
-### Low Priority (P3 — 백로그)
-
-| # | 카테고리 | 이슈 |
-|---|----------|------|
-| 43 | Correctness | ~~ABCompare halo_improvement: b_halo≤0 시 delta 무시~~ **[P4-W3-06 해결]** 절대 차이(delta) 비교로 변경 |
-| 44 | Quality | snprintf 버퍼 크기 하드코딩 |
-| 45 | Quality | formatReport 섹션 반복 패턴 |
-| 46 | Quality | 빈 마스크와 품질 실패 미구분 |
-| 47 | Security | toGray() 얕은 복사 참조 공유 |
-| 48 | Security | 테스트 코드 고정 시드 RNG |
-| 49 | Best Practice | std::string_view, structured bindings, constexpr 등 |
-| 50 | Testing | 단색 이미지 SSIM 분모 0, null 콜백 |
-| 51 | Documentation | QualityMetrics 사용 예제, ReleaseGate 입력 예제, 워크 페이퍼 체크박스 갱신 |
+| 파일 | 변경 내용 |
+|------|-----------|
+| `shader_sources.cpp:499-503` | Additive `smoothLow + adjusted_high` → Soft Light `(1-2b)*a²+2b*a` |
+| `gpu_beauty_backend.cpp:1005-1006` | `high_freq_preserve` 감쇠 계수 0.65→0.70, 주석 업데이트 |
+| `P4-W4-01b_soft_light.md` | 작업 상태 ⏳→✅, 완료 기준 체크 |
 
 ---
 
-## Findings by Category
+## Findings — 이번 변경 한정
 
-| 카테고리 | 총 건수 | Critical | High | Medium | Low |
-|----------|---------|----------|------|--------|-----|
-| Code Quality | 8 | 0 | 4 | 4 | 2 |
-| Correctness | 2 | 0 | 0 | 1 | 1 |
-| Architecture | 4 | 0 | 1 | 3 | 0 |
-| Security | 8 | 1 | 2 | 4 | 2 |
-| Performance | 8 | 2 | 3 | 2 | 0 |
-| Testing | 7 | 0 | 2 | 4 | 1 |
-| Documentation | 7 | 0 | 2 | 4 | 1 |
-| Best Practices | 7 | 0 | 1 | 4 | 3 |
-| **총계** | **51** | **3** | **15** | **26** | **10** |
+### Critical — 즉시 수정 필요 — 1건
 
-> **Note**: 기존 65건에서 P3 중복 4건(P0 #1, P1 #7, P1 #16, P2 #26과 동일), 번호 중복 2건(구 #18, #43 번호 공유), P1 집계 오류 보정 후 51건으로 정리됨.
+| ID | 위치 | 요약 | 개선 방향 |
+|----|------|------|-----------|
+| **P2** | shader_sources.cpp:499-503 | **Soft Light gain 손실 50-90%**: `SoftLight(a,0.5+h) = a+2h·a·(1-a)`. gain `2a(1-a)` — 중간톤(a=0.5) 50% 손실, 어두운/밝은 톤(a=0.1/0.9) 82~90% 손실. 감쇠 계수 5%p 조정으로 보상 불가. | gain 보상 스케일러 도입 (예: 톤 의존 보정) 또는 Additive-SoftLight 블렌딩 방식 검토. 구체적 수식은 프로파일링 후 결정 권장. |
+
+**gain 손실 상세:**
+
+| smoothLow (a) | gain = 2a(1-a) | 고주파 보존율 |
+|----------------|----------------|-------------|
+| 0.10 (매우 어두움) | 0.18 | **18%** |
+| 0.20 (어두운 피부) | 0.32 | **32%** |
+| 0.50 (중간톤) | 0.50 | **50%** |
+| 0.80 (밝은 피부) | 0.32 | **32%** |
+| 0.90 (매우 밝음) | 0.18 | **18%** |
+
+### Medium — 3건
+
+| ID | 카테고리 | 위치 | 요약 |
+|----|----------|------|------|
+| **GLSL-4** | Best Practices | shader_sources.cpp:502-503 | **Soft Light 수식 MAD 최적화**: 현재 `(1-2b)*a²+2b*a` (곱셈 4회) → `a*(a+2b*(1-a))` (곱셈 3회). MAD 패턴 적합. |
+| **CPP-1** | Best Practices | gpu_beauty_backend.cpp:1006 | **매직 넘버 상수화**: `0.70f` → `constexpr float kMaxHighFreqAttenuation = 0.70f;` |
+| **D1** | Documentation | P4-W4-01b_soft_light.md | **gain 손실 한계 미문서화**: gain `2a(1-a)` 특성과 50-90% 고주파 손실이 작업 문서에 미기록. 이점만 기술하고 한계 누락. 완료 기준 2건 미체크인데 상태 "✅ 완료". |
+
+### Low — 2건
+
+| ID | 카테고리 | 위치 | 요약 |
+|----|----------|------|------|
+| **F2** | Code Quality | shader_sources.cpp:499-503 | **gain 특성 주석 누락**: `2a(1-a)` 최대 0.5라는 특성과 `high_freq_preserve`의 의미론 변경(1.0이 더이상 "100% 보존"이 아님)에 대한 주석 부재. |
+| **T1** | Testing | — | **CPU 참조 테스트 부재**: Pegtop 수식의 identity, 출력 범위, gain 특성을 검증하는 단위 테스트 없음. 셰이더 롤백 시 어떤 테스트도 실패하지 않음. |
+
+---
+
+## 긍정적 평가
+
+| 항목 | 판정 |
+|------|------|
+| Pegtop 수식 구현 정확성 | ✅ Identity(h=0→base), 출력 [0,1] 보장, edge case 안전 |
+| 아키텍처 영향 | ✅ Pass 추가 없음, Uniform 변경 없음, 구조체 변경 없음 |
+| ALU 성능 영향 | ✅ +3-4 ops, texture fetch latency에 숨겨짐. 30fps 영향 없음 |
+| Warp divergence | ✅ 조건 분기 없음 (Overlay 대비 이점) |
+| clamp 안전장치 | ✅ adjusted_high ∈ [-1,1] 가능하므로 clamp 필수, 올바르게 적용됨 |
+| 기존 테스트 호환성 | ✅ 46개 테스트 전부 통과 — `cmake --build build --target test_beauty_config_v2 && ./build/bin/test_beauty_config_v2` 실행 확인. 경계값 0.30이 기존 테스트 허용 범위 [0.30, 0.40] 내 정확히 포함. |
 
 ---
 
 ## Recommended Action Plan
 
-### 1단계: Critical 즉시 수정 (노력: Small)
-1. `ABCompare::addResult()`에 `kMaxResults` 상한 추가 — 3줄 수정
-2. `TemporalAnalyzer`에 `addReductionRatio(double)` 오버로드 추가 — 호출자가 이미 계산된 ratio 전달
-3. `vector::erase(begin())` → `std::deque::pop_front()` 교체 — 1줄 변경 + 타입 변경
+| 우선순위 | 작업 | 노력 | 효과 |
+|----------|------|------|------|
+| **즉시** | P2 gain 보상 방안 설계 및 검증 | Medium | skinQuality 전 범위 블러 회귀 해소 |
+| 이번 스프린트 | T1 CPU 참조 테스트 작성 | Small | 수식 검증 + 회귀 방지 |
+| 이번 스프린트 | GLSL-4 수식 리팩터링 `a*(a+2b*(1-a))` | Small | 곱셈 1회 절감 |
+| 다음 스프린트 | D1 문서 보완 + F2 주석 추가 + CPP-1 상수화 | Small | 유지보수성 개선 |
 
-### 2단계: High 메모리/보안 수정 (노력: Medium)
-4. `computeSSIMChannel` → zero-allocation 단일 패스 루프 교체 (336MB → 0)
-5. `gridSearch()` steps 상한(≤10) 및 총 조합 수 제한(≤10,000) 추가
-6. `catch(...)` → `catch(const cv::Exception&)` + `catch(const std::exception&)` 분리 + 로깅
-7. `DeviceTier` 공통 헤더(types.h)로 통합
+---
 
-### 3단계: High 품질 개선 (노력: Medium)
-8. JSON escape 유틸리티 함수 추가
-9. 공통 임계값 상수 헤더(`quality_constants.h`) 생성
-10. `evaluateQuantitativeGate` 내 toGray 1회만 수행
-11. 누락 테스트 추가: `recommendPresets`, `generateReport`, `reset`, 경계값
+## 참고 사항 — 기존 코드 이슈 (이번 변경 범위 밖)
 
-### 4단계: Medium 문서화/구조 개선 (노력: Medium-Large)
-12. 임계값 도출 근거 주석 추가
-13. TemporalAnalyzer 스레드 안전성 정책 문서화
-14. Pimpl 패턴 적용 (ABI 안정성 필요 시)
-15. 워크 페이퍼 업데이트 (high_freq_preserve, 체크박스)
+아래는 이번 브랜치 변경과 직접 관련 없으나, 동일 셰이더/파이프라인에서 발견된 기존 이슈입니다. 별도 작업으로 추적 권장.
+
+| ID | 출처 | 요약 | 권장 작업 |
+|----|------|------|-----------|
+| P1 | P4-W4-01a | 8-bit 렌더 타겟에 linear-light 저장 → 어두운 영역 밴딩 | `GL_R11F_G11F_B10F` 전환 |
+| SRGB-1 | P4-W4-01a | 수동 pow(2.2) 비용+부정확 → 하드웨어 sRGB 활용 | `GL_SRGB8_ALPHA8` + `GL_FRAMEBUFFER_SRGB` |
+| SEC-2 | 기존 | mapSkinQuality NaN/Inf 가드 누락 | `std::isnan` 가드 추가 |
 
 ---
 
 ## Review Metadata
 
-- **Review date**: 2026-03-05
-- **Revised date**: 2026-03-06 (중복 이슈 정리, 번호 재부여)
-- **Phases completed**: Phase 1 (Quality & Architecture), Phase 2 (Security & Performance), Phase 3 (Testing & Documentation), Phase 4 (Best Practices, CI/CD 제외)
-- **Flags applied**: CI/CD 검증 제외 (SDK 프로젝트, 미배포)
-- **Total findings**: 51건 (Critical 3, High 13, Medium 26, Low 9)
-- **Removed duplicates**: 4건 — P3에서 상위 우선순위 이슈와 중복된 항목 제거
-- **Positive observations**: 의존성 방향 올바름, 코드 스타일 준수, Doxygen 커버리지 우수, noexcept 정책 일관, 온디바이스 처리 원칙 준수
+- **Review date**: 2026-03-09
+- **Scope**: 이번 브랜치(feature/P4-W4-01b) 변경분 한정
+- **Phases completed**: 1~5 (전체)
+- **Flags applied**: Performance Critical
+- **Total findings**: 6건 (Critical: 1 / Medium: 3 / Low: 2) + 참고 3건
+- **Reviewers**: code-reviewer, security-auditor (specialized agents)

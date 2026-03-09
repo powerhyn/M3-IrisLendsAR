@@ -4,6 +4,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <algorithm>
 
 #include "iris_sdk/beauty_filter.h"
 #include "iris_sdk/gpu/gpu_beauty_backend.h"
@@ -469,6 +470,113 @@ TEST(BeautyPresetTest, BackwardCompatDefaultZero) {
     BeautyFilterConfigV2 config = {};
     iris_sdk_default_beauty_config_v2(&config);
     EXPECT_FLOAT_EQ(config.skinQuality, 0.0f);
+}
+
+//=============================================================================
+// Soft Light (Pegtop) CPU 참조 테스트
+//=============================================================================
+
+namespace {
+
+// CPU reference: Pegtop Soft Light
+// SoftLight(base, blend) = (1 - 2*blend) * base² + 2 * blend * base
+//                        = base * (base + 2 * blend * (1 - base))
+float softLight(float base, float blend) {
+    return base * (base + 2.0f * blend * (1.0f - base));
+}
+
+// Gain compensation reference (mirrors shader logic)
+float compensatedSoftLight(float base, float high) {
+    float gainFactor = 2.0f * base * (1.0f - base);
+    float compensation = 1.0f / std::max(gainFactor, 0.25f);
+    float compensated = high * compensation;
+    float blend = std::clamp(0.5f + compensated, 0.0f, 1.0f);
+    return softLight(base, blend);
+}
+
+} // anonymous namespace
+
+TEST(SoftLightFormulaTest, IdentityWhenHighFreqZero) {
+    // h=0 → blend=0.5 → beauty=base
+    const float bases[] = {0.0f, 0.1f, 0.25f, 0.5f, 0.75f, 0.9f, 1.0f};
+    for (float base : bases) {
+        float result = softLight(base, 0.5f);
+        EXPECT_NEAR(result, base, 1e-6f)
+            << "Identity failed at base=" << base;
+    }
+}
+
+TEST(SoftLightFormulaTest, BrightensWhenHighFreqPositive) {
+    // h>0 → blend>0.5 → beauty>base (for base in (0,1))
+    const float bases[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+    for (float base : bases) {
+        float blend = 0.6f;  // h = +0.1
+        float result = softLight(base, blend);
+        EXPECT_GT(result, base)
+            << "Should brighten at base=" << base;
+    }
+}
+
+TEST(SoftLightFormulaTest, DarkensWhenHighFreqNegative) {
+    // h<0 → blend<0.5 → beauty<base (for base in (0,1))
+    const float bases[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+    for (float base : bases) {
+        float blend = 0.4f;  // h = -0.1
+        float result = softLight(base, blend);
+        EXPECT_LT(result, base)
+            << "Should darken at base=" << base;
+    }
+}
+
+TEST(SoftLightFormulaTest, OutputAlwaysInUnitRange) {
+    // base ∈ [0,1], blend ∈ [0,1] → result ∈ [0,1]
+    for (int bi = 0; bi <= 100; bi += 5) {
+        for (int li = 0; li <= 100; li += 5) {
+            float base = bi / 100.0f;
+            float blend = li / 100.0f;
+            float result = softLight(base, blend);
+            EXPECT_GE(result, 0.0f);
+            EXPECT_LE(result, 1.0f);
+        }
+    }
+}
+
+TEST(SoftLightFormulaTest, GainCharacteristic) {
+    // SoftLight(a, 0.5+h) ≈ a + 2h·a·(1-a) for small h
+    // → effective gain = 2a(1-a)
+    struct TestCase { float base; float expected_gain; };
+    const TestCase cases[] = {
+        {0.10f, 0.18f},
+        {0.20f, 0.32f},
+        {0.50f, 0.50f},
+        {0.80f, 0.32f},
+        {0.90f, 0.18f},
+    };
+
+    const float h = 0.01f;  // small perturbation
+    for (const auto& tc : cases) {
+        float result = softLight(tc.base, 0.5f + h);
+        float actual_gain = (result - tc.base) / h;
+        EXPECT_NEAR(actual_gain, tc.expected_gain, 0.01f)
+            << "Gain mismatch at base=" << tc.base;
+    }
+}
+
+TEST(SoftLightFormulaTest, GainCompensationEffectiveness) {
+    // After compensation, high-freq preservation should be >= 80% across tones
+    const float bases[] = {0.15f, 0.25f, 0.50f, 0.75f, 0.85f};
+    const float h = 0.05f;
+
+    for (float base : bases) {
+        float compensated = compensatedSoftLight(base, h);
+        float actual_delta = compensated - base;
+        // Without compensation: delta = h * 2*base*(1-base)
+        // With compensation: delta should be close to h (ideal full preservation)
+        float preservation = actual_delta / h;
+        EXPECT_GE(preservation, 0.80f)
+            << "Compensation insufficient at base=" << base
+            << " (preservation=" << preservation << ")";
+    }
 }
 
 } // namespace testing

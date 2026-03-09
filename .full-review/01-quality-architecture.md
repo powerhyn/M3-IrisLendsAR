@@ -1,70 +1,57 @@
 # Phase 1: Code Quality & Architecture Review
 
-## Code Quality Findings (21건)
+## 대상: P4-W4-01b Soft Light 합성 전환
 
-### High (6건)
-| ID | 카테고리 | 위치 | 요약 |
-|----|----------|------|------|
-| CX-1 | 복잡도 | param_tuner.cpp:63-96 | 4중 중첩 루프 (gridSearch) |
-| MT-1 | 유지보수 | 여러 파일 | 매직 넘버/임계값 중복 정의 (0.30, 0.95, 0.05 등) |
-| MT-2 | 유지보수 | release_gate.h:32 | DeviceTier enum 중복 선언 (gpu_beauty_backend.h와) |
-| TD-1 | 기술부채 | quality_metrics.cpp:411 | vector::erase(begin()) O(n) — 실시간 성능 영향 |
-| TD-2 | 기술부채 | 12+ 위치 | catch(...) 무음 예외 삼킴 — 디버깅 불가 |
-| TC-1 | 테스트 | test_quality_tuning.cpp | recommendPresets 테스트 미작성 |
+---
 
-### Medium (13건)
-| ID | 카테고리 | 위치 | 요약 |
-|----|----------|------|------|
-| CX-2 | 복잡도 | ab_compare.cpp:263-277 | GateVerdict switch 반복 |
-| MT-3 | 유지보수 | ab_compare.cpp:219-290 | JSON 수동 조립, 이스케이프 없음 |
-| CL-1 | 설계 | quality_metrics.h:107-209 | 전체 static 클래스 (향후 유연성 제한) |
-| CL-2 | 설계 | param_tuner.cpp:209-235 | validateBlurRadiusIndependence 무의미한 검증 |
-| CL-3 | 설계 | param_tuner.cpp:108-134 | 게이트 미통과 시 점수 0 절벽 |
-| DU-1 | 중복 | ab_compare.cpp | SkinToneGroup 문자열 변환 중복 |
-| DU-2 | 중복 | test_quality_tuning.cpp:398-571 | 테스트 입력 구조체 반복 |
-| TD-3 | 기술부채 | ab_compare.cpp:155 | addResult 바운드 체크 없음 |
-| EH-1 | 에러처리 | quality_metrics.cpp:66-89 | 중복 타입 검증 |
-| EH-2 | 에러처리 | param_tuner.cpp:74 | 콜백 예외 시 전체 결과 소실 |
-| PF-1 | 성능 | quality_metrics.cpp:275-290 | 불필요한 Mat 할당 |
-| TC-2 | 테스트 | test_quality_tuning.cpp | generateReport 테스트 없음 |
-| TC-3 | 테스트 | test_quality_tuning.cpp | 디바이스 티어별 테스트 없음 |
+## Code Quality Findings (6건)
 
-### Low (4건)
-| ID | 카테고리 | 위치 | 요약 |
-|----|----------|------|------|
-| MT-4 | 유지보수 | param_tuner.cpp, release_gate.cpp | snprintf 버퍼 크기 하드코딩 |
-| DU-3 | 중복 | release_gate.cpp:256-293 | formatReport 섹션 반복 패턴 |
-| EH-3 | 에러처리 | quality_metrics.cpp:343-392 | 빈 마스크와 품질 실패 미구분 |
-| PF-2 | 성능 | param_tuner.cpp:258-262 | 전체 벡터 복사 후 정렬 |
+### Critical (2건)
 
-## Architecture Findings (10건)
+| ID | 위치 | 요약 |
+|----|------|------|
+| **P1** | texture_pool.cpp:337 | **Linear-light 값의 8-bit 양자화**: 중간 버퍼(lowFreq, smoothedLow)가 GL_RGBA/GL_UNSIGNED_BYTE로 생성됨. linear 색공간에서 8-bit는 어두운 영역에서 ~8% 밝기 점프 → 심각한 밴딩/포스터라이제이션. P4-W4-01a에서 도입된 문제이나 Soft Light 합성이 `smoothLow`를 base로 사용하므로 아티팩트 증폭. |
+| **P2** | shader_sources.cpp:499-503 | **Soft Light 고주파 gain 손실**: `SoftLight(a, 0.5+h) = a + 2h·a·(1-a)`. gain 계수 `2a(1-a)`의 최대값이 0.5(a=0.5)이고 극단 톤에서 0.18까지 하락. uHighFreqPreserve=1.0에서도 50~90% 고주파 손실. 0.65→0.70 튜닝 조정(5%p)으로는 보상 불가. skinQuality 전 범위에서 사용자 체감 회귀 발생 가능. |
 
-### High (2건)
-| ID | 카테고리 | 위치 | 요약 |
-|----|----------|------|------|
-| A1-1 | 컴포넌트 경계 | release_gate.h:32, gpu_beauty_backend.h:259 | DeviceTier 중복 정의 → ODR 위반 위험 |
-| A3-1 | API 설계 | 12+ 위치 | noexcept + catch(...) 패턴 → 오류 추적 불가 |
+### Medium (1건)
 
-### Medium (7건)
-| ID | 카테고리 | 위치 | 요약 |
-|----|----------|------|------|
-| A1-2 | 컴포넌트 경계 | QualityMetrics ↔ ReleaseGate | 통합 편의 메서드 누락 |
-| A2-2 | 의존성 | sdk_api.h | 4개 모듈의 C API 미노출 |
-| A3-2 | API 설계 | quality_metrics.cpp, release_gate.cpp | 임계값 하드코딩, 설정 불가 |
-| A3-4 | API 설계 | ab_compare.cpp:219-290 | 수동 JSON 생성 → 이스케이핑 미처리 |
-| A4-1 | 데이터 모델 | quality_metrics.cpp:411 | vector::erase(begin()) O(n) |
-| A4-3 | 데이터 모델 | param_tuner.h | blur_radius grid search 미사용 혼란 |
-| A6-2 | 일관성 | 4개 모듈 전체 | Pimpl 패턴 미적용 (프로젝트 규칙) |
+| ID | 위치 | 요약 |
+|----|------|------|
+| F1 | shader_sources.cpp:481-484 | **smoothLow/low의 양자화 노이즈 혼입**: P1으로 인해 `low`가 양자화된 값 → `high = orig - low`에서 가짜 고주파 생성. P1 수정 시 자동 해결. |
 
-### Low (긍정적 평가 포함, 4건)
-- 의존성 방향 올바름 (순환 없음)
-- QualityMetrics/TemporalAnalyzer SRP 분리 적절
-- 코드 스타일 프로젝트 규칙 준수
-- ABCompare Builder-like 패턴 적절
+### Low (3건)
+
+| ID | 위치 | 요약 |
+|----|------|------|
+| F2 | shader_sources.cpp:499-503 | gain 특성 `2a(1-a)` 및 설계 의도에 대한 주석 누락 |
+| F3 | gpu_beauty_backend.cpp:1005 | `high_freq_preserve` 파라미터 의미론 변경 미반영 — Additive에서 1.0="100% 보존"이었으나 Soft Light에서는 최대 50% 보존 |
+| F4 | shader_sources.cpp:499-503 | ALU 3-4 ops 추가 — 성능 영향 무시 가능 (info) |
+
+---
+
+## Architecture Findings (4건)
+
+### 긍정적 평가
+| 항목 | 판정 |
+|------|------|
+| 파이프라인 구조 | 유지됨 — Pass 추가 없음, 기존 3-pass 동일 |
+| Uniform 인터페이스 | 유지됨 — 새 uniform 없음 |
+| FreqSepParams 구조체 | 유지됨 — 필드 추가/삭제 없음 |
+| DeviceTier 분기 | 영향 없음 — MID half-res, LOW fallback 동일 |
+| Bilateral fallback 경로 | 영향 없음 |
+
+### 개선 필요
+| ID | 항목 | 설명 |
+|----|------|------|
+| A1 | Soft Light 수식 정확성 | Pegtop 공식 구현 자체는 수학적으로 정확. Identity 조건, 출력 범위 [0,1] 보장 확인됨. |
+| A2 | gain 비보상 설계 | 구조적 문제: Additive→Soft Light 전환 시 gain 보상 없이 수식만 교체하여 파라미터 semantics 불일치 |
+| A3 | 테스트 호환성 | `test_beauty_config_v2.cpp:331-332`의 high_freq_preserve 범위 [0.30, 0.40] 검증이 경계값(0.30)에 걸림 |
+| A4 | 중간 버퍼 포맷 하드코딩 | TexturePool::createTexture()가 GL_RGBA8로 고정 → 색공간 전환 시 유연성 부재 |
+
+---
 
 ## Critical Issues for Phase 2 Context
 
-1. **catch(...) 무음 처리**: 보안/메모리 오류 은닉 가능성 → Security 리뷰에서 점검 필요
-2. **vector::erase(begin()) O(n)**: 실시간 처리 성능 영향 → Performance 리뷰에서 점검 필요
-3. **addResult 바운드 체크 없음**: 메모리 무한 증가 가능 → Performance/Security 리뷰에서 점검 필요
-4. **매직 넘버 중복**: 임계값 불일치 시 보안 게이트 우회 가능 → Security 리뷰에서 점검 필요
+1. **P1 (8-bit 양자화)**: 성능 리뷰에서 GL_RGBA16F/GL_R11F_G11F_B10F 전환 비용 분석 필요
+2. **P2 (gain 손실)**: 보상 스케일러 도입 시 추가 ALU 비용 및 register pressure 분석 필요
+3. **pow() 비용**: sRGB↔Linear 변환에 pow() 2회 사용 — 모바일 GPU에서의 SFU 비용 분석 필요

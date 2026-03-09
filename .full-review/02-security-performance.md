@@ -1,84 +1,88 @@
 # Phase 2: Security & Performance Review
 
-## Security Findings (15건)
-
-### Critical (1건)
-| ID | CWE | 위치 | 요약 |
-|----|-----|------|------|
-| SEC-01 | CWE-400 | ab_compare.cpp:155-157 | ABCompare::addResult() 무제한 메모리 성장 |
-
-### High (4건)
-| ID | CWE | 위치 | 요약 |
-|----|-----|------|------|
-| SEC-02 | CWE-755 | 12+ 위치 | catch(...) 보안 관련 실패 무시 (bad_alloc, cv::Exception 등) |
-| SEC-03 | CWE-400 | param_tuner.cpp:32-102 | gridSearch() steps 상한 미검증 → CPU/메모리 고갈 |
-| SEC-04 | CWE-407 | quality_metrics.cpp:411-413 | vector::erase(begin()) O(n) → 프레임 드롭 가능 |
-| SEC-05 | CWE-116 | ab_compare.cpp:255-256 | JSON 문자열 이스케이핑 미처리 |
-
-### Medium (6건)
-| ID | CWE | 위치 | 요약 |
-|----|-----|------|------|
-| SEC-06 | CWE-190 | param_tuner.cpp:58-59 | 32비트 플랫폼 size_t 곱셈 오버플로우 |
-| SEC-07 | CWE-1078 | quality_metrics.cpp, release_gate.cpp | 매직 넘버 중복 → 게이트 우회 위험 |
-| SEC-08 | CWE-120 | param_tuner.cpp:268-275 | snprintf 버퍼 잘림 가능성 |
-| SEC-09 | CWE-20 | quality_metrics.cpp:66-89 | cv::Mat 이미지 크기 상한 미검증 → OOM |
-| SEC-10 | CWE-20 | release_gate.cpp:55-140 | NaN/Inf 입력 미검증 |
-| SEC-11 | CWE-20 | param_tuner.cpp:377-381 | 음수 face_width 미처리 |
-
-### Low (4건)
-- SEC-12: DeviceTier enum 중복 (ODR 위험)
-- SEC-13: generateReport() 전체 벡터 복사
-- SEC-14: toGray() 얕은 복사 (참조 공유)
-- SEC-15: 테스트 코드 고정 시드 RNG (영향 없음)
-
-### 긍정적 보안 소견
-- noexcept 정책 일관 적용, snprintf 사용, clamp 적용
-- 온디바이스 처리 원칙 준수 (네트워크 전송 코드 없음)
-- TemporalAnalyzer kMaxFrames=300 제한 적용
+## 대상: P4-W4-01b Soft Light 합성 전환
 
 ---
 
-## Performance Findings (13건)
+## Security Findings (5건)
 
-### Critical (2건)
-| ID | 컴포넌트 | Frame-path | 예상 영향 |
-|----|----------|------------|-----------|
-| PF-1 | TemporalAnalyzer | Yes | vector::erase(begin()) O(n), 매 프레임 |
-| PF-2 | TemporalAnalyzer | Yes | addFrame에서 매 프레임 Laplacian 연산 (~2-5ms/frame, 예산 6-15%) |
+### 해당 없음 (N/A) — 보안 위험 없음
+| ID | 항목 | 판정 |
+|----|------|------|
+| SEC-1 | Shader Injection | 안전 — 셰이더 소스가 R"glsl()" 컴파일타임 고정, 런타임 삽입 경로 없음 |
+| SEC-3 | 버퍼 오버플로우 | 안전 — uWeights[29] 고정 크기, radius std::clamp(1,28) |
+| SEC-4 | 데이터 노출 | 안전 — 온디바이스 처리만, 네트워크 전송 경로 없음 |
+| SEC-6 | Warp divergence (보안) | 안전 — 조건 분기 없음, uniform branch만 존재 |
 
-### High (3건)
-| ID | 컴포넌트 | Frame-path | 예상 영향 |
-|----|----------|------------|-----------|
-| PF-3 | QualityMetrics | Indirect | SSIM 21개 전체 이미지 Mat 할당 (~336MB peak, 100MB 제한 초과) |
-| PF-4 | QualityMetrics | Indirect | cv::split 채널 분리 (~12MB 추가/call) |
-| PF-5 | ParamTuner | Offline | Grid search steps^4 조합 폭발 (steps=5에서 ~10초) |
+### Low (1건)
+| ID | 위치 | 요약 |
+|----|------|------|
+| SEC-2 | gpu_beauty_backend.cpp:995 | **NaN/Inf 입력 가드 누락**: `mapSkinQuality`에서 `skin_quality`가 NaN/Inf일 때 `std::clamp` 결과가 미정의 → `blur_radius`에 쓰레기 값 전파 가능. `if (std::isnan(skin_quality) || std::isinf(skin_quality))` 가드 추가 권장. |
 
-### Medium (5건)
-| ID | 컴포넌트 | 예상 영향 |
-|----|----------|-----------|
-| PF-6 | ParamTuner | generateReport 전체 벡터 복사+정렬 |
-| PF-7 | QualityMetrics | 중복 toGray 4회 호출 (~4ms/call 낭비) |
-| PF-8 | QualityMetrics | Sobel CV_64F 전체 이미지 (~48MB/call) |
-| PF-9 | ABCompare | compare()에서 gate 2회 호출 (개선폭 2배 증폭) |
-| PF-10 | QualityMetrics | Laplacian CV_64F (~16MB/call) |
+### Shader Numeric Safety
+| 항목 | 판정 |
+|------|------|
+| pow(orig, 2.2) | orig ∈ [0,1] 보장 → 결과 [0,1] ✅ |
+| pow(max(result,0), 1/2.2) | max로 음수 방어 → GLSL UB 차단 ✅ |
+| clamp(0.5+adjusted_high) | 필수 — adjusted_high ∈ [-1,1] 가능 → blend ∈ [-0.5,1.5] 방지 ✅ |
+| Soft Light 출력 범위 | blend,base ∈ [0,1] → 결과 항상 [0,1] ✅ |
 
-### Low (2건)
-- PF-11: TemporalAnalyzer thread safety (잠재적 data race)
-- PF-12: ABCompare results_ 무제한 성장
+---
 
-### 예상 최적화 효과
-| 메트릭 | Before | After (Phase 1+2) |
-|--------|--------|-------------------|
-| addFrame 비용 | ~2-5ms | ~0ms |
-| SSIM 메모리 peak | ~336MB | ~0 추가 할당 |
-| evaluateQuantitativeGate | ~8-15ms | ~4-7ms |
-| Grid search (steps=5) | ~9.4s | ~2.4s (coarse-to-fine) |
+## Performance Findings (7건)
+
+### Critical/High (2건)
+
+| ID | 심각도 | 항목 | 상세 |
+|----|--------|------|------|
+| **PERF-4** | **HIGH** | **8-bit linear 양자화 밴딩 (P1 이슈)** | `texture_pool.cpp:337`에서 중간 버퍼를 GL_RGBA/GL_UNSIGNED_BYTE로 생성. Linear 색공간에서 8-bit는 어두운 영역(value<0.1)에서 ~25단계만 사용 가능 → ~4-8% 밝기 점프, 포스터라이제이션 발생. |
+| **PERF-3** | **MED-HIGH** | **pow() 2회 비용** | sRGB↔Linear 변환에 `pow(x,2.2)`/`pow(x,1/2.2)` 사용. `pow`는 `exp2(y*log2(x))`로 확장되어 vec3 기준 6개 SFU 호출. MID tier GPU(Mali-G7x)에서 12-24 cycles, Composite 패스의 40-60% 차지 가능. |
+
+### Medium (2건)
+
+| ID | 심각도 | 항목 | 상세 |
+|----|--------|------|------|
+| PERF-2 | MEDIUM | Texture fetch 병목 | 4 texture fetch/fragment, 1080p@30fps 기준 ~1GB/s 텍스처 대역폭. 다만 Gaussian blur 패스가 실제 병목이므로 Composite 패스는 상대적으로 가벼움. |
+| PERF-4b | MEDIUM | GL_RGBA16F 전환 비용 | RGBA16F 시 메모리 2x(24.9→49.7MB), 대역폭 2x. 대안: GL_R11F_G11F_B10F는 동일 4바이트/픽셀로 메모리 증가 없이 정밀도 개선 가능. |
+
+### Low (3건)
+
+| ID | 심각도 | 항목 | 상세 |
+|----|--------|------|------|
+| PERF-1 | LOW | Soft Light ALU 비용 | Additive(1 add) → Soft Light(7-8 ops). GPU별 +1-2 cycles. Texture fetch latency에 숨겨짐. **영향 무시 가능.** |
+| PERF-5 | LOW | Register pressure | ~8-10 vec4 레지스터. Mali-G7x 64 vec4, Adreno 128 vec4 대비 점유율 영향 없음. |
+| PERF-7 | LOW | clamp() 필요성 | 입력 범위상 필수(adjusted_high ∈ [-1,1] 가능). 제거 불가. |
+
+### 성능 영향 종합
+
+| GPU 아키텍처 | Soft Light ALU 추가 | pow() 비용 | 30fps 유지 |
+|-------------|---------------------|-----------|-----------|
+| Mali-G710+ (Valhall) | +1-2 cycles | 6-12 cycles | ✅ |
+| Mali-G7x (Bifrost) | +1-2 cycles | 12-24 cycles | ✅ (여유 감소) |
+| Adreno 7xx | +1 cycle | 6 cycles | ✅ |
+| Adreno 6xx | +1-2 cycles | 6-12 cycles | ✅ |
+| PowerVR Rogue | +2 cycles | 12-18 cycles | ✅ (여유 감소) |
+
+---
+
+## 권장 수정 우선순위
+
+### 즉시 (P4-W4 내)
+1. **PERF-4**: TexturePool에 `internal_format` 파라미터 추가, FreqSep 중간 버퍼를 `GL_R11F_G11F_B10F`로 전환 (메모리 증가 없이 밴딩 해소)
+2. **SEC-2**: mapSkinQuality 진입부에 NaN/Inf 가드 1줄 추가
+
+### 단기
+3. **PERF-3**: pow(x,2.2)/pow(x,1/2.2)를 다항식 근사로 교체 → MID tier GPU에서 Composite 패스 ~30-50% 절감
+
+### 장기
+4. **PERF-4 확장**: DeviceTier 기반 HIGH=RGBA16F / MID=R11F_G11F_B10F 분기
+5. **PERF-3 Option B**: 파이프라인 전체 linear 통일, 최종 출력에서만 sRGB 변환
 
 ---
 
 ## Critical Issues for Phase 3 Context
 
-1. **테스트 커버리지**: PF-2(addReductionRatio 오버로드)와 ring buffer 교체 후 기존 테스트 수정 필요
-2. **SSIM 구현 교체**: zero-allocation 버전의 정밀도 검증 테스트 필요
-3. **gridSearch 상한 검증**: steps 제한에 대한 경계값 테스트 추가 필요
-4. **문서화**: TemporalAnalyzer thread safety 정책 명시, 각 메서드의 성능 특성 문서화 필요
+1. **P2 (gain 손실) 수정 시**: gain 보상 스케일러 도입 후 전 skinQuality 범위 시각적 검증 테스트 필요
+2. **P1 (버퍼 포맷) 수정 시**: GL_R11F_G11F_B10F 지원 여부 디바이스별 테스트 필요 (GLES 3.0+ 필수)
+3. **pow() 근사 적용 시**: sRGB↔Linear 변환 정확도 검증 테스트 필요 (max error < 0.5%)
+4. **문서화**: Soft Light gain 특성, 버퍼 포맷 결정 근거 문서화 필요
