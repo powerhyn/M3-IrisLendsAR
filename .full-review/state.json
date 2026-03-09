@@ -1,16 +1,16 @@
 {
-  "target": "P4-W3-05: 튜닝/테스트/릴리즈 인프라 구현 — QualityMetrics + ABCompare + ReleaseGate + ParamTuner",
+  "target": "P4-W4-01b: Soft Light 합성 전환",
   "status": "complete",
   "flags": {
     "security_focus": false,
-    "performance_critical": false,
+    "performance_critical": true,
     "strict_mode": false,
-    "framework": "C++17"
+    "framework": "C++17 / GLSL ES 3.1"
   },
   "current_step": 5,
   "current_phase": 5,
-  "completed_steps": ["0-scope", "1A", "1B", "2A", "2B", "checkpoint-1", "3A", "3B", "4A", "5"],
+  "completed_steps": ["0-scope", "1A", "1B", "2A", "2B", "checkpoint-1", "3A", "3B", "4A", "4B", "5"],
   "files_created": ["00-scope.md", "01-quality-architecture.md", "02-security-performance.md", "03-testing-documentation.md", "04-best-practices.md", "05-final-report.md"],
-  "started_at": "2026-03-05T12:00:00Z",
-  "last_updated": "2026-03-05T14:30:00Z"
+  "started_at": "2026-03-09T00:00:00Z",
+  "last_updated": "2026-03-09T00:30:00Z"
 }

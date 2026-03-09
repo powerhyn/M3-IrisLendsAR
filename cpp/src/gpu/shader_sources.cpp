@@ -497,10 +497,17 @@ void main() {
     vec3 adjusted_high = high * preserve;
 
     // Soft Light 합성 (Pegtop variant)
-    // blend = 0.5 + adjusted_high: 고주파 0이면 blend=0.5 → identity
-    vec3 blend = clamp(vec3(0.5) + adjusted_high, 0.0, 1.0);
-    vec3 beauty = (vec3(1.0) - 2.0 * blend) * smoothLow * smoothLow
-                + 2.0 * blend * smoothLow;
+    // SoftLight(a, 0.5+h) = a + 2h·a·(1-a)
+    // → 유효 gain = 2a(1-a): 중간톤(a=0.5) 50%, 어두운/밝은(a=0.1/0.9) 18%
+    // → gain 보상으로 톤 의존 손실 보정 (최대 4x, 하한 0.25로 발산 방지)
+    float baseLum = dot(smoothLow, vec3(0.2126, 0.7152, 0.0722));
+    float gainFactor = 2.0 * baseLum * (1.0 - baseLum);
+    float compensation = 1.0 / max(gainFactor, 0.25);
+    vec3 compensated_high = adjusted_high * compensation;
+
+    vec3 blend = clamp(vec3(0.5) + compensated_high, 0.0, 1.0);
+    // MAD 최적화: (1-2b)*a²+2b*a ≡ a*(a + 2b*(1-a))
+    vec3 beauty = smoothLow * (smoothLow + 2.0 * blend * (vec3(1.0) - smoothLow));
 
     // Blend with original using skin mask
     vec3 result = mix(orig, beauty, mask);

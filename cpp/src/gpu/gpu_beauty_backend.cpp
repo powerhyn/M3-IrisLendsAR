@@ -1003,7 +1003,8 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     );
 
     // high_freq_preserve: 질감 보존 비율 (1.0=원본 → 0.30=70% 감쇠)
-    p.high_freq_preserve = 1.0f - s * 0.70f;
+    constexpr float kMaxHighFreqAttenuation = 0.70f;
+    p.high_freq_preserve = 1.0f - s * kMaxHighFreqAttenuation;
 
     // low_freq_smooth: 이중 블러 반경 비율
     p.low_freq_smooth_radius_ratio = 0.30f + s * 0.15f;

@@ -1,33 +1,45 @@
 # Phase 4: Best Practices & Standards
 
-## Framework & Language Findings (C++17)
+## 대상: P4-W4-01b Soft Light 합성 전환
 
-### Critical (1건)
-| ID | 위치 | 요약 |
+---
+
+## Framework & Language Findings (9건)
+
+### High (3건)
+
+| ID | 항목 | 상세 |
 |----|------|------|
-| BP-1 | 전체 .cpp | catch(...) 예외 삼킴 — 구체적 예외 타입 분리 + 로깅 필요 |
+| **GLSL-1** | **sRGB 전달함수 정확도** | `pow(x,2.2)`는 sRGB 규격 근사치. 실제 sRGB는 0.04045 이하에서 선형 세그먼트 사용. 어두운 피부톤에서 색상 왜곡. 정확한 `sRGBToLinear()` 또는 하드웨어 sRGB 권장. |
+| **GLSL-2** | **하드웨어 sRGB vs 수동 pow()** | GLES 3.0+ `GL_SRGB8_ALPHA8` + `GL_FRAMEBUFFER_SRGB`로 셰이더 내 pow() 2회 완전 제거 가능. 성능(PERF-3)과 정확도 동시 해결. **가장 높은 ROI 단일 변경.** |
+| **GPU-3** | **pow() 모바일 비용** | PERF-3 재확인. Mali-G7x에서 12-24 cycles. GLSL-2로 해결 가능. |
 
-### High (4건)
-| ID | 위치 | 요약 |
+### Medium (3건)
+
+| ID | 항목 | 상세 |
 |----|------|------|
-| BP-4 | quality_metrics.cpp:411 | vector::erase(begin()) → std::deque 또는 circular buffer |
-| BP-7 | release_gate.h, gpu_beauty_backend.h | DeviceTier enum 중복 → 공통 헤더 추출 |
-| BP-8 | ab_compare.cpp | JSON 수동 조립 이스케이핑 없음 |
-| BP-11 | 전체 공개 헤더 | Pimpl 미적용 (프로젝트 컨벤션 위반) |
+| **GLSL-4** | **Soft Light 수식 MAD 최적화** | 현재: `(1-2b)*a²+2b*a`. 개선: `a*(a+2b*(1-a))`. 곱셈 4회→3회, MAD 패턴 적합. |
+| **CPP-1** | **매직 넘버 상수화** | `0.70f` → `constexpr float kMaxHighFreqAttenuation = 0.70f;` |
+| **CPP-2** | **NaN/Inf 파라미터 검증** | `mapSkinQuality` 진입부 `std::isnan`/`std::isinf` 가드 추가 권장. (SEC-2와 동일) |
 
-### Medium (6건)
-| ID | 위치 | 요약 |
+### Low (3건)
+
+| ID | 항목 | 상세 |
 |----|------|------|
-| BP-2 | param_tuner.cpp | std::max/min 체인 → std::clamp 통일 |
-| BP-3 | param_tuner.cpp, release_gate.cpp | snprintf + 하드코딩 버퍼 혼용 |
-| BP-5 | quality_metrics.h | All-static class → namespace 함수 고려 |
-| BP-6 | 전체 | 매직 넘버 중복 → inline constexpr 공통 상수 헤더 |
-| BP-10 | param_tuner.h | std::function ProcessCallback 오버헤드 |
-| BP-14 | ab_compare.cpp 등 | noexcept + vector::push_back → bad_alloc 시 terminate 위험 |
+| GLSL-3 | precision qualifier 세분화 | 마스크에 `mediump` 가능하나 실질 효과 미미. 현재 유지 합리적. |
+| GPU-2 | 마스크 Y좌표 플립 위치 | vertex shader varying 전달이 깔끔하나 성능 차이 없음. |
+| GLSL-5 | blend clamp과 gain loss 관계 | 의도적 설계. gain compensation 적용 시 재검토 필요. |
 
-### Low (7건)
-- std::string_view 미사용, structured bindings 미사용, toString 중복, constexpr 활용 부족, using namespace in tests, if-with-initializer 미사용, range-based for 양호
+### 긍정적 평가
+
+| 항목 | 판정 |
+|------|------|
+| Deprecated API | 없음 — `#version 310 es`, `texture()`, `in`/`out` 현행 표준 |
+| GLES 3.1 호환성 | 양호 |
+| C++17 활용 | 양호 — `std::clamp`, 구조화된 바인딩 적절 사용 |
+
+---
 
 ## CI/CD & DevOps Findings
 
-**제외** — 사용자 요청에 따라 CI/CD 검증을 건너뜁니다 (SDK 프로젝트, 미배포 상태).
+해당 없음 — SDK 프로젝트 미배포 상태, CI/CD 리뷰 제외.

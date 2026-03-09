@@ -1,7 +1,7 @@
 # P4-W4-01b: Soft Light 합성 전환
 
 > **상위 문서**: `P4-W4-01_freqsep_quality_improvement.md`
-> **상태**: ✅ 완료
+> **상태**: 🔄 이슈 수정 중 (P4-W4-01b-issue)
 > **난이도**: 낮음 | **추가 GPU 비용**: ALU only (패스 추가 없음)
 > **선행 조건**: Step 1 (Linear RGB) 완료 후 적용 — Linear 공간에서 Soft Light 수식이 정확
 
@@ -40,6 +40,10 @@ SoftLight(base, blend) = (1 - 2*blend) * base² + 2 * blend * base
 - **비선형 톤 보존**: base의 밝기에 비례하여 고주파 영향 스케일링
 - **조건 분기 없음**: Pegtop variant는 단일 수식 → GPU에서 Overlay보다 효율적
 - **Linear RGB에서 안전**: pow 연산 없이 곱셈/덧셈만으로 구성
+
+한계:
+- **톤 의존 gain 손실**: 유효 gain `2a(1-a)`가 중간톤(a=0.5)에서 최대 0.5, 어두운/밝은 톤(a=0.1/0.9)에서 0.18까지 하락 → 고주파 디테일 50-90% 손실
+- **gain 보상 필수**: 보상 없이는 `uHighFreqPreserve=1.0`에서도 절반 이상 손실. 톤 의존 보상 스케일러(`1/max(2a(1-a), 0.25)`)로 해소
 
 ### Council 합의 근거
 
@@ -150,12 +154,11 @@ void main() {
 )glsl";
 ```
 
-### 2.3 C++ 측 변경: 없음
+### 2.3 C++ 측 변경
 
-Soft Light 전환은 셰이더 내부 ALU 변경만으로 완료됨:
 - **Uniform 추가 없음**: 기존 uniform 그대로 사용
 - **FreqSepParams 변경 없음**: 파라미터 구조체 동일
-- **gpu_beauty_backend.cpp 변경 없음**: Composite 패스 호출 코드 동일
+- **gpu_beauty_backend.cpp**: `mapSkinQuality`에서 `high_freq_preserve` 감쇠 계수 0.65→0.70으로 재튜닝 (Soft Light의 부드러운 블렌딩에 맞춰 더 강한 감쇠 적용)
 - **gpu_beauty_backend.h 변경 없음**: 구조체 변경 없음
 
 ### 2.4 mapSkinQuality 재튜닝 (선택적)

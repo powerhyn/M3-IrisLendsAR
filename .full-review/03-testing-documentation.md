@@ -1,54 +1,68 @@
 # Phase 3: Testing & Documentation Review
 
-## Test Coverage Findings
-
-### 커버리지 현황 (공개 메서드 기준 ~65%)
-
-**미테스트 공개 메서드 (3건)**:
-- `ParamTuner::recommendPresets()` — 핵심 비즈니스 로직, 전용 테스트 없음
-- `ParamTuner::generateReport()` — 리포트 생성, 전용 테스트 없음
-- `ABCompare::reset()` — 상태 초기화, 전용 테스트 없음
-
-**미테스트 경계 조건**:
-- ReleaseGate 모든 임계값 정확한 경계(33.0ms, 0.30, 0.60, 0.05, 0.95)
-- MID/LOW 디바이스 티어의 `getMaxFreqSepTimeMs()` (HIGH 티어만 테스트)
-- TemporalAnalyzer 300프레임 순환 버퍼 전환 경로
-- `evaluateQuantitativeGate()` CONDITIONAL_GO 경로 (2/3 통과)
-- ABCompare::addResult() 무제한 성장 경로
-- NaN/Inf 입력 처리
-
-**테스트 품질**:
-- 27개 테스트 케이스, 동작 기반 방식 (양호)
-- 일부 테스트의 어설션 강도 약함 (ABCompare 계산 결과 내용 미검증)
-- 테스트 픽스처(TEST_F) 미사용 → DRY 위반 (ReleaseGate 5개 테스트에서 동일 구조체 반복 초기화)
-- 성능 회귀 테스트 0건
-
-### 심각도별 분류
-
-| 심각도 | 건수 | 주요 내용 |
-|--------|------|-----------|
-| High | 3 | recommendPresets/generateReport/reset 미테스트, ReleaseGate 경계값, gridSearch steps 폭발 |
-| Medium | 7 | NaN/Inf 검증, 300프레임 순환 버퍼, CONDITIONAL_GO 경로, 티어별 시간, 성능 회귀 |
-| Low | 3 | 단색 이미지 SSIM 분모 0, null 콜백, 테스트 DRY 개선 |
+## 대상: P4-W4-01b Soft Light 합성 전환
 
 ---
 
-## Documentation Findings
+## Test Coverage Findings (7건)
 
-### 긍정적 평가
-- 헤더 Doxygen 커버리지 우수 (모든 공개 클래스/구조체/메서드)
-- `TemporalAnalyzer`, `ABCompare`, `ParamTuner`에 `@code` 사용 예제 포함
-- `ReleaseGate` 3-tier 게이트 구조 서술형 설명 명확
+### Critical (2건)
 
-### 심각도별 분류
+| ID | 항목 | 상세 |
+|----|------|------|
+| **T1** | **셰이더 수학 검증 테스트 부재** | Pegtop Soft Light 수식 `(1-2b)*a²+2b*a`에 대한 CPU 참조 구현 테스트가 전혀 없음. Identity(h=0→beauty=base), 양/음 고주파, 출력 범위 [0,1] 검증 불가. 셰이더 변경의 핵심인데 검증 수단 없음. |
+| **T2** | **Gain 손실(P2) 검증 테스트 부재** | `SoftLight(a,0.5+h)=a+2h·a·(1-a)`의 gain 계수 `2a(1-a)` 특성을 검증하는 테스트 없음. 어두운/밝은 피부톤에서 50-90% 고주파 손실이 허용 범위인지 정량적 확인 불가. |
 
-| 심각도 | 건수 | 주요 내용 |
-|--------|------|-----------|
-| High | 3 | TemporalAnalyzer 스레드 안전성 미명시, 임계값(0.30/0.60/0.95 등) 도출 근거 완전 부재, getMaxFreqSepTimeMs() LOW 티어 설명 헤더 미반영 |
-| Medium | 8 | 모듈 간 협력 관계 아키텍처 설명 부재, C API 미노출 의도 미명시, catch(...) 정책 일관성, DeviceTier 중복 동기화 위험, computeScore() 가중치 근거, ITA 임계값 참조, preference_ratio > 0.7 근거, texture_pool_additional <= 3 근거 |
-| Low | 7 | QualityMetrics 사용 예제 추가, ReleaseGate 입력 초기화 예제, 워크 페이퍼 체크박스/상태 갱신 등 |
+### High (2건)
 
-### 워크 페이퍼 불일치 (3건)
-1. **Medium**: `high_freq_preserve` 4번째 튜닝 변수가 워크 페이퍼 §2.1에 누락
-2. **Low**: 완료 조건 체크박스 미갱신
-3. **Low**: 전체 상태가 "진행 중"으로 미갱신
+| ID | 항목 | 상세 |
+|----|------|------|
+| **T3** | **밴딩 위험(P1) 테스트 부재** | 8-bit 렌더 타겟에서 linear-light Soft Light 출력의 양자화 아티팩트 검증 없음. `base²` 항이 어두운 값을 추가 압축하여 밴딩 악화 가능. |
+| **T4** | **blend clamp 동작 테스트 부재** | `adjusted_high > 0.5` 또는 `< -0.5`일 때 clamp로 고주파 정보가 잘리는 비선형성이 미검증. Linear RGB에서 `orig-low`가 ±1.0 근접 가능. |
+
+### Medium (2건)
+
+| ID | 항목 | 상세 |
+|----|------|------|
+| T5 | `high_freq_preserve` 경계값 취약 | `test_beauty_config_v2.cpp:331`에서 [0.30, 0.40] 범위 검증. 0.70 계수로 값이 정확히 하한(0.30)에 걸림. `EXPECT_NEAR(0.30f, 0.02f)` 방식 권장. |
+| T6 | Additive→Soft Light 전환 회귀 테스트 부재 | golden-value 테스트 없음. 셰이더 롤백 시 어떤 테스트도 실패하지 않음. |
+
+### Low (1건)
+
+| ID | 항목 | 상세 |
+|----|------|------|
+| T7 | pow() 성능 테스트 | Step 1(Linear RGB) 범위이므로 out of scope. |
+
+### 테스트 품질 평가
+
+| 항목 | 평가 |
+|------|------|
+| 동작 vs 구현 테스트 | Good — 범위, 단조성, 경계값 검증 |
+| 파라미터 엣지 케이스 | Good — NaN/Inf, 음수, 과범위 커버 |
+| 셰이더 로직 테스트 | **None** — CPU 참조 구현 부재 |
+| 시각적 회귀 테스트 | **None** — golden-value 부재 |
+
+---
+
+## Documentation Findings (6건)
+
+### High (2건)
+
+| ID | 항목 | 상세 |
+|----|------|------|
+| **D1** | **P1(밴딩) 미언급** | 작업 문서에 8-bit linear 양자화 위험 전혀 기술되지 않음. `base²` 항이 어두운 영역을 추가 압축하는 점도 미언급. |
+| **D2** | **P2(gain 손실) 미언급** | gain 계수 `2a(1-a)` 특성과 50-90% 고주파 손실이 문서에 없음. 이점만 기술하고 한계 누락. |
+
+### Medium (3건)
+
+| ID | 항목 | 상세 |
+|----|------|------|
+| D3 | Section 2.3/2.4 모순 | "gpu_beauty_backend.cpp 변경 없음" vs 실제 0.65→0.70 변경 존재. |
+| D4 | 튜닝 근거 미기록 | 0.70 계수 선택의 실측 데이터 미기록. |
+| D5 | 완료 상태 불일치 | 상태 "✅ 완료"이나 완료 기준 2건 미체크. |
+
+### Low (1건)
+
+| ID | 항목 | 상세 |
+|----|------|------|
+| D6 | Section 3.4 출력 범위 증명 오타 | 중간 단계 수식 오류 (결론은 정확). |
