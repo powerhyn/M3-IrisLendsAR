@@ -439,6 +439,7 @@ uniform sampler2D uTexture;
 uniform vec2 uDirection;        // (1/w, 0) or (0, 1/h)
 uniform int uRadius;            // adaptive radius (6~28)
 uniform float uWeights[29];     // CPU-precomputed normalized half-kernel weights
+uniform bool uLinearize;        // sRGB→Linear 변환 여부 (Pass 1a에서만 true)
 
 void main() {
     vec3 sum = vec3(0.0);
@@ -446,6 +447,9 @@ void main() {
     for (int i = -uRadius; i <= uRadius; i++) {
         vec2 offset = uDirection * float(i);
         vec3 s = texture(uTexture, vTexCoord + offset).rgb;
+        if (uLinearize) {
+            s = pow(s, vec3(2.2));
+        }
         sum += s * uWeights[abs(i)];
     }
 
@@ -477,13 +481,14 @@ void main() {
     vec3 smoothLow = texture(uSmoothedLow, vTexCoord).rgb;
     vec3 low       = texture(uLowFreq, vTexCoord).rgb;
     vec3 orig      = texture(uOriginal, vTexCoord).rgb;
+    orig = pow(orig, vec3(2.2));  // sRGB → Linear
     float mask     = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - vTexCoord.y)).r;
 
     // High Frequency inline extraction (ALU operation, no separate pass/texture)
     vec3 high = orig - low;
 
-    // Y(luminance) based high-freq magnitude
-    float magnitude = dot(abs(high), vec3(0.299, 0.587, 0.114));
+    // Y(luminance) based high-freq magnitude — Rec.709 (linear-light 기준)
+    float magnitude = dot(abs(high), vec3(0.2126, 0.7152, 0.0722));
 
     // Non-linear attenuation: large changes (blemishes) → strong attenuation, small changes (skin texture) → preserve
     float blemishFactor = smoothstep(uAttenuationLow, uAttenuationHigh, magnitude);
@@ -496,6 +501,9 @@ void main() {
 
     // Blend with original using skin mask
     vec3 result = mix(orig, beauty, mask);
+
+    // Linear → sRGB (음수 방어: pow(음수, 비정수)는 GLSL undefined behavior)
+    result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
 
     fragColor = vec4(result, 1.0);
 }

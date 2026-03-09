@@ -7,6 +7,7 @@
 #include "iris_sdk/gpu/render_context.h"
 #include "iris_sdk/beauty_roi_manager.h"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <string>
@@ -331,6 +332,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
         freq_sep_gaussian_uniforms_.uDirection = glGetUniformLocation(freq_sep_gaussian_program_, "uDirection");
         freq_sep_gaussian_uniforms_.uRadius = glGetUniformLocation(freq_sep_gaussian_program_, "uRadius");
         freq_sep_gaussian_uniforms_.uWeights = glGetUniformLocation(freq_sep_gaussian_program_, "uWeights[0]");
+        freq_sep_gaussian_uniforms_.uLinearize = glGetUniformLocation(freq_sep_gaussian_program_, "uLinearize");
     }
 
     // Freq Sep Composite Uniforms
@@ -993,23 +995,22 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     float t = std::clamp(skin_quality, 0.0f, 1.0f);
     float s = t * t * (3.0f - 2.0f * t);  // smoothstep
 
-    // blur_radius: 3~6% of face_width, scales with quality → clamp(6, 28)
-    // 낮은 값에서는 작은 블러로 자연스러움 유지
+    // blur_radius: face_width 대비 3~6%
     const float ratio = 0.03f + s * 0.03f;
     p.blur_radius = std::clamp(
         static_cast<int>(face_width * ratio),
         6, 28
     );
 
-    // high_freq_preserve: 1.0 → 0.35 (질감을 최소 35% 보존하여 플라스틱 방지)
+    // high_freq_preserve: 질감 보존 비율 (1.0=원본 → 0.35=65% 감쇠)
     p.high_freq_preserve = 1.0f - s * 0.65f;
 
-    // low_freq_smooth: 30~45% of blur_radius (이중 블러 축소 → 피부 색감 보존)
+    // low_freq_smooth: 이중 블러 반경 비율
     p.low_freq_smooth_radius_ratio = 0.30f + s * 0.15f;
 
-    // attenuation range: 임계값 상향 → 진짜 잡티만 감쇠, 자연스러운 피부 변화 보존
-    p.attenuation_low = 0.04f;
-    p.attenuation_high = 0.15f + s * 0.15f;  // 0.15 ~ 0.30
+    // attenuation: 3-신호 감쇠 강도
+    p.attenuation_low = 0.005f;
+    p.attenuation_high = 0.03f + s * 0.03f;
 
     return p;
 }
@@ -1190,6 +1191,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / blur_w, 0.0f);
     glUniform1i(freq_sep_gaussian_uniforms_.uRadius, blur_radius);
     glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
+    glUniform1i(freq_sep_gaussian_uniforms_.uLinearize, 1);  // Pass 1a: sRGB→Linear 변환 활성화
     glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
@@ -1199,6 +1201,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     // Pass 1b: Vertical Gaussian → lowFreq
     std::snprintf(tag, sizeof(tag), "FreqSep_GaussianV%s", cfg.blur_profiler_suffix);
     if (profiling) profiler_->begin(tag);
+    glUniform1i(freq_sep_gaussian_uniforms_.uLinearize, 0);  // Pass 1b 이후: linearize 비활성화
     glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / blur_h);
     glBindFramebuffer(GL_FRAMEBUFFER, lowFreq->fbo_id);
     glActiveTexture(GL_TEXTURE0);
@@ -1215,6 +1218,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     std::snprintf(tag, sizeof(tag), "FreqSep_LowSmoothH%s", cfg.blur_profiler_suffix);
     if (profiling) profiler_->begin(tag);
     glUseProgram(freq_sep_gaussian_program_);
+    glUniform1i(freq_sep_gaussian_uniforms_.uLinearize, 0);  // Pass 2a/2b: 이미 Linear — 변환 불필요
     glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
     glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / blur_w, 0.0f);
     glUniform1i(freq_sep_gaussian_uniforms_.uRadius, low_radius);
@@ -1414,8 +1418,16 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         roi.timestamp_ms = detection->timestamp_ms;
 
         if (detection->face_mesh_valid) {
+            // 전면 카메라 미러링 보정: 입력 텍스처는 이미 X 미러링됨,
+            // 하지만 face_mesh 좌표는 원본(미러링 전) 기준 → X를 뒤집어야 함
+            std::array<IrisLandmark, 478> mirrored_mesh;
+            for (int i = 0; i < 478; i++) {
+                mirrored_mesh[i] = detection->face_mesh[i];
+                mirrored_mesh[i].x = 1.0f - mirrored_mesh[i].x;
+            }
+
             if (BeautyROIManager::computeROI(
-                    detection->face_mesh, 478,
+                    mirrored_mesh.data(), 478,
                     width, height, config, roi)) {
                 // computeROI outputs normalized (0~1) face_rect → convert to pixel
                 roi.face_rect.x *= width;

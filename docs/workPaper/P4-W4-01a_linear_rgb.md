@@ -1,7 +1,7 @@
 # P4-W4-01a: Linear RGB 색공간 전환
 
 > **상위 문서**: `P4-W4-01_freqsep_quality_improvement.md`
-> **상태**: ⏳ 대기
+> **상태**: ✅ 완료
 > **난이도**: 낮음 | **추가 GPU 비용**: ALU only (패스 추가 없음)
 
 ---
@@ -104,8 +104,8 @@ void main() {
     vec3 beauty = smoothLow + adjusted_high;
     vec3 result = mix(orig, beauty, mask);
 
-    // ★ 추가: 최종 출력을 Linear→sRGB 변환
-    result = pow(result, vec3(1.0 / 2.2));
+    // ★ 추가: 최종 출력을 Linear→sRGB 변환 (음수 방어 필수)
+    result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
 
     fragColor = vec4(result, 1.0);
 }
@@ -173,6 +173,20 @@ p.attenuation_high = 0.03f + s * 0.03f;  // 기존 0.15~0.30 → ~0.03~0.06
 
 ⚠️ **이 값은 실제 테스트 후 재조정 필수** — Linear 변환 후 Android 디바이스에서 skinQuality 0.2/0.5/1.0을 시각적으로 비교하여 최종 확정.
 
+### 2.6 Luminance 계수 교체 (Rec.601 → Rec.709)
+
+**파일**: `cpp/src/gpu/shader_sources.cpp` — FREQ_SEP_COMPOSITE_FRAGMENT 내 magnitude 계산
+
+Linear-light 공간에서는 Rec.601 감마 보정 계수 `(0.299, 0.587, 0.114)` 대신 Rec.709 선형 계수 `(0.2126, 0.7152, 0.0722)`를 사용해야 한다. 현재 코드와 이후 Step 3(edge), Step 5(sharpen)의 모든 luminance 계산에 동일하게 적용.
+
+```glsl
+// 변경 전 (sRGB 감마 공간용)
+float magnitude = dot(abs(high), vec3(0.299, 0.587, 0.114));
+
+// 변경 후 (Linear-light 공간용)
+float magnitude = dot(abs(high), vec3(0.2126, 0.7152, 0.0722));
+```
+
 ---
 
 ## 3. 테스트 계획
@@ -201,10 +215,10 @@ p.attenuation_high = 0.03f + s * 0.03f;  // 기존 0.15~0.30 → ~0.03~0.06
 
 ## 4. 완료 기준
 
-- [ ] FREQ_SEP_GAUSSIAN_FRAGMENT에 `uLinearize` uniform 추가
-- [ ] FREQ_SEP_COMPOSITE_FRAGMENT에 sRGB↔Linear 변환 추가
-- [ ] gpu_beauty_backend.h에 `uLinearize` uniform 멤버 추가
-- [ ] gpu_beauty_backend.cpp에서 Pass 1a에만 linearize=true 설정
-- [ ] mapSkinQuality의 attenuation 재튜닝
-- [ ] FreqSep 관련 테스트 통과
-- [ ] Android 디바이스에서 halo 감소 시각적 확인
+- [x] FREQ_SEP_GAUSSIAN_FRAGMENT에 `uLinearize` uniform 추가
+- [x] FREQ_SEP_COMPOSITE_FRAGMENT에 sRGB↔Linear 변환 추가
+- [x] gpu_beauty_backend.h에 `uLinearize` uniform 멤버 추가
+- [x] gpu_beauty_backend.cpp에서 Pass 1a에만 linearize=true 설정
+- [x] mapSkinQuality의 attenuation 재튜닝
+- [x] FreqSep 관련 테스트 통과 (기존 테스트 호환 확인)
+- [ ] Android 디바이스에서 halo 감소 시각적 확인 (디바이스 테스트 필요)

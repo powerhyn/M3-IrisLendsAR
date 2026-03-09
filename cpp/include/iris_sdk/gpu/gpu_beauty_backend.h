@@ -467,6 +467,7 @@ private:
         GLint uDirection = -1;
         GLint uRadius = -1;
         GLint uWeights = -1;
+        GLint uLinearize = -1;  // sRGB→Linear 변환 플래그
     } freq_sep_gaussian_uniforms_;
 
     // Freq Sep Composite Uniform 캐시

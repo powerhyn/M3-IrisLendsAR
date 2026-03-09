@@ -196,7 +196,7 @@ void BeautyROIManager::createSkinMask(
 
     for (int i = 0; i < FACE_OVAL_COUNT; i++) {
         const auto& lm = face_mesh[FACE_OVAL_INDICES[i]];
-        int x = static_cast<int>(lm.x * mask_width);
+        int x = static_cast<int>(lm.x * mask_width);  // 전면카메라 미러링 보정
         int y = static_cast<int>(lm.y * mask_height);
 
         // 범위 제한

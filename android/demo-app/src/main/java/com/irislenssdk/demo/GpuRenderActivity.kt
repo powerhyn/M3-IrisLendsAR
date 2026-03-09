@@ -824,7 +824,7 @@ class GpuRenderActivity : AppCompatActivity() {
         beautyConfig.whitening = 0.0f
         beautyConfig.colorBalance = 0.0f
         beautyConfig.softFocus = 0.3f
-        beautyConfig.roiOnly = false  // 전체 화면 뷰티 처리 (ROI 전용 모드 OFF)
+        beautyConfig.roiOnly = true  // ROI 전용 모드: 얼굴 피부에만 보정 적용
 
         // GLView에 초기 뷰티 설정 전달
         cameraGLView.setBeautyConfig(beautyConfig)

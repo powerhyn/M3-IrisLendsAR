@@ -114,16 +114,19 @@ uniform float uAttenuationLow;
 uniform float uAttenuationHigh;
 
 void main() {
-    vec3 smoothLow = texture(uSmoothedLow, vTexCoord).rgb;
-    vec3 low       = texture(uLowFreq, vTexCoord).rgb;
+    vec3 smoothLow = texture(uSmoothedLow, vTexCoord).rgb;  // 이미 linear
+    vec3 low       = texture(uLowFreq, vTexCoord).rgb;      // 이미 linear
     vec3 orig      = texture(uOriginal, vTexCoord).rgb;
     float mask     = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - vTexCoord.y)).r;
+
+    // ★ Step 1: sRGB → Linear (original만)
+    orig = pow(orig, vec3(2.2));
 
     // High Frequency inline extraction
     vec3 high = orig - low;
 
-    // Y(luminance) based high-freq magnitude
-    float magnitude = dot(abs(high), vec3(0.299, 0.587, 0.114));
+    // Y(luminance) based high-freq magnitude — Rec.709 (linear-light 기준)
+    float magnitude = dot(abs(high), vec3(0.2126, 0.7152, 0.0722));
 
     // Non-linear attenuation
     float blemishFactor = smoothstep(uAttenuationLow, uAttenuationHigh, magnitude);
@@ -138,6 +141,9 @@ void main() {
 
     // Blend with original using skin mask
     vec3 result = mix(orig, beauty, mask);
+
+    // ★ Step 1: Linear → sRGB (음수 방어)
+    result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
 
     fragColor = vec4(result, 1.0);
 }

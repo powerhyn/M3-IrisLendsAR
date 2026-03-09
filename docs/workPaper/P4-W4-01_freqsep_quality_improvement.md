@@ -26,7 +26,7 @@
 
 | Step | 작업 | 상태 |
 |:----:|------|:----:|
-| 1 | Linear RGB 색공간 전환 | ⏳ 대기 |
+| 1 | Linear RGB 색공간 전환 | ✅ 완료 |
 | 2 | Soft Light 합성 전환 | ⏳ 대기 |
 | 3 | Edge-aware Attenuation | ⏳ 대기 |
 | 4 | 톤커브 미드톤 리프트 | ⏳ 대기 |
@@ -79,6 +79,20 @@
 | `cpp/include/iris_sdk/gpu/gpu_beauty_backend.h` | FreqSepParams 필드 추가, FreqSepCompositeUniforms 필드 추가, sharpen 프로그램/uniform 멤버 | 3,4,5 |
 | `cpp/tests/test_beauty_config_v2.cpp` | FreqSep 테스트 기대값 업데이트 | 1,3 |
 
+## 테스트 전략 (Phase 1 공통)
+
+현재 자동 테스트는 `mapSkinQuality()` 파라미터 범위 검사에 머무르고 있다.
+핵심 리스크(셰이더 수학, MID half-res 경로, mask 경계)를 커버하려면 아래가 필요:
+
+| 테스트 유형 | 커버리지 | 우선순위 |
+|------------|---------|---------|
+| **골든 이미지 테스트** | full-res + MID half-res에서 기준 출력 비교 (PSNR/SSIM) | 높음 |
+| **Shader fixture** | 소규모 텍스처로 셰이더 수학 검증 (Linear 변환, attenuation, edge) | 높음 |
+| **Half-res 경로 테스트** | res_divisor=2에서 temp/compositeRT 해상도 정합성 | 높음 |
+| **Mask 경계 테스트** | mask 0→1 전이 영역에서 아티팩트 없음 확인 | 중간 |
+
+> Phase 1 완료 후 Android 디바이스 실측과 병행하여 골든 이미지 기준선 확정
+
 ## Phase 2 (조건부)
 
 Phase 1 완료 후에도 품질이 부족한 경우:
@@ -93,3 +107,4 @@ Phase 1 완료 후에도 품질이 부족한 경우:
 |------|------|
 | 2026-03-08 | 초안 작성, Phase 1 Step 1~5 정의 |
 | 2026-03-09 | 세부 구현 문서 5건으로 분리, 코드 레벨 상세화 |
+| 2026-03-09 | Step 1 구현 완료, 피드백 6건 반영 (temp/half-res, chromaDev, luma 계수, 문서 정합성, 상태 동기화, 테스트 전략) |
