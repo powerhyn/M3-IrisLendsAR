@@ -55,7 +55,17 @@
       "Bash(\"$COUNCIL_SCRIPT\" clean:*)",
       "Bash(export:*)",
       "Bash(/Users/seokhahyeon/.claude/plugins/cache/team-attention-plugins/agent-council/1.0.0/skills/agent-council/scripts/council.sh:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:patdavid.net)",
+      "WebFetch(domain:pixls.us)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:webcache.googleusercontent.com)",
+      "WebFetch(domain:vincent-dedun.medium.com)",
+      "mcp__tavily__tavily-extract",
+      "Bash(/Users/seokhahyeon/.claude/plugins/cache/team-attention-plugins/agent-council/1.0.0/skills/agent-council/scripts/council.sh wait:*)",
+      "Bash(/Users/seokhahyeon/.claude/plugins/cache/team-attention-plugins/agent-council/1.0.0/skills/agent-council/scripts/council.sh clean:*)"
     ]
   },
   "enabledPlugins": {

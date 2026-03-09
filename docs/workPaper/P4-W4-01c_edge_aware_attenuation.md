@@ -63,6 +63,7 @@ blemishScore = magnitude * (1.0 - edgeWeight * edgeStrength) * (1.0 + chromaWeig
     vec3 high = orig - low;
 
     // Y(luminance) based high-freq magnitude
+    // ⚠️ Rec.601 계수 — Step 3 구현 시 Rec.709 (0.2126, 0.7152, 0.0722)로 교체
     float magnitude = dot(abs(high), vec3(0.299, 0.587, 0.114));
 
     // Non-linear attenuation: large changes (blemishes) → strong attenuation
@@ -74,31 +75,40 @@ blemishScore = magnitude * (1.0 - edgeWeight * edgeStrength) * (1.0 + chromaWeig
 
 ```glsl
     // --- 신호 1: Magnitude (기존) ---
+    const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);  // Linear-light Rec.709
     vec3 high = orig - low;
-    float magnitude = dot(abs(high), vec3(0.299, 0.587, 0.114));
+    float magnitude = dot(abs(high), LUMA_709);
 
     // --- 신호 2: Edge Gradient (중심차분) ---
     // 주변 4 텍셀 샘플링으로 로컬 에지 강도 계산
     vec2 texelSize = vec2(1.0) / vec2(textureSize(uOriginal, 0));
-    float lumC = dot(orig, vec3(0.299, 0.587, 0.114));
+    float lumC = dot(orig, LUMA_709);
     float lumL = dot(texture(uOriginal, vTexCoord - vec2(texelSize.x, 0.0)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
     float lumR = dot(texture(uOriginal, vTexCoord + vec2(texelSize.x, 0.0)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
     float lumU = dot(texture(uOriginal, vTexCoord - vec2(0.0, texelSize.y)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
     float lumD = dot(texture(uOriginal, vTexCoord + vec2(0.0, texelSize.y)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
     float gx = lumR - lumL;
     float gy = lumD - lumU;
     float edgeStrength = sqrt(gx * gx + gy * gy);
 
-    // --- 신호 3: Chroma Deviation ---
-    // 원본과 블러 간의 색상(Cb/Cr) 차이
+    // --- 신호 3: Chroma Deviation (YCbCr UV 분리) ---
+    // 원본과 블러 간의 색차(Cb/Cr) 성분만 추출
     // 색소침착은 luminance 차이는 작지만 chrominance 차이가 큼
+    //
+    // ⚠️ 이전 방식 `length(diff) - magnitude`는 잘못된 색차 분리:
+    //   diff=(0.1,0.1,0.1) 같은 순수 명도 변화에서도 chromaDev > 0이 됨
+    //   (length(0.1,0.1,0.1)=0.173 vs magnitude=dot(0.1,0.1,0.1, luma)=0.1 → 0.073)
+    //   neutral contrast를 색소침착으로 오검출하는 문제.
+    //
+    // 수정: luminance projection을 제거하여 순수 색차 성분만 추출
     vec3 diff = orig - low;
-    float chromaDev = length(diff) - magnitude;  // 전체 색차 - 밝기 차 = 순수 색상 차
-    chromaDev = max(chromaDev, 0.0);
+    float lumDiff = dot(diff, vec3(0.2126, 0.7152, 0.0722));  // Linear-light Rec.709
+    vec3 chromaDiff = diff - vec3(lumDiff);  // luminance 성분 제거 → 순수 색차
+    float chromaDev = length(chromaDiff);
 
     // --- 3-신호 결합 ---
     float blemishScore = magnitude
@@ -155,8 +165,10 @@ void main() {
     orig = pow(orig, vec3(2.2));
 
     // --- 신호 1: Magnitude ---
+    // Linear-light 공간에서는 Rec.709 계수 사용 (Rec.601 0.299/0.587/0.114는 sRGB 감마용)
+    const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
     vec3 high = orig - low;
-    float magnitude = dot(abs(high), vec3(0.299, 0.587, 0.114));
+    float magnitude = dot(abs(high), LUMA_709);
 
     // --- 신호 2: Edge Gradient (★ Step 3) ---
     vec2 texelSize = vec2(1.0) / vec2(textureSize(uOriginal, 0));
@@ -167,18 +179,19 @@ void main() {
     vec3 sR = pow(texture(uOriginal, vTexCoord + vec2(texelSize.x, 0.0)).rgb, vec3(2.2));
     vec3 sU = pow(texture(uOriginal, vTexCoord - vec2(0.0, texelSize.y)).rgb, vec3(2.2));
     vec3 sD = pow(texture(uOriginal, vTexCoord + vec2(0.0, texelSize.y)).rgb, vec3(2.2));
-    float lumL = dot(sL, vec3(0.299, 0.587, 0.114));
-    float lumR = dot(sR, vec3(0.299, 0.587, 0.114));
-    float lumU = dot(sU, vec3(0.299, 0.587, 0.114));
-    float lumD = dot(sD, vec3(0.299, 0.587, 0.114));
+    float lumL = dot(sL, LUMA_709);
+    float lumR = dot(sR, LUMA_709);
+    float lumU = dot(sU, LUMA_709);
+    float lumD = dot(sD, LUMA_709);
     float gx = lumR - lumL;
     float gy = lumD - lumU;
     float edgeStrength = sqrt(gx * gx + gy * gy);
 
-    // --- 신호 3: Chroma Deviation (★ Step 3) ---
+    // --- 신호 3: Chroma Deviation (★ Step 3, YCbCr UV 분리) ---
     vec3 diff = orig - low;
-    float totalDiff = length(diff);
-    float chromaDev = max(totalDiff - magnitude, 0.0);
+    float lumDiff = dot(diff, vec3(0.2126, 0.7152, 0.0722));
+    vec3 chromaDiff = diff - vec3(lumDiff);  // luminance 성분 제거
+    float chromaDev = length(chromaDiff);
 
     // --- 3-신호 결합 ---
     float blemishScore = magnitude
@@ -197,8 +210,8 @@ void main() {
 
     vec3 result = mix(orig, beauty, mask);
 
-    // ★ Step 1: Linear → sRGB
-    result = pow(result, vec3(1.0 / 2.2));
+    // ★ Step 1: Linear → sRGB (음수 방어)
+    result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
 
     fragColor = vec4(result, 1.0);
 }
@@ -320,12 +333,12 @@ float lumL = dot(texture(uOriginal, vTexCoord - vec2(texelSize.x, 0.0)).rgb,
 ```
 → 에지 **상대적 크기**만 필요하므로 sRGB에서도 유효. **권장 옵션**.
 
-**옵션 C: DeviceTier 분기** — LOW 기기에서 3-신호 비활성화:
+**옵션 C: DeviceTier 분기** — LOW 기기에서 3-신호 비활성화 (`mapSkinQuality()` 내부에서 조정):
 ```cpp
-// LOW tier에서는 magnitude만 사용 (기존 동작)
+// mapSkinQuality() 내에서 — params는 const&로 전달되므로 호출 전에 설정
 if (device_tier_ == DeviceTier::LOW) {
-    params.edge_weight = 0.0f;
-    params.chroma_weight = 0.0f;
+    p.edge_weight = 0.0f;
+    p.chroma_weight = 0.0f;
 }
 ```
 

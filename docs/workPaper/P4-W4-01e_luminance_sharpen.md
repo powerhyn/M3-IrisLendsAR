@@ -100,8 +100,8 @@ in vec2 vTexCoord;
 out vec4 fragColor;
 
 uniform sampler2D uTexture;      // Composite 결과 (beauty)
-uniform sampler2D uOriginal;     // 원본 프레임 (mask 블렌딩용)
 uniform sampler2D uSkinMask;     // ROI mask
+// 참고: uOriginal은 불필요 — 셰이더 본문에서 사용하지 않음 (mask 기반 블렌딩만)
 uniform float uSharpenAmount;    // 샤프닝 강도 (0.0~0.5, 기본 0.15)
 uniform vec2 uTexelSize;         // (1/width, 1/height)
 
@@ -109,19 +109,21 @@ void main() {
     vec3 center = texture(uTexture, vTexCoord).rgb;
     float mask = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - vTexCoord.y)).r;
 
-    // 3×3 Gaussian blur (중심 가중치 4/16, 이웃 2/16, 대각 1/16)
+    // 5-tap cross blur (중심 가중치 2/6, 이웃 각 1/6)
     // Luminance만 계산하여 성능 최적화
-    float lumCenter = dot(center, vec3(0.299, 0.587, 0.114));
+    // Linear-light 공간에서는 Rec.709 계수 사용
+    const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
+    float lumCenter = dot(center, LUMA_709);
 
     // 4-neighbor (cross) 샘플링 — 대각 생략으로 4 텍스처 읽기
     float lumL = dot(texture(uTexture, vTexCoord - vec2(uTexelSize.x, 0.0)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
     float lumR = dot(texture(uTexture, vTexCoord + vec2(uTexelSize.x, 0.0)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
     float lumU = dot(texture(uTexture, vTexCoord - vec2(0.0, uTexelSize.y)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
     float lumD = dot(texture(uTexture, vTexCoord + vec2(0.0, uTexelSize.y)).rgb,
-                     vec3(0.299, 0.587, 0.114));
+                     LUMA_709);
 
     // 간이 blur: (center*2 + neighbors) / 6
     float lumBlur = (lumCenter * 2.0 + lumL + lumR + lumU + lumD) / 6.0;
@@ -175,7 +177,6 @@ GLuint luminance_sharpen_program_ = 0;  // ★ 추가
 // Luminance Sharpen Uniform 캐시
 struct LuminanceSharpenUniforms {
     GLint uTexture = -1;
-    GLint uOriginal = -1;
     GLint uSkinMask = -1;
     GLint uSharpenAmount = -1;
     GLint uTexelSize = -1;
@@ -206,13 +207,15 @@ struct FreqSepParams {
 
 ```cpp
 // Luminance Sharpen 프로그램 (★ Step 5)
-luminance_sharpen_program_ = createProgram(
-    FULLSCREEN_VERTEX,
-    LUMINANCE_SHARPEN_FRAGMENT
-);
-if (luminance_sharpen_program_ == 0) {
+// 기존 FreqSep 셰이더와 동일하게 ShaderManager에 캐시하는 패턴 사용
+if (!shader_manager_->createProgram(
+        shaders::FULLSCREEN_QUAD_VERTEX,
+        shaders::LUMINANCE_SHARPEN_FRAGMENT,
+        luminance_sharpen_program_)) {
     LOGE("Failed to create Luminance Sharpen program");
     // 비필수 패스이므로 실패해도 초기화 계속
+} else {
+    shader_manager_->cacheProgram("luminance_sharpen", luminance_sharpen_program_);
 }
 ```
 
@@ -224,7 +227,6 @@ if (luminance_sharpen_program_ == 0) {
 // Luminance Sharpen Uniforms
 if (luminance_sharpen_program_ != 0) {
     luminance_sharpen_uniforms_.uTexture = glGetUniformLocation(luminance_sharpen_program_, "uTexture");
-    luminance_sharpen_uniforms_.uOriginal = glGetUniformLocation(luminance_sharpen_program_, "uOriginal");
     luminance_sharpen_uniforms_.uSkinMask = glGetUniformLocation(luminance_sharpen_program_, "uSkinMask");
     luminance_sharpen_uniforms_.uSharpenAmount = glGetUniformLocation(luminance_sharpen_program_, "uSharpenAmount");
     luminance_sharpen_uniforms_.uTexelSize = glGetUniformLocation(luminance_sharpen_program_, "uTexelSize");
@@ -246,20 +248,36 @@ Pass 3  → output_fbo (Composite)
 
 **변경 후 구조**:
 ```
-Pass 1a → temp
-Pass 1b → lowFreq
-Pass 2a → temp
-Pass 2b → smoothedLow
-Pass 3  → temp (Composite → 중간 버퍼)     ← 변경: output_fbo → temp
-Pass 4  → output_fbo (Sharpen)              ← 추가
+Pass 1a → temp (blur_w × blur_h)
+Pass 1b → lowFreq (blur_w × blur_h)
+Pass 2a → temp (blur_w × blur_h)
+Pass 2b → smoothedLow (blur_w × blur_h)
+Pass 3  → compositeRT (width × height, full-res)  ← 변경: output_fbo → compositeRT
+Pass 4  → output_fbo (Sharpen)                     ← 추가
 ```
 
-**핵심 변경**: Pass 3 (Composite)의 출력 대상을 `temp`으로 변경하고, Pass 4에서 temp을 읽어 sharpen 후 output_fbo에 쓴다.
+**핵심 변경**: Pass 3 (Composite)의 출력 대상을 **full-res intermediate RT**로 변경하고, Pass 4에서 이를 읽어 sharpen 후 output_fbo에 쓴다.
+
+⚠️ **temp 재사용 불가 (MID half-res 경로)**: `temp`은 `blur_w × blur_h` (= `width/res_divisor`)로 할당된다. MID 경로(res_divisor=2)에서는 half-res이므로, Composite 직전에 뷰포트를 full-res로 복원한 상태에서 half-res `temp`에 full-res Composite를 그리면 해상도 불일치가 발생한다. 따라서 **full-res compositeRT를 texture_pool에서 별도 할당**해야 한다.
 
 ```cpp
-// Pass 3: Composite → temp (sharpen이 활성이면 중간 버퍼로)
+// ① sharpen 활성 여부 판정 (compositeRT 할당보다 먼저 선언)
 bool sharpen_enabled = (luminance_sharpen_program_ != 0 && params.sharpen_amount > 0.01f);
-GLuint composite_output_fbo = sharpen_enabled ? temp->fbo_id : output_fbo;
+
+// ② Sharpen용 full-res intermediate — temp 재사용 불가 (half-res일 수 있음)
+TexturePool::TextureInfo* compositeRT = nullptr;
+if (sharpen_enabled) {
+    compositeRT = texture_pool_->acquireRenderTarget(width, height);  // full-res
+    if (!compositeRT) {
+        LOGW("FreqSep: Failed to acquire compositeRT, sharpen disabled");
+        sharpen_enabled = false;
+    }
+}
+```
+
+```cpp
+// Pass 3: Composite (sharpen 활성이면 compositeRT로, 아니면 output_fbo로)
+GLuint composite_output_fbo = sharpen_enabled ? compositeRT->fbo_id : output_fbo;
 
 std::snprintf(tag, sizeof(tag), "FreqSep_Composite%s", cfg.composite_profiler_suffix);
 if (profiling) profiler_->begin(tag);
@@ -277,27 +295,26 @@ if (sharpen_enabled) {
 
     glUseProgram(luminance_sharpen_program_);
     glUniform1i(luminance_sharpen_uniforms_.uTexture, 0);
-    glUniform1i(luminance_sharpen_uniforms_.uOriginal, 1);
-    glUniform1i(luminance_sharpen_uniforms_.uSkinMask, 2);
+    glUniform1i(luminance_sharpen_uniforms_.uSkinMask, 1);
     glUniform1f(luminance_sharpen_uniforms_.uSharpenAmount, params.sharpen_amount);
     glUniform2f(luminance_sharpen_uniforms_.uTexelSize, 1.0f / width, 1.0f / height);
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, temp->texture_id);  // Composite 결과
+    glBindTexture(GL_TEXTURE_2D, compositeRT->texture_id);  // Composite 결과 (full-res)
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, input_tex);          // 원본
-    glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, mask_tex);            // skin mask
 
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
     renderFullscreenQuad();
 
     if (profiling) profiler_->end(tag);
+
+    // ③ compositeRT 즉시 반환 — 풀 누수 방지
+    texture_pool_->releaseTexture(compositeRT);
 }
 ```
 
-**중간 버퍼 재사용**: `temp`은 Pass 2a에서 사용 후 Pass 2b→smoothedLow 이후 비어있으므로,
-Pass 3 출력에 안전하게 재사용 가능. 추가 render target 할당 불필요.
+**중간 버퍼**: `temp`은 MID 경로에서 half-res(blur_w × blur_h)이므로 Composite 결과(full-res) 저장에 사용 불가. `compositeRT`를 full-res로 별도 할당하며, Sharpen 완료 후 즉시 반환한다. HIGH 경로(res_divisor=1)에서도 동일 로직으로 통일하여 분기를 줄인다.
 
 ### 3.7 mapSkinQuality — sharpen_amount 매핑
 
@@ -318,14 +335,7 @@ p.sharpen_amount = 0.12f + s * 0.06f;  // 0.12 ~ 0.18
 
 ### 3.8 셰이더 프로그램 해제
 
-**파일**: `cpp/src/gpu/gpu_beauty_backend.cpp` — release() 또는 소멸자 내
-
-```cpp
-if (luminance_sharpen_program_ != 0) {
-    glDeleteProgram(luminance_sharpen_program_);
-    luminance_sharpen_program_ = 0;
-}
-```
+ShaderManager에 캐시하므로 **수동 glDeleteProgram 불필요** — `ShaderManager::releaseAll()`에서 일괄 해제된다. 기존 `freq_sep_gaussian_program_`, `freq_sep_composite_program_`과 동일한 수명 관리 정책.
 
 ---
 
@@ -336,9 +346,9 @@ if (luminance_sharpen_program_ != 0) {
 | 항목 | 비용 |
 |------|------|
 | 추가 패스 | +1 (Sharpen) |
-| 텍스처 샘플링 | 7회 (center + 4 neighbor + original + mask) |
+| 텍스처 샘플링 | 6회 (center + 4 neighbor + mask) |
 | ALU | ~20 ops (luminance 변환, ratio 계산) |
-| Render target | 재사용 (temp 버퍼) → 0 추가 할당 |
+| Render target | +1 (compositeRT, full-res) — Sharpen 완료 후 즉시 반환 |
 
 ### 파이프라인 총 패스 수
 
@@ -359,11 +369,12 @@ if (luminance_sharpen_program_ != 0) {
 
 ### DeviceTier 분기 (선택적)
 
-MID 기기에서 프레임 시간이 부족하면:
+MID 기기에서 프레임 시간이 부족하면 (`params`는 `const&`이므로 호출 전에 조정):
 ```cpp
+// mapSkinQuality() 내부 또는 호출측에서 조정
 if (device_tier_ == DeviceTier::MID) {
-    params.sharpen_amount *= 0.5f;  // 약한 sharpen
-    // 또는 패스 자체를 스킵
+    p.sharpen_amount *= 0.5f;  // 약한 sharpen
+    // 또는 p.sharpen_amount = 0.0f로 패스 자체를 스킵
 }
 ```
 
@@ -417,9 +428,9 @@ TEST(FreqSepParamsTest, SharpenDisabledAtZeroQuality) {
 - [ ] `initializeShaders()`에 sharpen 프로그램 컴파일 추가
 - [ ] Uniform 초기화 코드 추가
 - [ ] `executeFreqSepPipelineImpl()`에 Pass 4 (Sharpen) 추가
-- [ ] Composite 출력을 temp 버퍼로 변경 (sharpen 활성 시)
+- [ ] Composite 출력을 compositeRT (full-res) 버퍼로 변경 (sharpen 활성 시)
 - [ ] `mapSkinQuality()`에 sharpen_amount 매핑 추가
-- [ ] 셰이더 프로그램 해제 코드 추가
+- [ ] ShaderManager에 cacheProgram 등록 (수명 관리 위임)
 - [ ] FreqSep 관련 테스트 추가 및 통과
 - [ ] Android 디바이스에서 선명도 복구 시각적 확인
 - [ ] 6 패스 파이프라인에서 30fps 유지 성능 확인

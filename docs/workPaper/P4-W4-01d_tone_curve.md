@@ -87,8 +87,8 @@ void main() {
     // mask 블렌딩
     vec3 result = mix(orig, beauty, mask);
 
-    // ★ Step 1: Linear → sRGB
-    result = pow(result, vec3(1.0 / 2.2));
+    // ★ Step 1: Linear → sRGB (음수 방어)
+    result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
 
     fragColor = vec4(result, 1.0);
 }
