@@ -1,57 +1,67 @@
 # Phase 1: Code Quality & Architecture Review
 
-## 대상: P4-W4-01b Soft Light 합성 전환
+## Code Quality Findings
+
+### [Medium] CQ-1: 셰이더 내 `diff`와 `high` 변수 중복 계산
+- **파일**: `shader_sources.cpp` line 495 vs 512
+- `vec3 high = orig - low;`과 `vec3 diff = orig - low;`가 동일한 연산
+- GPU 컴파일러 CSE로 최적화 가능하나, 가독성 측면에서 혼란
+- **권장**: `diff` 제거 → `high` 직접 사용
+
+### [Medium] CQ-2: LUMA_709 상수와 인라인 리터럴 혼재
+- **파일**: `shader_sources.cpp` line 483 vs 534
+- `LUMA_709` 상수 도입했으나 Soft Light gain 보상 코드에서 인라인 `vec3(0.2126, 0.7152, 0.0722)` 사용
+- DRY 원칙 위반, 향후 계수 변경 시 동기화 누락 위험
+- **권장**: `float baseLum = dot(smoothLow, LUMA_709);`
+
+### [Medium] CQ-3: 매직 넘버 스케일링 계수
+- **파일**: `shader_sources.cpp` line 521-522
+- `edgeStrength * 5.0`, `chromaDev * 10.0` 하드코딩
+- 정규화 범위의 의미가 코드에서 드러나지 않음
+- **권장**: `const float EDGE_SCALE = 5.0; const float CHROMA_SCALE = 10.0;`으로 명명
+
+### [Low] CQ-4: 테스트 범위 검증 정밀도
+- **파일**: `test_beauty_config_v2.cpp` line 376-400
+- 실제 범위 [0.3, 0.7]에 대해 [0.0, 1.0]으로 검증 → 범위 2배 이상 넓음
+- **권장**: 기대 범위를 실제 매핑에 가깝게 조정
 
 ---
 
-## Code Quality Findings (6건)
+## Architecture Findings
 
-### Critical (2건)
+### [Medium] AR-1: FreqSepParams 기본값과 mapSkinQuality 범위 불일치
+- `chroma_weight` 기본값 0.3f는 매핑 범위 [0.2, 0.5]의 하한 근처
+- `enabled = false` 기본이므로 실질적 영향 없으나, 직접 구성 경로에서 의미 불명확
+- **권장**: 기본값을 범위 중간값(0.35f)으로 조정 또는 주석 명시
 
-| ID | 위치 | 요약 |
-|----|------|------|
-| **P1** | texture_pool.cpp:337 | **Linear-light 값의 8-bit 양자화**: 중간 버퍼(lowFreq, smoothedLow)가 GL_RGBA/GL_UNSIGNED_BYTE로 생성됨. linear 색공간에서 8-bit는 어두운 영역에서 ~8% 밝기 점프 → 심각한 밴딩/포스터라이제이션. P4-W4-01a에서 도입된 문제이나 Soft Light 합성이 `smoothLow`를 base로 사용하므로 아티팩트 증폭. |
-| **P2** | shader_sources.cpp:499-503 | **Soft Light 고주파 gain 손실**: `SoftLight(a, 0.5+h) = a + 2h·a·(1-a)`. gain 계수 `2a(1-a)`의 최대값이 0.5(a=0.5)이고 극단 톤에서 0.18까지 하락. uHighFreqPreserve=1.0에서도 50~90% 고주파 손실. 0.65→0.70 튜닝 조정(5%p)으로는 보상 불가. skinQuality 전 범위에서 사용자 체감 회귀 발생 가능. |
+### [Low] AR-2: 매직 넘버 정규화 스케일 팩터
+- `5.0`, `10.0`이 해상도/색공간 특성에 민감할 수 있음
+- 현 단계에서는 하드코딩 적절, 셰이더 상수 분리가 첫 단계
+- **권장**: 범위 의미 주석 추가 (`// maps typical range [0, ~0.2] to [0, 1]`)
 
-### Medium (1건)
+### [Low] AR-3: sqrt 최적화 후보
+- `edgeStrength = sqrt(gx*gx + gy*gy)` → 제곱 비교로 대체 가능
+- 비선형 응답 곡선 변경 → 시각적 결과 달라질 수 있음
+- **권장**: 프로파일링 시 최적화 후보로만 기록
 
-| ID | 위치 | 요약 |
-|----|------|------|
-| F1 | shader_sources.cpp:481-484 | **smoothLow/low의 양자화 노이즈 혼입**: P1으로 인해 `low`가 양자화된 값 → `high = orig - low`에서 가짜 고주파 생성. P1 수정 시 자동 해결. |
-
-### Low (3건)
-
-| ID | 위치 | 요약 |
-|----|------|------|
-| F2 | shader_sources.cpp:499-503 | gain 특성 `2a(1-a)` 및 설계 의도에 대한 주석 누락 |
-| F3 | gpu_beauty_backend.cpp:1005 | `high_freq_preserve` 파라미터 의미론 변경 미반영 — Additive에서 1.0="100% 보존"이었으나 Soft Light에서는 최대 50% 보존 |
-| F4 | shader_sources.cpp:499-503 | ALU 3-4 ops 추가 — 성능 영향 무시 가능 (info) |
+### [Low] AR-4: 경계값 테스트 부재
+- `skinQuality = 1.0f`에서 `edge_weight == 0.7f` 정밀 검증 없음
+- 기존 테스트도 이 수준의 정밀도를 요구하지 않으므로 일관성 있음
 
 ---
 
-## Architecture Findings (4건)
+## Positive Observations
 
-### 긍정적 평가
-| 항목 | 판정 |
-|------|------|
-| 파이프라인 구조 | 유지됨 — Pass 추가 없음, 기존 3-pass 동일 |
-| Uniform 인터페이스 | 유지됨 — 새 uniform 없음 |
-| FreqSepParams 구조체 | 유지됨 — 필드 추가/삭제 없음 |
-| DeviceTier 분기 | 영향 없음 — MID half-res, LOW fallback 동일 |
-| Bilateral fallback 경로 | 영향 없음 |
-
-### 개선 필요
-| ID | 항목 | 설명 |
-|----|------|------|
-| A1 | Soft Light 수식 정확성 | Pegtop 공식 구현 자체는 수학적으로 정확. Identity 조건, 출력 범위 [0,1] 보장 확인됨. |
-| A2 | gain 비보상 설계 | 구조적 문제: Additive→Soft Light 전환 시 gain 보상 없이 수식만 교체하여 파라미터 semantics 불일치 |
-| A3 | 테스트 호환성 | `test_beauty_config_v2.cpp:331-332`의 high_freq_preserve 범위 [0.30, 0.40] 검증이 경계값(0.30)에 걸림 |
-| A4 | 중간 버퍼 포맷 하드코딩 | TexturePool::createTexture()가 GL_RGBA8로 고정 → 색공간 전환 시 유연성 부재 |
+- **컴포넌트 경계**: 기존 레이어 구조(shader/params/backend) 완벽 준수
+- **Uniform 초기화 패턴**: 3단계 흐름(헤더→cache→execute) 기존 패턴과 1:1 일치
+- **하위 호환성**: in-class initializer로 기존 코드 경로 안전
+- **clamp 방어**: edge/chroma 신호 0-1 범위 보장
+- **패스 추가 없음**: ALU + 4 fetch만으로 30fps 목표 안전
 
 ---
 
 ## Critical Issues for Phase 2 Context
 
-1. **P1 (8-bit 양자화)**: 성능 리뷰에서 GL_RGBA16F/GL_R11F_G11F_B10F 전환 비용 분석 필요
-2. **P2 (gain 손실)**: 보상 스케일러 도입 시 추가 ALU 비용 및 register pressure 분석 필요
-3. **pow() 비용**: sRGB↔Linear 변환에 pow() 2회 사용 — 모바일 GPU에서의 SFU 비용 분석 필요
+- **Performance**: 추가 텍스처 샘플링 4회 + pow() 절약(Option B) → 성능 리뷰에서 정밀 평가 필요
+- **sRGB/Linear 혼용**: 에지 검출은 sRGB, magnitude/chroma는 linear 공간 → 수치 정확성 검증
+- **스케일 팩터**: `5.0`/`10.0` 하드코딩 → 디바이스/해상도별 민감도 확인

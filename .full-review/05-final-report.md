@@ -2,108 +2,154 @@
 
 ## Review Target
 
-**P4-W4-01b**: Soft Light 합성 전환 — FreqSep Composite 셰이더 Additive→Soft Light(Pegtop) + 감쇠 계수 재튜닝
-
-**브랜치**: `feature/P4-W4-01b` (develop 기준 1커밋, 3파일, +11/-8)
-
-**리뷰 범위**: 이번 브랜치에서 변경된 코드만 대상. 기존 코드(P4-W4-01a 등)의 이슈는 "참고 사항"으로 분리.
-
----
+**P4-W4-01c: Edge-aware Attenuation (3-신호 결합)**
+브랜치: `feature/feature/P4-W4-01c` vs `develop`
+변경 규모: 5 files, +80/-11 lines
 
 ## Executive Summary
 
-Soft Light (Pegtop variant) 수식은 **수학적으로 정확하게** 구현되었으며, 아키텍처 변경 없이 셰이더 ALU만 교체하는 깔끔한 변경입니다. 그러나 **1건의 Critical 이슈**가 식별되었습니다:
+단일 magnitude 신호를 3-신호 결합(Magnitude + Edge Gradient + Chroma Deviation)으로 확장하는 변경. 기존 FreqSep 파이프라인의 구조적 패턴을 정확히 따르며 최소한의 표면적 변경으로 구현되었습니다.
 
-- **P2 (gain 손실)**: Soft Light의 본질적 특성으로 고주파 디테일의 50~90%가 손실됨. `2a(1-a)` gain 계수가 최대 0.5이므로 `uHighFreqPreserve=1.0`에서도 절반 이상 손실. 0.65→0.70 조정(5%p)으로는 보상 불가. skinQuality 전 범위에서 사용자 체감 블러 회귀 위험.
+**주요 리스크**: Edge Gradient가 gamma-encoded sRGB 공간에서 계산되면서 linear 공간의 magnitude/chromaDev와 곱셈으로 결합됩니다. 이로 인해 에지 보존 강도가 노출/피부톤에 의존하게 되며, 설계 문서(`P4-W4-01c_edge_aware_attenuation.md` line 175)에서 명시한 "에지 계산도 linear 공간에서 수행" 방향과 최종 구현 사이에 괴리가 있습니다. 이 이슈는 병합 전 해결 또는 명시적 수용 결정이 필요합니다.
 
----
-
-## 변경 사항 요약
-
-| 파일 | 변경 내용 |
-|------|-----------|
-| `shader_sources.cpp:499-503` | Additive `smoothLow + adjusted_high` → Soft Light `(1-2b)*a²+2b*a` |
-| `gpu_beauty_backend.cpp:1005-1006` | `high_freq_preserve` 감쇠 계수 0.65→0.70, 주석 업데이트 |
-| `P4-W4-01b_soft_light.md` | 작업 상태 ⏳→✅, 완료 기준 체크 |
+**성능 판단 유보**: Performance Critical 플래그가 설정되었으나, 실측 프레임 타임/GPU 프로파일링/셰이더 컴파일 결과 없이 추정치만으로 평가되었습니다. 30fps 달성 가능성은 이론적 분석상 양호하나, 정량적 근거가 부족하므로 실 기기 측정 전까지 확정할 수 없습니다.
 
 ---
 
-## Findings — 이번 변경 한정
+## Findings by Priority
 
-### Critical — 즉시 수정 필요 — 1건
+### Critical Issues (P0) — 없음
 
-| ID | 위치 | 요약 | 개선 방향 |
-|----|------|------|-----------|
-| **P2** | shader_sources.cpp:499-503 | **Soft Light gain 손실 50-90%**: `SoftLight(a,0.5+h) = a+2h·a·(1-a)`. gain `2a(1-a)` — 중간톤(a=0.5) 50% 손실, 어두운/밝은 톤(a=0.1/0.9) 82~90% 손실. 감쇠 계수 5%p 조정으로 보상 불가. | gain 보상 스케일러 도입 (예: 톤 의존 보정) 또는 Additive-SoftLight 블렌딩 방식 검토. 구체적 수식은 프로파일링 후 결정 권장. |
+### High Priority (P1) — 1건
 
-**gain 손실 상세:**
+**P1-1: Edge Gradient의 sRGB/Linear 색공간 불일치 — 출력 품질 회귀 리스크**
+- `shader_sources.cpp` line 491, 500-522
+- **문제**: `orig`는 line 491에서 `pow(orig, vec3(2.2))`로 linearize됨. 그러나 에지 검출용 4-neighbor 샘플(line 503-506)은 `texture(uOriginal, ...)`를 직접 사용하여 gamma-encoded sRGB 공간에 남아 있음. 이 sRGB `edgeStrength`가 linear 공간의 `magnitude`와 곱셈으로 결합됨(line 520-522)
+- **영향 범위**: 밝은 하이라이트 **및** 어두운 그림자 피부 양쪽에서 발생하는 노출 의존성 문제
+  - 어두운 영역: 감마 확장으로 에지 과대평가 → 에지 보존 과잉 활성 (잡티도 보존)
+  - 밝은 영역: 감마 압축으로 에지 과소평가 → 에지 보호 부족 (주름 삭제 위험)
+  - 즉, 동일한 물리적 에지가 피부톤/조명에 따라 다르게 처리됨
+- **설계 문서와의 괴리**: 설계 문서 line 175에 "에지 계산도 linear 공간에서 수행 (orig을 이미 linearize했으므로)"라고 명시되어 있으나, 실제 구현은 Option B(sRGB 에지 검출, pow 4회 절약)로 변경됨. 이 변경 결정이 설계 문서에 반영되지 않았으며, 트레이드오프에 대한 명시적 승인 기록이 없음
+- **KI-1 기록 상태**: 작업 문서에 이미 기록됨. 그러나 "P2, QA 후 판단"이 아닌 "병합 전 해결 또는 명시적 수용 결정" 수준의 이슈
+- **수정 옵션**:
+  - **(A)** `pow(sample, vec3(2.2))` 4회 추가 — 정확하지만 +4 pow() 비용
+  - **(B 권장)** `sample * sample` (gamma 2.0 근사) — 오차 ~5%, 비용 최소, linear 공간 근사 달성
+  - **(C)** sRGB 유지 + 설계 문서 업데이트 + 스케일 팩터 별도 튜닝 — 의식적 수용 경로
 
-| smoothLow (a) | gain = 2a(1-a) | 고주파 보존율 |
-|----------------|----------------|-------------|
-| 0.10 (매우 어두움) | 0.18 | **18%** |
-| 0.20 (어두운 피부) | 0.32 | **32%** |
-| 0.50 (중간톤) | 0.50 | **50%** |
-| 0.80 (밝은 피부) | 0.32 | **32%** |
-| 0.90 (매우 밝음) | 0.18 | **18%** |
+### Medium Priority (P2) — 3건
 
-### Medium — 3건
+**P2-1: `diff`와 `high` 변수 중복 계산**
+- `shader_sources.cpp` line 495 vs 512
+- `vec3 high = orig - low`과 `vec3 diff = orig - low`가 동일한 연산
+- GPU CSE 최적화 가능하나, 모바일 드라이버 CSE가 불안정할 수 있으며 가독성 혼란
+- **수정**: `diff` 제거 → `high` 직접 사용
 
-| ID | 카테고리 | 위치 | 요약 |
-|----|----------|------|------|
-| **GLSL-4** | Best Practices | shader_sources.cpp:502-503 | **Soft Light 수식 MAD 최적화**: 현재 `(1-2b)*a²+2b*a` (곱셈 4회) → `a*(a+2b*(1-a))` (곱셈 3회). MAD 패턴 적합. |
-| **CPP-1** | Best Practices | gpu_beauty_backend.cpp:1006 | **매직 넘버 상수화**: `0.70f` → `constexpr float kMaxHighFreqAttenuation = 0.70f;` |
-| **D1** | Documentation | P4-W4-01b_soft_light.md | **gain 손실 한계 미문서화**: gain `2a(1-a)` 특성과 50-90% 고주파 손실이 작업 문서에 미기록. 이점만 기술하고 한계 누락. 완료 기준 2건 미체크인데 상태 "✅ 완료". |
+**P2-2: LUMA_709 상수와 인라인 리터럴 혼재**
+- `shader_sources.cpp` line 483 vs 534
+- `LUMA_709` 상수를 도입했으나 Soft Light 코드에서 인라인 `vec3(0.2126, 0.7152, 0.0722)` 사용
+- DRY 위반, 계수 변경 시 동기화 누락 위험
+- **수정**: `float baseLum = dot(smoothLow, LUMA_709);`
 
-### Low — 2건
+**P2-3: 매직 넘버 스케일 팩터**
+- `shader_sources.cpp` line 521-522
+- `edgeStrength * 5.0`, `chromaDev * 10.0` 하드코딩
+- 정규화 범위의 의미가 코드에서 드러나지 않음
+- **수정**: `const float EDGE_SCALE = 5.0;` / `const float CHROMA_SCALE = 10.0;`으로 명명
 
-| ID | 카테고리 | 위치 | 요약 |
-|----|----------|------|------|
-| **F2** | Code Quality | shader_sources.cpp:499-503 | **gain 특성 주석 누락**: `2a(1-a)` 최대 0.5라는 특성과 `high_freq_preserve`의 의미론 변경(1.0이 더이상 "100% 보존"이 아님)에 대한 주석 부재. |
-| **T1** | Testing | — | **CPU 참조 테스트 부재**: Pegtop 수식의 identity, 출력 범위, gain 특성을 검증하는 단위 테스트 없음. 셰이더 롤백 시 어떤 테스트도 실패하지 않음. |
+### Low Priority (P3) — 5건
+
+**P3-1: FreqSepParams 기본값과 mapSkinQuality 범위 소폭 불일치**
+- `chroma_weight` 기본값 0.3f는 매핑 범위 [0.2, 0.5]의 하한 근처
+- `enabled = false` 기본이므로 실질적 영향 없음
+
+**P3-2: Uniform 값 클램핑 미적용**
+- `edge_weight > 1.0` 시 blemishScore 음수 반전 가능 (기능 무력화, 보안 위험 아님)
+- 현재 `mapSkinQuality()`만이 생성 경로이므로 즉각적 위험 없음
+- 방어적 프로그래밍 관점에서 `std::clamp` 적용 권장
+
+**P3-3: 테스트 범위 검증 정밀도**
+- 실제 범위 [0.3, 0.7]에 대해 [0.0, 1.0]으로 검증 → 범위 2배 이상 넓음
+
+**P3-4: sqrt() 2회 최적화 후보**
+- 제곱 도메인 비교로 대체 가능하나 비선형 응답 변경 → 시각 검증 필요
+- Mali-G52 이하 저가 디바이스에서 측정 후 판단
+
+**P3-5: 경계값 테스트 부재**
+- `skinQuality` 극단값(0, >1, 음수)에서 edge/chroma weight 명시적 검증 없음
 
 ---
 
-## 긍정적 평가
+## Findings by Category
 
-| 항목 | 판정 |
-|------|------|
-| Pegtop 수식 구현 정확성 | ✅ Identity(h=0→base), 출력 [0,1] 보장, edge case 안전 |
-| 아키텍처 영향 | ✅ Pass 추가 없음, Uniform 변경 없음, 구조체 변경 없음 |
-| ALU 성능 영향 | ✅ +3-4 ops, texture fetch latency에 숨겨짐. 30fps 영향 없음 |
-| Warp divergence | ✅ 조건 분기 없음 (Overlay 대비 이점) |
-| clamp 안전장치 | ✅ adjusted_high ∈ [-1,1] 가능하므로 clamp 필수, 올바르게 적용됨 |
-| 기존 테스트 호환성 | ✅ 46개 테스트 전부 통과 — `cmake --build build --target test_beauty_config_v2 && ./build/bin/test_beauty_config_v2` 실행 확인. 경계값 0.30이 기존 테스트 허용 범위 [0.30, 0.40] 내 정확히 포함. |
+| 카테고리 | 건수 | Critical | High | Medium | Low |
+|----------|------|----------|------|--------|-----|
+| 출력 품질/동작 회귀 | 1 | 0 | 1 | 0 | 0 |
+| Code Quality | 3 | 0 | 0 | 3 | 0 |
+| Architecture | 2 | 0 | 0 | 0 | 2 |
+| Security/방어 코드 | 1 | 0 | 0 | 0 | 1 |
+| Performance | 1 | 0 | 0 | 0 | 1 |
+| 테스트 커버리지 | 1 | 0 | 0 | 0 | 1 |
+| **합계** | **9** | **0** | **1** | **3** | **5** |
+
+---
+
+## 검증 상태 및 한계
+
+### 검증된 것
+- C++ 측 `mapSkinQuality()` 범위/단조성 테스트 17건 통과 (`test_beauty_config_v2.cpp`)
+- 수치 안전성: clamp/smoothstep으로 NaN/Inf/GLSL UB 위험 없음
+- 메모리 안전성: 동적 할당/포인터 연산 없음, GLint -1 초기값 방어
+
+### 검증되지 않은 것 (리뷰 한계)
+- **셰이더 출력 품질**: 피부톤별/노출별 시각적 에지 보존 회귀 미검증
+- **GPU 성능**: 실 기기 프레임 타임, GPU 프로파일링 데이터 없음 (이론적 추정만 수행)
+- **셰이더 컴파일**: 타겟 GPU 드라이버에서의 실제 컴파일 결과/레지스터 사용량 미확인
+- **디바이스 매트릭스**: Mali-G52 이하 저가 기기에서의 실측 없음
+
+이 리뷰는 코드 수준 정적 분석이며, 위 항목들은 실 기기 통합 테스트에서 검증되어야 합니다.
+
+---
+
+## Positive Observations
+
+- **컴포넌트 경계**: 기존 레이어 구조(shader/params/backend) 완벽 준수
+- **Uniform 패턴 일관성**: 3단계 흐름(헤더→cache→execute) 기존 패턴과 1:1 일치
+- **하위 호환성**: in-class initializer로 기존 코드 경로 안전
+- **분기 분산 없음**: 셰이더에 if/else 없이 ALU만으로 구현 — 이상적인 GPU 실행 패턴
+- **패스 추가 없음**: 기존 composite 패스 내 ALU 확장만으로 구현
 
 ---
 
 ## Recommended Action Plan
 
-| 우선순위 | 작업 | 노력 | 효과 |
-|----------|------|------|------|
-| **즉시** | P2 gain 보상 방안 설계 및 검증 | Medium | skinQuality 전 범위 블러 회귀 해소 |
-| 이번 스프린트 | T1 CPU 참조 테스트 작성 | Small | 수식 검증 + 회귀 방지 |
-| 이번 스프린트 | GLSL-4 수식 리팩터링 `a*(a+2b*(1-a))` | Small | 곱셈 1회 절감 |
-| 다음 스프린트 | D1 문서 보완 + F2 주석 추가 + CPP-1 상수화 | Small | 유지보수성 개선 |
+| # | 작업 | 우선순위 | 분류 | 노력 |
+|---|------|---------|------|------|
+| 1 | **P1-1 해결**: sRGB/Linear 혼용 수정 또는 명시적 수용 결정 | **병합 전** | 동작 회귀 | Medium |
+| 2 | `diff` → `high` 재사용 (P2-1) | 병합 전 | 코드 정리 | Small |
+| 3 | `LUMA_709` 상수 통일 (P2-2) | 병합 전 | 코드 정리 | Small |
+| 4 | 스케일 팩터 상수 명명 (P2-3) | 병합 전 | 코드 정리 | Small |
+| 5 | 실 기기 GPU 프로파일링 (성능 검증) | 병합 후 즉시 | 성능 검증 | Medium |
+| 6 | Uniform 클램핑 방어 코드 (P3-2) | 다음 스프린트 | 방어 코드 | Small |
+| 7 | 테스트 범위 정밀화 (P3-3, P3-5) | 백로그 | 테스트 | Small |
+| 8 | sqrt 최적화 프로파일링 (P3-4) | 저가 기기 테스트 시 | 성능 | Medium |
 
----
+**병합 전 필수**: #1 (출력 품질 리스크 해결) + #2~#4 (코드 정리)
+**병합 후 즉시**: #5 (성능 실측)
 
-## 참고 사항 — 기존 코드 이슈 (이번 변경 범위 밖)
+### P1-1 해결 경로 옵션
 
-아래는 이번 브랜치 변경과 직접 관련 없으나, 동일 셰이더/파이프라인에서 발견된 기존 이슈입니다. 별도 작업으로 추적 권장.
-
-| ID | 출처 | 요약 | 권장 작업 |
-|----|------|------|-----------|
-| P1 | P4-W4-01a | 8-bit 렌더 타겟에 linear-light 저장 → 어두운 영역 밴딩 | `GL_R11F_G11F_B10F` 전환 |
-| SRGB-1 | P4-W4-01a | 수동 pow(2.2) 비용+부정확 → 하드웨어 sRGB 활용 | `GL_SRGB8_ALPHA8` + `GL_FRAMEBUFFER_SRGB` |
-| SEC-2 | 기존 | mapSkinQuality NaN/Inf 가드 누락 | `std::isnan` 가드 추가 |
+| 옵션 | 내용 | 비용 | 권장 |
+|------|------|------|------|
+| A | `pow(sample, vec3(2.2))` 4회 추가 | +4 pow(), ~0.3ms 추가 | 정확성 최우선 시 |
+| **B** | **`sample * sample` (gamma 2.0 근사)** | **+4 mul, 오차 ~5%** | **권장 — 비용/정확성 균형** |
+| C | sRGB 유지 + 설계 문서 업데이트 + 스케일 팩터 재튜닝 | 문서 작업 | 현 동작 수용 시 |
 
 ---
 
 ## Review Metadata
 
-- **Review date**: 2026-03-09
-- **Scope**: 이번 브랜치(feature/P4-W4-01b) 변경분 한정
-- **Phases completed**: 1~5 (전체)
-- **Flags applied**: Performance Critical
-- **Total findings**: 6건 (Critical: 1 / Medium: 3 / Low: 2) + 참고 3건
-- **Reviewers**: code-reviewer, security-auditor (specialized agents)
+- Review date: 2026-03-10
+- Phases completed: Phase 1 (Code Quality & Architecture), Phase 2 (Security & Performance)
+- Flags: Performance Critical (GPU shader, 30fps target)
+- Framework: C++17 / GLSL ES 3.1
+- **Review limitation**: 정적 코드 분석만 수행. 셰이더 출력 품질, GPU 프로파일링, 디바이스 매트릭스 테스트는 미포함.

@@ -236,6 +236,8 @@ public:
         float low_freq_smooth_radius_ratio = 0.5f;
         float attenuation_low = 0.02f;
         float attenuation_high = 0.15f;
+        float edge_weight = 0.5f;      // 에지 보존 강도
+        float chroma_weight = 0.3f;    // 색소침착 감지 강도
         bool enabled = false;
     };
 
@@ -479,6 +481,8 @@ private:
         GLint uHighFreqPreserve = -1;
         GLint uAttenuationLow = -1;
         GLint uAttenuationHigh = -1;
+        GLint uEdgeWeight = -1;
+        GLint uChromaWeight = -1;
     } freq_sep_composite_uniforms_;
 
     // Temporal stability용 One Euro Filter (P4-W3-04)

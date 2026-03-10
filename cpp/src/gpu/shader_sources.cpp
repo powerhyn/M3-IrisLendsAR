@@ -476,6 +476,14 @@ uniform sampler2D uSkinMask;      // ROI mask texture
 uniform float uHighFreqPreserve;   // Internal mapped value (0.1~1.0)
 uniform float uAttenuationLow;     // smoothstep lower bound (default 0.02)
 uniform float uAttenuationHigh;    // smoothstep upper bound (default 0.15)
+uniform float uEdgeWeight;         // Edge preservation strength (0.3~0.7)
+uniform float uChromaWeight;       // Chroma deviation sensitivity (0.2~0.5)
+
+// Rec.709 luminance coefficients (linear-space)
+const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
+// Normalization scale factors — maps typical signal range to [0, 1]
+const float EDGE_SCALE = 5.0;    // edge gradient range [0, ~0.2] → [0, 1]
+const float CHROMA_SCALE = 10.0; // chroma deviation range [0, ~0.1] → [0, 1]
 
 void main() {
     vec3 smoothLow = texture(uSmoothedLow, vTexCoord).rgb;
@@ -487,11 +495,40 @@ void main() {
     // High Frequency inline extraction (ALU operation, no separate pass/texture)
     vec3 high = orig - low;
 
-    // Y(luminance) based high-freq magnitude — Rec.709 (linear-light 기준)
-    float magnitude = dot(abs(high), vec3(0.2126, 0.7152, 0.0722));
+    // === Signal 1: Y(luminance) based high-freq magnitude — Rec.709 (linear-light 기준) ===
+    float magnitude = dot(abs(high), LUMA_709);
+
+    // === Signal 2: Edge Gradient (center difference, gamma 2.0 근사 linearize) ===
+    // pow(x, 2.2) 대신 x*x (gamma 2.0)로 근사 linearize — 오차 ~5%, 4×pow 절약
+    // linear 공간에서 에지 검출하여 magnitude/chromaDev와 색공간 통일
+    vec2 texelSize = vec2(1.0) / vec2(textureSize(uOriginal, 0));
+    vec3 sR = texture(uOriginal, vTexCoord + vec2( texelSize.x, 0.0)).rgb;
+    vec3 sL = texture(uOriginal, vTexCoord + vec2(-texelSize.x, 0.0)).rgb;
+    vec3 sU = texture(uOriginal, vTexCoord + vec2(0.0,  texelSize.y)).rgb;
+    vec3 sD = texture(uOriginal, vTexCoord + vec2(0.0, -texelSize.y)).rgb;
+    float lumR = dot(sR * sR, LUMA_709);
+    float lumL = dot(sL * sL, LUMA_709);
+    float lumU = dot(sU * sU, LUMA_709);
+    float lumD = dot(sD * sD, LUMA_709);
+    float gx = lumR - lumL;
+    float gy = lumU - lumD;
+    float edgeStrength = sqrt(gx * gx + gy * gy);
+
+    // === Signal 3: Chroma Deviation (YCbCr UV separation) ===
+    // high(=orig-low)의 luminance 성분을 제거하여 순수 색차만 추출
+    float lumHigh = dot(high, LUMA_709);
+    vec3 chromaDiff = high - vec3(lumHigh);
+    float chromaDev = length(chromaDiff);
+
+    // === 3-Signal Combination ===
+    // Edge가 강한 곳 → blemishScore 감소 (에지 보존)
+    // Chroma deviation이 큰 곳 → blemishScore 증가 (색소침착 강한 제거)
+    float blemishScore = magnitude
+                       * (1.0 - uEdgeWeight * clamp(edgeStrength * EDGE_SCALE, 0.0, 1.0))
+                       * (1.0 + uChromaWeight * clamp(chromaDev * CHROMA_SCALE, 0.0, 1.0));
 
     // Non-linear attenuation: large changes (blemishes) → strong attenuation, small changes (skin texture) → preserve
-    float blemishFactor = smoothstep(uAttenuationLow, uAttenuationHigh, magnitude);
+    float blemishFactor = smoothstep(uAttenuationLow, uAttenuationHigh, blemishScore);
     float preserve = mix(uHighFreqPreserve, 1.0, 1.0 - blemishFactor);
 
     vec3 adjusted_high = high * preserve;
@@ -500,7 +537,7 @@ void main() {
     // SoftLight(a, 0.5+h) = a + 2h·a·(1-a)
     // → 유효 gain = 2a(1-a): 중간톤(a=0.5) 50%, 어두운/밝은(a=0.1/0.9) 18%
     // → gain 보상으로 톤 의존 손실 보정 (최대 4x, 하한 0.25로 발산 방지)
-    float baseLum = dot(smoothLow, vec3(0.2126, 0.7152, 0.0722));
+    float baseLum = dot(smoothLow, LUMA_709);
     float gainFactor = 2.0 * baseLum * (1.0 - baseLum);
     float compensation = 1.0 / max(gainFactor, 0.25);
     vec3 compensated_high = adjusted_high * compensation;

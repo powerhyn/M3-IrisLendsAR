@@ -344,6 +344,8 @@ void GPUBeautyBackend::cacheUniformLocations() {
         freq_sep_composite_uniforms_.uHighFreqPreserve = glGetUniformLocation(freq_sep_composite_program_, "uHighFreqPreserve");
         freq_sep_composite_uniforms_.uAttenuationLow = glGetUniformLocation(freq_sep_composite_program_, "uAttenuationLow");
         freq_sep_composite_uniforms_.uAttenuationHigh = glGetUniformLocation(freq_sep_composite_program_, "uAttenuationHigh");
+        freq_sep_composite_uniforms_.uEdgeWeight = glGetUniformLocation(freq_sep_composite_program_, "uEdgeWeight");
+        freq_sep_composite_uniforms_.uChromaWeight = glGetUniformLocation(freq_sep_composite_program_, "uChromaWeight");
     }
 
     LOGI("Uniform locations cached successfully");
@@ -1013,6 +1015,10 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     p.attenuation_low = 0.005f;
     p.attenuation_high = 0.03f + s * 0.03f;
 
+    // Edge-aware attenuation weights (3-signal combination)
+    p.edge_weight = 0.3f + s * 0.4f;     // 0.3 ~ 0.7
+    p.chroma_weight = 0.2f + s * 0.3f;   // 0.2 ~ 0.5
+
     return p;
 }
 
@@ -1266,6 +1272,8 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     glUniform1f(freq_sep_composite_uniforms_.uHighFreqPreserve, params.high_freq_preserve);
     glUniform1f(freq_sep_composite_uniforms_.uAttenuationLow, params.attenuation_low);
     glUniform1f(freq_sep_composite_uniforms_.uAttenuationHigh, params.attenuation_high);
+    glUniform1f(freq_sep_composite_uniforms_.uEdgeWeight, params.edge_weight);
+    glUniform1f(freq_sep_composite_uniforms_.uChromaWeight, params.chroma_weight);
 
     glUniform1i(freq_sep_composite_uniforms_.uSmoothedLow, 0);
     glUniform1i(freq_sep_composite_uniforms_.uLowFreq, 1);

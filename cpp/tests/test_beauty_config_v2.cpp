@@ -373,6 +373,32 @@ TEST(FreqSepParamsTest, AttenuationRangeValid) {
     EXPECT_GT(params.attenuation_low, 0.0f);
 }
 
+TEST(FreqSepParamsTest, EdgeWeightRange) {
+    auto params = GPUBeautyBackend::mapSkinQuality(1.0f, 300);
+    EXPECT_GE(params.edge_weight, 0.0f);
+    EXPECT_LE(params.edge_weight, 1.0f);
+}
+
+TEST(FreqSepParamsTest, ChromaWeightRange) {
+    auto params = GPUBeautyBackend::mapSkinQuality(1.0f, 300);
+    EXPECT_GE(params.chroma_weight, 0.0f);
+    EXPECT_LE(params.chroma_weight, 1.0f);
+}
+
+TEST(FreqSepParamsTest, EdgeChromaBaselineAtLowQuality) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.1f, 300);
+    // 낮은 quality에서도 기본 edge 보존 있음 (0.3 baseline)
+    EXPECT_GE(params.edge_weight, 0.2f);
+    EXPECT_GE(params.chroma_weight, 0.1f);
+}
+
+TEST(FreqSepParamsTest, EdgeChromaIncreaseWithQuality) {
+    auto low_q = GPUBeautyBackend::mapSkinQuality(0.2f, 200);
+    auto high_q = GPUBeautyBackend::mapSkinQuality(0.9f, 200);
+    EXPECT_LT(low_q.edge_weight, high_q.edge_weight);
+    EXPECT_LT(low_q.chroma_weight, high_q.chroma_weight);
+}
+
 TEST(FreqSepParamsTest, LowFreqSmoothRatioInRange) {
     auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 200);
     // 0.30 ~ 0.45 범위 (이중 블러 축소하여 피부 색감 보존)
