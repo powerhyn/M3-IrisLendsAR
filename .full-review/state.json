@@ -1,5 +1,5 @@
 {
-  "target": "P4-W4-01b: Soft Light 합성 전환",
+  "target": "P4-W4-01c: Edge-aware Attenuation (3-신호 결합) — develop 브랜치 대비 변경사항 리뷰",
   "status": "complete",
   "flags": {
     "security_focus": false,
@@ -9,8 +9,8 @@
   },
   "current_step": 5,
   "current_phase": 5,
-  "completed_steps": ["0-scope", "1A", "1B", "2A", "2B", "checkpoint-1", "3A", "3B", "4A", "4B", "5"],
-  "files_created": ["00-scope.md", "01-quality-architecture.md", "02-security-performance.md", "03-testing-documentation.md", "04-best-practices.md", "05-final-report.md"],
-  "started_at": "2026-03-09T00:00:00Z",
-  "last_updated": "2026-03-09T00:30:00Z"
+  "completed_steps": ["0-scope", "1A", "1B", "2A", "2B", "5-final"],
+  "files_created": ["00-scope.md", "01-quality-architecture.md", "02-security-performance.md", "05-final-report.md"],
+  "started_at": "2026-03-10T00:00:00Z",
+  "last_updated": "2026-03-10T00:30:00Z"
 }
