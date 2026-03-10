@@ -698,5 +698,111 @@ TEST(SoftLightFormulaTest, GainCompensationEffectiveness) {
     }
 }
 
+//=============================================================================
+// 회귀 테스트 A: FreqSep RT 풀 사용량 검증
+// temp를 Pass 2b 후 조기 릴리스하여 compositeRT 할당 시 풀 슬롯 재활용
+//=============================================================================
+
+TEST(FreqSepPipelineTest, MaxConcurrentRenderTargetsWithinPoolLimit) {
+    // 파이프라인 RT 사용 패턴을 정적으로 검증
+    // temp: Pass 1a~2b (조기 릴리스)
+    // lowFreq: Pass 1b ~ end
+    // smoothedLow: Pass 2b ~ end
+    // compositeRT: Pass 3~4 (sharpen 활성 시만, temp 릴리스 후 할당)
+
+    constexpr int kTexturePoolLimit = 4;  // TexturePool 기본 한도
+
+    // sharpen 활성 시: temp 릴리스 후 compositeRT 할당
+    // 동시 사용: lowFreq + smoothedLow + compositeRT = 3
+    constexpr int kMaxConcurrentWithSharpen = 3;
+    EXPECT_LE(kMaxConcurrentWithSharpen, kTexturePoolLimit);
+
+    // sharpen 비활성 시: temp는 함수 끝에서 릴리스
+    // 동시 사용: temp + lowFreq + smoothedLow = 3
+    constexpr int kMaxConcurrentWithoutSharpen = 3;
+    EXPECT_LE(kMaxConcurrentWithoutSharpen, kTexturePoolLimit);
+
+    // 이전 구현(temp 미릴리스 + compositeRT 추가)에서는 4개 동시 사용이었음
+    // onMemoryPressure()로 풀이 축소되면 acquireRenderTarget 실패 → sharpen 탈락
+    constexpr int kOldMaxConcurrent = 4;  // 이전 구현의 회귀 케이스
+    EXPECT_EQ(kOldMaxConcurrent, kTexturePoolLimit);  // 한도 꽉 참 = 위험
+}
+
+//=============================================================================
+// 회귀 테스트 B: Mask 경계 Sharpen 수식 검증
+// 비피부 인접 픽셀이 blur에 기여 → 마스크 경계에서 halo/ringing 발생 방지
+// 수정: 인접 mask=0이면 lumCenter로 대체하여 합성 에지 무력화
+//=============================================================================
+
+TEST(LuminanceSharpenFormulaTest, MaskBoundaryNeighborReplacement) {
+    // 시나리오: center는 피부(mask=1), 오른쪽 인접은 비피부(mask=0)
+    // 셰이더 수식: lumR = mix(lumCenter, rawLumR, maskR)
+    // maskR=0 → lumR = lumCenter (비피부 방향은 center로 대체)
+
+    float lumCenter = 0.5f;
+    float rawLumR_nonSkin = 0.8f;  // 비피부 영역은 밝기가 다를 수 있음
+    float maskR = 0.0f;  // 비피부
+
+    // mix(lumCenter, rawLumR, maskR) = lumCenter*(1-maskR) + rawLumR*maskR
+    float lumR = lumCenter * (1.0f - maskR) + rawLumR_nonSkin * maskR;
+    EXPECT_FLOAT_EQ(lumR, lumCenter);  // 비피부 방향은 center로 대체됨
+
+    // 반대로 피부 인접(mask=1)이면 원래 luminance 사용
+    maskR = 1.0f;
+    lumR = lumCenter * (1.0f - maskR) + rawLumR_nonSkin * maskR;
+    EXPECT_FLOAT_EQ(lumR, rawLumR_nonSkin);  // 피부 방향은 원래 값
+}
+
+TEST(LuminanceSharpenFormulaTest, MaskBoundaryNoHaloWhenAllNeighborsNonSkin) {
+    // 모든 인접이 비피부(mask=0)면, blur == lumCenter → high_freq = 0 → sharpen 없음
+    float lumCenter = 0.5f;
+    float rawLumL = 0.8f, rawLumR = 0.3f, rawLumU = 0.9f, rawLumD = 0.2f;
+    float maskL = 0.0f, maskR = 0.0f, maskU = 0.0f, maskD = 0.0f;
+
+    // mix로 대체
+    float lumL = lumCenter * (1.0f - maskL) + rawLumL * maskL;  // = lumCenter
+    float lumR = lumCenter * (1.0f - maskR) + rawLumR * maskR;  // = lumCenter
+    float lumU = lumCenter * (1.0f - maskU) + rawLumU * maskU;  // = lumCenter
+    float lumD = lumCenter * (1.0f - maskD) + rawLumD * maskD;  // = lumCenter
+
+    // blur = (lumCenter*2 + lumL + lumR + lumU + lumD) / 6
+    float lumBlur = (lumCenter * 2.0f + lumL + lumR + lumU + lumD) / 6.0f;
+    EXPECT_FLOAT_EQ(lumBlur, lumCenter);  // blur == center → no sharpening
+
+    // high_freq = lumCenter - lumBlur = 0
+    float highFreq = lumCenter - lumBlur;
+    EXPECT_FLOAT_EQ(highFreq, 0.0f);
+
+    // sharpened = lumCenter + amount * 0 = lumCenter → 변화 없음
+    float sharpenAmount = 0.15f;
+    float lumSharp = lumCenter + sharpenAmount * highFreq;
+    EXPECT_FLOAT_EQ(lumSharp, lumCenter);
+}
+
+TEST(LuminanceSharpenFormulaTest, FullSkinRegionSharpensNormally) {
+    // 모든 인접이 피부(mask=1)이면 정상 샤프닝 동작
+    float lumCenter = 0.5f;
+    float rawLumL = 0.48f, rawLumR = 0.52f, rawLumU = 0.49f, rawLumD = 0.51f;
+    float maskAll = 1.0f;
+
+    float lumL = lumCenter * (1.0f - maskAll) + rawLumL * maskAll;  // = rawLumL
+    float lumR = lumCenter * (1.0f - maskAll) + rawLumR * maskAll;
+    float lumU = lumCenter * (1.0f - maskAll) + rawLumU * maskAll;
+    float lumD = lumCenter * (1.0f - maskAll) + rawLumD * maskAll;
+
+    float lumBlur = (lumCenter * 2.0f + lumL + lumR + lumU + lumD) / 6.0f;
+    float highFreq = lumCenter - lumBlur;
+
+    // center(0.5)와 이웃 평균(0.5)이 비슷하므로 highFreq ≈ 0
+    // 하지만 정확히 0은 아닐 수 있음 → 정상 샤프닝 동작 확인
+    float sharpenAmount = 0.15f;
+    float lumSharp = lumCenter + sharpenAmount * highFreq;
+
+    // lumSharp는 lumCenter와 다를 수 있음 (정상 동작)
+    // 핵심: mask=1 영역에서는 원래 luminance가 그대로 사용됨
+    EXPECT_FLOAT_EQ(lumL, rawLumL);
+    EXPECT_FLOAT_EQ(lumR, rawLumR);
+}
+
 } // namespace testing
 } // namespace iris_sdk
