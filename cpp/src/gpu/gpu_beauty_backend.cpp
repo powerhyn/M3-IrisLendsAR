@@ -1284,7 +1284,12 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     // ① sharpen 활성 여부 판정
     bool sharpen_enabled = (luminance_sharpen_program_ != 0 && params.sharpen_amount > 0.01f);
 
-    // ② full-res compositeRT 할당 (temp은 half-res일 수 있으므로 재사용 불가)
+    // temp 조기 릴리스: Pass 2b 완료 후 더 이상 사용하지 않으므로
+    // 풀 슬롯을 확보하여 compositeRT 할당 실패를 방지
+    texture_pool_->releaseTexture(temp);
+    temp = nullptr;
+
+    // ② full-res compositeRT 할당 (temp 릴리스로 풀 슬롯 확보됨)
     TexturePool::TextureInfo* compositeRT = nullptr;
     if (sharpen_enabled) {
         compositeRT = texture_pool_->acquireRenderTarget(width, height);
@@ -1385,7 +1390,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     // Release textures back to pool
     texture_pool_->releaseTexture(lowFreq);
     texture_pool_->releaseTexture(smoothedLow);
-    texture_pool_->releaseTexture(temp);
+    if (temp) texture_pool_->releaseTexture(temp);
     return true;
 #else
     (void)input_tex; (void)mask_tex; (void)output_fbo;

@@ -584,10 +584,24 @@ void main() {
     const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
     float lumCenter = dot(center, LUMA_709);
 
-    float lumL = dot(texture(uTexture, vTexCoord - vec2(uTexelSize.x, 0.0)).rgb, LUMA_709);
-    float lumR = dot(texture(uTexture, vTexCoord + vec2(uTexelSize.x, 0.0)).rgb, LUMA_709);
-    float lumU = dot(texture(uTexture, vTexCoord - vec2(0.0, uTexelSize.y)).rgb, LUMA_709);
-    float lumD = dot(texture(uTexture, vTexCoord + vec2(0.0, uTexelSize.y)).rgb, LUMA_709);
+    // 인접 픽셀의 mask 값 샘플링 (Y-flip 적용)
+    float maskL = texture(uSkinMask, vec2(vTexCoord.x - uTexelSize.x, 1.0 - vTexCoord.y)).r;
+    float maskR = texture(uSkinMask, vec2(vTexCoord.x + uTexelSize.x, 1.0 - vTexCoord.y)).r;
+    float maskU = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - (vTexCoord.y - uTexelSize.y))).r;
+    float maskD = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - (vTexCoord.y + uTexelSize.y))).r;
+
+    // 인접 luminance 샘플링
+    float rawLumL = dot(texture(uTexture, vTexCoord - vec2(uTexelSize.x, 0.0)).rgb, LUMA_709);
+    float rawLumR = dot(texture(uTexture, vTexCoord + vec2(uTexelSize.x, 0.0)).rgb, LUMA_709);
+    float rawLumU = dot(texture(uTexture, vTexCoord - vec2(0.0, uTexelSize.y)).rgb, LUMA_709);
+    float rawLumD = dot(texture(uTexture, vTexCoord + vec2(0.0, uTexelSize.y)).rgb, LUMA_709);
+
+    // mask가 0인(비피부) 인접 픽셀은 center luminance로 대체하여
+    // composite 경계의 합성 에지가 unsharp mask에 반응하지 않도록 함
+    float lumL = mix(lumCenter, rawLumL, maskL);
+    float lumR = mix(lumCenter, rawLumR, maskR);
+    float lumU = mix(lumCenter, rawLumU, maskU);
+    float lumD = mix(lumCenter, rawLumD, maskD);
 
     float lumBlur = (lumCenter * 2.0 + lumL + lumR + lumU + lumD) / 6.0;
 
