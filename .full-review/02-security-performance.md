@@ -1,56 +1,69 @@
-# Phase 2: Security & Performance Review
+# Phase 2: Performance Review
 
-## Security Findings
-
-### [Medium] SEC-1: sRGB/Linear 공간 혼용 — 기능적 정확성
-- **파일**: `shader_sources.cpp` line 500-509
-- Edge gradient는 sRGB 공간, magnitude/chroma는 linear 공간에서 계산
-- 어두운 영역에서 에지 과대평가, 밝은 영역에서 과소평가 가능
-- 의도된 트레이드오프(Option B, 4xpow 절약)이나 다양한 피부톤 시각적 QA 필요
-- **보안 위험 없음**, 기능적 정확성 이슈
-
-### [Low] SEC-2: Uniform 값 클램핑 미적용 (public struct 경유 시)
-- **파일**: `gpu_beauty_backend.cpp` line 1275-1276
-- `edge_weight > 1.0` 시 blemishScore 음수 반전 → 잡티 감쇠 비활성화
-- 현재 `mapSkinQuality()`만이 생성 경로이므로 즉각적 위험 없음
-- **권장**: `std::clamp(edge_weight, 0.0f, 1.0f)` 방어 코드
-
-### [Low] SEC-3: 경계값 테스트 부족
-- `skinQuality` 극단값(0, >1, 음수)에서 edge/chroma weight 검증 미비
-
-### NONE: 버퍼 오버플로, GLSL UB, Division-by-Zero, C++ 메모리 안전성 — 모두 안전 확인
+## 리뷰 대상: P4-W4-01d 톤커브 미드톤 리프트 (2 commits)
 
 ---
 
 ## Performance Findings
 
-### [Low] PERF-1: `diff = orig - low` 중복 계산
-- **파일**: `shader_sources.cpp` line 495 vs 512
-- `high`와 동일한 연산. 모바일 GPU 드라이버 CSE 불안정할 수 있음
-- **권장**: `high` 직접 재사용 → vec3 레지스터 1개 + ALU 1회 절약
+### [Low] PERF-1: 셰이더 ALU 추가 비용 무시 가능
 
-### [Low] PERF-2: sqrt() 2회 (edgeStrength + length(chromaDiff))
-- SFU 기반, 전체 추가 ALU 비용의 ~25-40% 차지
-- 제곱 도메인 비교로 대체 가능하나 비선형 응답 변경 → 시각적 결과 달라짐
-- **권장**: 측정 후 판단, 현재는 유지
+- **파일**: `shader_sources.cpp:552`
+- **수식**: `beauty = beauty + uToneLift * beauty * (vec3(1.0) - beauty)`
+- **ALU 분석**: `vec3(1.0) - beauty` (SUB×3) + `beauty * result` (MUL×3) + `uToneLift * result` (MUL×3) + `beauty + result` (ADD×3) = 12 scalar ALU ops
+- 실제로는 MAD 최적화로 6-9 ops로 축소 가능
+- **텍스처 페치**: 추가 없음 (기존 `beauty` 레지스터 재사용)
+- **예상 비용**: Adreno 660: ~0.1ms, Mali-G78: ~0.15ms, Mali-G52: ~0.3ms
+- **판정**: 33ms 프레임 버짓 대비 0.3-0.9% 추가. **안전**
 
-### 30fps 달성 평가
+### [Low] PERF-2: Uniform 업로드 추가 1회
 
-| GPU | 추가 비용 | 33ms 대비 | 판정 |
-|-----|----------|----------|------|
-| Adreno 660+ | ~0.5-0.7ms | 1.5-2.1% | ✅ 안전 |
-| Mali-G78 | ~0.87ms | 2.6% | ✅ 안전 |
-| Mali-G52 (저가) | ~1.8ms | 5.5% | ⚠️ 모니터링 필요 |
+- **파일**: `gpu_beauty_backend.cpp:1282`
+- `glUniform1f(freq_sep_composite_uniforms_.uToneLift, params.tone_lift)` 1회 추가
+- **비용**: ~1μs. 무시 가능
 
-- 텍스처 캐시 효율: 1-texel 인접 패턴으로 양호 (대부분 L1 캐시 히트)
-- 메모리 대역폭: ~0.5-1.1% 추가, 무시 가능
-- 분기 분산: 없음 (이상적)
-- CPU 오버헤드: ~10us (glUniform1f 2회), 무시 가능
+### [Low] PERF-3: `mapSkinQuality()` 분기 1개 추가
+
+- **파일**: `gpu_beauty_backend.cpp:1026`
+- 삼항 연산자 1회 + 곱셈 1회 추가. CPU 측 ~1ns. 무시 가능
+
+### NONE: 메모리, 동시성, 스케일링 이슈 — 없음
+
+- 새 텍스처 할당 없음
+- 새 렌더 패스 없음
+- 기존 mutex/fence 패턴에 영향 없음
+- 해상도 의존 추가 비용 없음 (per-fragment ALU만)
 
 ---
 
-## Critical Issues for Phase 3 Context
+## 30fps 달성 평가
 
-- 다양한 피부톤(특히 어두운 톤)에서의 시각적 QA 테스트 필요 (SEC-1)
-- 경계값 테스트 추가 권장 (SEC-3)
-- 저가 GPU(Mali-G52 이하)에서 실측 프로파일링 권장
+| GPU | 추가 비용 | 33ms 대비 | 판정 |
+|-----|----------|----------|------|
+| Adreno 660+ | ~0.1ms | 0.3% | ✅ 안전 |
+| Mali-G78 | ~0.15ms | 0.5% | ✅ 안전 |
+| Mali-G52 (저가) | ~0.3ms | 0.9% | ✅ 안전 |
+
+---
+
+## 수치 안전성 검증
+
+| 조건 | `beauty` 입력 | `uToneLift` | 결과 | 범위 내? |
+|------|--------------|-------------|------|---------|
+| Identity | 0.5 | 0.0 | 0.5 | ✅ |
+| 미드톤 최대 | 0.5 | 0.15 | 0.5375 | ✅ |
+| 하이라이트 | 0.9 | 0.15 | 0.9135 | ✅ |
+| 섀도우 | 0.1 | 0.15 | 0.1135 | ✅ |
+| 극한 intensity | 0.5 | 0.30 | 0.575 | ✅ |
+| 경계 x=1 | 1.0 | 0.30 | 1.0 | ✅ |
+| 경계 x=0 | 0.0 | 0.30 | 0.0 | ✅ |
+
+**`intensity ≤ 1.0`이면 출력 항상 [0, 1]** — 클램핑 불필요 확인
+
+---
+
+## Critical Issues for Phase 2 Context
+
+- 성능 위험 없음
+- 수치 안정성 확인됨
+- 유일한 주의점: `uToneLift` 범위 방어가 없으나, `mapSkinQuality()`만이 유일한 생성 경로이므로 실질적 위험 없음
