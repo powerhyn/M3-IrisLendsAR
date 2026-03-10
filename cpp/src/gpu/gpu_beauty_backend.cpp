@@ -285,6 +285,16 @@ bool GPUBeautyBackend::initializeFreqSepShaders() {
     }
     shader_manager_->cacheProgram("freq_sep_composite", freq_sep_composite_program_);
 
+    // Luminance Sharpen
+    if (!shader_manager_->createProgram(
+            shaders::FULLSCREEN_QUAD_VERTEX,
+            shaders::LUMINANCE_SHARPEN_FRAGMENT,
+            luminance_sharpen_program_)) {
+        LOGE("Failed to create Luminance Sharpen program");
+    } else {
+        shader_manager_->cacheProgram("luminance_sharpen", luminance_sharpen_program_);
+    }
+
     LOGI("Freq Sep shader programs created successfully");
     return true;
 }
@@ -347,6 +357,14 @@ void GPUBeautyBackend::cacheUniformLocations() {
         freq_sep_composite_uniforms_.uEdgeWeight = glGetUniformLocation(freq_sep_composite_program_, "uEdgeWeight");
         freq_sep_composite_uniforms_.uChromaWeight = glGetUniformLocation(freq_sep_composite_program_, "uChromaWeight");
         freq_sep_composite_uniforms_.uToneLift = glGetUniformLocation(freq_sep_composite_program_, "uToneLift");
+    }
+
+    // Luminance Sharpen Uniforms
+    if (luminance_sharpen_program_ != 0) {
+        luminance_sharpen_uniforms_.uTexture = glGetUniformLocation(luminance_sharpen_program_, "uTexture");
+        luminance_sharpen_uniforms_.uSkinMask = glGetUniformLocation(luminance_sharpen_program_, "uSkinMask");
+        luminance_sharpen_uniforms_.uSharpenAmount = glGetUniformLocation(luminance_sharpen_program_, "uSharpenAmount");
+        luminance_sharpen_uniforms_.uTexelSize = glGetUniformLocation(luminance_sharpen_program_, "uTexelSize");
     }
 
     LOGI("Uniform locations cached successfully");
@@ -484,6 +502,7 @@ void GPUBeautyBackend::release() {
     combined_color_program_ = 0;
     freq_sep_gaussian_program_ = 0;
     freq_sep_composite_program_ = 0;
+    luminance_sharpen_program_ = 0;
 
     LOGI("GPUBeautyBackend released");
 }
@@ -1026,6 +1045,10 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     // At t=0.1: t*1.5 = 0.15 = fixed value (continuous by design)
     p.tone_lift = (t > 0.1f) ? 0.15f : t * 1.5f;
 
+    // Luminance sharpen: FreqSep blur 후 선명도 복구
+    // s=0 → 0.12 (최소), s=1 → 0.18 (최대)
+    p.sharpen_amount = 0.12f + s * 0.06f;
+
     return p;
 }
 
@@ -1258,7 +1281,20 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
         glViewport(0, 0, width, height);
     }
 
-    // Pass 3: Composite — re-synthesis + mask blending → output
+    // ① sharpen 활성 여부 판정
+    bool sharpen_enabled = (luminance_sharpen_program_ != 0 && params.sharpen_amount > 0.01f);
+
+    // ② full-res compositeRT 할당 (temp은 half-res일 수 있으므로 재사용 불가)
+    TexturePool::TextureInfo* compositeRT = nullptr;
+    if (sharpen_enabled) {
+        compositeRT = texture_pool_->acquireRenderTarget(width, height);
+        if (!compositeRT) {
+            LOGW("FreqSep: Failed to acquire compositeRT, sharpen disabled");
+            sharpen_enabled = false;
+        }
+    }
+
+    // Pass 3: Composite — re-synthesis + mask blending
     std::snprintf(tag, sizeof(tag), "FreqSep_Composite%s", cfg.composite_profiler_suffix);
     if (profiling) profiler_->begin(tag);
 
@@ -1302,7 +1338,8 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, mask_tex);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+    // Composite 출력: sharpen 활성 시 compositeRT, 아니면 output_fbo
+    glBindFramebuffer(GL_FRAMEBUFFER, sharpen_enabled ? compositeRT->fbo_id : output_fbo);
     renderFullscreenQuad();
 
     // Cleanup texture bindings
@@ -1315,6 +1352,35 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, 0);
     if (profiling) profiler_->end(tag);
+
+    // Pass 4: Luminance Sharpen (sharpen_enabled일 때만)
+    if (sharpen_enabled) {
+        std::snprintf(tag, sizeof(tag), "FreqSep_Sharpen%s", cfg.composite_profiler_suffix);
+        if (profiling) profiler_->begin(tag);
+
+        glUseProgram(luminance_sharpen_program_);
+        glUniform1i(luminance_sharpen_uniforms_.uTexture, 0);
+        glUniform1i(luminance_sharpen_uniforms_.uSkinMask, 1);
+        glUniform1f(luminance_sharpen_uniforms_.uSharpenAmount, params.sharpen_amount);
+        glUniform2f(luminance_sharpen_uniforms_.uTexelSize, 1.0f / width, 1.0f / height);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, compositeRT->texture_id);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, mask_tex);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+        renderFullscreenQuad();
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        if (profiling) profiler_->end(tag);
+
+        texture_pool_->releaseTexture(compositeRT);
+    }
 
     // Release textures back to pool
     texture_pool_->releaseTexture(lowFreq);

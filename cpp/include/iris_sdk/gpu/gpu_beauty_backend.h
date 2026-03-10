@@ -239,6 +239,7 @@ public:
         float edge_weight = 0.5f;      // 에지 보존 강도
         float chroma_weight = 0.3f;    // 색소침착 감지 강도
         float tone_lift = 0.15f;      // 미드톤 리프트 강도
+        float sharpen_amount = 0.15f; // Luminance sharpen 강도
         bool enabled = false;
     };
 
@@ -408,6 +409,7 @@ private:
     // Freq Sep 셰이더 프로그램
     GLuint freq_sep_gaussian_program_ = 0;
     GLuint freq_sep_composite_program_ = 0;
+    GLuint luminance_sharpen_program_ = 0;
 
     // Skin mask GPU 텍스처
     GLuint skin_mask_texture_ = 0;
@@ -486,6 +488,14 @@ private:
         GLint uChromaWeight = -1;
         GLint uToneLift = -1;
     } freq_sep_composite_uniforms_;
+
+    // Luminance Sharpen Uniform 캐시
+    struct LuminanceSharpenUniforms {
+        GLint uTexture = -1;
+        GLint uSkinMask = -1;
+        GLint uSharpenAmount = -1;
+        GLint uTexelSize = -1;
+    } luminance_sharpen_uniforms_;
 
     // Temporal stability용 One Euro Filter (P4-W3-04)
     // 모든 필터는 mutex_ lock 하에서만 접근 (applyTextureId → public → lock_guard)

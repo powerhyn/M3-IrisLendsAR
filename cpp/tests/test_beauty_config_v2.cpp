@@ -471,6 +471,44 @@ TEST(FreqSepParamsTest, ToneLiftRange) {
 }
 
 //=============================================================================
+// Luminance Sharpen 매핑 테스트
+//=============================================================================
+
+TEST(FreqSepParamsTest, SharpenAmountMidQuality) {
+    // skinQuality 0.5 → s = smoothstep(0.5) = 0.5
+    // sharpen_amount = 0.12 + 0.5 * 0.06 = 0.15
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 200);
+    EXPECT_NEAR(params.sharpen_amount, 0.15f, 0.02f);
+}
+
+TEST(FreqSepParamsTest, SharpenAmountMaxQuality) {
+    // skinQuality 1.0 → s = 1.0
+    // sharpen_amount = 0.12 + 1.0 * 0.06 = 0.18
+    auto params = GPUBeautyBackend::mapSkinQuality(1.0f, 200);
+    EXPECT_NEAR(params.sharpen_amount, 0.18f, 0.01f);
+}
+
+TEST(FreqSepParamsTest, SharpenAmountDisabledWhenZero) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.0f, 200);
+    EXPECT_FALSE(params.enabled);
+    // sharpen_amount 기본값은 0.15이지만 enabled=false이므로 사용 안 됨
+}
+
+TEST(FreqSepParamsTest, SharpenAmountRange) {
+    for (float q = 0.01f; q <= 1.0f; q += 0.1f) {
+        auto params = GPUBeautyBackend::mapSkinQuality(q, 200);
+        EXPECT_GE(params.sharpen_amount, 0.11f);  // 최소 ~0.12
+        EXPECT_LE(params.sharpen_amount, 0.19f);   // 최대 ~0.18
+    }
+}
+
+TEST(FreqSepParamsTest, SharpenAmountMonotonicallyIncreases) {
+    auto low_q = GPUBeautyBackend::mapSkinQuality(0.2f, 200);
+    auto high_q = GPUBeautyBackend::mapSkinQuality(0.9f, 200);
+    EXPECT_LE(low_q.sharpen_amount, high_q.sharpen_amount);
+}
+
+//=============================================================================
 // skinQuality C API 테스트
 //=============================================================================
 

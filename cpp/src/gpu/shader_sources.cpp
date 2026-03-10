@@ -561,5 +561,48 @@ void main() {
 }
 )glsl";
 
+//=============================================================================
+// Luminance Sharpen 프래그먼트 셰이더
+// Luminance-only Unsharp Mask — FreqSep 파이프라인 마지막에 적용
+//=============================================================================
+const char* LUMINANCE_SHARPEN_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+uniform sampler2D uTexture;      // Composite 결과 (beauty)
+uniform sampler2D uSkinMask;     // ROI mask
+uniform float uSharpenAmount;    // 샤프닝 강도 (0.0~0.5, 기본 0.15)
+uniform vec2 uTexelSize;         // (1/width, 1/height)
+
+void main() {
+    vec3 center = texture(uTexture, vTexCoord).rgb;
+    float mask = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - vTexCoord.y)).r;
+
+    const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
+    float lumCenter = dot(center, LUMA_709);
+
+    float lumL = dot(texture(uTexture, vTexCoord - vec2(uTexelSize.x, 0.0)).rgb, LUMA_709);
+    float lumR = dot(texture(uTexture, vTexCoord + vec2(uTexelSize.x, 0.0)).rgb, LUMA_709);
+    float lumU = dot(texture(uTexture, vTexCoord - vec2(0.0, uTexelSize.y)).rgb, LUMA_709);
+    float lumD = dot(texture(uTexture, vTexCoord + vec2(0.0, uTexelSize.y)).rgb, LUMA_709);
+
+    float lumBlur = (lumCenter * 2.0 + lumL + lumR + lumU + lumD) / 6.0;
+
+    float lumSharp = lumCenter + uSharpenAmount * (lumCenter - lumBlur);
+    lumSharp = clamp(lumSharp, 0.0, 1.0);
+
+    float ratio = (lumCenter > 0.001) ? min(lumSharp / lumCenter, 2.0) : 1.0;
+    vec3 sharpened = center * ratio;
+    sharpened = clamp(sharpened, 0.0, 1.0);
+
+    vec3 result = mix(center, sharpened, mask);
+
+    fragColor = vec4(result, 1.0);
+}
+)glsl";
+
 } // namespace shaders
 } // namespace iris_sdk

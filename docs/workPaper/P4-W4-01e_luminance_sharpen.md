@@ -1,7 +1,7 @@
 # P4-W4-01e: Luminance Sharpen 패스 추가
 
 > **상위 문서**: `P4-W4-01_freqsep_quality_improvement.md`
-> **상태**: ⏳ 대기
+> **상태**: ✅ 구현 완료
 > **난이도**: 중간 | **추가 GPU 비용**: +1~2 패스 (Separable Unsharp Mask)
 > **선행 조건**: Step 1~4 완료 후 최종 단계로 적용
 
@@ -421,16 +421,16 @@ TEST(FreqSepParamsTest, SharpenDisabledAtZeroQuality) {
 
 ## 6. 완료 기준
 
-- [ ] LUMINANCE_SHARPEN_FRAGMENT 셰이더 신규 작성
-- [ ] `luminance_sharpen_program_` 프로그램 멤버 추가
-- [ ] `LuminanceSharpenUniforms` 구조체 + 멤버 추가
-- [ ] `FreqSepParams`에 `sharpen_amount` 필드 추가
-- [ ] `initializeShaders()`에 sharpen 프로그램 컴파일 추가
-- [ ] Uniform 초기화 코드 추가
-- [ ] `executeFreqSepPipelineImpl()`에 Pass 4 (Sharpen) 추가
-- [ ] Composite 출력을 compositeRT (full-res) 버퍼로 변경 (sharpen 활성 시)
-- [ ] `mapSkinQuality()`에 sharpen_amount 매핑 추가
-- [ ] ShaderManager에 cacheProgram 등록 (수명 관리 위임)
-- [ ] FreqSep 관련 테스트 추가 및 통과
+- [x] LUMINANCE_SHARPEN_FRAGMENT 셰이더 신규 작성
+- [x] `luminance_sharpen_program_` 프로그램 멤버 추가
+- [x] `LuminanceSharpenUniforms` 구조체 + 멤버 추가
+- [x] `FreqSepParams`에 `sharpen_amount` 필드 추가
+- [x] `initializeShaders()`에 sharpen 프로그램 컴파일 추가
+- [x] Uniform 초기화 코드 추가
+- [x] `executeFreqSepPipelineImpl()`에 Pass 4 (Sharpen) 추가
+- [x] Composite 출력을 compositeRT (full-res) 버퍼로 변경 (sharpen 활성 시)
+- [x] `mapSkinQuality()`에 sharpen_amount 매핑 추가
+- [x] ShaderManager에 cacheProgram 등록 (수명 관리 위임)
+- [x] FreqSep 관련 테스트 추가 및 통과 (5개 신규 테스트, 전체 67개 통과)
 - [ ] Android 디바이스에서 선명도 복구 시각적 확인
 - [ ] 6 패스 파이프라인에서 30fps 유지 성능 확인
