@@ -406,3 +406,15 @@ TEST(FreqSepParamsTest, EdgeChromaZeroAtLowQuality) {
 - [x] `mapSkinQuality()`에 edge/chroma weight 매핑 추가
 - [x] FreqSep 관련 테스트 추가 및 통과 (4개 신규 테스트, 17개 전체 통과)
 - [ ] Android 디바이스에서 주름 보존 + 잡티 감쇠 시각적 확인
+
+---
+
+## 6. 알려진 이슈 (Known Issues)
+
+### ~~KI-1: Edge Gradient의 sRGB/Linear 색공간 불일치~~ [해결됨]
+
+**해결 방법**: 옵션 B 적용 — `sample * sample` (gamma 2.0 근사 linearize)
+- 4-neighbor 텍스처 샘플을 `sR * sR`로 근사 linearize 후 Rec.709 계수 적용
+- `pow(x, 2.2)` 대비 오차 ~5%, 4×pow 절약 유지
+- 3-신호 모두 linear(근사) 공간에서 계산되어 색공간 통일 달성
+- LUMA_601 상수 삭제 (더 이상 sRGB 공간 에지 검출 미사용)
