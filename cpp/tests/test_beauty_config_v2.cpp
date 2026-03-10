@@ -416,7 +416,7 @@ TEST(FreqSepParamsTest, OverRangeSkinQualityClampedInternally) {
 }
 
 TEST(FreqSepParamsTest, ToneLiftFixedAboveThreshold) {
-    // skinQuality 0.5 → s ≈ 0.5 (smoothstep) > 0.1 → tone_lift = 0.15 고정
+    // skinQuality 0.5 → t = 0.5 > 0.1 → tone_lift = 0.15 고정
     auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 300);
     EXPECT_NEAR(params.tone_lift, 0.15f, 0.01f);
 }
@@ -427,7 +427,7 @@ TEST(FreqSepParamsTest, ToneLiftFixedAtFullQuality) {
 }
 
 TEST(FreqSepParamsTest, ToneLiftGradualAtLowQuality) {
-    // skinQuality 0.05 → s ≈ 0.0073 (smoothstep) ≤ 0.1 → tone_lift = s * 1.5
+    // skinQuality 0.05 → t = 0.05 ≤ 0.1 → tone_lift = t * 1.5 = 0.075
     auto params = GPUBeautyBackend::mapSkinQuality(0.05f, 300);
     EXPECT_LT(params.tone_lift, 0.15f);
     EXPECT_GE(params.tone_lift, 0.0f);
@@ -439,11 +439,34 @@ TEST(FreqSepParamsTest, ToneLiftZeroWhenDisabled) {
     // disabled 상태에서는 기본값 0.15지만 enabled=false이므로 사용되지 않음
 }
 
+// 회귀 테스트: s→t 수정 (085732f) 검증
+// smoothstep(0.15) ≈ 0.06 < 0.1 이므로, s 기반이면 tone_lift = 0.06*1.5 ≈ 0.09
+// t 기반이면 t = 0.15 > 0.1 이므로 tone_lift = 0.15 (올바름)
+TEST(FreqSepParamsTest, ToneLiftFixedAtBorderlineQuality) {
+    // skinQuality 0.1 → t = 0.1, 정확히 경계 (else 분기: t*1.5 = 0.15 → 연속)
+    auto p_at = GPUBeautyBackend::mapSkinQuality(0.1f, 300);
+    EXPECT_NEAR(p_at.tone_lift, 0.15f, 0.001f);
+
+    // skinQuality 0.1001 → t > 0.1 → 고정 0.15
+    auto p_above = GPUBeautyBackend::mapSkinQuality(0.1001f, 300);
+    EXPECT_NEAR(p_above.tone_lift, 0.15f, 0.001f);
+
+    // skinQuality 0.15 → t = 0.15 > 0.1 → 고정 0.15
+    // (s 기반이면 smoothstep(0.15)≈0.06 < 0.1 → 0.09로 잘못 계산됨)
+    auto p_mid = GPUBeautyBackend::mapSkinQuality(0.15f, 300);
+    EXPECT_NEAR(p_mid.tone_lift, 0.15f, 0.001f);
+
+    // skinQuality 0.196 → t = 0.196 > 0.1 → 고정 0.15
+    // (s 기반이면 smoothstep(0.196)≈0.1 → 경계, 이전 구현 버그의 전환점)
+    auto p_edge = GPUBeautyBackend::mapSkinQuality(0.196f, 300);
+    EXPECT_NEAR(p_edge.tone_lift, 0.15f, 0.001f);
+}
+
 TEST(FreqSepParamsTest, ToneLiftRange) {
     for (float q = 0.01f; q <= 1.0f; q += 0.1f) {
         auto params = GPUBeautyBackend::mapSkinQuality(q, 200);
         EXPECT_GE(params.tone_lift, 0.0f);
-        EXPECT_LE(params.tone_lift, 0.30f);
+        EXPECT_LE(params.tone_lift, 0.16f);  // 실제 최대 0.15
     }
 }
 

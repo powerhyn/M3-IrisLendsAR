@@ -1023,6 +1023,7 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     // Mid-tone lift: Council recommended 0.12~0.18 fixed → center 0.15
     // Very low skinQuality (≤0.1): gradual ramp for natural look
     // Use raw t (not smoothstep s) so threshold matches slider value 0.1
+    // At t=0.1: t*1.5 = 0.15 = fixed value (continuous by design)
     p.tone_lift = (t > 0.1f) ? 0.15f : t * 1.5f;
 
     return p;

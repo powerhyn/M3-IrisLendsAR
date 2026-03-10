@@ -1,7 +1,7 @@
 # P4-W4-01d: 톤커브 미드톤 리프트
 
 > **상위 문서**: `P4-W4-01_freqsep_quality_improvement.md`
-> **상태**: ✅ 완료
+> **상태**: 🔄 구현 완료 (Android 시각 검증 대기)
 > **난이도**: 낮음 | **추가 GPU 비용**: ALU only (~3 ops, 패스 추가 없음)
 > **선행 조건**: Step 1~3 완료 후 적용
 
@@ -160,11 +160,14 @@ glUniform1f(freq_sep_composite_uniforms_.uToneLift, params.tone_lift);  // ★ �
 // 톤커브 미드톤 리프트
 // Council 권장: 0.12~0.18 고정, skinQuality에 비례하지 않음
 // 다만 skinQuality가 매우 낮으면 리프트도 줄여 자연스러움 유지
-p.tone_lift = (s > 0.1f) ? 0.15f : s * 1.5f;  // s≤0.1에서 점진적 진입, 이후 0.15 고정
+// raw t (not smoothstep s) 사용 — 슬라이더 값 0.1에서 정확히 전환
+// t=0.1에서 t*1.5=0.15=고정값 → 연속 (by design)
+p.tone_lift = (t > 0.1f) ? 0.15f : t * 1.5f;
 ```
 
 **설계 근거**:
 - Council 합의: "intensity 0.12~0.18 고정" → 중간값 0.15 채택
+- **raw skinQuality(t) 기준**: smoothstep(s) 사용 시 실제 전환점이 ~0.196으로 밀려 0.1~0.196 구간에서 의도보다 약한 리프트 발생 → t 기준으로 수정 (085732f)
 - skinQuality가 매우 낮을 때 (≤0.1): 리프트도 비례적으로 줄여 "보정 안 한 것 같은" 자연스러움
 - skinQuality 0.1 이상: 고정 0.15 → 사용자 슬라이더에 노출하지 않음
 - 별도 UI 없이 내부 파라미터로만 동작
