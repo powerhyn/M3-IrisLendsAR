@@ -478,6 +478,7 @@ uniform float uAttenuationLow;     // smoothstep lower bound (default 0.02)
 uniform float uAttenuationHigh;    // smoothstep upper bound (default 0.15)
 uniform float uEdgeWeight;         // Edge preservation strength (0.3~0.7)
 uniform float uChromaWeight;       // Chroma deviation sensitivity (0.2~0.5)
+uniform float uToneLift;          // Mid-tone lift intensity (0.0~0.3, default 0.15)
 
 // Rec.709 luminance coefficients (linear-space)
 const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
@@ -545,6 +546,10 @@ void main() {
     vec3 blend = clamp(vec3(0.5) + compensated_high, 0.0, 1.0);
     // MAD 최적화: (1-2b)*a²+2b*a ≡ a*(a + 2b*(1-a))
     vec3 beauty = smoothLow * (smoothLow + 2.0 * blend * (vec3(1.0) - smoothLow));
+
+    // Mid-tone lift: f(x) = x + intensity * x * (1 - x)
+    // Maximum effect at mid-tones (x=0.5), zero at highlights/shadows
+    beauty = beauty + uToneLift * beauty * (vec3(1.0) - beauty);
 
     // Blend with original using skin mask
     vec3 result = mix(orig, beauty, mask);

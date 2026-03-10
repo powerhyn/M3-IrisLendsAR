@@ -346,6 +346,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
         freq_sep_composite_uniforms_.uAttenuationHigh = glGetUniformLocation(freq_sep_composite_program_, "uAttenuationHigh");
         freq_sep_composite_uniforms_.uEdgeWeight = glGetUniformLocation(freq_sep_composite_program_, "uEdgeWeight");
         freq_sep_composite_uniforms_.uChromaWeight = glGetUniformLocation(freq_sep_composite_program_, "uChromaWeight");
+        freq_sep_composite_uniforms_.uToneLift = glGetUniformLocation(freq_sep_composite_program_, "uToneLift");
     }
 
     LOGI("Uniform locations cached successfully");
@@ -1019,6 +1020,10 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     p.edge_weight = 0.3f + s * 0.4f;     // 0.3 ~ 0.7
     p.chroma_weight = 0.2f + s * 0.3f;   // 0.2 ~ 0.5
 
+    // Mid-tone lift: Council recommended 0.12~0.18 fixed → center 0.15
+    // Very low skinQuality (≤0.1): gradual ramp for natural look
+    p.tone_lift = (s > 0.1f) ? 0.15f : s * 1.5f;
+
     return p;
 }
 
@@ -1274,6 +1279,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     glUniform1f(freq_sep_composite_uniforms_.uAttenuationHigh, params.attenuation_high);
     glUniform1f(freq_sep_composite_uniforms_.uEdgeWeight, params.edge_weight);
     glUniform1f(freq_sep_composite_uniforms_.uChromaWeight, params.chroma_weight);
+    glUniform1f(freq_sep_composite_uniforms_.uToneLift, params.tone_lift);
 
     glUniform1i(freq_sep_composite_uniforms_.uSmoothedLow, 0);
     glUniform1i(freq_sep_composite_uniforms_.uLowFreq, 1);

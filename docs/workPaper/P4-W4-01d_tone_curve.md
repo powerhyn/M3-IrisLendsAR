@@ -1,7 +1,7 @@
 # P4-W4-01d: 톤커브 미드톤 리프트
 
 > **상위 문서**: `P4-W4-01_freqsep_quality_improvement.md`
-> **상태**: ⏳ 대기
+> **상태**: ✅ 완료
 > **난이도**: 낮음 | **추가 GPU 비용**: ALU only (~3 ops, 패스 추가 없음)
 > **선행 조건**: Step 1~3 완료 후 적용
 
@@ -244,11 +244,11 @@ TEST(FreqSepParamsTest, ToneLiftGradualAtLowQuality) {
 
 ## 5. 완료 기준
 
-- [ ] FREQ_SEP_COMPOSITE_FRAGMENT에 미드톤 리프트 수식 추가
-- [ ] `uToneLift` uniform 셰이더에 선언
-- [ ] `FreqSepCompositeUniforms`에 `uToneLift` 멤버 추가
-- [ ] `FreqSepParams`에 `tone_lift` 필드 추가
-- [ ] Uniform 초기화 + Composite 패스 설정 추가
-- [ ] `mapSkinQuality()`에 tone_lift 매핑 추가
-- [ ] 테스트 추가 및 통과
+- [x] FREQ_SEP_COMPOSITE_FRAGMENT에 미드톤 리프트 수식 추가
+- [x] `uToneLift` uniform 셰이더에 선언
+- [x] `FreqSepCompositeUniforms`에 `uToneLift` 멤버 추가
+- [x] `FreqSepParams`에 `tone_lift` 필드 추가
+- [x] Uniform 초기화 + Composite 패스 설정 추가
+- [x] `mapSkinQuality()`에 tone_lift 매핑 추가
+- [x] 테스트 추가 및 통과 (5개 테스트, 전체 61개 PASS)
 - [ ] Android 디바이스에서 미드톤 개선 시각적 확인

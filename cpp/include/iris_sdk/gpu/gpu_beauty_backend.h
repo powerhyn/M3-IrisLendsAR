@@ -238,6 +238,7 @@ public:
         float attenuation_high = 0.15f;
         float edge_weight = 0.5f;      // 에지 보존 강도
         float chroma_weight = 0.3f;    // 색소침착 감지 강도
+        float tone_lift = 0.15f;      // 미드톤 리프트 강도
         bool enabled = false;
     };
 
@@ -483,6 +484,7 @@ private:
         GLint uAttenuationHigh = -1;
         GLint uEdgeWeight = -1;
         GLint uChromaWeight = -1;
+        GLint uToneLift = -1;
     } freq_sep_composite_uniforms_;
 
     // Temporal stability용 One Euro Filter (P4-W3-04)

@@ -415,6 +415,38 @@ TEST(FreqSepParamsTest, OverRangeSkinQualityClampedInternally) {
     EXPECT_FLOAT_EQ(params.high_freq_preserve, params_max.high_freq_preserve);
 }
 
+TEST(FreqSepParamsTest, ToneLiftFixedAboveThreshold) {
+    // skinQuality 0.5 → s ≈ 0.5 (smoothstep) > 0.1 → tone_lift = 0.15 고정
+    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 300);
+    EXPECT_NEAR(params.tone_lift, 0.15f, 0.01f);
+}
+
+TEST(FreqSepParamsTest, ToneLiftFixedAtFullQuality) {
+    auto params = GPUBeautyBackend::mapSkinQuality(1.0f, 300);
+    EXPECT_NEAR(params.tone_lift, 0.15f, 0.01f);
+}
+
+TEST(FreqSepParamsTest, ToneLiftGradualAtLowQuality) {
+    // skinQuality 0.05 → s ≈ 0.0073 (smoothstep) ≤ 0.1 → tone_lift = s * 1.5
+    auto params = GPUBeautyBackend::mapSkinQuality(0.05f, 300);
+    EXPECT_LT(params.tone_lift, 0.15f);
+    EXPECT_GE(params.tone_lift, 0.0f);
+}
+
+TEST(FreqSepParamsTest, ToneLiftZeroWhenDisabled) {
+    auto params = GPUBeautyBackend::mapSkinQuality(0.0f, 300);
+    EXPECT_FALSE(params.enabled);
+    // disabled 상태에서는 기본값 0.15지만 enabled=false이므로 사용되지 않음
+}
+
+TEST(FreqSepParamsTest, ToneLiftRange) {
+    for (float q = 0.01f; q <= 1.0f; q += 0.1f) {
+        auto params = GPUBeautyBackend::mapSkinQuality(q, 200);
+        EXPECT_GE(params.tone_lift, 0.0f);
+        EXPECT_LE(params.tone_lift, 0.30f);
+    }
+}
+
 //=============================================================================
 // skinQuality C API 테스트
 //=============================================================================
