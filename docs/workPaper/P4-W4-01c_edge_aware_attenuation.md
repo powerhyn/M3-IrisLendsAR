@@ -1,7 +1,7 @@
 # P4-W4-01c: Edge-aware Attenuation (3-신호 결합)
 
 > **상위 문서**: `P4-W4-01_freqsep_quality_improvement.md`
-> **상태**: ⏳ 대기
+> **상태**: ✅ 완료
 > **난이도**: 중간 | **추가 GPU 비용**: ALU + 추가 텍스처 샘플링 4회 (패스 추가 없음)
 > **선행 조건**: Step 1 (Linear RGB), Step 2 (Soft Light) 완료 후 적용
 
@@ -398,11 +398,11 @@ TEST(FreqSepParamsTest, EdgeChromaZeroAtLowQuality) {
 
 ## 5. 완료 기준
 
-- [ ] FREQ_SEP_COMPOSITE_FRAGMENT에 에지 gradient + chroma deviation 계산 추가
-- [ ] `uEdgeWeight`, `uChromaWeight` uniform 셰이더에 선언
-- [ ] `FreqSepCompositeUniforms`에 2개 멤버 추가
-- [ ] `FreqSepParams`에 `edge_weight`, `chroma_weight` 필드 추가
-- [ ] `gpu_beauty_backend.cpp` Uniform 초기화 + Composite 패스 설정 추가
-- [ ] `mapSkinQuality()`에 edge/chroma weight 매핑 추가
-- [ ] FreqSep 관련 테스트 추가 및 통과
+- [x] FREQ_SEP_COMPOSITE_FRAGMENT에 에지 gradient + chroma deviation 계산 추가
+- [x] `uEdgeWeight`, `uChromaWeight` uniform 셰이더에 선언
+- [x] `FreqSepCompositeUniforms`에 2개 멤버 추가
+- [x] `FreqSepParams`에 `edge_weight`, `chroma_weight` 필드 추가
+- [x] `gpu_beauty_backend.cpp` Uniform 초기화 + Composite 패스 설정 추가
+- [x] `mapSkinQuality()`에 edge/chroma weight 매핑 추가
+- [x] FreqSep 관련 테스트 추가 및 통과 (4개 신규 테스트, 17개 전체 통과)
 - [ ] Android 디바이스에서 주름 보존 + 잡티 감쇠 시각적 확인
