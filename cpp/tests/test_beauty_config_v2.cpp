@@ -780,28 +780,36 @@ TEST(LuminanceSharpenFormulaTest, MaskBoundaryNoHaloWhenAllNeighborsNonSkin) {
 }
 
 TEST(LuminanceSharpenFormulaTest, FullSkinRegionSharpensNormally) {
-    // 모든 인접이 피부(mask=1)이면 정상 샤프닝 동작
-    float lumCenter = 0.5f;
-    float rawLumL = 0.48f, rawLumR = 0.52f, rawLumU = 0.49f, rawLumD = 0.51f;
+    // 모든 인접이 피부(mask=1)이면 원래 luminance가 사용되어 정상 샤프닝 동작
+    // 의도적으로 center보다 어두운 이웃을 설정하여 highFreq > 0 유도
+    float lumCenter = 0.6f;
+    float rawLumL = 0.50f, rawLumR = 0.50f, rawLumU = 0.50f, rawLumD = 0.50f;
     float maskAll = 1.0f;
 
-    float lumL = lumCenter * (1.0f - maskAll) + rawLumL * maskAll;  // = rawLumL
+    // mask=1이면 mix(lumCenter, rawLum, 1.0) = rawLum (원래 값 그대로)
+    float lumL = lumCenter * (1.0f - maskAll) + rawLumL * maskAll;
     float lumR = lumCenter * (1.0f - maskAll) + rawLumR * maskAll;
     float lumU = lumCenter * (1.0f - maskAll) + rawLumU * maskAll;
     float lumD = lumCenter * (1.0f - maskAll) + rawLumD * maskAll;
 
-    float lumBlur = (lumCenter * 2.0f + lumL + lumR + lumU + lumD) / 6.0f;
-    float highFreq = lumCenter - lumBlur;
-
-    // center(0.5)와 이웃 평균(0.5)이 비슷하므로 highFreq ≈ 0
-    // 하지만 정확히 0은 아닐 수 있음 → 정상 샤프닝 동작 확인
-    float sharpenAmount = 0.15f;
-    float lumSharp = lumCenter + sharpenAmount * highFreq;
-
-    // lumSharp는 lumCenter와 다를 수 있음 (정상 동작)
-    // 핵심: mask=1 영역에서는 원래 luminance가 그대로 사용됨
     EXPECT_FLOAT_EQ(lumL, rawLumL);
     EXPECT_FLOAT_EQ(lumR, rawLumR);
+
+    float lumBlur = (lumCenter * 2.0f + lumL + lumR + lumU + lumD) / 6.0f;
+    // blur = (0.6*2 + 0.5*4) / 6 = 3.2/6 ≈ 0.5333
+    float highFreq = lumCenter - lumBlur;
+    // highFreq = 0.6 - 0.5333 ≈ 0.0667 (양수 → 밝기 강조)
+    EXPECT_GT(highFreq, 0.0f);
+
+    float sharpenAmount = 0.15f;
+    float lumSharp = lumCenter + sharpenAmount * highFreq;
+    // lumSharp = 0.6 + 0.15 * 0.0667 ≈ 0.61 → center보다 밝아짐 (샤프닝 효과)
+    EXPECT_GT(lumSharp, lumCenter);
+
+    // ratio 계산 — 셰이더와 동일 로직
+    float ratio = (lumCenter > 0.001f) ? std::min(lumSharp / lumCenter, 2.0f) : 1.0f;
+    EXPECT_GT(ratio, 1.0f);   // 밝기 증가
+    EXPECT_LT(ratio, 1.05f);  // 과도하지 않음 (amount=0.15)
 }
 
 } // namespace testing
