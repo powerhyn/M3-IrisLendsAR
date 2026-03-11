@@ -397,9 +397,9 @@ struct BeautyFilterConfigV2Helper {
         BeautyFilterConfigV2 cfg = {};
         cfg.enabled = false;
         cfg.intensity = 0.5f;
-        cfg.smoothing = 0.5f;
+        cfg.smoothing = 0.0f;
         cfg.brightness = 1.0f;
-        cfg.softFocus = 0.3f;
+        cfg.softFocus = 0.0f;
         cfg.whitening = 0.0f;
         cfg.colorBalance = 0.0f;
         cfg.wrinkleRemove = 0.0f;

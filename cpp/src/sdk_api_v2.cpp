@@ -136,9 +136,9 @@ void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* config) {
 
     config->enabled = 1;
     config->intensity = 0.5f;
-    config->smoothing = 0.5f;
+    config->smoothing = 0.0f;
     config->brightness = 1.0f;
-    config->soft_focus = 0.3f;
+    config->soft_focus = 0.0f;
     config->whitening = 0.0f;
     config->color_balance = 0.0f;
     config->wrinkle_remove = 0.0f;

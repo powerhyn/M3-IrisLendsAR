@@ -291,16 +291,16 @@ class MainActivity : AppCompatActivity() {
             // V1 설정 (하위 호환)
             beautyConfig.enabled = false
             beautyConfig.intensity = 0.5f
-            beautyConfig.smoothing = 0.5f
+            beautyConfig.smoothing = 0.0f
             beautyConfig.brightness = 1.05f
-            beautyConfig.softFocus = 0.3f
+            beautyConfig.softFocus = 0.0f
 
             // V2 설정 (확장 기능)
             beautyConfigV2.enabled = false  // 기본 비활성화
             beautyConfigV2.intensity = 0.5f
-            beautyConfigV2.smoothing = 0.5f
+            beautyConfigV2.smoothing = 0.0f
             beautyConfigV2.brightness = 1.05f
-            beautyConfigV2.softFocus = 0.3f
+            beautyConfigV2.softFocus = 0.0f
             beautyConfigV2.whitening = 0.0f
             beautyConfigV2.colorBalance = 0.0f
             beautyConfigV2.skinQuality = 0.0f   // 잡티 보정 (Freq Sep)
@@ -1148,5 +1148,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
-
 

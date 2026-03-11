@@ -504,11 +504,11 @@ class GpuRenderActivity : AppCompatActivity() {
         })
 
         // 초기값
-        seekSmoothing.progress = 50
+        seekSmoothing.progress = 0
         seekBrightness.progress = 50
         seekWhitening.progress = 0
         seekColorBalance.progress = 50  // 중립 (0.0)
-        seekSoftFocus.progress = 30     // 기본값 0.3f
+        seekSoftFocus.progress = 0
         seekSkinQuality.progress = 0    // 기본값 0.0 (비활성)
 
         // 초기 버튼 상태 표시 (ON = 뷰티 활성화)
@@ -819,11 +819,11 @@ class GpuRenderActivity : AppCompatActivity() {
         // 기본 뷰티 설정
         beautyConfig = IrisLensSDK.getDefaultBeautyConfigV2()
         beautyConfig.enabled = true
-        beautyConfig.smoothing = 0.5f
+        beautyConfig.smoothing = 0.0f
         beautyConfig.brightness = 1.0f
         beautyConfig.whitening = 0.0f
         beautyConfig.colorBalance = 0.0f
-        beautyConfig.softFocus = 0.3f
+        beautyConfig.softFocus = 0.0f
         beautyConfig.roiOnly = true  // ROI 전용 모드: 얼굴 피부에만 보정 적용
 
         // GLView에 초기 뷰티 설정 전달

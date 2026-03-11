@@ -7,6 +7,7 @@
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace iris_sdk {
 
@@ -206,9 +207,34 @@ void BeautyROIManager::createSkinMask(
         contour.emplace_back(x, y);
     }
 
+    // "피부 판정" 대신 얼굴 안쪽 finish 영역에 가깝게 마스크를 단순화한다.
+    // 외곽 턱선/헤어라인까지 꽉 채우면 foundation가 아니라 cutout처럼 보이기 쉬워서,
+    // face oval을 중심 방향으로 한 번 더 축소한 내부 contour를 사용한다.
+    cv::Point2f contour_center(0.0f, 0.0f);
+    for (const auto& pt : contour) {
+        contour_center.x += static_cast<float>(pt.x);
+        contour_center.y += static_cast<float>(pt.y);
+    }
+    contour_center.x /= static_cast<float>(contour.size());
+    contour_center.y /= static_cast<float>(contour.size());
+
+    std::vector<cv::Point> inner_contour;
+    inner_contour.reserve(contour.size());
+    for (const auto& pt : contour) {
+        const bool upper_half = static_cast<float>(pt.y) < contour_center.y;
+        const float scale_x = upper_half ? 0.90f : 0.94f;
+        const float scale_y = upper_half ? 0.84f : 0.96f;
+        const float inner_x = contour_center.x + (static_cast<float>(pt.x) - contour_center.x) * scale_x;
+        const float inner_y = contour_center.y + (static_cast<float>(pt.y) - contour_center.y) * scale_y;
+        inner_contour.emplace_back(
+            std::clamp(static_cast<int>(std::round(inner_x)), 0, mask_width - 1),
+            std::clamp(static_cast<int>(std::round(inner_y)), 0, mask_height - 1)
+        );
+    }
+
     // OpenCV로 다각형 채우기
     cv::Mat mask_mat(mask_height, mask_width, CV_8UC1, out_mask.data());
-    std::vector<std::vector<cv::Point>> contours = {contour};
+    std::vector<std::vector<cv::Point>> contours = {inner_contour};
     cv::fillPoly(mask_mat, contours, cv::Scalar(255));
 }
 

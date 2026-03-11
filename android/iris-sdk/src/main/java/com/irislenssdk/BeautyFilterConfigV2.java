@@ -170,9 +170,9 @@ public class BeautyFilterConfigV2 {
 
     public static final boolean DEFAULT_ENABLED = false;
     public static final float DEFAULT_INTENSITY = 0.5f;
-    public static final float DEFAULT_SMOOTHING = 0.5f;
+    public static final float DEFAULT_SMOOTHING = 0.0f;
     public static final float DEFAULT_BRIGHTNESS = 1.0f;
-    public static final float DEFAULT_SOFT_FOCUS = 0.3f;
+    public static final float DEFAULT_SOFT_FOCUS = 0.0f;
     public static final float DEFAULT_WHITENING = 0.0f;
     public static final float DEFAULT_COLOR_BALANCE = 0.0f;
     public static final float DEFAULT_WRINKLE_REMOVE = 0.0f;

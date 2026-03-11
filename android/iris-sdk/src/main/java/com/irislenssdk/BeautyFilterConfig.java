@@ -90,11 +90,11 @@ public class BeautyFilterConfig {
     /** 기본 전체 강도 */
     public static final float DEFAULT_INTENSITY = 0.5f;
     /** 기본 스무딩 정도 */
-    public static final float DEFAULT_SMOOTHING = 0.5f;
+    public static final float DEFAULT_SMOOTHING = 0.0f;
     /** 기본 밝기 */
     public static final float DEFAULT_BRIGHTNESS = 1.05f;
     /** 기본 소프트 포커스 정도 */
-    public static final float DEFAULT_SOFT_FOCUS = 0.3f;
+    public static final float DEFAULT_SOFT_FOCUS = 0.0f;
 
     // ========================================================================
     // 생성자

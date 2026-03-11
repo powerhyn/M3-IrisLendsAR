@@ -52,6 +52,27 @@ static void computeGaussianWeights(int radius, float weights[kMaxGaussianRadius 
         weights[i] = 0.0f;
     }
 }
+
+static BeautyFilterConfigV2 buildEffectiveConfig(const BeautyFilterConfigV2& config) {
+    BeautyFilterConfigV2 effective = config;
+    const float master = std::clamp(config.intensity, 0.0f, 1.0f);
+
+    effective.smoothing *= master;
+    effective.softFocus *= master;
+    effective.whitening *= master;
+    effective.colorBalance *= master;
+    // skinQuality is controlled by its dedicated slider.
+    // Keeping it independent from the legacy master intensity avoids
+    // unintentionally halving the effect when the UI leaves intensity at 0.5.
+    effective.brightness = 1.0f + (config.brightness - 1.0f) * master;
+
+    return effective;
+}
+
+static float computeFallbackSmoothing(float skin_quality) {
+    const float t = std::clamp(skin_quality, 0.0f, 1.0f);
+    return 0.05f + t * 0.15f;  // 0.05 ~ 0.20
+}
 #endif
 
 // 셰이더 소스 extern 선언
@@ -582,6 +603,7 @@ IrisSdkError GPUBeautyBackend::applyTexture(
 
     // native_handle는 GLuint* 타입
     GLuint input_tex = *static_cast<GLuint*>(input.native_handle);
+    BeautyFilterConfigV2 effective_config = buildEffectiveConfig(config);
 
     // Ping-Pong 버퍼 획득
     TexturePool::TextureInfo* ping = nullptr;
@@ -603,10 +625,10 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     bool profiling = profiler_ && profiler_->isEnabled();
 
     // 1. 스무딩 (Bilateral Filter) - 단독 패스
-    if (config.smoothing > 0.01f) {
+    if (effective_config.smoothing > 0.01f) {
         if (profiling) profiler_->begin("Smoothing");
         executeSmoothingPass(current_input, current_output->fbo_id,
-                             width, height, config);
+                             width, height, effective_config);
         if (profiling) profiler_->end("Smoothing");
         current_input = current_output->texture_id;
         current_output = (current_output == ping) ? pong : ping;
@@ -614,27 +636,27 @@ IrisSdkError GPUBeautyBackend::applyTexture(
 
     // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
     //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
-    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
-    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
-    bool needsWhitening = config.whitening > 0.01f;
+    bool needsBrightness = std::abs(effective_config.brightness - 1.0f) > 0.01f;
+    bool needsBalance = std::abs(effective_config.colorBalance) > 0.01f;
+    bool needsWhitening = effective_config.whitening > 0.01f;
 
     if (needsBrightness || needsBalance || needsWhitening) {
         if (profiling) profiler_->begin("CombinedColor");
         executeCombinedColorPass(current_input, current_output->fbo_id,
                                  width, height,
-                                 config.brightness,
-                                 config.colorBalance,
-                                 config.whitening);
+                                 effective_config.brightness,
+                                 effective_config.colorBalance,
+                                 effective_config.whitening);
         if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
         current_output = (current_output == ping) ? pong : ping;
     }
 
     // 3. 소프트 포커스 - 단독 패스 (blur 필요)
-    if (config.softFocus > 0.01f) {
+    if (effective_config.softFocus > 0.01f) {
         if (profiling) profiler_->begin("SoftFocus");
         executeSoftFocusPass(current_input, current_output->fbo_id,
-                             width, height, config.softFocus);
+                             width, height, effective_config.softFocus);
         if (profiling) profiler_->end("SoftFocus");
         current_input = current_output->texture_id;
     }
@@ -1017,37 +1039,36 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     float t = std::clamp(skin_quality, 0.0f, 1.0f);
     float s = t * t * (3.0f - 2.0f * t);  // smoothstep
 
-    // blur_radius: face_width 대비 3~6%
-    const float ratio = 0.03f + s * 0.03f;
+    // blur_radius: still biased toward pore / fine texture compression,
+    // but strong settings should remain visibly effective.
+    const float ratio = 0.018f + s * 0.014f;
     p.blur_radius = std::clamp(
         static_cast<int>(face_width * ratio),
-        6, 28
+        5, 16
     );
 
-    // high_freq_preserve: 질감 보존 비율 (1.0=원본 → 0.30=70% 감쇠)
-    constexpr float kMaxHighFreqAttenuation = 0.70f;
-    p.high_freq_preserve = 1.0f - s * kMaxHighFreqAttenuation;
+    // high_freq_preserve: strong enough to visibly compress pores, while
+    // large details are still protected later in the composite shader.
+    p.high_freq_preserve = 0.72f - s * 0.42f;
 
-    // low_freq_smooth: 이중 블러 반경 비율
-    p.low_freq_smooth_radius_ratio = 0.30f + s * 0.15f;
+    // low_freq_smooth: slightly stronger than the previous pass so the result
+    // reads as a real skin finish, not "no-op".
+    p.low_freq_smooth_radius_ratio = 0.22f + s * 0.10f;
 
-    // attenuation: 3-신호 감쇠 강도
+    // attenuation window: target fine repetitive texture a bit more aggressively.
     p.attenuation_low = 0.005f;
-    p.attenuation_high = 0.03f + s * 0.03f;
+    p.attenuation_high = 0.016f + s * 0.010f;
 
-    // Edge-aware attenuation weights (3-signal combination)
-    p.edge_weight = 0.3f + s * 0.4f;     // 0.3 ~ 0.7
-    p.chroma_weight = 0.2f + s * 0.3f;   // 0.2 ~ 0.5
+    // Keep protecting strong edges / chroma outliers, but not so much that
+    // the skin finish becomes imperceptible.
+    p.edge_weight = 0.42f + s * 0.16f;     // 0.42 ~ 0.58
+    p.chroma_weight = 0.28f + s * 0.20f;   // 0.28 ~ 0.48
 
-    // Mid-tone lift: Council recommended 0.12~0.18 fixed → center 0.15
-    // Very low skinQuality (≤0.1): gradual ramp for natural look
-    // Use raw t (not smoothstep s) so threshold matches slider value 0.1
-    // At t=0.1: t*1.5 = 0.15 = fixed value (continuous by design)
-    p.tone_lift = (t > 0.1f) ? 0.15f : t * 1.5f;
+    // Foundation-like face finish: visible but still restrained.
+    p.tone_lift = 0.020f + s * 0.030f;
 
-    // Luminance sharpen: FreqSep blur 후 선명도 복구
-    // s=0 → 0.12 (최소), s=1 → 0.18 (최대)
-    p.sharpen_amount = 0.12f + s * 0.06f;
+    // Restore pores / lash line crispness after the stronger smoothing.
+    p.sharpen_amount = 0.11f + s * 0.05f;
 
     return p;
 }
@@ -1059,10 +1080,12 @@ void GPUBeautyBackend::executeSmoothingWithFallbackStrength(
 
 #if IRIS_SDK_GPU_AVAILABLE
     BeautyFilterConfigV2 fallback_config = config;
-    float effective_smoothing = config.skinQuality * 0.5f;
+    float effective_smoothing = computeFallbackSmoothing(config.skinQuality);
     if (fallback_config.smoothing < effective_smoothing) {
         fallback_config.smoothing = effective_smoothing;
     }
+    LOGW("FreqSep fallback using bilateral smoothing=%.2f (skinQuality=%.2f)",
+         fallback_config.smoothing, config.skinQuality);
     executeSmoothingPass(input_tex, output_fbo, width, height, fallback_config);
 #else
     (void)input_tex; (void)output_fbo;
@@ -1550,15 +1573,19 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         previous_output_pong_ = nullptr;
     }
 
+    BeautyFilterConfigV2 effective_config = buildEffectiveConfig(config);
+
     // 활성 필터 수에 따라 동적으로 텍스처 할당
     int active_filter_count = 0;
-    if (config.skinQuality > 0.0f || config.smoothing > 0.01f) active_filter_count++;
-    bool needsBrightness = std::abs(config.brightness - 1.0f) > 0.01f;
-    bool needsBalance = std::abs(config.colorBalance) > 0.01f;
-    bool needsWhitening = config.whitening > 0.01f;
+    if (effective_config.skinQuality > 0.0f || effective_config.smoothing > 0.01f) {
+        active_filter_count++;
+    }
+    bool needsBrightness = std::abs(effective_config.brightness - 1.0f) > 0.01f;
+    bool needsBalance = std::abs(effective_config.colorBalance) > 0.01f;
+    bool needsWhitening = effective_config.whitening > 0.01f;
     bool needsLut = (lut_texture_id != 0 && lut_intensity > 0.01f);
     if (needsBrightness || needsBalance || needsWhitening || needsLut) active_filter_count++;
-    if (config.softFocus > 0.01f) active_filter_count++;
+    if (effective_config.softFocus > 0.01f) active_filter_count++;
 
     // 필터 0개: 패스스루 (텍스처 할당 불필요)
     if (active_filter_count == 0) {
@@ -1681,7 +1708,7 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     if (roi_ptr && roi_ptr->valid) {
         face_w = static_cast<int>(roi_ptr->face_rect.width);
     }
-    FreqSepParams freq_sep_params = mapSkinQuality(config.skinQuality, face_w);
+    FreqSepParams freq_sep_params = mapSkinQuality(effective_config.skinQuality, face_w);
 
     // Temporal stability: One Euro Filter for blur_radius (P4-W3-04)
     // frame_ts는 위에서 캡처된 동일 프레임 타임스탬프
@@ -1693,10 +1720,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     }
 
     // Bilateral fallback 헬퍼 (FreqSep 실패 시 공통 경로)
-    auto runBilateralFallback = [&]() {
+    auto runBilateralFallback = [&](const char* reason) {
+        LOGW("FreqSep unavailable (%s); using bilateral fallback", reason);
         if (profiling) profiler_->begin("Smoothing_Fallback");
         executeSmoothingWithFallbackStrength(current_input, current_output->fbo_id,
-                                              width, height, config);
+                                             width, height, effective_config);
         if (profiling) profiler_->end("Smoothing_Fallback");
         current_input = current_output->texture_id;
         if (pong) current_output = (current_output == ping) ? pong : ping;
@@ -1708,7 +1736,7 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
         // LOW tier: FreqSep 전체 건너뛰기 → Bilateral fallback
         if (device_tier_ == DeviceTier::LOW) {
-            runBilateralFallback();
+            runBilateralFallback("device-tier-low");
         } else {
             // HIGH 또는 MID: skin mask 업로드 후 파이프라인 실행
             GLuint mask_tex = uploadSkinMask(
@@ -1724,12 +1752,20 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                 bool freq_sep_ok = false;
                 if (device_tier_ == DeviceTier::MID) {
                     // MID: blur half-res, composite full-res (하이브리드 해상도)
+                    LOGD("FreqSep path: MID half-res blur_radius=%d mask=%dx%d quality=%.2f",
+                         freq_sep_params.blur_radius,
+                         roi_ptr->mask_width, roi_ptr->mask_height,
+                         effective_config.skinQuality);
                     freq_sep_ok = executeFreqSepPipelineHalfRes(
                         current_input, mask_tex,
                         current_output->fbo_id,
                         width, height, freq_sep_params);
                 } else {
                     // HIGH: full resolution
+                    LOGD("FreqSep path: HIGH full-res blur_radius=%d mask=%dx%d quality=%.2f",
+                         freq_sep_params.blur_radius,
+                         roi_ptr->mask_width, roi_ptr->mask_height,
+                         effective_config.skinQuality);
                     freq_sep_ok = executeFreqSepPipeline(
                         current_input, mask_tex,
                         current_output->fbo_id,
@@ -1744,22 +1780,22 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                     current_input = current_output->texture_id;
                     if (pong) current_output = (current_output == ping) ? pong : ping;
                 } else {
-                    runBilateralFallback();
+                    runBilateralFallback("freq-sep-pipeline-failed");
                 }
             } else {
                 // mask upload failed → Bilateral fallback
-                runBilateralFallback();
+                runBilateralFallback("mask-upload-failed");
             }
         }
     } else if (freq_sep_params.enabled) {
         // skinQuality > 0 but FreqSep cannot run (shader not compiled / no valid ROI/mask)
         // → Bilateral fallback with minimum strength
-        runBilateralFallback();
-    } else if (config.smoothing > 0.01f) {
+        runBilateralFallback("preconditions-not-met");
+    } else if (effective_config.smoothing > 0.01f) {
         // Original Bilateral path (skinQuality = 0)
         if (profiling) profiler_->begin("Smoothing");
         executeSmoothingPass(current_input, current_output->fbo_id,
-                             width, height, config);
+                             width, height, effective_config);
         if (profiling) profiler_->end("Smoothing");
         current_input = current_output->texture_id;
         if (pong) current_output = (current_output == ping) ? pong : ping;
@@ -1771,9 +1807,9 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         if (profiling) profiler_->begin("CombinedColor");
         executeCombinedColorPass(current_input, current_output->fbo_id,
                                  width, height,
-                                 config.brightness,
-                                 config.colorBalance,
-                                 config.whitening,
+                                 effective_config.brightness,
+                                 effective_config.colorBalance,
+                                 effective_config.whitening,
                                  static_cast<GLuint>(lut_texture_id),
                                  lut_intensity);
         if (profiling) profiler_->end("CombinedColor");
@@ -1782,10 +1818,10 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     }
 
     // 3. 소프트 포커스 - 단독 패스 (blur 필요)
-    if (config.softFocus > 0.01f) {
+    if (effective_config.softFocus > 0.01f) {
         if (profiling) profiler_->begin("SoftFocus");
         executeSoftFocusPass(current_input, current_output->fbo_id,
-                             width, height, config.softFocus);
+                             width, height, effective_config.softFocus);
         if (profiling) profiler_->end("SoftFocus");
         current_input = current_output->texture_id;
     }

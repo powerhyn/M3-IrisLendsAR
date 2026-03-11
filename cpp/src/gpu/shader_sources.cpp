@@ -522,37 +522,48 @@ void main() {
     float chromaDev = length(chromaDiff);
 
     // === 3-Signal Combination ===
-    // Edge가 강한 곳 → blemishScore 감소 (에지 보존)
-    // Chroma deviation이 큰 곳 → blemishScore 증가 (색소침착 강한 제거)
-    float blemishScore = magnitude
-                       * (1.0 - uEdgeWeight * clamp(edgeStrength * EDGE_SCALE, 0.0, 1.0))
-                       * (1.0 + uChromaWeight * clamp(chromaDev * CHROMA_SCALE, 0.0, 1.0));
+    // 목표는 "큰 잡티 제거"가 아니라 "미세 피부결 압축"이다.
+    // 따라서 작은/중간 고주파만 선택적으로 눌러주고,
+    // 큰 점, 털, 진한 그림자 경계는 magnitude 상단 구간에서 다시 보호한다.
+    float microTextureBand = smoothstep(uAttenuationLow * 0.7, uAttenuationHigh * 0.9, magnitude);
+    float largeDetailProtection = smoothstep(uAttenuationHigh * 2.6, uAttenuationHigh * 5.2, magnitude);
+    float edgeProtection = 1.0 - uEdgeWeight * clamp(edgeStrength * EDGE_SCALE * 0.85, 0.0, 1.0);
+    float chromaProtection = 1.0 - uChromaWeight * clamp(chromaDev * CHROMA_SCALE * 0.85, 0.0, 1.0);
+    float poreCompression = microTextureBand
+                          * (1.0 - largeDetailProtection)
+                          * clamp(edgeProtection, 0.0, 1.0)
+                          * clamp(chromaProtection, 0.0, 1.0);
 
-    // Non-linear attenuation: large changes (blemishes) → strong attenuation, small changes (skin texture) → preserve
-    float blemishFactor = smoothstep(uAttenuationLow, uAttenuationHigh, blemishScore);
-    float preserve = mix(uHighFreqPreserve, 1.0, 1.0 - blemishFactor);
+    // Deep shadow / highlight 보호:
+    // 수염, 콧망울 그림자, 턱 그림자처럼 어두운 영역과 강한 반사광 영역은
+    // beauty 결과를 덜 섞어 판화처럼 뭉개지는 현상을 줄인다.
+    float baseLum = dot(smoothLow, LUMA_709);
+    float shadowProtection = smoothstep(0.04, 0.14, baseLum);
+    float highlightProtection = 1.0 - smoothstep(0.62, 0.88, baseLum) * 0.22;
+    float effectStrength = clamp(shadowProtection * highlightProtection, 0.0, 1.0);
+
+    // Compression only affects the selected micro-texture band.
+    float compression = poreCompression * effectStrength;
+    float preserve = mix(1.0, uHighFreqPreserve, compression);
 
     vec3 adjusted_high = high * preserve;
 
-    // Soft Light 합성 (Pegtop variant)
-    // SoftLight(a, 0.5+h) = a + 2h·a·(1-a)
-    // → 유효 gain = 2a(1-a): 중간톤(a=0.5) 50%, 어두운/밝은(a=0.1/0.9) 18%
-    // → gain 보상으로 톤 의존 손실 보정 (최대 4x, 하한 0.25로 발산 방지)
-    float baseLum = dot(smoothLow, LUMA_709);
-    float gainFactor = 2.0 * baseLum * (1.0 - baseLum);
-    float compensation = 1.0 / max(gainFactor, 0.25);
-    vec3 compensated_high = adjusted_high * compensation;
+    // Direct foundation-style recomposition:
+    // use the smoother low-frequency base, then re-inject protected detail.
+    vec3 foundationBase = clamp(smoothLow + adjusted_high, 0.0, 1.0);
 
-    vec3 blend = clamp(vec3(0.5) + compensated_high, 0.0, 1.0);
-    // MAD 최적화: (1-2b)*a²+2b*a ≡ a*(a + 2b*(1-a))
-    vec3 beauty = smoothLow * (smoothLow + 2.0 * blend * (vec3(1.0) - smoothLow));
+    // Even when micro-texture gating is conservative, the face should still
+    // read as "finished". A non-zero floor keeps the effect perceptible.
+    float textureBlend = mask * mix(0.38, 0.88, compression);
+    vec3 textureFinished = mix(orig, foundationBase, textureBlend);
 
-    // Mid-tone lift: f(x) = x + intensity * x * (1 - x)
-    // Maximum effect at mid-tones (x=0.5), zero at highlights/shadows
-    beauty = beauty + uToneLift * beauty * (vec3(1.0) - beauty);
+    // Tone finish rides on top of the texture-compressed base so the result
+    // feels like slight makeup, not fog.
+    vec3 toneFinish = textureFinished
+                    + (uToneLift * effectStrength) * textureFinished * (vec3(1.0) - textureFinished);
 
-    // Blend with original using skin mask
-    vec3 result = mix(orig, beauty, mask);
+    // Tone finish is applied broadly within the face ROI.
+    vec3 result = mix(textureFinished, toneFinish, mask * (0.65 * effectStrength));
 
     // Linear → sRGB (음수 방어: pow(음수, 비정수)는 GLSL undefined behavior)
     result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));

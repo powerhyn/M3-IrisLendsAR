@@ -1255,7 +1255,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
 
         // 디버그: 뷰티+LUT 설정 확인
-        Log.d(TAG, "Beauty filter call: enabled=${beautyConfig.enabled}, smoothing=${beautyConfig.smoothing}, brightness=${beautyConfig.brightness}, lut=$lutTextureId, lutIntensity=$lutIntensityVal, detHandle=$detectionHandle")
+        Log.d(
+            TAG,
+            "Beauty filter call: enabled=${beautyConfig.enabled}, intensity=${beautyConfig.intensity}, " +
+                "smoothing=${beautyConfig.smoothing}, skinQuality=${beautyConfig.skinQuality}, " +
+                "softFocus=${beautyConfig.softFocus}, whitening=${beautyConfig.whitening}, " +
+                "brightness=${beautyConfig.brightness}, colorBalance=${beautyConfig.colorBalance}, " +
+                "lut=$lutTextureId, lutIntensity=$lutIntensityVal, detHandle=$detectionHandle"
+        )
 
         // GPU Beauty Backend 호출 (JNI) - LUT 통합 + Detection Handle
         val outputTexture = IrisLensSDK.applyBeautyFilterTextureV2(
