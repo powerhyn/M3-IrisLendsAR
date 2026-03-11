@@ -185,6 +185,15 @@ extern const char* GAUSSIAN_BLUR_FRAGMENT;
 /// 통합 Color Adjustment 셰이더 (Brightness + ColorBalance + Whitening)
 extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
 
+/// Frequency Separation Gaussian Blur 셰이더
+extern const char* FREQ_SEP_GAUSSIAN_FRAGMENT;
+
+/// Frequency Separation Composite 셰이더
+extern const char* FREQ_SEP_COMPOSITE_FRAGMENT;
+
+/// Luminance Sharpen 셰이더 (FreqSep 후 선명도 복구)
+extern const char* LUMINANCE_SHARPEN_FRAGMENT;
+
 } // namespace shaders
 
 } // namespace iris_sdk

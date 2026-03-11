@@ -2,38 +2,39 @@
 
 ## Target
 
-P4-W4-01c: Edge-aware Attenuation (3-신호 결합) — develop 브랜치 대비 변경사항
-브랜치: `feature/feature/P4-W4-01c` vs `develop`
+P4-W4-01e: Luminance Sharpen 패스 추가
+- Branch: `feature/P4-W4-01e` vs `develop`
+- Commits: `060b011` feat(beauty): P4-W4-01e Luminance Sharpen 패스 추가
+- PR 스타일 리뷰 (비판적 시각)
 
-## Changes Summary
+## Summary of Changes
 
-5 files changed, +80/-11 lines
+FreqSep beauty pipeline 마지막에 Luminance-only Unsharp Mask 패스를 추가하여 blur로 인한 선명도 손실을 복구한다.
+
+### 변경 사항
+1. **LUMINANCE_SHARPEN_FRAGMENT** GLSL 셰이더 신규 작성 (4-neighbor cross blur, luminance ratio 방식)
+2. **gpu_beauty_backend.h**: `luminance_sharpen_program_`, `LuminanceSharpenUniforms` 구조체, `FreqSepParams::sharpen_amount` 추가
+3. **gpu_beauty_backend.cpp**: 셰이더 초기화, uniform 캐싱, Pass 4 (Sharpen) 파이프라인 추가, mapSkinQuality() 매핑
+4. **shader_manager.h**: extern 선언 3개 추가 (FREQ_SEP_GAUSSIAN, FREQ_SEP_COMPOSITE, LUMINANCE_SHARPEN)
+5. **test_beauty_config_v2.cpp**: 5개 신규 테스트
 
 ## Files
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `cpp/include/iris_sdk/gpu/gpu_beauty_backend.h` | FreqSepParams에 edge_weight/chroma_weight 필드, FreqSepCompositeUniforms에 GLint 멤버 추가 (+4) |
-| `cpp/src/gpu/gpu_beauty_backend.cpp` | Uniform 초기화, Composite pass 설정, mapSkinQuality 매핑 (+8) |
-| `cpp/src/gpu/shader_sources.cpp` | 3-신호 GLSL: Edge Gradient + Chroma Deviation + 결합식 (+37/-2) |
-| `cpp/tests/test_beauty_config_v2.cpp` | 신규 테스트 4개 (EdgeWeightRange, ChromaWeightRange, Baseline, Increase) (+26) |
-| `docs/workPaper/P4-W4-01c_edge_aware_attenuation.md` | 상태 업데이트 ⏳→✅, 완료 기준 체크 (+5/-5) |
+| `cpp/include/iris_sdk/gpu/gpu_beauty_backend.h` | `FreqSepParams.sharpen_amount` + `luminance_sharpen_program_` + `LuminanceSharpenUniforms` (+10) |
+| `cpp/include/iris_sdk/gpu/shader_manager.h` | FreqSep/Sharpen extern 선언 3개 (+9) |
+| `cpp/src/gpu/gpu_beauty_backend.cpp` | 셰이더 초기화, uniform 캐싱, Pass 4 파이프라인, mapSkinQuality 매핑 (+70) |
+| `cpp/src/gpu/shader_sources.cpp` | LUMINANCE_SHARPEN_FRAGMENT 셰이더 (+43) |
+| `cpp/tests/test_beauty_config_v2.cpp` | Sharpen 관련 5개 테스트 (+38) |
 
-## Context
-
-GPU Beauty 파이프라인의 Frequency Separation Composite 셰이더에서 단일 magnitude 신호 → 3-신호 결합(Magnitude + Edge Gradient + Chroma Deviation)으로 확장하여 주름/경계 보존 및 색소침착 감지를 개선하는 작업.
+Total: +170 lines (code only)
 
 ## Flags
 
 - Security Focus: no
-- Performance Critical: yes (GPU 셰이더 — 실시간 30fps 필수)
+- Performance Critical: yes (실시간 GPU 파이프라인, 30fps)
 - Strict Mode: no
 - Framework: C++17 / GLSL ES 3.1
-
-## Review Phases
-
-1. Code Quality & Architecture
-2. Security & Performance
-3. Testing & Documentation
-4. Best Practices & Standards
-5. Consolidated Report
+- Skip: docs, CI/CD analysis
+- Perspective: 비판적

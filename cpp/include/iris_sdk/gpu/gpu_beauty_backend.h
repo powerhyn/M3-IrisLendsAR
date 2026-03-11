@@ -39,7 +39,7 @@ namespace iris_sdk {
  * 실시간 뷰티 필터를 GPU 셰이더로 적용합니다.
  *
  * **파이프라인 구조**:
- * - Frequency Separation (skinQuality > 0): 5-subpass GPU 파이프라인
+ * - Frequency Separation (skinQuality > 0): 6-subpass GPU 파이프라인 (Sharpen 패스 포함)
  *   - DeviceTier::HIGH → full-res, MID → hybrid half-res blur
  * - Bilateral Filter (skinQuality == 0 또는 FreqSep 실패 시 fallback)
  * - Combined Color Pass (brightness + balance + whitening + LUT)
@@ -239,6 +239,7 @@ public:
         float edge_weight = 0.5f;      // 에지 보존 강도
         float chroma_weight = 0.3f;    // 색소침착 감지 강도
         float tone_lift = 0.15f;      // 미드톤 리프트 강도
+        float sharpen_amount = 0.15f; // Luminance sharpen 강도
         bool enabled = false;
     };
 
@@ -251,7 +252,7 @@ public:
      * GL_RENDERER 문자열을 파싱하여 결정됩니다 (detectDeviceTier()).
      *
      * 파이프라인 동작 차이:
-     * - HIGH: FreqSep full-res 5-subpass (blur + composite 모두 원본 해상도)
+     * - HIGH: FreqSep full-res 6-subpass (blur + composite + sharpen, 모두 원본 해상도)
      * - MID:  FreqSep hybrid half-res (blur는 1/2 해상도, composite는 full-res)
      * - LOW:  FreqSep 비활성 → Bilateral fallback
      *
@@ -340,7 +341,7 @@ private:
         const char* composite_profiler_suffix; ///< "" 또는 "_Full"
     };
 
-    /// Frequency Separation 5서브패스 파이프라인 (full-res)
+    /// Frequency Separation 6서브패스 파이프라인 (full-res, sharpen 포함)
     /// @return true: 파이프라인 정상 완료, false: 텍스처 할당 실패 등 (호출자가 fallback 처리)
     bool executeFreqSepPipeline(
         GLuint input_tex,
@@ -408,6 +409,7 @@ private:
     // Freq Sep 셰이더 프로그램
     GLuint freq_sep_gaussian_program_ = 0;
     GLuint freq_sep_composite_program_ = 0;
+    GLuint luminance_sharpen_program_ = 0;
 
     // Skin mask GPU 텍스처
     GLuint skin_mask_texture_ = 0;
@@ -486,6 +488,14 @@ private:
         GLint uChromaWeight = -1;
         GLint uToneLift = -1;
     } freq_sep_composite_uniforms_;
+
+    // Luminance Sharpen Uniform 캐시
+    struct LuminanceSharpenUniforms {
+        GLint uTexture = -1;
+        GLint uSkinMask = -1;
+        GLint uSharpenAmount = -1;
+        GLint uTexelSize = -1;
+    } luminance_sharpen_uniforms_;
 
     // Temporal stability용 One Euro Filter (P4-W3-04)
     // 모든 필터는 mutex_ lock 하에서만 접근 (applyTextureId → public → lock_guard)
