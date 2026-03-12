@@ -300,7 +300,8 @@ TEST(BeautyFilterConfigV2HelperTest, DefaultsAreValid) {
 
     EXPECT_FALSE(cfg.enabled);
     EXPECT_FLOAT_EQ(cfg.intensity, 0.5f);
-    EXPECT_FLOAT_EQ(cfg.smoothing, 0.5f);
+    EXPECT_FLOAT_EQ(cfg.smoothing, 0.0f);
+    EXPECT_FLOAT_EQ(cfg.softFocus, 0.0f);
     EXPECT_FLOAT_EQ(cfg.brightness, 1.0f);
     EXPECT_TRUE(cfg.useGpu);
     EXPECT_TRUE(cfg.roiOnly);
