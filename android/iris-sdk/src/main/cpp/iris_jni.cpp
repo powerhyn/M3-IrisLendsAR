@@ -161,6 +161,10 @@ bool JniCache::init(JNIEnv* env) {
     beautyConfigV2_protectEyes = env->GetFieldID(beautyConfigV2Class, "protectEyes", "Z");
     beautyConfigV2_protectLips = env->GetFieldID(beautyConfigV2Class, "protectLips", "Z");
     beautyConfigV2_downscaleFactor = env->GetFieldID(beautyConfigV2Class, "downscaleFactor", "I");
+    beautyConfigV2_vividIntensity = env->GetFieldID(beautyConfigV2Class, "vividIntensity", "F");
+    beautyConfigV2_vividSaturation = env->GetFieldID(beautyConfigV2Class, "vividSaturation", "F");
+    beautyConfigV2_vividBrightness = env->GetFieldID(beautyConfigV2Class, "vividBrightness", "F");
+    beautyConfigV2_vividWarmth = env->GetFieldID(beautyConfigV2Class, "vividWarmth", "F");
 
     // 필드 ID 검증
     if (!beautyConfigV2_enabled || !beautyConfigV2_intensity || !beautyConfigV2_smoothing ||
@@ -169,7 +173,9 @@ bool JniCache::init(JNIEnv* env) {
         !beautyConfigV2_slimFace ||
         !beautyConfigV2_enlargeEyes || !beautyConfigV2_thinChin || !beautyConfigV2_useGpu ||
         !beautyConfigV2_roiOnly || !beautyConfigV2_protectEyes || !beautyConfigV2_protectLips ||
-        !beautyConfigV2_downscaleFactor) {
+        !beautyConfigV2_downscaleFactor ||
+        !beautyConfigV2_vividIntensity || !beautyConfigV2_vividSaturation ||
+        !beautyConfigV2_vividBrightness || !beautyConfigV2_vividWarmth) {
         LOGE("Failed to get BeautyFilterConfigV2 field IDs");
         return false;
     }
@@ -430,6 +436,10 @@ bool copyBeautyConfigV2FromJava(JNIEnv* env, jobject src, IrisBeautyConfigV2& de
     dest.protect_eyes = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectEyes) ? 1 : 0;
     dest.protect_lips = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectLips) ? 1 : 0;
     dest.downscale_factor = env->GetIntField(src, g_jniCache.beautyConfigV2_downscaleFactor);
+    dest.vivid_intensity = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividIntensity);
+    dest.vivid_saturation = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividSaturation);
+    dest.vivid_brightness = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividBrightness);
+    dest.vivid_warmth = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividWarmth);
 
     return !checkAndLogException(env);
 }
@@ -458,6 +468,10 @@ bool copyBeautyConfigV2ToJava(JNIEnv* env, const IrisBeautyConfigV2& src, jobjec
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectEyes, src.protect_eyes != 0);
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectLips, src.protect_lips != 0);
     env->SetIntField(dest, g_jniCache.beautyConfigV2_downscaleFactor, src.downscale_factor);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividIntensity, src.vivid_intensity);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividSaturation, src.vivid_saturation);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividBrightness, src.vivid_brightness);
+    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividWarmth, src.vivid_warmth);
 
     return !checkAndLogException(env);
 }

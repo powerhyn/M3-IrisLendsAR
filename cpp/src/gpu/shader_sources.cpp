@@ -630,5 +630,55 @@ void main() {
 }
 )glsl";
 
+//=============================================================================
+// Vivid 포스트프로세싱 프래그먼트 셰이더
+// 화면 전체 화사한 효과: Vibrance + 밝기 리프트 + 웜톤 시프트
+// 단일 패스, 텍스처 샘플 1회 + ALU 연산 위주 → ~0.3ms (MID tier)
+//=============================================================================
+const char* VIVID_POSTPROCESS_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+
+uniform sampler2D uTexture;
+uniform float uIntensity;    // 마스터 강도 (0.0~1.0)
+uniform float uSaturation;   // Vibrance 채도 부스트 (0.0~1.0)
+uniform float uBrightness;   // 밝기 리프트 (0.0~0.5)
+uniform float uWarmth;       // 웜톤 시프트 (0.0~1.0)
+
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+void main() {
+    vec4 color = texture(uTexture, vTexCoord);
+    vec3 result = color.rgb;
+
+    // 1. Vibrance: 저채도 영역 우선 부스트 (과포화 방지)
+    if (uSaturation > 0.01) {
+        float lum = dot(result, vec3(0.2126, 0.7152, 0.0722));
+        float sat = max(max(result.r, result.g), result.b) - min(min(result.r, result.g), result.b);
+        // 저채도일수록 부스트 강함
+        float vibranceAmount = uSaturation * (1.0 - smoothstep(0.0, 0.4, sat));
+        result = mix(vec3(lum), result, 1.0 + vibranceAmount);
+    }
+
+    // 2. 밝기 리프트: 미드톤 위주 소프트 커브 (하이라이트 클리핑 방지)
+    if (uBrightness > 0.001) {
+        result += uBrightness * result * (1.0 - result);
+    }
+
+    // 3. 웜톤 시프트: R/G 미세 증가 + B 미세 감소
+    if (uWarmth > 0.01) {
+        result.r += uWarmth * 0.04;
+        result.g += uWarmth * 0.02;
+        result.b -= uWarmth * 0.03;
+    }
+
+    // 마스터 intensity로 원본과 mix
+    result = mix(color.rgb, result, uIntensity);
+
+    fragColor = vec4(clamp(result, 0.0, 1.0), color.a);
+}
+)glsl";
+
 } // namespace shaders
 } // namespace iris_sdk

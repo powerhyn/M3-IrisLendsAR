@@ -383,6 +383,10 @@ struct JniCache {
     jfieldID beautyConfigV2_protectEyes = nullptr;
     jfieldID beautyConfigV2_protectLips = nullptr;
     jfieldID beautyConfigV2_downscaleFactor = nullptr;
+    jfieldID beautyConfigV2_vividIntensity = nullptr;
+    jfieldID beautyConfigV2_vividSaturation = nullptr;
+    jfieldID beautyConfigV2_vividBrightness = nullptr;
+    jfieldID beautyConfigV2_vividWarmth = nullptr;
 
     /**
      * @brief 캐시 초기화

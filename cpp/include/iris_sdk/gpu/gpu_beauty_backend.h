@@ -372,6 +372,12 @@ private:
         const std::vector<uint8_t>& combined_mask,
         int mask_width, int mask_height);
 
+    /// Vivid 포스트프로세싱 패스 (전체 프레임, ROI 무관)
+    void executeVividPass(GLuint input_tex, GLuint output_fbo,
+                          int width, int height,
+                          float intensity, float saturation,
+                          float brightness, float warmth);
+
     /// Freq Sep 불가 시 Bilateral fallback (공통 최소 강도 정책)
     void executeSmoothingWithFallbackStrength(
         GLuint input_tex, GLuint output_fbo,
@@ -410,6 +416,7 @@ private:
     GLuint freq_sep_gaussian_program_ = 0;
     GLuint freq_sep_composite_program_ = 0;
     GLuint luminance_sharpen_program_ = 0;
+    GLuint vivid_program_ = 0;
 
     // Skin mask GPU 텍스처
     GLuint skin_mask_texture_ = 0;
@@ -496,6 +503,15 @@ private:
         GLint uSharpenAmount = -1;
         GLint uTexelSize = -1;
     } luminance_sharpen_uniforms_;
+
+    // Vivid Postprocess Uniform 캐시
+    struct VividUniforms {
+        GLint uTexture = -1;
+        GLint uIntensity = -1;
+        GLint uSaturation = -1;
+        GLint uBrightness = -1;
+        GLint uWarmth = -1;
+    } vivid_uniforms_;
 
     // Temporal stability용 One Euro Filter (P4-W3-04)
     // 모든 필터는 mutex_ lock 하에서만 접근 (applyTextureId → public → lock_guard)

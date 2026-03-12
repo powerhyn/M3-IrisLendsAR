@@ -613,6 +613,12 @@ typedef struct IrisBeautyConfigV2 {
     int protect_lips;       /**< 입술 영역 보호 (0=미보호, 1=보호) */
     int downscale_factor;   /**< 다운스케일 팩터 (1, 2, 4) */
     int feather_radius;     /**< ROI 페더링 반경 (픽셀) */
+
+    /* 화면 전체 포스트프로세싱 (Vivid, GPU 전용) */
+    float vivid_intensity;     /**< 화사한 필터 강도 (0.0~1.0, 0=비활성) */
+    float vivid_saturation;    /**< 채도 부스트 (0.0~1.0) */
+    float vivid_brightness;    /**< 밝기 리프트 (0.0~0.5) */
+    float vivid_warmth;        /**< 웜톤 시프트 (0.0~1.0) */
 } IrisBeautyConfigV2;
 
 /**

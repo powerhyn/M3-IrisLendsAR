@@ -75,6 +75,13 @@ BeautyFilterConfigV2 toCppConfigV2(const IrisBeautyConfigV2* c_config) {
     config.protectEyes = c_config->protect_eyes != 0;
     config.protectLips = c_config->protect_lips != 0;
     config.downscaleFactor = c_config->downscale_factor;
+    config.vividIntensity = c_config->vivid_intensity;
+    config.vividSaturation = c_config->vivid_saturation;
+    config.vividBrightness = c_config->vivid_brightness;
+    config.vividWarmth = c_config->vivid_warmth;
+
+    // NaN/Inf/범위초과 방어 — 모든 C API 진입점에서 정규화
+    iris_sdk::BeautyFilterConfigV2Helper::clamp(config);
 
     return config;
 }
@@ -102,6 +109,10 @@ void fromCppConfigV2(const BeautyFilterConfigV2& cpp_config, IrisBeautyConfigV2*
     c_config->protect_eyes = cpp_config.protectEyes ? 1 : 0;
     c_config->protect_lips = cpp_config.protectLips ? 1 : 0;
     c_config->downscale_factor = cpp_config.downscaleFactor;
+    c_config->vivid_intensity = cpp_config.vividIntensity;
+    c_config->vivid_saturation = cpp_config.vividSaturation;
+    c_config->vivid_brightness = cpp_config.vividBrightness;
+    c_config->vivid_warmth = cpp_config.vividWarmth;
 }
 
 /**
@@ -152,6 +163,10 @@ void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* config) {
     config->protect_lips = 1;
     config->downscale_factor = 1;
     config->feather_radius = 15;
+    config->vivid_intensity = 0.0f;
+    config->vivid_saturation = 0.0f;
+    config->vivid_brightness = 0.0f;
+    config->vivid_warmth = 0.0f;
 }
 
 IrisSdkError iris_sdk_apply_beauty_v2_c(
@@ -191,28 +206,12 @@ IrisSdkError iris_sdk_apply_beauty_v2_c(
     iris_sdk::BeautyROI roi;
 
     if (detection && detection->detected && config->roi_only) {
-        // Face rect를 ROI로 변환
-        int face_x = static_cast<int>(detection->face_rect.x * width);
-        int face_y = static_cast<int>(detection->face_rect.y * height);
-        int face_w = static_cast<int>(detection->face_rect.width * width);
-        int face_h = static_cast<int>(detection->face_rect.height * height);
-
-        // 약간의 마진 추가 (20%)
-        int margin_x = face_w / 5;
-        int margin_y = face_h / 5;
-        face_x = std::max(0, face_x - margin_x);
-        face_y = std::max(0, face_y - margin_y);
-        face_w = std::min(width - face_x, face_w + 2 * margin_x);
-        face_h = std::min(height - face_y, face_h + 2 * margin_y);
-
-        roi.face_rect = iris_sdk::Rect{
-            static_cast<float>(face_x),
-            static_cast<float>(face_y),
-            static_cast<float>(face_w),
-            static_cast<float>(face_h)
-        };
-        roi.mask_width = face_w;
-        roi.mask_height = face_h;
+        roi.face_rect = iris_sdk::computeExpandedFaceRect(
+            detection->face_rect.x, detection->face_rect.y,
+            detection->face_rect.width, detection->face_rect.height,
+            width, height);
+        roi.mask_width = static_cast<int>(roi.face_rect.width);
+        roi.mask_height = static_cast<int>(roi.face_rect.height);
         roi.valid = true;
         roi.timestamp_ms = detection->timestamp_ms;
 
@@ -314,8 +313,9 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
         return IRIS_SDK_INVALID_PARAM;
     }
 
-    // 비활성화 상태면 입력 텍스처 그대로 반환
-    if (!config->enabled) {
+    // 비활성화 상태면 입력 텍스처 그대로 반환 (vivid는 enabled와 독립)
+    bool needsVivid = config->vivid_intensity > 0.01f;
+    if (!config->enabled && !needsVivid) {
         *output_texture = input_texture;
         return IRIS_SDK_OK;
     }
@@ -326,26 +326,12 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
     // ROI 생성 (detection이 있는 경우)
     iris_sdk::BeautyROI roi;
     if (detection && detection->detected && config->roi_only) {
-        int face_x = static_cast<int>(detection->face_rect.x * width);
-        int face_y = static_cast<int>(detection->face_rect.y * height);
-        int face_w = static_cast<int>(detection->face_rect.width * width);
-        int face_h = static_cast<int>(detection->face_rect.height * height);
-
-        int margin_x = face_w / 5;
-        int margin_y = face_h / 5;
-        face_x = std::max(0, face_x - margin_x);
-        face_y = std::max(0, face_y - margin_y);
-        face_w = std::min(width - face_x, face_w + 2 * margin_x);
-        face_h = std::min(height - face_y, face_h + 2 * margin_y);
-
-        roi.face_rect = iris_sdk::Rect{
-            static_cast<float>(face_x),
-            static_cast<float>(face_y),
-            static_cast<float>(face_w),
-            static_cast<float>(face_h)
-        };
-        roi.mask_width = face_w;
-        roi.mask_height = face_h;
+        roi.face_rect = iris_sdk::computeExpandedFaceRect(
+            detection->face_rect.x, detection->face_rect.y,
+            detection->face_rect.width, detection->face_rect.height,
+            width, height);
+        roi.mask_width = static_cast<int>(roi.face_rect.width);
+        roi.mask_height = static_cast<int>(roi.face_rect.height);
         roi.valid = true;
         roi.timestamp_ms = detection->timestamp_ms;
 
