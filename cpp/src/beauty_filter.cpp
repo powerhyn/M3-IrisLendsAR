@@ -550,7 +550,13 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_beauty_preset(IrisBeautyPreset preset)
         case IRIS_BEAUTY_PRESET_MODERATE: quality = 0.5f; break;
         case IRIS_BEAUTY_PRESET_STRONG:   quality = 0.8f; break;
         case IRIS_BEAUTY_PRESET_CUSTOM:
-            return IRIS_SDK_OK;  // 현재 skinQuality 유지
+            ensureV2ConfigInitialized();
+            {
+                std::lock_guard<std::mutex> lock(g_config_v2_mutex);
+                g_config_v2.smoothing = 0.0f;
+                g_config_v2.softFocus = 0.0f;
+            }
+            return IRIS_SDK_OK;  // skinQuality 유지, smoothing/softFocus 초기화
         default:
             return IRIS_SDK_INVALID_PARAM;
     }
