@@ -525,12 +525,13 @@ void main() {
     // 목표는 "큰 잡티 제거"가 아니라 "미세 피부결 압축"이다.
     // 따라서 작은/중간 고주파만 선택적으로 눌러주고,
     // 큰 점, 털, 진한 그림자 경계는 magnitude 상단 구간에서 다시 보호한다.
-    float microTextureBand = smoothstep(uAttenuationLow * 0.7, uAttenuationHigh * 0.9, magnitude);
-    float largeDetailProtection = smoothstep(uAttenuationHigh * 2.6, uAttenuationHigh * 5.2, magnitude);
-    float edgeProtection = 1.0 - uEdgeWeight * clamp(edgeStrength * EDGE_SCALE * 0.85, 0.0, 1.0);
-    float chromaProtection = 1.0 - uChromaWeight * clamp(chromaDev * CHROMA_SCALE * 0.85, 0.0, 1.0);
+    float microTextureBand = smoothstep(uAttenuationLow * 0.6, uAttenuationHigh * 1.2, magnitude);
+    float largeDetailProtection = smoothstep(uAttenuationHigh * 4.0, uAttenuationHigh * 8.0, magnitude);
+    float edgeProtection = 1.0 - uEdgeWeight * clamp(edgeStrength * EDGE_SCALE * 0.72, 0.0, 1.0);
+    float chromaProtection = 1.0 - uChromaWeight * clamp(chromaDev * CHROMA_SCALE * 0.70, 0.0, 1.0);
+    float largeDetailCompression = mix(1.0, 0.45, largeDetailProtection);
     float poreCompression = microTextureBand
-                          * (1.0 - largeDetailProtection)
+                          * largeDetailCompression
                           * clamp(edgeProtection, 0.0, 1.0)
                           * clamp(chromaProtection, 0.0, 1.0);
 
