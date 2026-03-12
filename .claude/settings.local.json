@@ -66,7 +66,8 @@
       "mcp__tavily__tavily-extract",
       "Bash(/Users/seokhahyeon/.claude/plugins/cache/team-attention-plugins/agent-council/1.0.0/skills/agent-council/scripts/council.sh wait:*)",
       "Bash(/Users/seokhahyeon/.claude/plugins/cache/team-attention-plugins/agent-council/1.0.0/skills/agent-council/scripts/council.sh clean:*)",
-      "Bash(./build/bin/test_beauty_config_v2:*)"
+      "Bash(./build/bin/test_beauty_config_v2:*)",
+      "Bash(for commit:*)"
     ]
   },
   "enabledPlugins": {
