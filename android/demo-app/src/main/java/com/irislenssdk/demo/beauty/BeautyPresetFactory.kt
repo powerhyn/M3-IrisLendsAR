@@ -1,238 +1,155 @@
 /**
  * 뷰티 필터 프리셋 팩토리
  *
- * beauty-tuner가 설계한 Natural/Studio/Glamour 프리셋을 생성하고,
- * 과보정 방지를 위한 sanitizeConfig를 제공합니다.
- *
- * 참조: docs/demo_app/beauty_preset_tuning_guide.md
+ * 잡티 보정(SkinQuality) + Vivid 포스트프로세싱 조합 프리셋.
+ * 기존 스무딩/화이트닝/소프트포커스 등 레거시 뷰티는 0으로 비활성화.
  */
 package com.irislenssdk.demo.beauty
 
 import com.irislenssdk.BeautyFilterConfigV2
-import kotlin.math.min
 
 /**
- * 뷰티 프리셋 종류
+ * Vivid 프리셋 종류
  */
 enum class BeautyPreset(val label: String) {
-    NATURAL("Natural"),
+    NATURAL_GLOW("Natural"),
+    SPRING("Spring"),
     STUDIO("Studio"),
-    GLAMOUR("Glamour"),
+    GOLDEN_HOUR("Golden"),
+    VIVID_POP("Vivid"),
     CUSTOM("Custom")
 }
 
 object BeautyPresetFactory {
 
     // ========================================================================
-    // 과보정 방지 하드 리밋
+    // 베이스 빌더 — 잡티 보정만 켜고 레거시 뷰티는 모두 OFF
     // ========================================================================
 
-    private const val MAX_SMOOTHING = 0.65f
-    private const val MAX_WHITENING = 0.45f
-    private const val MAX_BRIGHTNESS = 1.25f
-    private const val MAX_SOFT_FOCUS = 0.50f
-    private const val MAX_SLIM_FACE = 0.40f
-    private const val MAX_ENLARGE_EYES = 0.35f
-    private const val MAX_THIN_CHIN = 0.30f
+    private fun baseBuilder(skinQuality: Float = 0.3f) = BeautyFilterConfigV2.Builder()
+        .enabled(true)
+        .intensity(1.0f)          // 마스터 강도 100%
+        .smoothing(0.0f)
+        .brightness(1.0f)
+        .whitening(0.0f)
+        .colorBalance(0.0f)
+        .softFocus(0.0f)
+        .skinQuality(skinQuality)
+        .wrinkleRemove(0.0f)
+        .slimFace(0.0f)
+        .enlargeEyes(0.0f)
+        .thinChin(0.0f)
+        .protectEyes(true)
+        .protectLips(true)
+        .useGpu(true)
+        .roiOnly(false)
 
     // ========================================================================
-    // 프리셋 생성
+    // Vivid 프리셋
     // ========================================================================
 
     /**
-     * Natural 프리셋 생성.
-     * "더 좋은 조명에서 찍은 것 같은" 자연스러운 보정.
+     * Natural Glow — 일상 셀피, "더 좋은 조명" 느낌
      */
-    fun createNaturalPreset(): BeautyFilterConfigV2 {
-        return BeautyFilterConfigV2.Builder()
-            .enabled(true)
-            .intensity(0.50f)
-            .smoothing(0.25f)
-            .brightness(1.03f)
-            .whitening(0.08f)
-            .colorBalance(0.10f)
-            .softFocus(0.10f)
-            .skinQuality(0.2f)      // 자연스러운 잡티 보정
-            .wrinkleRemove(0.0f)
-            .slimFace(0.08f)
-            .enlargeEyes(0.05f)
-            .thinChin(0.05f)
-            .protectEyes(true)
-            .protectLips(true)
-            .useGpu(true)
-            .roiOnly(false)
+    fun createNaturalGlowPreset(): BeautyFilterConfigV2 {
+        return baseBuilder(skinQuality = 0.2f)
+            .vividIntensity(0.4f)
+            .vividSaturation(0.25f)
+            .vividBrightness(0.05f)
+            .vividWarmth(0.15f)
             .build()
     }
 
     /**
-     * Studio 프리셋 생성.
-     * "프로 사진작가가 조명 세팅하고 찍은 듯한" 보정.
+     * Spring — 화사하고 따뜻한 봄날 톤
+     */
+    fun createSpringPreset(): BeautyFilterConfigV2 {
+        return baseBuilder(skinQuality = 0.3f)
+            .vividIntensity(0.6f)
+            .vividSaturation(0.4f)
+            .vividBrightness(0.1f)
+            .vividWarmth(0.3f)
+            .build()
+    }
+
+    /**
+     * Studio — 채도+밝기, 웜톤 없이 깨끗한 스튜디오 느낌
      */
     fun createStudioPreset(): BeautyFilterConfigV2 {
-        return BeautyFilterConfigV2.Builder()
-            .enabled(true)
-            .intensity(0.70f)
-            .smoothing(0.40f)
-            .brightness(1.08f)
-            .whitening(0.18f)
-            .colorBalance(0.05f)
-            .softFocus(0.20f)
-            .skinQuality(0.4f)      // 중간 잡티 보정
-            .wrinkleRemove(0.0f)
-            .slimFace(0.15f)
-            .enlargeEyes(0.12f)
-            .thinChin(0.10f)
-            .protectEyes(true)
-            .protectLips(true)
-            .useGpu(true)
-            .roiOnly(false)
+        return baseBuilder(skinQuality = 0.35f)
+            .vividIntensity(0.5f)
+            .vividSaturation(0.3f)
+            .vividBrightness(0.12f)
+            .vividWarmth(0.0f)
             .build()
     }
 
     /**
-     * Glamour 프리셋 생성.
-     * "매거진 화보 속 모델" 느낌의 확실한 보정.
+     * Golden Hour — 웜톤 강조, 일몰 분위기
      */
-    fun createGlamourPreset(): BeautyFilterConfigV2 {
-        return BeautyFilterConfigV2.Builder()
-            .enabled(true)
-            .intensity(0.85f)
-            .smoothing(0.55f)
-            .brightness(1.12f)
-            .whitening(0.30f)
-            .colorBalance(0.15f)
-            .softFocus(0.35f)
-            .skinQuality(0.6f)      // 강한 잡티 보정
-            .wrinkleRemove(0.0f)
-            .slimFace(0.22f)
-            .enlargeEyes(0.20f)
-            .thinChin(0.15f)
-            .protectEyes(true)
-            .protectLips(true)
-            .useGpu(true)
-            .roiOnly(false)
+    fun createGoldenHourPreset(): BeautyFilterConfigV2 {
+        return baseBuilder(skinQuality = 0.25f)
+            .vividIntensity(0.7f)
+            .vividSaturation(0.2f)
+            .vividBrightness(0.08f)
+            .vividWarmth(0.6f)
             .build()
     }
 
     /**
-     * Custom 프리셋 생성.
-     * 잡티 보정(FreqSep)만 활성화된 상태로, 다른 효과는 모두 무효화.
-     * 개별 효과를 독립적으로 테스트할 때 사용합니다.
+     * Vivid Pop — 강한 채도+밝기, SNS/제품 촬영용
+     */
+    fun createVividPopPreset(): BeautyFilterConfigV2 {
+        return baseBuilder(skinQuality = 0.4f)
+            .vividIntensity(0.8f)
+            .vividSaturation(0.5f)
+            .vividBrightness(0.15f)
+            .vividWarmth(0.1f)
+            .build()
+    }
+
+    /**
+     * Custom — 잡티 보정 + vivid OFF 기본 상태
      */
     fun createCustomPreset(): BeautyFilterConfigV2 {
-        return BeautyFilterConfigV2.Builder()
-            .enabled(true)
-            .intensity(1.0f)          // 마스터 강도 100% (감쇠 없이 그대로 전달)
-            .smoothing(0.0f)          // Bilateral 스무딩 OFF
-            .brightness(1.0f)         // 밝기 변경 없음
-            .whitening(0.0f)          // 화이트닝 OFF
-            .colorBalance(0.0f)       // 컬러 밸런스 중립
-            .softFocus(0.0f)          // 소프트 포커스 OFF
-            .skinQuality(0.5f)        // 잡티 보정만 중간 강도로 활성화
-            .wrinkleRemove(0.0f)      // 주름 제거 OFF
-            .slimFace(0.0f)           // 얼굴 슬림 OFF
-            .enlargeEyes(0.0f)        // 눈 확대 OFF
-            .thinChin(0.0f)           // 턱 축소 OFF
-            .protectEyes(true)
-            .protectLips(true)
-            .useGpu(true)
-            .roiOnly(false)
+        return baseBuilder(skinQuality = 0.3f)
+            .vividIntensity(0.0f)
+            .vividSaturation(0.0f)
+            .vividBrightness(0.0f)
+            .vividWarmth(0.0f)
             .build()
     }
 
     /**
      * 프리셋 종류에 따라 BeautyFilterConfigV2를 생성합니다.
-     * CUSTOM인 경우 현재 설정이 있으면 그대로, 없으면 잡티 보정만 활성화된 기본값을 반환합니다.
      */
     fun createPreset(preset: BeautyPreset, current: BeautyFilterConfigV2? = null): BeautyFilterConfigV2 {
         return when (preset) {
-            BeautyPreset.NATURAL -> createNaturalPreset()
+            BeautyPreset.NATURAL_GLOW -> createNaturalGlowPreset()
+            BeautyPreset.SPRING -> createSpringPreset()
             BeautyPreset.STUDIO -> createStudioPreset()
-            BeautyPreset.GLAMOUR -> createGlamourPreset()
+            BeautyPreset.GOLDEN_HOUR -> createGoldenHourPreset()
+            BeautyPreset.VIVID_POP -> createVividPopPreset()
             BeautyPreset.CUSTOM -> current?.let { BeautyFilterConfigV2(it) } ?: createCustomPreset()
         }
     }
 
     // ========================================================================
-    // 과보정 방지 (sanitizeConfig)
+    // 과보정 방지 (Vivid 전용)
     // ========================================================================
 
     /**
-     * 과보정 방지 규칙을 적용합니다.
-     *
-     * 5가지 조합 제한 규칙:
-     * 1. smoothing + whitening <= 0.70 (플라스틱 피부 방지)
-     * 2. whitening + (brightness - 1.0) <= 0.35 (과노출 방지)
-     * 3. smoothing + softFocus <= 0.75 (디테일 손실 방지)
-     * 4. slimFace + thinChin <= 0.45 (뾰족한 얼굴 방지)
-     * 5. enlargeEyes <= slimFace * 2.0 (비정상 비율 방지, enlargeEyes > 0.20일 때)
-     *
-     * @param config 검증할 설정 (in-place로 수정됨)
-     * @return 수정된 config (체이닝용)
+     * Vivid 과보정 방지 규칙.
+     * - vividSaturation 0.6 초과 시 과포화 위험
+     * - vividBrightness 0.3 초과 시 하이라이트 뭉개짐
+     * - vividWarmth 0.7 초과 시 노란끼 과다
      */
     fun sanitizeConfig(config: BeautyFilterConfigV2): BeautyFilterConfigV2 {
-        // 하드 리밋 적용
-        config.smoothing = min(config.smoothing, MAX_SMOOTHING)
-        config.whitening = min(config.whitening, MAX_WHITENING)
-        config.brightness = min(config.brightness, MAX_BRIGHTNESS)
-        config.softFocus = min(config.softFocus, MAX_SOFT_FOCUS)
-        config.slimFace = min(config.slimFace, MAX_SLIM_FACE)
-        config.enlargeEyes = min(config.enlargeEyes, MAX_ENLARGE_EYES)
-        config.thinChin = min(config.thinChin, MAX_THIN_CHIN)
-
-        // 규칙 1: smoothing + whitening 합산 제한 (플라스틱 피부 방지)
-        if (config.smoothing + config.whitening > 0.70f) {
-            config.whitening = min(config.whitening, 0.70f - config.smoothing)
-        }
-
-        // 규칙 2: whitening + (brightness - 1.0) 합산 제한 (과노출 방지)
-        if (config.whitening + (config.brightness - 1.0f) > 0.35f) {
-            config.brightness = min(config.brightness, 1.0f + 0.35f - config.whitening)
-        }
-
-        // 규칙 3: smoothing + softFocus 합산 제한 (디테일 손실 방지)
-        if (config.smoothing + config.softFocus > 0.75f) {
-            config.softFocus = min(config.softFocus, 0.75f - config.smoothing)
-        }
-
-        // 규칙 4: slimFace + thinChin 합산 제한 (뾰족한 얼굴 방지)
-        if (config.slimFace + config.thinChin > 0.45f) {
-            config.thinChin = min(config.thinChin, 0.45f - config.slimFace)
-        }
-
-        // 규칙 5: enlargeEyes / slimFace 비율 제한 (비정상 비율 방지)
-        if (config.enlargeEyes > config.slimFace * 2.0f && config.enlargeEyes > 0.20f) {
-            config.enlargeEyes = min(config.enlargeEyes, config.slimFace * 2.0f)
-        }
-
+        config.vividIntensity = config.vividIntensity.coerceIn(0.0f, 1.0f)
+        config.vividSaturation = config.vividSaturation.coerceIn(0.0f, 0.6f)
+        config.vividBrightness = config.vividBrightness.coerceIn(0.0f, 0.3f)
+        config.vividWarmth = config.vividWarmth.coerceIn(0.0f, 0.7f)
+        config.skinQuality = config.skinQuality.coerceIn(0.0f, 1.0f)
         return config
-    }
-
-    // ========================================================================
-    // LUT 프리셋 연결
-    // ========================================================================
-
-    /**
-     * 뷰티 프리셋에 연결된 기본 LUT 프리셋
-     */
-    fun getDefaultLutPreset(preset: BeautyPreset): LutTextureLoader.LutPreset? {
-        return when (preset) {
-            BeautyPreset.NATURAL -> LutTextureLoader.LutPreset.NATURAL_GLOW
-            BeautyPreset.STUDIO -> LutTextureLoader.LutPreset.CLEAN_PORCELAIN
-            BeautyPreset.GLAMOUR -> LutTextureLoader.LutPreset.ROSY_GLOW
-            BeautyPreset.CUSTOM -> null  // Custom has no default LUT
-        }
-    }
-
-    /**
-     * 기본 LUT 강도
-     */
-    fun getDefaultLutIntensity(preset: BeautyPreset): Float {
-        return when (preset) {
-            BeautyPreset.NATURAL -> 0.3f
-            BeautyPreset.STUDIO -> 0.5f
-            BeautyPreset.GLAMOUR -> 0.6f
-            BeautyPreset.CUSTOM -> 0.0f
-        }
     }
 }

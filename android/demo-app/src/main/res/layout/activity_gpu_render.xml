@@ -426,198 +426,111 @@
                     android:text="Beauty: ON"
                     android:textAllCaps="false" />
 
-                <!-- 프리셋 선택 버튼 -->
+                <!-- Vivid 프리셋 선택 버튼 -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnPresetNaturalGlow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:layout_marginEnd="4dp"
+                            android:text="Natural"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:minWidth="0dp"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:backgroundTint="#FF4CAF50"
+                            style="@style/Widget.MaterialComponents.Button" />
+
+                        <Button
+                            android:id="@+id/btnPresetSpring"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:layout_marginEnd="4dp"
+                            android:text="Spring"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:minWidth="0dp"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:backgroundTint="#FFFF9800"
+                            style="@style/Widget.MaterialComponents.Button" />
+
+                        <Button
+                            android:id="@+id/btnPresetStudio"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:layout_marginEnd="4dp"
+                            android:text="Studio"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:minWidth="0dp"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:backgroundTint="#FF2196F3"
+                            style="@style/Widget.MaterialComponents.Button" />
+
+                        <Button
+                            android:id="@+id/btnPresetGoldenHour"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:layout_marginEnd="4dp"
+                            android:text="Golden"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:minWidth="0dp"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:backgroundTint="#FFFFC107"
+                            style="@style/Widget.MaterialComponents.Button" />
+
+                        <Button
+                            android:id="@+id/btnPresetVividPop"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:layout_marginEnd="4dp"
+                            android:text="Vivid"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:minWidth="0dp"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:backgroundTint="#FFE91E63"
+                            style="@style/Widget.MaterialComponents.Button" />
+
+                        <Button
+                            android:id="@+id/btnPresetCustom"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:text="Custom"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:minWidth="0dp"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:backgroundTint="#FF666666"
+                            style="@style/Widget.MaterialComponents.Button" />
+
+                    </LinearLayout>
+                </HorizontalScrollView>
+
+                <!-- 잡티보정 슬라이더 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
+                    android:gravity="center_vertical"
                     android:layout_marginTop="8dp">
-
-                    <Button
-                        android:id="@+id/btnPresetNatural"
-                        android:layout_width="0dp"
-                        android:layout_height="36dp"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="4dp"
-                        android:text="Natural"
-                        android:textSize="11sp"
-                        android:textAllCaps="false"
-                        android:minWidth="0dp"
-                        android:backgroundTint="#FF4CAF50"
-                        style="@style/Widget.MaterialComponents.Button" />
-
-                    <Button
-                        android:id="@+id/btnPresetStudio"
-                        android:layout_width="0dp"
-                        android:layout_height="36dp"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="4dp"
-                        android:text="Studio"
-                        android:textSize="11sp"
-                        android:textAllCaps="false"
-                        android:minWidth="0dp"
-                        android:backgroundTint="#FF2196F3"
-                        style="@style/Widget.MaterialComponents.Button" />
-
-                    <Button
-                        android:id="@+id/btnPresetGlamour"
-                        android:layout_width="0dp"
-                        android:layout_height="36dp"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="4dp"
-                        android:text="Glamour"
-                        android:textSize="11sp"
-                        android:textAllCaps="false"
-                        android:minWidth="0dp"
-                        android:backgroundTint="#FFE91E63"
-                        style="@style/Widget.MaterialComponents.Button" />
-
-                    <Button
-                        android:id="@+id/btnPresetCustom"
-                        android:layout_width="0dp"
-                        android:layout_height="36dp"
-                        android:layout_weight="1"
-                        android:text="Custom"
-                        android:textSize="11sp"
-                        android:textAllCaps="false"
-                        android:minWidth="0dp"
-                        android:backgroundTint="#FF666666"
-                        style="@style/Widget.MaterialComponents.Button" />
-
-                </LinearLayout>
-
-                <!-- Smoothing 슬라이더 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="8dp">
-
-                    <TextView
-                        android:layout_width="80dp"
-                        android:layout_height="wrap_content"
-                        android:text="스무딩"
-                        android:textColor="@android:color/white"
-                        android:textSize="12sp" />
-
-                    <SeekBar
-                        android:id="@+id/seekSmoothing"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:max="100"
-                        android:progress="50" />
-
-                </LinearLayout>
-
-                <!-- Brightness 슬라이더 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
-
-                    <TextView
-                        android:layout_width="80dp"
-                        android:layout_height="wrap_content"
-                        android:text="밝기"
-                        android:textColor="@android:color/white"
-                        android:textSize="12sp" />
-
-                    <SeekBar
-                        android:id="@+id/seekBrightness"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:max="100"
-                        android:progress="50" />
-
-                </LinearLayout>
-
-                <!-- Whitening 슬라이더 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
-
-                    <TextView
-                        android:layout_width="80dp"
-                        android:layout_height="wrap_content"
-                        android:text="화이트닝"
-                        android:textColor="@android:color/white"
-                        android:textSize="12sp" />
-
-                    <SeekBar
-                        android:id="@+id/seekWhitening"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:max="100"
-                        android:progress="0" />
-
-                </LinearLayout>
-
-                <!-- Color Balance 슬라이더 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
-
-                    <TextView
-                        android:layout_width="80dp"
-                        android:layout_height="wrap_content"
-                        android:text="컬러밸런스"
-                        android:textColor="@android:color/white"
-                        android:textSize="12sp" />
-
-                    <SeekBar
-                        android:id="@+id/seekColorBalance"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:max="100"
-                        android:progress="50" />
-
-                </LinearLayout>
-
-                <!-- Soft Focus 슬라이더 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
-
-                    <TextView
-                        android:layout_width="80dp"
-                        android:layout_height="wrap_content"
-                        android:text="소프트포커스"
-                        android:textColor="@android:color/white"
-                        android:textSize="12sp" />
-
-                    <SeekBar
-                        android:id="@+id/seekSoftFocus"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:max="100"
-                        android:progress="30" />
-
-                </LinearLayout>
-
-                <!-- SkinQuality (잡티 보정) 슬라이더 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
 
                     <TextView
                         android:layout_width="80dp"
@@ -632,11 +545,11 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:max="100"
-                        android:progress="0" />
+                        android:progress="30" />
 
                 </LinearLayout>
 
-                <!-- LUT 필터 구분선 -->
+                <!-- Vivid 구분선 -->
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
@@ -644,171 +557,111 @@
                     android:layout_marginTop="8dp"
                     android:layout_marginBottom="4dp" />
 
-                <!-- LUT 프리셋 라벨 -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="LUT Filter"
-                    android:textColor="@android:color/white"
+                    android:text="Vivid (GPU Post)"
+                    android:textColor="#FFFFAB40"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:layout_marginBottom="4dp" />
 
-                <!-- LUT 프리셋 가로 스크롤 -->
-                <HorizontalScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:scrollbars="none">
-
-                    <LinearLayout
-                        android:id="@+id/lutPresetRow"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-
-                        <Button
-                            android:id="@+id/btnLutOff"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="OFF"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutRosyGlow"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Rosy"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutPeachCream"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Peach"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutCleanPorcelain"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Clean"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutGoldenHour"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Golden"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutFilmVintage"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Film"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutCoolEditorial"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Cool"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutWarmSunset"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Warm"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:layout_marginEnd="4dp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                        <Button
-                            android:id="@+id/btnLutNaturalGlow"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:minWidth="64dp"
-                            android:text="Natural"
-                            android:textSize="11sp"
-                            android:textAllCaps="false"
-                            android:backgroundTint="#FF795548"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
-
-                    </LinearLayout>
-                </HorizontalScrollView>
-
-                <!-- LUT 강도 슬라이더 -->
+                <!-- Vivid Intensity -->
                 <LinearLayout
-                    android:id="@+id/lutIntensityPanel"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp"
-                    android:visibility="gone">
+                    android:gravity="center_vertical">
 
                     <TextView
                         android:layout_width="80dp"
                         android:layout_height="wrap_content"
-                        android:text="LUT 강도"
+                        android:text="화사함"
                         android:textColor="@android:color/white"
                         android:textSize="12sp" />
 
                     <SeekBar
-                        android:id="@+id/seekLutIntensity"
+                        android:id="@+id/seekVividIntensity"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:max="100"
-                        android:progress="100" />
+                        android:progress="0" />
+
+                </LinearLayout>
+
+                <!-- Vivid Saturation -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="80dp"
+                        android:layout_height="wrap_content"
+                        android:text="채도"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekVividSaturation"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+
+                </LinearLayout>
+
+                <!-- Vivid Brightness -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="80dp"
+                        android:layout_height="wrap_content"
+                        android:text="밝기부스트"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekVividBrightness"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+
+                </LinearLayout>
+
+                <!-- Vivid Warmth -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="80dp"
+                        android:layout_height="wrap_content"
+                        android:text="웜톤"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekVividWarmth"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
 
                 </LinearLayout>
 
