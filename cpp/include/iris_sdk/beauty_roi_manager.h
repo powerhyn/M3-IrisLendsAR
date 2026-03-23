@@ -13,6 +13,7 @@
 #include "beauty_filter.h"
 #include <vector>
 #include <cstdint>
+#include <algorithm>
 
 #ifdef IRIS_SDK_HAS_OPENCV
 #include <opencv2/core.hpp>
@@ -72,6 +73,44 @@ struct BeautyROI {
         combined_mask.clear();
     }
 };
+
+/**
+ * @brief 정규화된 face_rect로부터 픽셀 좌표 ROI를 계산 (20% 마진 포함)
+ *
+ * sdk_api_v2.cpp(CPU/GPU), gpu_beauty_backend.cpp(applyTextureId)에서
+ * 동일하게 사용되는 ROI 확장 로직의 공통 헬퍼.
+ *
+ * @param norm_x 정규화된 face rect x (0.0~1.0)
+ * @param norm_y 정규화된 face rect y (0.0~1.0)
+ * @param norm_w 정규화된 face rect width (0.0~1.0)
+ * @param norm_h 정규화된 face rect height (0.0~1.0)
+ * @param frame_width 프레임 너비 (px)
+ * @param frame_height 프레임 높이 (px)
+ * @return 확장된 face_rect (픽셀 좌표, Rect)
+ */
+inline Rect computeExpandedFaceRect(float norm_x, float norm_y,
+                                    float norm_w, float norm_h,
+                                    int frame_width, int frame_height) {
+    int face_x = static_cast<int>(norm_x * frame_width);
+    int face_y = static_cast<int>(norm_y * frame_height);
+    int face_w = static_cast<int>(norm_w * frame_width);
+    int face_h = static_cast<int>(norm_h * frame_height);
+
+    // 20% 마진 확장
+    int margin_x = face_w / 5;
+    int margin_y = face_h / 5;
+    face_x = std::max(0, face_x - margin_x);
+    face_y = std::max(0, face_y - margin_y);
+    face_w = std::min(frame_width - face_x, face_w + 2 * margin_x);
+    face_h = std::min(frame_height - face_y, face_h + 2 * margin_y);
+
+    return Rect{
+        static_cast<float>(face_x),
+        static_cast<float>(face_y),
+        static_cast<float>(face_w),
+        static_cast<float>(face_h)
+    };
+}
 
 /**
  * @brief Face Mesh 기반 ROI 관리자

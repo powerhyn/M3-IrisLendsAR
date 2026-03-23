@@ -55,6 +55,18 @@ static void computeGaussianWeights(int radius, float weights[kMaxGaussianRadius 
 
 static BeautyFilterConfigV2 buildEffectiveConfig(const BeautyFilterConfigV2& config) {
     BeautyFilterConfigV2 effective = config;
+
+    if (!config.enabled) {
+        // beauty 비활성 → vivid-only 경로. 모든 beauty 수치를 중립값으로 설정.
+        effective.smoothing = 0.0f;
+        effective.softFocus = 0.0f;
+        effective.whitening = 0.0f;
+        effective.colorBalance = 0.0f;
+        effective.brightness = 1.0f;
+        effective.skinQuality = 0.0f;
+        return effective;
+    }
+
     const float master = std::clamp(config.intensity, 0.0f, 1.0f);
 
     effective.smoothing *= master;
@@ -88,6 +100,7 @@ extern const char* MASKING_FRAGMENT;
 extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
 extern const char* FREQ_SEP_GAUSSIAN_FRAGMENT;
 extern const char* FREQ_SEP_COMPOSITE_FRAGMENT;
+extern const char* VIVID_POSTPROCESS_FRAGMENT;
 }
 
 GPUBeautyBackend::GPUBeautyBackend() = default;
@@ -274,6 +287,17 @@ bool GPUBeautyBackend::initializeShaders() {
     }
     shader_manager_->cacheProgram("combined_color", combined_color_program_);
 
+    // Vivid 포스트프로세싱 (non-fatal: 실패해도 beauty 파이프라인은 정상 동작)
+    if (!shader_manager_->createProgram(
+            shaders::FULLSCREEN_QUAD_VERTEX,
+            shaders::VIVID_POSTPROCESS_FRAGMENT,
+            vivid_program_)) {
+        LOGW("Failed to create vivid program (non-fatal, vivid will be unavailable)");
+        vivid_program_ = 0;
+    } else {
+        shader_manager_->cacheProgram("vivid", vivid_program_);
+    }
+
     // Frequency Separation 셰이더
     if (!initializeFreqSepShaders()) {
         LOGW("Failed to create Freq Sep shaders (non-fatal)");
@@ -356,6 +380,15 @@ void GPUBeautyBackend::cacheUniformLocations() {
     combined_color_uniforms_.uCombinedWhitening = glGetUniformLocation(combined_color_program_, "uWhitening");
     combined_color_uniforms_.uCombinedLutTexture = glGetUniformLocation(combined_color_program_, "uLutTexture");
     combined_color_uniforms_.uCombinedLutIntensity = glGetUniformLocation(combined_color_program_, "uLutIntensity");
+
+    // Vivid Postprocess Uniforms
+    if (vivid_program_ != 0) {
+        vivid_uniforms_.uTexture = glGetUniformLocation(vivid_program_, "uTexture");
+        vivid_uniforms_.uIntensity = glGetUniformLocation(vivid_program_, "uIntensity");
+        vivid_uniforms_.uSaturation = glGetUniformLocation(vivid_program_, "uSaturation");
+        vivid_uniforms_.uBrightness = glGetUniformLocation(vivid_program_, "uBrightness");
+        vivid_uniforms_.uWarmth = glGetUniformLocation(vivid_program_, "uWarmth");
+    }
 
     // Freq Sep Gaussian Uniforms
     if (freq_sep_gaussian_program_ != 0) {
@@ -524,6 +557,7 @@ void GPUBeautyBackend::release() {
     freq_sep_gaussian_program_ = 0;
     freq_sep_composite_program_ = 0;
     luminance_sharpen_program_ = 0;
+    vivid_program_ = 0;
 
     LOGI("GPUBeautyBackend released");
 }
@@ -586,8 +620,9 @@ IrisSdkError GPUBeautyBackend::applyTexture(
         return IRIS_SDK_INVALID_PARAM;
     }
 
-    if (!config.enabled) {
-        // 비활성화: 입력을 그대로 출력으로
+    bool needsVivid = config.vividIntensity > 0.01f;
+    if (!config.enabled && !needsVivid) {
+        // beauty 비활성 + vivid 비활성: 입력을 그대로 출력으로
         output = input;
         return IRIS_SDK_OK;
     }
@@ -659,21 +694,34 @@ IrisSdkError GPUBeautyBackend::applyTexture(
                              width, height, effective_config.softFocus);
         if (profiling) profiler_->end("SoftFocus");
         current_input = current_output->texture_id;
+        if (pong) current_output = (current_output == ping) ? pong : ping;
+    }
+
+    // 4. Vivid 포스트프로세싱 (전체 프레임, beauty enabled와 독립)
+    if (needsVivid) {
+        if (profiling) profiler_->begin("Vivid");
+        executeVividPass(current_input, current_output->fbo_id,
+                         width, height,
+                         config.vividIntensity,
+                         config.vividSaturation,
+                         config.vividBrightness,
+                         config.vividWarmth);
+        if (profiling) profiler_->end("Vivid");
+        current_input = current_output->texture_id;
     }
 
     // 출력 텍스처 핸들 설정
-    // 주의: 이 텍스처는 풀에서 관리되므로 사용 후 반환 필요
-    // current_input이 가리키는 텍스처는 풀의 TextureInfo가 소유하므로
-    // native_handle은 해당 TextureInfo의 texture_id 주소를 사용
-    TexturePool::TextureInfo* result_info = (current_input == ping->texture_id) ? ping : pong;
-    output.native_handle = &result_info->texture_id;
-    output.type = TextureHandle::Type::OpenGLES;
-    output.width = width;
-    output.height = height;
-    output.format = input.format;
-
-    // 텍스처 반환 (현재 output으로 사용 중인 것 제외)
-    // 실제 구현에서는 호출자가 output 사용 후 반환해야 함
+    if (current_input == input_tex) {
+        // 아무 패스도 실행되지 않음 — 입력을 그대로 반환
+        output = input;
+    } else {
+        TexturePool::TextureInfo* result_info = (current_input == ping->texture_id) ? ping : pong;
+        output.native_handle = &result_info->texture_id;
+        output.type = TextureHandle::Type::OpenGLES;
+        output.width = width;
+        output.height = height;
+        output.format = input.format;
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -831,6 +879,42 @@ void GPUBeautyBackend::executeBrightnessPass(
     (void)width;
     (void)height;
     (void)brightness;
+#endif
+}
+
+void GPUBeautyBackend::executeVividPass(
+    GLuint input_tex, GLuint output_fbo,
+    int width, int height,
+    float intensity, float saturation,
+    float brightness, float warmth) {
+
+#if IRIS_SDK_GPU_AVAILABLE
+    if (vivid_program_ == 0) return;
+    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+    glViewport(0, 0, width, height);
+    glUseProgram(vivid_program_);
+
+    glUniform1i(vivid_uniforms_.uTexture, 0);
+    glUniform1f(vivid_uniforms_.uIntensity, intensity);
+    glUniform1f(vivid_uniforms_.uSaturation, saturation);
+    glUniform1f(vivid_uniforms_.uBrightness, brightness);
+    glUniform1f(vivid_uniforms_.uWarmth, warmth);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, input_tex);
+
+    renderFullscreenQuad();
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+#else
+    (void)input_tex;
+    (void)output_fbo;
+    (void)width;
+    (void)height;
+    (void)intensity;
+    (void)saturation;
+    (void)brightness;
+    (void)warmth;
 #endif
 }
 
@@ -1480,7 +1564,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         return IRIS_SDK_INVALID_PARAM;
     }
 
-    if (!config.enabled) {
+    bool needsVivid = config.vividIntensity > 0.01f;
+    if (!config.enabled && !needsVivid) {
         *output_texture = input_texture;
         return IRIS_SDK_OK;
     }
@@ -1504,27 +1589,13 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     BeautyROI roi;
     BeautyROI* roi_ptr = nullptr;
 
-    if (detection && detection->detected && config.roiOnly) {
-        int face_x = static_cast<int>(detection->face_rect.x * width);
-        int face_y = static_cast<int>(detection->face_rect.y * height);
-        int face_w = static_cast<int>(detection->face_rect.width * width);
-        int face_h = static_cast<int>(detection->face_rect.height * height);
-
-        int margin_x = face_w / 5;
-        int margin_y = face_h / 5;
-        face_x = std::max(0, face_x - margin_x);
-        face_y = std::max(0, face_y - margin_y);
-        face_w = std::min(width - face_x, face_w + 2 * margin_x);
-        face_h = std::min(height - face_y, face_h + 2 * margin_y);
-
-        roi.face_rect = Rect{
-            static_cast<float>(face_x),
-            static_cast<float>(face_y),
-            static_cast<float>(face_w),
-            static_cast<float>(face_h)
-        };
-        roi.mask_width = face_w;
-        roi.mask_height = face_h;
+    if (config.enabled && detection && detection->detected && config.roiOnly) {
+        roi.face_rect = computeExpandedFaceRect(
+            detection->face_rect.x, detection->face_rect.y,
+            detection->face_rect.width, detection->face_rect.height,
+            width, height);
+        roi.mask_width = static_cast<int>(roi.face_rect.width);
+        roi.mask_height = static_cast<int>(roi.face_rect.height);
         roi.valid = true;
         roi.timestamp_ms = detection->timestamp_ms;
 
@@ -1583,9 +1654,10 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     bool needsBrightness = std::abs(effective_config.brightness - 1.0f) > 0.01f;
     bool needsBalance = std::abs(effective_config.colorBalance) > 0.01f;
     bool needsWhitening = effective_config.whitening > 0.01f;
-    bool needsLut = (lut_texture_id != 0 && lut_intensity > 0.01f);
+    bool needsLut = config.enabled && (lut_texture_id != 0 && lut_intensity > 0.01f);
     if (needsBrightness || needsBalance || needsWhitening || needsLut) active_filter_count++;
     if (effective_config.softFocus > 0.01f) active_filter_count++;
+    if (needsVivid) active_filter_count++;
 
     // 필터 0개: 패스스루 (텍스처 할당 불필요)
     if (active_filter_count == 0) {
@@ -1686,11 +1758,18 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                  sx, sy, sw, sh, roi_ptr->face_rect.x, roi_ptr->face_rect.y,
                  roi_ptr->face_rect.width, roi_ptr->face_rect.height);
         } else {
-            // roiOnly 정책: 교집합이 비어있으면 필터 처리를 건너뛰고
-            // pre-fill된 원본(passthrough)을 그대로 반환
+            // roiOnly 정책: 교집합이 비어있으면 beauty 필터 스킵
             LOGW("ROI Scissor skipped: intersection empty (rect=%d,%d,%d,%d frame=%dx%d)",
                  rect_x, rect_y, rect_w, rect_h, width, height);
-            *output_texture = current_input;
+            if (needsVivid) {
+                executeVividPass(current_input, ping->fbo_id,
+                                 width, height, config.vividIntensity,
+                                 config.vividSaturation, config.vividBrightness,
+                                 config.vividWarmth);
+                *output_texture = ping->texture_id;
+            } else {
+                *output_texture = current_input;
+            }
             if (ping) { previous_output_ping_ = ping; }
             if (pong) { previous_output_pong_ = pong; }
             previous_fence_ = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -1824,11 +1903,25 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                              width, height, effective_config.softFocus);
         if (profiling) profiler_->end("SoftFocus");
         current_input = current_output->texture_id;
+        if (pong) current_output = (current_output == ping) ? pong : ping;
     }
 
     // ROI Scissor 해제
     if (scissor_active) {
         glDisable(GL_SCISSOR_TEST);
+    }
+
+    // 4. Vivid 포스트프로세싱 (전체 프레임, ROI 무관)
+    if (needsVivid) {
+        if (profiling) profiler_->begin("Vivid");
+        executeVividPass(current_input, current_output->fbo_id,
+                         width, height,
+                         config.vividIntensity,
+                         config.vividSaturation,
+                         config.vividBrightness,
+                         config.vividWarmth);
+        if (profiling) profiler_->end("Vivid");
+        current_input = current_output->texture_id;
     }
 
     *output_texture = current_input;

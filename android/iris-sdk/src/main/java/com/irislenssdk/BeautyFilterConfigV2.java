@@ -165,6 +165,34 @@ public class BeautyFilterConfigV2 {
     public int downscaleFactor;
 
     // ========================================================================
+    // 화면 전체 포스트프로세싱 (Vivid, GPU 전용)
+    // ========================================================================
+
+    /**
+     * 화사한 필터 마스터 강도 (0.0 ~ 1.0).
+     * 0이면 비활성화됩니다. GPU 전용 기능입니다.
+     */
+    public float vividIntensity;
+
+    /**
+     * Vibrance 채도 부스트 (0.0 ~ 1.0).
+     * 저채도 영역을 우선 부스트하여 과포화를 방지합니다.
+     */
+    public float vividSaturation;
+
+    /**
+     * 밝기 리프트 (0.0 ~ 0.5).
+     * 미드톤 위주 소프트 리프트로 하이라이트 클리핑을 방지합니다.
+     */
+    public float vividBrightness;
+
+    /**
+     * 웜톤 시프트 (0.0 ~ 1.0).
+     * R/G 미세 증가, B 미세 감소로 따뜻한 톤을 적용합니다.
+     */
+    public float vividWarmth;
+
+    // ========================================================================
     // 기본값 상수
     // ========================================================================
 
@@ -185,6 +213,10 @@ public class BeautyFilterConfigV2 {
     public static final boolean DEFAULT_PROTECT_EYES = true;
     public static final boolean DEFAULT_PROTECT_LIPS = true;
     public static final int DEFAULT_DOWNSCALE_FACTOR = 1;
+    public static final float DEFAULT_VIVID_INTENSITY = 0.0f;
+    public static final float DEFAULT_VIVID_SATURATION = 0.0f;
+    public static final float DEFAULT_VIVID_BRIGHTNESS = 0.0f;
+    public static final float DEFAULT_VIVID_WARMTH = 0.0f;
 
     // ========================================================================
     // 생성자
@@ -220,6 +252,10 @@ public class BeautyFilterConfigV2 {
         this.protectEyes = other.protectEyes;
         this.protectLips = other.protectLips;
         this.downscaleFactor = other.downscaleFactor;
+        this.vividIntensity = other.vividIntensity;
+        this.vividSaturation = other.vividSaturation;
+        this.vividBrightness = other.vividBrightness;
+        this.vividWarmth = other.vividWarmth;
     }
 
     // ========================================================================
@@ -247,6 +283,10 @@ public class BeautyFilterConfigV2 {
         protectEyes = DEFAULT_PROTECT_EYES;
         protectLips = DEFAULT_PROTECT_LIPS;
         downscaleFactor = DEFAULT_DOWNSCALE_FACTOR;
+        vividIntensity = DEFAULT_VIVID_INTENSITY;
+        vividSaturation = DEFAULT_VIVID_SATURATION;
+        vividBrightness = DEFAULT_VIVID_BRIGHTNESS;
+        vividWarmth = DEFAULT_VIVID_WARMTH;
     }
 
     /**
@@ -300,7 +340,11 @@ public class BeautyFilterConfigV2 {
                 && slimFace >= 0.0f && slimFace <= 1.0f
                 && enlargeEyes >= 0.0f && enlargeEyes <= 1.0f
                 && thinChin >= 0.0f && thinChin <= 1.0f
-                && downscaleFactor >= 1 && downscaleFactor <= 4;
+                && downscaleFactor >= 1 && downscaleFactor <= 4
+                && vividIntensity >= 0.0f && vividIntensity <= 1.0f
+                && vividSaturation >= 0.0f && vividSaturation <= 1.0f
+                && vividBrightness >= 0.0f && vividBrightness <= 0.5f
+                && vividWarmth >= 0.0f && vividWarmth <= 1.0f;
     }
 
     /**
@@ -319,6 +363,10 @@ public class BeautyFilterConfigV2 {
         enlargeEyes = clampFloat(enlargeEyes, 0.0f, 1.0f);
         thinChin = clampFloat(thinChin, 0.0f, 1.0f);
         downscaleFactor = clampInt(downscaleFactor, 1, 4);
+        vividIntensity = clampFloat(vividIntensity, 0.0f, 1.0f);
+        vividSaturation = clampFloat(vividSaturation, 0.0f, 1.0f);
+        vividBrightness = clampFloat(vividBrightness, 0.0f, 0.5f);
+        vividWarmth = clampFloat(vividWarmth, 0.0f, 1.0f);
     }
 
     private static float clampFloat(float value, float min, float max) {
@@ -350,6 +398,10 @@ public class BeautyFilterConfigV2 {
                 ", protectEyes=" + protectEyes +
                 ", protectLips=" + protectLips +
                 ", downscaleFactor=" + downscaleFactor +
+                ", vividIntensity=" + vividIntensity +
+                ", vividSaturation=" + vividSaturation +
+                ", vividBrightness=" + vividBrightness +
+                ", vividWarmth=" + vividWarmth +
                 '}';
     }
 
@@ -463,6 +515,28 @@ public class BeautyFilterConfigV2 {
 
         public Builder downscaleFactor(int downscaleFactor) {
             config.downscaleFactor = downscaleFactor;
+            return this;
+        }
+
+        // 화면 전체 포스트프로세싱 (Vivid)
+
+        public Builder vividIntensity(float vividIntensity) {
+            config.vividIntensity = vividIntensity;
+            return this;
+        }
+
+        public Builder vividSaturation(float vividSaturation) {
+            config.vividSaturation = vividSaturation;
+            return this;
+        }
+
+        public Builder vividBrightness(float vividBrightness) {
+            config.vividBrightness = vividBrightness;
+            return this;
+        }
+
+        public Builder vividWarmth(float vividWarmth) {
+            config.vividWarmth = vividWarmth;
             return this;
         }
 

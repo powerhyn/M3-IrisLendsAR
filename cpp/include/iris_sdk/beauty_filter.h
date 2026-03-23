@@ -104,6 +104,16 @@ typedef struct BeautyFilterConfigV2 {
     /** @brief 다운스케일 팩터 (1=원본, 2=1/2, 4=1/4, 기본값 1)
      *  @note 성능과 품질 트레이드오프 조절용 */
     int downscaleFactor;
+
+    //===== 화면 전체 포스트프로세싱 (Vivid, GPU 전용) =====
+    /** @brief 화사한 필터 마스터 강도 (0.0~1.0, 기본값 0.0, 0이면 비활성) */
+    float vividIntensity;
+    /** @brief 채도 부스트 - Vibrance 방식 (0.0~1.0, 기본값 0.0) */
+    float vividSaturation;
+    /** @brief 밝기 리프트 (0.0~0.5, 기본값 0.0) */
+    float vividBrightness;
+    /** @brief 웜톤 시프트 (0.0~1.0, 기본값 0.0) */
+    float vividWarmth;
 } BeautyFilterConfigV2;
 
 // ============================================================================
@@ -305,6 +315,8 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_beauty_preset(IrisBeautyPreset preset)
 // ============================================================================
 #ifdef __cplusplus
 
+#include <cmath>
+
 namespace iris_sdk {
 
 /**
@@ -334,6 +346,10 @@ struct BeautyFilterConfigV2Helper {
         v2.protectEyes = true;
         v2.protectLips = true;
         v2.downscaleFactor = 1;
+        v2.vividIntensity = 0.0f;
+        v2.vividSaturation = 0.0f;
+        v2.vividBrightness = 0.0f;
+        v2.vividWarmth = 0.0f;
         return v2;
     }
 
@@ -365,14 +381,20 @@ struct BeautyFilterConfigV2Helper {
                (cfg.slimFace >= 0.0f && cfg.slimFace <= 1.0f) &&
                (cfg.enlargeEyes >= 0.0f && cfg.enlargeEyes <= 1.0f) &&
                (cfg.thinChin >= 0.0f && cfg.thinChin <= 1.0f) &&
-               (cfg.downscaleFactor >= 1 && cfg.downscaleFactor <= 4);
+               (cfg.downscaleFactor >= 1 && cfg.downscaleFactor <= 4) &&
+               (cfg.vividIntensity >= 0.0f && cfg.vividIntensity <= 1.0f) &&
+               (cfg.vividSaturation >= 0.0f && cfg.vividSaturation <= 1.0f) &&
+               (cfg.vividBrightness >= 0.0f && cfg.vividBrightness <= 0.5f) &&
+               (cfg.vividWarmth >= 0.0f && cfg.vividWarmth <= 1.0f);
     }
 
     /**
      * @brief 범위 내로 클램핑
      */
     static void clamp(BeautyFilterConfigV2& cfg) {
-        auto clampf = [](float v, float lo, float hi) {
+        // NaN-safe: std::isfinite가 false이면 lo로 치환
+        auto clampf = [](float v, float lo, float hi) -> float {
+            if (!std::isfinite(v)) return lo;
             return v < lo ? lo : (v > hi ? hi : v);
         };
         cfg.intensity = clampf(cfg.intensity, 0.0f, 1.0f);
@@ -388,6 +410,10 @@ struct BeautyFilterConfigV2Helper {
         cfg.thinChin = clampf(cfg.thinChin, 0.0f, 1.0f);
         cfg.downscaleFactor = cfg.downscaleFactor < 1 ? 1 :
                               (cfg.downscaleFactor > 4 ? 4 : cfg.downscaleFactor);
+        cfg.vividIntensity = clampf(cfg.vividIntensity, 0.0f, 1.0f);
+        cfg.vividSaturation = clampf(cfg.vividSaturation, 0.0f, 1.0f);
+        cfg.vividBrightness = clampf(cfg.vividBrightness, 0.0f, 0.5f);
+        cfg.vividWarmth = clampf(cfg.vividWarmth, 0.0f, 1.0f);
     }
 
     /**
@@ -412,6 +438,10 @@ struct BeautyFilterConfigV2Helper {
         cfg.protectEyes = true;
         cfg.protectLips = true;
         cfg.downscaleFactor = 1;
+        cfg.vividIntensity = 0.0f;
+        cfg.vividSaturation = 0.0f;
+        cfg.vividBrightness = 0.0f;
+        cfg.vividWarmth = 0.0f;
         return cfg;
     }
 };

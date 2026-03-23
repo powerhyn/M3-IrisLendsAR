@@ -23,7 +23,6 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Spinner
@@ -49,7 +48,6 @@ import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
 import com.irislenssdk.demo.beauty.BeautyPreset
 import com.irislenssdk.demo.beauty.BeautyPresetFactory
-import com.irislenssdk.demo.beauty.LutTextureLoader
 import com.irislenssdk.demo.camera.OverlayView
 import com.irislenssdk.demo.camera.gpu.CameraGLView
 import com.irislenssdk.demo.lens.LensAdapter
@@ -106,19 +104,17 @@ class GpuRenderActivity : AppCompatActivity() {
 
     // 뷰티 탭 UI
     private lateinit var btnToggleBeauty: Button
-    private lateinit var btnPresetNatural: Button
+    private lateinit var btnPresetNaturalGlow: Button
+    private lateinit var btnPresetSpring: Button
     private lateinit var btnPresetStudio: Button
-    private lateinit var btnPresetGlamour: Button
+    private lateinit var btnPresetGoldenHour: Button
+    private lateinit var btnPresetVividPop: Button
     private lateinit var btnPresetCustom: Button
-    private lateinit var seekSmoothing: SeekBar
-    private lateinit var seekBrightness: SeekBar
-    private lateinit var seekWhitening: SeekBar
-    private lateinit var seekColorBalance: SeekBar
-    private lateinit var seekSoftFocus: SeekBar
     private lateinit var seekSkinQuality: SeekBar
-    private lateinit var lutIntensityPanel: LinearLayout
-    private lateinit var seekLutIntensity: SeekBar
-    private lateinit var lutPresetButtons: List<Button>
+    private lateinit var seekVividIntensity: SeekBar
+    private lateinit var seekVividSaturation: SeekBar
+    private lateinit var seekVividBrightness: SeekBar
+    private lateinit var seekVividWarmth: SeekBar
 
     // 카메라
     private var cameraProvider: ProcessCameraProvider? = null
@@ -135,9 +131,6 @@ class GpuRenderActivity : AppCompatActivity() {
     private var beautyEnabled = true
     private var currentPreset = BeautyPreset.CUSTOM
     private var isUpdatingSliders = false
-    private var lutEnabled = false
-    private var currentLutPreset: LutTextureLoader.LutPreset? = null
-    private var currentLutTextureId: Int = 0
 
     // 홍채 검출 (스레드별 불변 스냅샷 사용)
     private val irisResult = IrisResult()       // Analyzer 스레드 전용 (JNI 결과 수신)
@@ -202,29 +195,17 @@ class GpuRenderActivity : AppCompatActivity() {
 
         // 뷰티 탭 UI
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
-        btnPresetNatural = findViewById(R.id.btnPresetNatural)
+        btnPresetNaturalGlow = findViewById(R.id.btnPresetNaturalGlow)
+        btnPresetSpring = findViewById(R.id.btnPresetSpring)
         btnPresetStudio = findViewById(R.id.btnPresetStudio)
-        btnPresetGlamour = findViewById(R.id.btnPresetGlamour)
+        btnPresetGoldenHour = findViewById(R.id.btnPresetGoldenHour)
+        btnPresetVividPop = findViewById(R.id.btnPresetVividPop)
         btnPresetCustom = findViewById(R.id.btnPresetCustom)
-        seekSmoothing = findViewById(R.id.seekSmoothing)
-        seekBrightness = findViewById(R.id.seekBrightness)
-        seekWhitening = findViewById(R.id.seekWhitening)
-        seekColorBalance = findViewById(R.id.seekColorBalance)
-        seekSoftFocus = findViewById(R.id.seekSoftFocus)
         seekSkinQuality = findViewById(R.id.seekSkinQuality)
-        lutIntensityPanel = findViewById(R.id.lutIntensityPanel)
-        seekLutIntensity = findViewById(R.id.seekLutIntensity)
-        lutPresetButtons = listOf(
-            findViewById(R.id.btnLutOff),
-            findViewById(R.id.btnLutRosyGlow),
-            findViewById(R.id.btnLutPeachCream),
-            findViewById(R.id.btnLutCleanPorcelain),
-            findViewById(R.id.btnLutGoldenHour),
-            findViewById(R.id.btnLutFilmVintage),
-            findViewById(R.id.btnLutCoolEditorial),
-            findViewById(R.id.btnLutWarmSunset),
-            findViewById(R.id.btnLutNaturalGlow)
-        )
+        seekVividIntensity = findViewById(R.id.seekVividIntensity)
+        seekVividSaturation = findViewById(R.id.seekVividSaturation)
+        seekVividBrightness = findViewById(R.id.seekVividBrightness)
+        seekVividWarmth = findViewById(R.id.seekVividWarmth)
 
         // GPU 초기화 콜백 설정
         cameraGLView.onGpuInitialized = { success ->
@@ -263,7 +244,6 @@ class GpuRenderActivity : AppCompatActivity() {
 
         setupLensControls()
         setupBeautyControls()
-        setupLutControls()
         setupDebugControls()
 
         // OverlayView 초기 설정: 렌즈는 GPU에서 렌더링하므로 OverlayView에서는 비활성화
@@ -426,75 +406,17 @@ class GpuRenderActivity : AppCompatActivity() {
             btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
         }
 
-        // 프리셋 버튼 리스너
-        btnPresetNatural.setOnClickListener { applyPreset(BeautyPreset.NATURAL) }
+        // Vivid 프리셋 버튼 리스너
+        btnPresetNaturalGlow.setOnClickListener { applyPreset(BeautyPreset.NATURAL_GLOW) }
+        btnPresetSpring.setOnClickListener { applyPreset(BeautyPreset.SPRING) }
         btnPresetStudio.setOnClickListener { applyPreset(BeautyPreset.STUDIO) }
-        btnPresetGlamour.setOnClickListener { applyPreset(BeautyPreset.GLAMOUR) }
+        btnPresetGoldenHour.setOnClickListener { applyPreset(BeautyPreset.GOLDEN_HOUR) }
+        btnPresetVividPop.setOnClickListener { applyPreset(BeautyPreset.VIVID_POP) }
         btnPresetCustom.setOnClickListener { applyPreset(BeautyPreset.CUSTOM) }
 
-        // Smoothing 슬라이더
-        seekSmoothing.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.smoothing = progress / 100f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Brightness 슬라이더
-        seekBrightness.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                // 0-100 → 0.5-1.5
-                beautyConfig.brightness = 0.5f + progress / 100f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Whitening 슬라이더
-        seekWhitening.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                // 0-100 → 0.0-1.0
-                beautyConfig.whitening = progress / 100f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Color Balance 슬라이더
-        seekColorBalance.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                // 0-100 → -1.0-1.0 (50 = 0.0 중립)
-                beautyConfig.colorBalance = (progress - 50) / 50f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Soft Focus 슬라이더
-        seekSoftFocus.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                // 0-100 → 0.0-1.0
-                beautyConfig.softFocus = progress / 100f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // SkinQuality (잡티 보정 / Frequency Separation) 슬라이더
+        // SkinQuality (잡티 보정) 슬라이더
         seekSkinQuality.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                // 0-100 → 0.0-1.0
                 beautyConfig.skinQuality = progress / 100f
                 if (fromUser) onSliderManualChange()
                 cameraGLView.setBeautyConfig(beautyConfig)
@@ -503,66 +425,86 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // 초기값
-        seekSmoothing.progress = 0
-        seekBrightness.progress = 50
-        seekWhitening.progress = 0
-        seekColorBalance.progress = 50  // 중립 (0.0)
-        seekSoftFocus.progress = 0
-        seekSkinQuality.progress = 0    // 기본값 0.0 (비활성)
+        // Vivid Intensity (0-100 → 0.0-1.0)
+        seekVividIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                beautyConfig.vividIntensity = progress / 100f
+                if (fromUser) onSliderManualChange()
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
 
-        // 초기 버튼 상태 표시 (ON = 뷰티 활성화)
+        // Vivid Saturation (0-100 → 0.0-1.0)
+        seekVividSaturation.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                beautyConfig.vividSaturation = progress / 100f
+                if (fromUser) onSliderManualChange()
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Vivid Brightness (0-100 → 0.0-0.5)
+        seekVividBrightness.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                beautyConfig.vividBrightness = progress / 200f
+                if (fromUser) onSliderManualChange()
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Vivid Warmth (0-100 → 0.0-1.0)
+        seekVividWarmth.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                beautyConfig.vividWarmth = progress / 100f
+                if (fromUser) onSliderManualChange()
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // 초기 프리셋 적용 (Custom = 잡티보정만, vivid OFF)
+        syncSlidersToConfig()
+
         btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
         updatePresetButtonHighlight()
     }
 
-    /**
-     * 프리셋을 적용하고 슬라이더 값을 동기화합니다.
-     */
     private fun applyPreset(preset: BeautyPreset) {
         currentPreset = preset
         beautyConfig = BeautyPresetFactory.createPreset(preset, beautyConfig)
         BeautyPresetFactory.sanitizeConfig(beautyConfig)
 
-        // 뷰티 활성화
         beautyEnabled = true
         beautyConfig.enabled = true
         cameraGLView.setBeautyEnabled(true)
         btnToggleBeauty.text = "Beauty: ON"
 
-        // 슬라이더 동기화
         syncSlidersToConfig()
-
-        // GPU에 설정 전달
         cameraGLView.setBeautyConfig(beautyConfig)
-
-        // 버튼 하이라이트 업데이트
         updatePresetButtonHighlight()
 
         Log.d(TAG, "Preset applied: ${preset.label}, config=$beautyConfig")
     }
 
-    /**
-     * beautyConfig 값에 맞게 슬라이더 위치를 업데이트합니다.
-     */
     private fun syncSlidersToConfig() {
         isUpdatingSliders = true
 
-        seekSmoothing.progress = (beautyConfig.smoothing * 100).toInt()
-        // brightness: 0.5~1.5 → 0~100
-        seekBrightness.progress = ((beautyConfig.brightness - 0.5f) * 100).toInt()
-        seekWhitening.progress = (beautyConfig.whitening * 100).toInt()
-        // colorBalance: -1.0~1.0 → 0~100 (50 = 중립)
-        seekColorBalance.progress = ((beautyConfig.colorBalance * 50) + 50).toInt()
-        seekSoftFocus.progress = (beautyConfig.softFocus * 100).toInt()
         seekSkinQuality.progress = (beautyConfig.skinQuality * 100).toInt()
+        seekVividIntensity.progress = (beautyConfig.vividIntensity * 100).toInt()
+        seekVividSaturation.progress = (beautyConfig.vividSaturation * 100).toInt()
+        seekVividBrightness.progress = (beautyConfig.vividBrightness * 200).toInt()
+        seekVividWarmth.progress = (beautyConfig.vividWarmth * 100).toInt()
 
         isUpdatingSliders = false
     }
 
-    /**
-     * 슬라이더를 수동 조작하면 Custom 프리셋으로 전환합니다.
-     */
     private fun onSliderManualChange() {
         if (!isUpdatingSliders && currentPreset != BeautyPreset.CUSTOM) {
             currentPreset = BeautyPreset.CUSTOM
@@ -570,125 +512,19 @@ class GpuRenderActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 현재 선택된 프리셋 버튼의 시각적 하이라이트를 업데이트합니다.
-     */
     private fun updatePresetButtonHighlight() {
-        // 모든 프리셋 버튼 알파 조정 (선택 = 1.0, 미선택 = 0.5)
-        btnPresetNatural.alpha = if (currentPreset == BeautyPreset.NATURAL) 1.0f else 0.5f
-        btnPresetStudio.alpha = if (currentPreset == BeautyPreset.STUDIO) 1.0f else 0.5f
-        btnPresetGlamour.alpha = if (currentPreset == BeautyPreset.GLAMOUR) 1.0f else 0.5f
-        btnPresetCustom.alpha = if (currentPreset == BeautyPreset.CUSTOM) 1.0f else 0.5f
-    }
-
-    /**
-     * LUT 프리셋 컨트롤 설정
-     *
-     * 8종 LUT 프리셋 + OFF 버튼으로 구성.
-     * 프리셋 선택 시 GL 스레드에서 LUT 3D 텍스처를 생성하여 적용합니다.
-     */
-    private fun setupLutControls() {
-        // 프리셋 매핑: 버튼 인덱스 → LutPreset (0 = OFF)
-        val presetMap = listOf(
-            null,  // OFF
-            LutTextureLoader.LutPreset.ROSY_GLOW,
-            LutTextureLoader.LutPreset.PEACH_CREAM,
-            LutTextureLoader.LutPreset.CLEAN_PORCELAIN,
-            LutTextureLoader.LutPreset.GOLDEN_HOUR,
-            LutTextureLoader.LutPreset.FILM_VINTAGE,
-            LutTextureLoader.LutPreset.COOL_EDITORIAL,
-            LutTextureLoader.LutPreset.WARM_SUNSET,
-            LutTextureLoader.LutPreset.NATURAL_GLOW
+        val buttons = mapOf(
+            BeautyPreset.NATURAL_GLOW to btnPresetNaturalGlow,
+            BeautyPreset.SPRING to btnPresetSpring,
+            BeautyPreset.STUDIO to btnPresetStudio,
+            BeautyPreset.GOLDEN_HOUR to btnPresetGoldenHour,
+            BeautyPreset.VIVID_POP to btnPresetVividPop,
+            BeautyPreset.CUSTOM to btnPresetCustom
         )
-
-        lutPresetButtons.forEachIndexed { index, button ->
-            button.setOnClickListener {
-                applyLutPreset(presetMap[index])
-            }
-        }
-
-        // 초기 상태: OFF 하이라이트
-        updateLutPresetHighlight()
-
-        seekLutIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                cameraGLView.setLutIntensity(progress / 100f)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-    }
-
-    /**
-     * LUT 프리셋을 적용합니다 (null = OFF).
-     */
-    private fun applyLutPreset(preset: LutTextureLoader.LutPreset?) {
-        if (preset == null) {
-            // OFF — Renderer가 기존 텍스처 삭제 책임 (ownership 단일화)
-            lutEnabled = false
-            currentLutPreset = null
-            currentLutTextureId = 0
-            // CameraGLView.setLut3dTexture()가 내부에서 queueEvent 처리
-            // → 이중 큐잉 방지를 위해 Activity에서는 queueEvent 불필요
-            cameraGLView.setLut3dTexture(0)
-            cameraGLView.setLutEnabled(false)
-            lutIntensityPanel.visibility = View.GONE
-            updateLutPresetHighlight()
-            Log.d(TAG, "LUT filter disabled")
-            return
-        }
-
-        // 같은 프리셋 재선택 시 토글 OFF
-        if (lutEnabled && currentLutPreset == preset) {
-            applyLutPreset(null)
-            return
-        }
-
-        currentLutPreset = preset
-        lutEnabled = true
-        lutIntensityPanel.visibility = View.VISIBLE
-        updateLutPresetHighlight()
-
-        // GL 스레드에서 LUT 텍스처 로드 + 설정을 단일 queueEvent로 처리
-        // Direct 메서드 사용 → 이미 GL 스레드이므로 내부 queueEvent 불필요
-        cameraGLView.queueEvent {
-            val textureId = LutTextureLoader.loadPresetLut(this@GpuRenderActivity, preset)
-            if (textureId != 0) {
-                currentLutTextureId = textureId
-                cameraGLView.setLut3dTextureDirect(textureId)
-                cameraGLView.setLutEnabledDirect(true)
-                Log.d(TAG, "LUT preset applied: ${preset.displayName} (textureId=$textureId)")
-            } else {
-                Log.e(TAG, "Failed to load LUT preset: ${preset.displayName}")
-            }
+        buttons.forEach { (preset, btn) ->
+            btn.alpha = if (currentPreset == preset) 1.0f else 0.5f
         }
     }
-
-    /**
-     * 현재 선택된 LUT 프리셋 버튼을 하이라이트합니다.
-     */
-    private fun updateLutPresetHighlight() {
-        val presets = listOf(
-            null,
-            LutTextureLoader.LutPreset.ROSY_GLOW,
-            LutTextureLoader.LutPreset.PEACH_CREAM,
-            LutTextureLoader.LutPreset.CLEAN_PORCELAIN,
-            LutTextureLoader.LutPreset.GOLDEN_HOUR,
-            LutTextureLoader.LutPreset.FILM_VINTAGE,
-            LutTextureLoader.LutPreset.COOL_EDITORIAL,
-            LutTextureLoader.LutPreset.WARM_SUNSET,
-            LutTextureLoader.LutPreset.NATURAL_GLOW
-        )
-        lutPresetButtons.forEachIndexed { index, button ->
-            val isSelected = if (currentLutPreset == null && !lutEnabled) {
-                index == 0  // OFF 선택
-            } else {
-                presets[index] == currentLutPreset
-            }
-            button.alpha = if (isSelected) 1.0f else 0.5f
-        }
-    }
-
     private fun setupDebugControls() {
         btnToggleMesh = findViewById(R.id.btnToggleMesh)
         btnToggleDebug = findViewById(R.id.btnToggleDebug)

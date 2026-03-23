@@ -1,119 +1,107 @@
-# Comprehensive Code Review Report — P4-W4-01e
+# Comprehensive Code Review Report — Vivid Post-Processing Filter
 
-## Review Target
-
-P4-W4-01e: Luminance Sharpen 패스 추가
-- Branch: `feature/P4-W4-01e` vs `develop`
-- Commits: `060b011` (원본), `6164a51` (리뷰 반영), HEAD (문서/테스트 동기화)
-- 변경: 5 code files, +170 lines (원본) + 리뷰 반영 수정
-
-## Executive Summary
-
-FreqSep 파이프라인에 Luminance-only Unsharp Mask 패스를 추가하는 변경입니다. 원본 구현(060b011)에서 기능 회귀 2건(RT 풀 드롭아웃, mask 경계 halo)이 발견되어 6164a51에서 수정되었습니다. 코드/문서 정합성은 양호하나, Android 디바이스에서의 시각적 확인과 6패스 성능 검증(런타임 QA)은 아직 미완료입니다. 남은 기술 부채는 sRGB/Linear 색공간 불일치(Medium)로, 현재 sharpen_amount 범위에서 시각적 영향은 제한적입니다.
+**Date**: 2026-03-12
+**Branch**: develop 대비 현재 브랜치
+**Scope**: +307/-12 lines, 10 files
 
 ---
 
-## 수정 이력
+## Review Target
 
-| 커밋 | 내용 | 상태 |
-|------|------|------|
-| `060b011` | 원본 구현 — Sharpen 패스 추가 | 기능 회귀 2건 포함 |
-| `6164a51` | 리뷰 반영 — temp 조기 릴리스 + mask 경계 halo 방지 | 회귀 해결 |
-| HEAD | 문서/테스트 동기화 — 헤더 주석 6-subpass, 회귀 테스트 4건, 작업 문서 갱신 | 현재 |
+화면 전체에 화사한 느낌을 주는 GPU 전용 포스트프로세싱 필터 구현.
+Vibrance + 밝기 리프트 + 웜톤 시프트를 단일 패스 GLSL 셰이더로 구현하여 기존 beauty 파이프라인 끝에 삽입. `enabled=false` 상태에서도 vivid만 독립 활성화 가능.
+
+## Executive Summary
+
+**Mixed — C API(JNI) 경로는 양호하나, 공개 C++ API 경로에 미수정 결함 존재. 머지 전 수정 필수.**
+
+기존 SDK 레이어 아키텍처(C++ → C API → JNI → Java)를 충실히 따르면서 최소 침투로 vivid 기능을 통합했다. C API 경로(`iris_sdk_apply_beauty_texture_v2`)의 셰이더 설계, 파이프라인 통합, 바인딩 일관성은 프로덕션 수준이다. 그러나 **smoothstep GLSL ES spec 위반(디바이스별 렌더링 불일치)**, **공개 C++ API 경로(`applyTexture`) vivid 완전 누락 + 미초기화 텍스처 반환** 2건은 기능적 결함이므로 머지 전 반드시 수정해야 한다.
 
 ---
 
 ## Findings by Priority
 
-### 해결된 이슈 (6164a51에서 수정 완료)
+### P0 — 머지 전 수정 필수 (2건)
 
-| ID | 이전 심각도 | 설명 | 상태 |
-|----|-----------|------|------|
-| RT-1 | **P1 (기능 회귀)** | temp 미릴리스로 동시 RT 4개 → onMemoryPressure 후 sharpen 탈락 | ✅ 해결: temp 조기 릴리스 |
-| HALO-1 | **P1 (기능 회귀)** | 비피부 인접 픽셀이 blur에 기여 → mask 경계 합성 에지에 halo/ringing | ✅ 해결: 인접 mask 가중 |
+| ID | 카테고리 | 이슈 | 파일 | 수정 규모 |
+|----|----------|------|------|-----------|
+| **SHADER-01** | **Correctness** | **`smoothstep(0.4, 0.0, sat)` — GLSL ES spec에서 edge0 ≥ edge1일 때 undefined behavior. 디바이스/드라이버별 vibrance 효과 차이 또는 소실 발생 가능.** `1.0 - smoothstep(0.0, 0.4, sat)`로 교체 필요. | `shader_sources.cpp:660` | **1줄 수정** |
+| **API-01** | **Correctness** | **`applyTexture(TextureHandle)` 경로에 vivid 패스 완전 누락** — (1) `enabled=false + vivid` 시 즉시 패스스루로 vivid 미실행, (2) `enabled=true + vivid only` 시 beauty 체인이 모두 스킵되어 `current_input`이 원본 그대로인데, line 701의 ping/pong 판별이 미초기화 pong 텍스처를 반환하는 심각한 버그. 공개 C++ API가 깨진 상태. | `gpu_beauty_backend.cpp:605-713` | ~30줄 |
 
-### 현재 남은 이슈
+### P1 — 다음 릴리즈 전 수정 권장 (5건)
 
-#### Medium (P2) — 2건
+| ID | 카테고리 | 이슈 | 수정 규모 |
+|----|----------|------|-----------|
+| ROBUST-01 | Robustness | `toCppConfigV2()`에서 NaN/Inf 방어 부재 — `clamp()`의 `<`/`>` 비교는 NaN을 통과시키므로, `std::isfinite()` 기반 검증 또는 NaN-safe 클램핑(`std::isnan(v) ? lo : ...`) 필요. Builder/clamp를 우회하는 모든 입력 경로가 영향 (C API 직접 호출, Java에서 public 필드 직접 설정 후 JNI 전달 등). | 15줄 |
+| A-M-02 | Architecture | vivid 셰이더 컴파일 실패 = 전체 초기화 실패 → FreqSep처럼 non-fatal 처리 | 10줄 |
+| H-01 | Quality | ROI 계산 로직 3중 중복 → 공통 헬퍼 함수 추출 | 1시간 |
+| M-04/A-H-02 | Quality+Arch | SoftFocus 후 ping-pong 스왑이 `needsVivid`에 하드코딩 → 일관된 스왑 규칙 | 10분 |
+| ABI-01 | Robustness | POD 구조체 ABI 버전링 부재 → `uint32_t struct_size` 도입 검토 (iOS/Flutter 바인딩 확장 전 대응) | 2시간 |
 
-| ID | 카테고리 | 설명 | 파일 |
-|----|----------|------|------|
-| F-1 | 셰이더 정확성 | sRGB 공간에서 Linear LUMA_709 계수 사용 — Composite가 gamma 인코딩 후 출력하므로 Sharpen이 sRGB 데이터에 linear 계산 적용. sharpen_amount 0.12~0.18 범위에서 시각적 영향은 제한적이나 파이프라인 색공간 일관성 위반. | `shader_sources.cpp:584` |
-| F-2 | 에러 로그 | Sharpen 셰이더 컴파일 실패 시 `LOGE` 사용 + "successfully" 로그 출력 — graceful degradation인데 error 레벨 로그. `luminance_sharpen_program_`은 헤더에서 `= 0` 초기화되어 있으므로 미초기화 문제는 아님. | `gpu_beauty_backend.cpp:292,298` |
+### P2 — 백로그 (6건)
 
-#### Low (P3) — 4건
-
-| ID | 카테고리 | 설명 |
+| ID | 카테고리 | 이슈 |
 |----|----------|------|
-| F-3 | 코드 중복 | LUMA_709 상수가 Composite/Sharpen 셰이더에 독립 선언 — 계수 변경 시 동기화 누락 위험 |
-| F-4 | 테스트 정밀도 | `SharpenAmountMidQuality` tolerance 0.02f가 넓음, 0.005f로 축소 권장 |
-| F-5 | 테스트 경계값 | `SharpenAmountRange` 검증 범위 [0.11, 0.19]가 실제 [0.12, 0.18]보다 느슨 |
-| F-6 | 입력 방어 | `sharpen_amount` uniform에 `std::clamp` 방어 코드 없음 (mapSkinQuality만이 유일한 생성 경로이므로 실질적 위험 낮음) |
+| M-01/A-M-03 | Quality+Arch | buildEffectiveConfig에서 vivid 독립성 주석 추가 |
+| M-02 | Quality | warmth 셰이더 매직 넘버(0.04, 0.02, 0.03) 주석 보강 |
+| A-M-01 | Architecture | ConfigV2 구조체 비대화 경향 — 포스트프로세싱 효과 추가 시 서브 구조체 분리 |
+| Low-threshold | Arch | needsVivid 임계값 0.01f 매직 넘버 → 상수 추출 |
+| Low-precision | Performance | `precision highp` → `mediump` 전환 검토 (~15-25% ALU 개선) |
+| S-07/S-08 | Robustness | int overflow guard, static_assert 추가 |
 
 ---
 
 ## Findings by Category
 
-| 카테고리 | 건수 | 해결됨 | Medium | Low |
-|----------|------|--------|--------|-----|
-| 기능 회귀 | 2 | 2 | 0 | 0 |
-| 셰이더 정확성 | 1 | 0 | 1 | 0 |
-| 에러 처리 | 1 | 0 | 1 | 0 |
-| 코드 품질 | 1 | 0 | 0 | 1 |
-| 테스트 | 2 | 0 | 0 | 2 |
-| 입력 검증 | 1 | 0 | 0 | 1 |
-| **Total** | **8** | **2** | **2** | **4** |
+| 카테고리 | 건수 | 설명 |
+|----------|------|------|
+| Correctness | 2 | smoothstep spec 위반, applyTexture 경로 누락 |
+| Robustness | 2 | NaN/Inf 입력 방어, ABI 버전링 |
+| Architecture | 3 | 셰이더 non-fatal 처리, ROI 중복, ping-pong 스왑 규칙 |
+| Quality | 3 | 주석 보강, 매직 넘버, 구조체 비대화 |
+| Performance | 2 | mediump 전환, 상수 추출 |
+
+**중복 제거 후 실제 고유 이슈: 13건** (P0: 2, P1: 5, P2: 6)
+*카테고리 표는 주제별 분류이며, 일부 이슈가 복수 카테고리에 걸쳐 있어 합산과 고유 건수가 다름*
 
 ---
 
-## 테스트 현황
+## 잘 구현된 부분
 
-**총 71개 통과** (기존 62 + 매핑 5 + 회귀 4)
-
-| 테스트 유형 | 건수 | 검증 대상 | 검증 수준 |
-|------------|------|----------|----------|
-| 매핑 테스트 | 5 | mapSkinQuality() sharpen_amount 범위/단조성 | 논리 (수식 검증) |
-| RT 풀 회귀 | 1 | temp 조기 릴리스 후 최대 동시 RT 상수 ≤ 풀 한도 | 논리 (정적 상수 검증, TexturePool 미사용) |
-| Mask 경계 회귀 | 3 | 비피부 인접→lumCenter 대체, 전비피부→sharpen 없음, 전피부→정상 동작 | 논리 (셰이더 수식 검증, GPU 미사용) |
-
-> **참고**: 회귀 테스트는 논리/수식 수준의 가드이며, 실제 GPU 파이프라인이나 TexturePool 경로를 실행하는 런타임 검증은 포함되지 않습니다.
+1. **Config/Binding 레이어 일관성** — C++ struct, C API struct, JNI field ID cache, Java class에서 vivid 4필드가 빈틈없이 반영. Builder, isValid, clamp, toString, 복사 생성자 모두 완비.
+2. **buildEffectiveConfig 분리** — enabled=false 시 beauty 수치를 중립값으로 덮어써서 파이프라인 하류의 조건 분기 최소화. 설계 의도가 코드에 잘 반영됨.
+3. **셰이더 설계** — 단일 패스, 텍스처 샘플 1회 + ALU 31ops. MID-tier에서 ~0.25ms로 0.3ms 목표 달성. 프레임 버짓의 0.75%만 추가.
+4. **ROI/Scissor 통합** — Scissor 해제 후 vivid 전체 프레임 적용, ROI 교집합 empty 시 vivid-only 처리 등 엣지 케이스 정확히 처리.
+5. **C API/JNI 경로에서 기존 패턴을 잘 따름** — Profiler 통합, uniform cache, release 정리, ping-pong 버퍼, JNI field ID 캐시 등. 단, 공개 C++ API 경로(`applyTexture`)에는 vivid 반영이 누락되어 해당 경로의 패턴 준수는 불완전.
+6. **하위 호환** — 기본값 0.0f로 기존 사용자 동작 변화 없음.
 
 ---
 
 ## Recommended Action Plan
 
-### 다음 스프린트 (선택적)
+### 즉시 (P0, ~1시간)
 
-| # | 작업 | ID | 노력 |
-|---|------|-----|------|
-| 1 | Sharpen 셰이더 컴파일 실패 로그 `LOGE`→`LOGW` + "successfully" 메시지 수정 | F-2 | Small |
-| 2 | 테스트 tolerance/경계값 정밀화 | F-4, F-5 | Small |
-| 3 | `sharpen_amount` uniform `std::clamp` 방어 | F-6 | Small |
+1. `smoothstep(0.4, 0.0, sat)` → `1.0 - smoothstep(0.0, 0.4, sat)` 교체 (GLSL ES spec 준수)
+2. `applyTexture(TextureHandle)` 진입부에 `needsVivid` 가드 + 필터 체인 끝에 vivid 패스 추가 + 0-pass 시 output 판별 로직 수정
 
-### 후속 태스크 (기술 부채)
+### 다음 릴리즈 전 (P1, ~4시간)
 
-| # | 작업 | ID | 노력 |
-|---|------|-----|------|
-| 1 | 파이프라인 sRGB/Linear 색공간 정리 | F-1 | Medium |
-| 2 | LUMA_709 상수 셰이더 간 공유 메커니즘 | F-3 | Small |
-
----
-
-## 긍정적 관찰
-
-1. **기존 아키텍처 패턴 완벽 준수** — 셰이더 선언~mapSkinQuality 6단계 패턴 1:1 일치
-2. **Graceful degradation 3단계 방어** — 셰이더 실패 → RT 할당 실패 → 런타임 스킵
-3. **리뷰 반영 품질** — 기능 회귀 2건을 정확히 수정, 논리 수준 회귀 가드 추가 (런타임 파이프라인 검증은 미포함)
-4. **문서 동기화** — 작업 문서, 헤더 주석 모두 현재 코드와 일치
-5. **리소스 수명 관리** — temp 조기 릴리스로 풀 한도 내 안전 동작
+3. `toCppConfigV2()`에 `std::isfinite()` 기반 NaN/Inf 검증 추가 (단순 clamp로는 NaN 통과)
+4. vivid 셰이더 컴파일 실패를 non-fatal (LOGW) 처리 + executeVividPass에 program==0 가드
+5. ROI 계산 공통 헬퍼 함수 추출
+6. SoftFocus 후 스왑 조건을 무조건 스왑으로 통일
+7. POD 구조체 ABI 버전링 전략 검토
 
 ---
 
 ## Review Metadata
 
-- Review date: 2026-03-10
-- Branch state: HEAD (060b011 + 6164a51 + 문서/테스트 동기화)
-- Phases completed: Code Quality, Architecture, Security, Performance
-- Phases skipped: CI/CD (사용자 요청)
-- Framework: C++17 / GLSL ES 3.1
-- Tests: 71/71 passed
+- Phases completed: Phase 1 (Code Quality + Architecture), Phase 2 (Security + Performance)
+- Phases skipped: Phase 3 (Testing & Documentation), Phase 4 (Best Practices) — 사용자 판단으로 생략
+- Total unique findings: 13건 (P0: 2, P1: 5, P2: 6)
+- Post-review feedback incorporated:
+  - SHADER-01 추가 (smoothstep spec violation)
+  - API-01 설명 보강 (uninitialized texture return 시나리오)
+  - pong "누수" 주장 철회 → 지연 반환으로 정상 동작 확인
+  - NaN clamp 수정안 교체 → `std::isfinite()` 기반으로, P1 robustness로 격하
+  - Executive Summary 톤 조정 → "Mixed, not ready to merge without fixes"

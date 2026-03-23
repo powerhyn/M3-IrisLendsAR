@@ -2,39 +2,39 @@
 
 ## Target
 
-P4-W4-01e: Luminance Sharpen 패스 추가
-- Branch: `feature/P4-W4-01e` vs `develop`
-- Commits: `060b011` feat(beauty): P4-W4-01e Luminance Sharpen 패스 추가
-- PR 스타일 리뷰 (비판적 시각)
+Vivid Post-Processing 필터 구현 — develop 브랜치 대비 현재 브랜치의 변경 사항 (PR 스타일 리뷰)
 
-## Summary of Changes
+화면 전체에 화사한 느낌을 주는 GPU 전용 포스트프로세싱 필터. Vibrance + 밝기 리프트 + 웜톤 시프트를 단일 패스 셰이더로 구현. 기존 beauty 필터 파이프라인과 독립적으로 동작하며, enabled=false 상태에서도 vivid만 활성화 가능.
 
-FreqSep beauty pipeline 마지막에 Luminance-only Unsharp Mask 패스를 추가하여 blur로 인한 선명도 손실을 복구한다.
+## Files (10 files, +307/-12 lines)
 
-### 변경 사항
-1. **LUMINANCE_SHARPEN_FRAGMENT** GLSL 셰이더 신규 작성 (4-neighbor cross blur, luminance ratio 방식)
-2. **gpu_beauty_backend.h**: `luminance_sharpen_program_`, `LuminanceSharpenUniforms` 구조체, `FreqSepParams::sharpen_amount` 추가
-3. **gpu_beauty_backend.cpp**: 셰이더 초기화, uniform 캐싱, Pass 4 (Sharpen) 파이프라인 추가, mapSkinQuality() 매핑
-4. **shader_manager.h**: extern 선언 3개 추가 (FREQ_SEP_GAUSSIAN, FREQ_SEP_COMPOSITE, LUMINANCE_SHARPEN)
-5. **test_beauty_config_v2.cpp**: 5개 신규 테스트
+### C++ Core
+- `cpp/include/iris_sdk/beauty_filter.h` — BeautyFilterConfigV2 구조체 + Helper 확장
+- `cpp/include/iris_sdk/sdk_api.h` — IrisBeautyConfigV2 C API 구조체 확장
+- `cpp/src/sdk_api_v2.cpp` — C API 변환 함수 + enabled 가드 + 기본값
+- `cpp/src/gpu/shader_sources.cpp` — VIVID_POSTPROCESS_FRAGMENT 셰이더
+- `cpp/include/iris_sdk/gpu/gpu_beauty_backend.h` — vivid 멤버/메서드 선언
+- `cpp/src/gpu/gpu_beauty_backend.cpp` — buildEffectiveConfig + vivid 패스 + applyTextureId 수정
 
-## Files
+### Android JNI Bindings
+- `android/iris-sdk/src/main/java/com/irislenssdk/BeautyFilterConfigV2.java` — Java 필드 + Builder
+- `android/iris-sdk/src/main/cpp/jni_utils.h` — JniCache vivid field ID 선언
+- `android/iris-sdk/src/main/cpp/iris_jni.cpp` — JNI field ID 초기화 + 매핑 함수
 
-| 파일 | 변경 내용 |
-|------|----------|
-| `cpp/include/iris_sdk/gpu/gpu_beauty_backend.h` | `FreqSepParams.sharpen_amount` + `luminance_sharpen_program_` + `LuminanceSharpenUniforms` (+10) |
-| `cpp/include/iris_sdk/gpu/shader_manager.h` | FreqSep/Sharpen extern 선언 3개 (+9) |
-| `cpp/src/gpu/gpu_beauty_backend.cpp` | 셰이더 초기화, uniform 캐싱, Pass 4 파이프라인, mapSkinQuality 매핑 (+70) |
-| `cpp/src/gpu/shader_sources.cpp` | LUMINANCE_SHARPEN_FRAGMENT 셰이더 (+43) |
-| `cpp/tests/test_beauty_config_v2.cpp` | Sharpen 관련 5개 테스트 (+38) |
-
-Total: +170 lines (code only)
+### Config
+- `.claude/settings.local.json` — (무관)
 
 ## Flags
 
 - Security Focus: no
-- Performance Critical: yes (실시간 GPU 파이프라인, 30fps)
+- Performance Critical: no
 - Strict Mode: no
-- Framework: C++17 / GLSL ES 3.1
-- Skip: docs, CI/CD analysis
-- Perspective: 비판적
+- Framework: C++17 / OpenGL ES 3.1 / Android JNI
+
+## Review Phases
+
+1. Code Quality & Architecture
+2. Security & Performance
+3. Testing & Documentation
+4. Best Practices & Standards
+5. Consolidated Report
