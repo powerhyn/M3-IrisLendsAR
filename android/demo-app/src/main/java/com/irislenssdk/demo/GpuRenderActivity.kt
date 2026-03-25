@@ -422,6 +422,9 @@ class GpuRenderActivity : AppCompatActivity() {
         seekSkinQuality.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 beautyConfig.skinQuality = progress / 100f
+                // 레거시 모드로 전환: 2축 값을 클리어하여 stale 값 방지
+                beautyConfig.smoothIntensity = 0f
+                beautyConfig.poreReduction = 0f
                 if (fromUser) onSliderManualChange()
                 cameraGLView.setBeautyConfig(beautyConfig)
             }
@@ -433,7 +436,8 @@ class GpuRenderActivity : AppCompatActivity() {
         seekSmoothIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 beautyConfig.smoothIntensity = progress / 100f
-                android.util.Log.d("BEAUTY_2AXIS", "smoothIntensity=${beautyConfig.smoothIntensity} poreReduction=${beautyConfig.poreReduction} skinQuality=${beautyConfig.skinQuality}")
+                // 2축 모드 진입 시 레거시 skinQuality 클리어
+                if (progress > 0) beautyConfig.skinQuality = 0f
                 if (fromUser) onSliderManualChange()
                 cameraGLView.setBeautyConfig(beautyConfig)
             }
@@ -445,6 +449,8 @@ class GpuRenderActivity : AppCompatActivity() {
         seekPoreReduction.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 beautyConfig.poreReduction = progress / 100f
+                // 2축 모드 진입 시 레거시 skinQuality 클리어
+                if (progress > 0) beautyConfig.skinQuality = 0f
                 if (fromUser) onSliderManualChange()
                 cameraGLView.setBeautyConfig(beautyConfig)
             }
