@@ -840,6 +840,16 @@ public final class IrisLensSDK {
     }
 
     /**
+     * FreqSep 디버그 모드 설정 (GL 스레드에서 호출).
+     * @param mode 0=off, 1=magnitude heatmap, 2=compression, 3=mask
+     */
+    public static void setFreqSepDebugMode(int mode) {
+        if (sLibraryLoaded) {
+            nativeSetFreqSepDebugMode(mode);
+        }
+    }
+
+    /**
      * 텍스처가 SDK 관리인지 확인합니다.
      *
      * @param texture 확인할 텍스처 ID
@@ -1118,6 +1128,8 @@ public final class IrisLensSDK {
             int inputTexture, int width, int height,
             BeautyFilterConfigV2 config, long detectionPtr,
             int lutTextureId, float lutIntensity);
+
+    private static native void nativeSetFreqSepDebugMode(int mode);
 
     /**
      * Face Warp 적용 (GPU)

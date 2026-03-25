@@ -35,6 +35,8 @@ object BeautyPresetFactory {
         .colorBalance(0.0f)
         .softFocus(0.0f)
         .skinQuality(skinQuality)
+        .smoothIntensity(0.0f)
+        .poreReduction(0.0f)
         .wrinkleRemove(0.0f)
         .slimFace(0.0f)
         .enlargeEyes(0.0f)

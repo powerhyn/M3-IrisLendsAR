@@ -64,6 +64,8 @@ static BeautyFilterConfigV2 buildEffectiveConfig(const BeautyFilterConfigV2& con
         effective.colorBalance = 0.0f;
         effective.brightness = 1.0f;
         effective.skinQuality = 0.0f;
+        effective.smoothIntensity = 0.0f;
+        effective.poreReduction = 0.0f;
         return effective;
     }
 
@@ -81,8 +83,15 @@ static BeautyFilterConfigV2 buildEffectiveConfig(const BeautyFilterConfigV2& con
     return effective;
 }
 
-static float computeFallbackSmoothing(float skin_quality) {
-    const float t = std::clamp(skin_quality, 0.0f, 1.0f);
+static float computeFallbackSmoothing(float skin_quality,
+                                      float smooth_intensity = 0.0f,
+                                      float pore_reduction = 0.0f) {
+    // 2축 모드: smoothIntensity/poreReduction 중 더 큰 값 기준
+    float effective = skin_quality;
+    if (smooth_intensity > 0.0f || pore_reduction > 0.0f) {
+        effective = std::max(smooth_intensity, pore_reduction);
+    }
+    const float t = std::clamp(effective, 0.0f, 1.0f);
     return 0.05f + t * 0.15f;  // 0.05 ~ 0.20
 }
 #endif
@@ -411,6 +420,8 @@ void GPUBeautyBackend::cacheUniformLocations() {
         freq_sep_composite_uniforms_.uEdgeWeight = glGetUniformLocation(freq_sep_composite_program_, "uEdgeWeight");
         freq_sep_composite_uniforms_.uChromaWeight = glGetUniformLocation(freq_sep_composite_program_, "uChromaWeight");
         freq_sep_composite_uniforms_.uToneLift = glGetUniformLocation(freq_sep_composite_program_, "uToneLift");
+        freq_sep_composite_uniforms_.uTextureBlendFloor = glGetUniformLocation(freq_sep_composite_program_, "uTextureBlendFloor");
+        freq_sep_composite_uniforms_.uDebugMode = glGetUniformLocation(freq_sep_composite_program_, "uDebugMode");
     }
 
     // Luminance Sharpen Uniforms
@@ -1154,6 +1165,59 @@ GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
     // Restore pores / lash line crispness after the stronger smoothing.
     p.sharpen_amount = 0.11f + s * 0.05f;
 
+    // texture_blend_floor는 레거시 모드에서 기본값 유지
+    p.texture_blend_floor = 0.38f;
+
+    return p;
+}
+
+GPUBeautyBackend::FreqSepParams
+GPUBeautyBackend::mapSmoothingAndPore(float smooth_intensity, float pore_reduction, int face_width) {
+    FreqSepParams p;
+
+    // 둘 다 0이면 비활성
+    if (smooth_intensity <= 0.0f && pore_reduction <= 0.0f) {
+        p.enabled = false;
+        return p;
+    }
+
+    p.enabled = true;
+
+    // S-curve
+    float ss = std::clamp(smooth_intensity, 0.0f, 1.0f);
+    float sp = std::clamp(pore_reduction, 0.0f, 1.0f);
+    float s_smooth = ss * ss * (3.0f - 2.0f * ss);
+    float s_pore = sp * sp * (3.0f - 2.0f * sp);
+
+    // blur_radius: 두 축 중 더 큰 요구에 맞춤
+    // 극단 테스트: face_w=240 기준 radius 28 수준
+    float smooth_ratio = 0.018f + s_smooth * 0.120f;  // 0.018~0.138
+    float pore_ratio = 0.018f + s_pore * 0.014f;      // 모공: 기존과 동일
+    const float ratio = std::max(smooth_ratio, pore_ratio);
+    p.blur_radius = std::clamp(static_cast<int>(face_width * ratio), 5, 28);
+
+    // === 매끈하게 축 (극단 테스트) ===
+    p.low_freq_smooth_radius_ratio = 0.22f + s_smooth * 0.48f;  // 0.22~0.70
+    p.texture_blend_floor = 0.38f + s_smooth * 0.57f;           // 0.38~0.95
+    p.tone_lift = 0.002f + s_smooth * 0.005f;                   // 거의 0 → 완전 매트
+
+    // === 모공 축 ===
+    // high_freq_preserve: 매끈하게와 모공 모두 영향. 둘 중 더 강하게 낮추는 쪽을 따름.
+    float hfp_smooth = 0.72f - s_smooth * 0.55f;                // 매끈하게: 0.72~0.17
+    float hfp_pore   = 0.72f - s_pore * 0.52f;                  // 모공: 0.72~0.20
+    p.high_freq_preserve = std::min(hfp_smooth, hfp_pore);      // 둘 중 더 낮은 값
+    p.attenuation_low = 0.005f;
+    p.attenuation_high = 0.016f + s_pore * 0.020f;              // 0.016~0.036
+
+    // === 공통 ===
+    float s_max = std::max(s_smooth, s_pore);
+    p.edge_weight = 0.42f + s_max * 0.20f;                      // 에지 보호 강화
+    p.chroma_weight = 0.28f + s_max * 0.20f;
+    // 샤프닝: 매끈하게가 강할수록 더 강한 샤프닝으로 선명도 복구 (뿌연 느낌 방지)
+    float sharpen_smooth = s_smooth * 0.14f;                     // 매끈하게: 0~0.14
+    float sharpen_pore = s_pore * 0.05f;                         // 모공: 0~0.05
+    p.sharpen_amount = 0.11f + std::max(sharpen_smooth, sharpen_pore);
+
     return p;
 }
 
@@ -1164,12 +1228,14 @@ void GPUBeautyBackend::executeSmoothingWithFallbackStrength(
 
 #if IRIS_SDK_GPU_AVAILABLE
     BeautyFilterConfigV2 fallback_config = config;
-    float effective_smoothing = computeFallbackSmoothing(config.skinQuality);
+    float effective_smoothing = computeFallbackSmoothing(
+        config.skinQuality, config.smoothIntensity, config.poreReduction);
     if (fallback_config.smoothing < effective_smoothing) {
         fallback_config.smoothing = effective_smoothing;
     }
-    LOGW("FreqSep fallback using bilateral smoothing=%.2f (skinQuality=%.2f)",
-         fallback_config.smoothing, config.skinQuality);
+    LOGW("FreqSep fallback using bilateral smoothing=%.2f (skinQuality=%.2f smooth=%.2f pore=%.2f)",
+         fallback_config.smoothing, config.skinQuality,
+         config.smoothIntensity, config.poreReduction);
     executeSmoothingPass(input_tex, output_fbo, width, height, fallback_config);
 #else
     (void)input_tex; (void)output_fbo;
@@ -1430,6 +1496,8 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     glUniform1f(freq_sep_composite_uniforms_.uEdgeWeight, params.edge_weight);
     glUniform1f(freq_sep_composite_uniforms_.uChromaWeight, params.chroma_weight);
     glUniform1f(freq_sep_composite_uniforms_.uToneLift, params.tone_lift);
+    glUniform1f(freq_sep_composite_uniforms_.uTextureBlendFloor, params.texture_blend_floor);
+    glUniform1i(freq_sep_composite_uniforms_.uDebugMode, freqsep_debug_mode_);
 
     glUniform1i(freq_sep_composite_uniforms_.uSmoothedLow, 0);
     glUniform1i(freq_sep_composite_uniforms_.uLowFreq, 1);
@@ -1648,7 +1716,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
     // 활성 필터 수에 따라 동적으로 텍스처 할당
     int active_filter_count = 0;
-    if (effective_config.skinQuality > 0.0f || effective_config.smoothing > 0.01f) {
+    if (effective_config.skinQuality > 0.0f || effective_config.smoothing > 0.01f
+        || effective_config.smoothIntensity > 0.0f || effective_config.poreReduction > 0.0f) {
         active_filter_count++;
     }
     bool needsBrightness = std::abs(effective_config.brightness - 1.0f) > 0.01f;
@@ -1781,13 +1850,27 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // 필터 체인 실행 (최적화됨 + 프로파일링)
     bool profiling = profiler_ && profiler_->isEnabled();
 
-    // 1. 스무딩: Freq Sep (skinQuality > 0) 또는 Bilateral (기존)
-    // Compute Freq Sep params from skinQuality
+    // 1. 스무딩: Freq Sep (skinQuality > 0 또는 2축 모드) 또는 Bilateral (기존)
     int face_w = 0;
     if (roi_ptr && roi_ptr->valid) {
         face_w = static_cast<int>(roi_ptr->face_rect.width);
     }
-    FreqSepParams freq_sep_params = mapSkinQuality(effective_config.skinQuality, face_w);
+    FreqSepParams freq_sep_params;
+    if (effective_config.smoothIntensity > 0.0f || effective_config.poreReduction > 0.0f) {
+        // 2축 모드: smoothIntensity/poreReduction이 0보다 크면 skinQuality 무시
+        freq_sep_params = mapSmoothingAndPore(
+            effective_config.smoothIntensity,
+            effective_config.poreReduction,
+            face_w);
+        LOGI("[2AXIS] smooth=%.2f pore=%.2f face_w=%d enabled=%d blur_r=%d blendFloor=%.2f toneLift=%.3f hfp=%.2f",
+             effective_config.smoothIntensity, effective_config.poreReduction,
+             face_w, freq_sep_params.enabled ? 1 : 0, freq_sep_params.blur_radius,
+             freq_sep_params.texture_blend_floor, freq_sep_params.tone_lift,
+             freq_sep_params.high_freq_preserve);
+    } else {
+        // 레거시 호환: skinQuality 단일 슬라이더
+        freq_sep_params = mapSkinQuality(effective_config.skinQuality, face_w);
+    }
 
     // Temporal stability: One Euro Filter for blur_radius (P4-W3-04)
     // frame_ts는 위에서 캡처된 동일 프레임 타임스탬프

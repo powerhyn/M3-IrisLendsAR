@@ -240,11 +240,15 @@ public:
         float chroma_weight = 0.3f;    // 색소침착 감지 강도
         float tone_lift = 0.15f;      // 미드톤 리프트 강도
         float sharpen_amount = 0.15f; // Luminance sharpen 강도
+        float texture_blend_floor = 0.38f; // Composite textureBlend 하한 (기본 0.38)
         bool enabled = false;
     };
 
-    /// skinQuality → FreqSepParams 매핑
+    /// skinQuality → FreqSepParams 매핑 (레거시 호환)
     static FreqSepParams mapSkinQuality(float skin_quality, int face_width);
+
+    /// smoothIntensity/poreReduction 2축 → FreqSepParams 매핑
+    static FreqSepParams mapSmoothingAndPore(float smooth_intensity, float pore_reduction, int face_width);
 
     /**
      * @brief GPU 디바이스 성능 등급
@@ -494,6 +498,8 @@ private:
         GLint uEdgeWeight = -1;
         GLint uChromaWeight = -1;
         GLint uToneLift = -1;
+        GLint uTextureBlendFloor = -1;
+        GLint uDebugMode = -1;
     } freq_sep_composite_uniforms_;
 
     // Luminance Sharpen Uniform 캐시
@@ -527,6 +533,13 @@ private:
 
     // 디바이스 성능 등급 (P4-W3-04)
     DeviceTier device_tier_ = DeviceTier::HIGH;
+
+    // FreqSep 디버그 모드 (0=off, 1=magnitude, 2=compression, 3=mask)
+    int freqsep_debug_mode_ = 0;
+public:
+    void setFreqSepDebugMode(int mode) { freqsep_debug_mode_ = mode; }
+    int getFreqSepDebugMode() const { return freqsep_debug_mode_; }
+private:
 
     /// Uniform Location 캐싱 (초기화 시 호출)
     void cacheUniformLocations();
