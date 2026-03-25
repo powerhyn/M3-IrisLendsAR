@@ -52,6 +52,7 @@ struct BeautyROI {
     std::vector<uint8_t> eye_protect_mask;     ///< 눈 보호 마스크 (반전)
     std::vector<uint8_t> eyebrow_protect_mask; ///< 눈썹 보호 마스크 (반전)
     std::vector<uint8_t> lip_protect_mask;     ///< 입술 보호 마스크 (반전)
+    std::vector<uint8_t> nose_protect_mask;     ///< 코 보호 마스크 (반전)
     std::vector<uint8_t> combined_mask;        ///< 최종 합성 마스크
 
     /// 마스크 크기
@@ -190,7 +191,32 @@ public:
     );
 
     /**
-     * @brief 마스크 합성 (피부 - 눈 - 눈썹 - 입술)
+     * @brief 코 영역 보호 마스크 생성
+     *
+     * 코 강(cavity) 및 콧볼(wing) 랜드마크로 보호 영역 생성
+     */
+    static void createNoseProtectionMask(
+        const IrisLandmark* face_mesh, int landmark_count,
+        int mask_width, int mask_height,
+        std::vector<uint8_t>& out_mask
+    );
+
+    /**
+     * @brief 마스크 합성 (피부 - 눈 - 눈썹 - 입술 - 코)
+     *
+     * combined = skin_mask * (1 - eye_mask) * (1 - eyebrow_mask) * (1 - lip_mask) * (1 - nose_mask)
+     */
+    static void combineMasks(
+        const std::vector<uint8_t>& skin_mask,
+        const std::vector<uint8_t>& eye_protect_mask,
+        const std::vector<uint8_t>& eyebrow_protect_mask,
+        const std::vector<uint8_t>& lip_protect_mask,
+        const std::vector<uint8_t>& nose_protect_mask,
+        std::vector<uint8_t>& out_combined
+    );
+
+    /**
+     * @brief 마스크 합성 (피부 - 눈 - 눈썹 - 입술) - 하위 호환
      *
      * combined = skin_mask * (1 - eye_mask) * (1 - eyebrow_mask) * (1 - lip_mask)
      */
@@ -329,6 +355,8 @@ public:
     static constexpr int LEFT_EYEBROW_COUNT = 8;
     static constexpr int RIGHT_EYEBROW_COUNT = 8;
     static constexpr int LIP_OUTER_COUNT = 20;  ///< 외곽 입술 랜드마크 수
+    static constexpr int NOSE_CAVITY_COUNT = 7;  ///< 코 하단(cavity) 랜드마크 수
+    static constexpr int NOSE_WING_COUNT = 6;    ///< 콧볼(wing) 랜드마크 수
 
 private:
     // Face Mesh 랜드마크 인덱스 테이블
@@ -339,6 +367,8 @@ private:
     static const int LEFT_EYEBROW_INDICES[LEFT_EYEBROW_COUNT];
     static const int RIGHT_EYEBROW_INDICES[RIGHT_EYEBROW_COUNT];
     static const int LIP_OUTER_INDICES[LIP_OUTER_COUNT];  ///< 외곽 입술 인덱스
+    static const int NOSE_CAVITY_INDICES[NOSE_CAVITY_COUNT];  ///< 코 강 인덱스
+    static const int NOSE_WING_INDICES[NOSE_WING_COUNT];      ///< 콧볼 인덱스
 
     /**
      * @brief 랜드마크 좌표를 마스크 좌표로 변환

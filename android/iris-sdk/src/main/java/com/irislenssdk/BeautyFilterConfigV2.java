@@ -170,6 +170,12 @@ public class BeautyFilterConfigV2 {
     public boolean protectLips;
 
     /**
+     * 코 보호 (기본 false).
+     * 콧구멍/콧볼 경계를 뷰티 필터에서 제외하여 haze 방지
+     */
+    public boolean protectNose;
+
+    /**
      * 다운스케일 팩터 (1, 2, 4).
      * 1 = 원본, 2 = 1/2 해상도, 4 = 1/4 해상도
      * 성능과 품질 트레이드오프를 조절합니다.
@@ -226,6 +232,7 @@ public class BeautyFilterConfigV2 {
     public static final boolean DEFAULT_ROI_ONLY = true;
     public static final boolean DEFAULT_PROTECT_EYES = true;
     public static final boolean DEFAULT_PROTECT_LIPS = true;
+    public static final boolean DEFAULT_PROTECT_NOSE = false;
     public static final int DEFAULT_DOWNSCALE_FACTOR = 1;
     public static final float DEFAULT_VIVID_INTENSITY = 0.0f;
     public static final float DEFAULT_VIVID_SATURATION = 0.0f;
@@ -267,6 +274,7 @@ public class BeautyFilterConfigV2 {
         this.roiOnly = other.roiOnly;
         this.protectEyes = other.protectEyes;
         this.protectLips = other.protectLips;
+        this.protectNose = other.protectNose;
         this.downscaleFactor = other.downscaleFactor;
         this.vividIntensity = other.vividIntensity;
         this.vividSaturation = other.vividSaturation;
@@ -300,6 +308,7 @@ public class BeautyFilterConfigV2 {
         roiOnly = DEFAULT_ROI_ONLY;
         protectEyes = DEFAULT_PROTECT_EYES;
         protectLips = DEFAULT_PROTECT_LIPS;
+        protectNose = DEFAULT_PROTECT_NOSE;
         downscaleFactor = DEFAULT_DOWNSCALE_FACTOR;
         vividIntensity = DEFAULT_VIVID_INTENSITY;
         vividSaturation = DEFAULT_VIVID_SATURATION;
@@ -421,6 +430,7 @@ public class BeautyFilterConfigV2 {
                 ", roiOnly=" + roiOnly +
                 ", protectEyes=" + protectEyes +
                 ", protectLips=" + protectLips +
+                ", protectNose=" + protectNose +
                 ", downscaleFactor=" + downscaleFactor +
                 ", vividIntensity=" + vividIntensity +
                 ", vividSaturation=" + vividSaturation +
@@ -544,6 +554,11 @@ public class BeautyFilterConfigV2 {
 
         public Builder protectLips(boolean protectLips) {
             config.protectLips = protectLips;
+            return this;
+        }
+
+        public Builder protectNose(boolean protectNose) {
+            config.protectNose = protectNose;
             return this;
         }
 

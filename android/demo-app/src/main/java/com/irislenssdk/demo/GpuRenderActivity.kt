@@ -113,6 +113,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var seekSkinQuality: SeekBar
     private lateinit var seekSmoothIntensity: SeekBar
     private lateinit var seekPoreReduction: SeekBar
+    private lateinit var btnProtectNose: Button
     private lateinit var seekVividIntensity: SeekBar
     private lateinit var seekVividSaturation: SeekBar
     private lateinit var seekVividBrightness: SeekBar
@@ -206,6 +207,7 @@ class GpuRenderActivity : AppCompatActivity() {
         seekSkinQuality = findViewById(R.id.seekSkinQuality)
         seekSmoothIntensity = findViewById(R.id.seekSmoothIntensity)
         seekPoreReduction = findViewById(R.id.seekPoreReduction)
+        btnProtectNose = findViewById(R.id.btnProtectNose)
         seekVividIntensity = findViewById(R.id.seekVividIntensity)
         seekVividSaturation = findViewById(R.id.seekVividSaturation)
         seekVividBrightness = findViewById(R.id.seekVividBrightness)
@@ -457,6 +459,14 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+
+        // 코 보호 토글
+        btnProtectNose.setOnClickListener {
+            beautyConfig.protectNose = !beautyConfig.protectNose
+            btnProtectNose.text = if (beautyConfig.protectNose) "코보호: ON" else "코보호: OFF"
+            btnProtectNose.setTextColor(if (beautyConfig.protectNose) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt())
+            cameraGLView.setBeautyConfig(beautyConfig)
+        }
 
         // Vivid Intensity (0-100 → 0.0-1.0)
         seekVividIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {

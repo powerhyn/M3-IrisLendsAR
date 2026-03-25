@@ -599,6 +599,17 @@
 
                 </LinearLayout>
 
+                <!-- 코 보호 토글 -->
+                <Button
+                    android:id="@+id/btnProtectNose"
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:layout_marginTop="4dp"
+                    android:text="코보호: OFF"
+                    android:textSize="11sp"
+                    android:textColor="#FFAAAAAA"
+                    android:backgroundTint="#44444444" />
+
                 <!-- Vivid 구분선 -->
                 <View
                     android:layout_width="match_parent"

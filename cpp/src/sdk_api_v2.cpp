@@ -81,6 +81,7 @@ BeautyFilterConfigV2 toCppConfigV2(const IrisBeautyConfigV2* c_config) {
     config.vividSaturation = c_config->vivid_saturation;
     config.vividBrightness = c_config->vivid_brightness;
     config.vividWarmth = c_config->vivid_warmth;
+    config.protectNose = c_config->protect_nose != 0;
 
     // NaN/Inf/범위초과 방어 — 모든 C API 진입점에서 정규화
     iris_sdk::BeautyFilterConfigV2Helper::clamp(config);
@@ -117,6 +118,7 @@ void fromCppConfigV2(const BeautyFilterConfigV2& cpp_config, IrisBeautyConfigV2*
     c_config->vivid_saturation = cpp_config.vividSaturation;
     c_config->vivid_brightness = cpp_config.vividBrightness;
     c_config->vivid_warmth = cpp_config.vividWarmth;
+    c_config->protect_nose = cpp_config.protectNose ? 1 : 0;
 }
 
 /**
@@ -173,6 +175,7 @@ void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* config) {
     config->vivid_saturation = 0.0f;
     config->vivid_brightness = 0.0f;
     config->vivid_warmth = 0.0f;
+    config->protect_nose = 0;
 }
 
 IrisSdkError iris_sdk_apply_beauty_v2_c(

@@ -58,6 +58,18 @@ const int BeautyROIManager::LIP_OUTER_INDICES[20] = {
     409, 270, 269, 267, 0, 37, 39, 40, 185
 };
 
+// 코 하단 인덱스 — 콧구멍/콧볼/코끝 (FACEMESH_NOSE에서 하단부만 선택)
+// 공식 FACEMESH_NOSE: 168,6,197,195,5,4,1,19,94,2,98,97,326,327,294,278,344,440,275,45,220,115,48,64
+// 콧등(168,6,197,195)은 피부 보정 대상이므로 제외
+const int BeautyROIManager::NOSE_CAVITY_INDICES[7] = {
+    4, 1, 19, 94, 2, 97, 326   // 코끝(4), 코 하단 중심(1,19), 좌측(94,2), 우측(97,326)
+};
+
+// 콧볼 외곽 — FACEMESH_NOSE에서 좌우 날개 끝점
+const int BeautyROIManager::NOSE_WING_INDICES[6] = {
+    48, 115, 220, 275, 440, 344  // 좌측(48,115,220), 우측(275,440,344)
+};
+
 //=============================================================================
 // 유틸리티 함수
 //=============================================================================
@@ -161,10 +173,31 @@ bool BeautyROIManager::computeROI(
             static_cast<size_t>(out_roi.mask_width) * out_roi.mask_height, 0);
     }
 
-    // 5. 마스크 합성 (눈썹 보호 포함)
+    // 4-b. 코 보호 마스크 (protectNose 활성 시)
+    if (config.protectNose) {
+        createNoseProtectionMask(face_mesh, landmark_count,
+                                 out_roi.mask_width, out_roi.mask_height,
+                                 out_roi.nose_protect_mask);
+    } else {
+        out_roi.nose_protect_mask.clear();
+    }
+
+    // 5. 마스크 합성 (눈썹 + 코 보호 포함)
     combineMasks(out_roi.skin_mask, out_roi.eye_protect_mask,
                  out_roi.eyebrow_protect_mask, out_roi.lip_protect_mask,
-                 out_roi.combined_mask);
+                 out_roi.nose_protect_mask, out_roi.combined_mask);
+
+    // 5-b. 정규화 erode (코 보호 또는 스무딩 활성 시 마스크 경계 축소)
+    if (config.protectNose || config.smoothIntensity > 0.0f || config.poreReduction > 0.0f) {
+        int min_dim = std::min(out_roi.mask_width, out_roi.mask_height);
+        int erode_size = std::clamp(static_cast<int>(std::round(min_dim * 0.02f)), 1, 5);
+        erode_size = erode_size | 1; // 홀수 보장
+        cv::Mat combined_mat(out_roi.mask_height, out_roi.mask_width, CV_8UC1,
+                             out_roi.combined_mask.data());
+        cv::erode(combined_mat, combined_mat,
+                  cv::getStructuringElement(cv::MORPH_ELLIPSE,
+                                            cv::Size(erode_size, erode_size)));
+    }
 
     // 6. 페더링 적용
     applyFeathering(out_roi.combined_mask, out_roi.mask_width,
@@ -340,6 +373,50 @@ void BeautyROIManager::createLipProtectionMask(
                cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)));
 }
 
+void BeautyROIManager::createNoseProtectionMask(
+    const IrisLandmark* face_mesh, int landmark_count,
+    int mask_width, int mask_height,
+    std::vector<uint8_t>& out_mask) {
+
+    out_mask.assign(static_cast<size_t>(mask_width) * mask_height, 0);
+    cv::Mat mask_mat(mask_height, mask_width, CV_8UC1, out_mask.data());
+
+    // 코 강 + 콧볼 포인트 수집
+    std::vector<cv::Point> nose_points;
+    nose_points.reserve(NOSE_CAVITY_COUNT + NOSE_WING_COUNT);
+
+    for (int i = 0; i < NOSE_CAVITY_COUNT; i++) {
+        int idx = NOSE_CAVITY_INDICES[i];
+        if (idx >= landmark_count) continue;
+        const auto& lm = face_mesh[idx];
+        int x = std::clamp(static_cast<int>(lm.x * mask_width), 0, mask_width - 1);
+        int y = std::clamp(static_cast<int>(lm.y * mask_height), 0, mask_height - 1);
+        nose_points.emplace_back(x, y);
+    }
+
+    for (int i = 0; i < NOSE_WING_COUNT; i++) {
+        int idx = NOSE_WING_INDICES[i];
+        if (idx >= landmark_count) continue;
+        const auto& lm = face_mesh[idx];
+        int x = std::clamp(static_cast<int>(lm.x * mask_width), 0, mask_width - 1);
+        int y = std::clamp(static_cast<int>(lm.y * mask_height), 0, mask_height - 1);
+        nose_points.emplace_back(x, y);
+    }
+
+    if (nose_points.size() < 3) return;
+
+    // convexHull로 코 영역 생성
+    std::vector<cv::Point> hull;
+    cv::convexHull(nose_points, hull);
+
+    std::vector<std::vector<cv::Point>> contours = {hull};
+    cv::fillPoly(mask_mat, contours, cv::Scalar(255));
+
+    // 경계 확장
+    cv::dilate(mask_mat, mask_mat,
+               cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)));
+}
+
 //=============================================================================
 // 마스크 합성 및 페더링
 //=============================================================================
@@ -349,6 +426,7 @@ void BeautyROIManager::combineMasks(
     const std::vector<uint8_t>& eye_protect_mask,
     const std::vector<uint8_t>& eyebrow_protect_mask,
     const std::vector<uint8_t>& lip_protect_mask,
+    const std::vector<uint8_t>& nose_protect_mask,
     std::vector<uint8_t>& out_combined) {
 
     size_t size = skin_mask.size();
@@ -358,18 +436,33 @@ void BeautyROIManager::combineMasks(
     bool has_eye = !eye_protect_mask.empty() && eye_protect_mask.size() == size;
     bool has_eyebrow = !eyebrow_protect_mask.empty() && eyebrow_protect_mask.size() == size;
     bool has_lip = !lip_protect_mask.empty() && lip_protect_mask.size() == size;
+    bool has_nose = !nose_protect_mask.empty() && nose_protect_mask.size() == size;
 
     for (size_t i = 0; i < size; i++) {
         float skin = skin_mask[i] / 255.0f;
         float eye = has_eye ? eye_protect_mask[i] / 255.0f : 0.0f;
         float eyebrow = has_eyebrow ? eyebrow_protect_mask[i] / 255.0f : 0.0f;
         float lip = has_lip ? lip_protect_mask[i] / 255.0f : 0.0f;
+        float nose = has_nose ? nose_protect_mask[i] / 255.0f : 0.0f;
 
-        // combined = skin * (1 - eye) * (1 - eyebrow) * (1 - lip)
+        // combined = skin * (1 - eye) * (1 - eyebrow) * (1 - lip) * (1 - nose)
         // 보호 영역에서는 0이 되어 필터가 적용되지 않음
-        float combined = skin * (1.0f - eye) * (1.0f - eyebrow) * (1.0f - lip);
+        float combined = skin * (1.0f - eye) * (1.0f - eyebrow) * (1.0f - lip) * (1.0f - nose);
         out_combined[i] = static_cast<uint8_t>(std::clamp(combined * 255.0f, 0.0f, 255.0f));
     }
+}
+
+void BeautyROIManager::combineMasks(
+    const std::vector<uint8_t>& skin_mask,
+    const std::vector<uint8_t>& eye_protect_mask,
+    const std::vector<uint8_t>& eyebrow_protect_mask,
+    const std::vector<uint8_t>& lip_protect_mask,
+    std::vector<uint8_t>& out_combined) {
+
+    // 하위 호환: 코 보호 마스크 없이 호출 시 빈 벡터 전달
+    static const std::vector<uint8_t> empty_nose;
+    combineMasks(skin_mask, eye_protect_mask, eyebrow_protect_mask,
+                 lip_protect_mask, empty_nose, out_combined);
 }
 
 void BeautyROIManager::applyFeathering(
