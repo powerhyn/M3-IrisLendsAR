@@ -384,6 +384,7 @@ struct JniCache {
     jfieldID beautyConfigV2_roiOnly = nullptr;
     jfieldID beautyConfigV2_protectEyes = nullptr;
     jfieldID beautyConfigV2_protectLips = nullptr;
+    jfieldID beautyConfigV2_protectNose = nullptr;
     jfieldID beautyConfigV2_downscaleFactor = nullptr;
     jfieldID beautyConfigV2_vividIntensity = nullptr;
     jfieldID beautyConfigV2_vividSaturation = nullptr;

@@ -876,3 +876,6 @@ compression = microTextureBand(~0.5) × largeDetailComp(~0.8) × edgeProt(~0.85)
 | 2026-03-23 | Claude (5차) | 토론 마무리 — 확정 합의 8개 항목 정리, 미해결 질문을 실험 계획으로 전환, 다음 단계 실행 순서 확정 |
 | 2026-03-24 | Claude (6차) | 프로토타이핑 실험 결과 추가 — 매끈하게 4회 이터레이션, 모공 테스트, 종합 판단 및 다음 단계 기록 |
 | 2026-03-25 | Claude (7차) | 디버그 히트맵 분석 결과 추가, compression 포물선 부스트 실험(실패) 기록, 프로토타이핑 종합 판단 및 다음 단계 업데이트 |
+| 2026-03-25 | Codex (4차) | 프로토타이핑 결과 피드백 — "실험 프레임으로 성공, 해법으로 미완" 프레이밍, 마스크→결합식→Guided Filter 우선순위 제안, C API stale 값 지적 |
+| 2026-03-25 | Gemini (4차) | 프로토타이핑 결과 피드백 — 곱셈 감쇠 분석 공감, Mask Refinement Pass(Erode/Dilate) 제안, Pore-specific Nonlinear Operator 제안 |
+| 2026-03-25 | Claude (8차) | 마스크 정밀도 개선 토론을 별도 문서(`beauty_mask_refinement_discussion.md`)로 분리 |

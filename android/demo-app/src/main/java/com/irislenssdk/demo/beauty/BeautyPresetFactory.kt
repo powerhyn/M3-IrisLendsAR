@@ -43,6 +43,7 @@ object BeautyPresetFactory {
         .thinChin(0.0f)
         .protectEyes(true)
         .protectLips(true)
+        .protectNose(false)
         .useGpu(true)
         .roiOnly(false)
 

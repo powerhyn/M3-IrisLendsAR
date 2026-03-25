@@ -162,6 +162,7 @@ bool JniCache::init(JNIEnv* env) {
     beautyConfigV2_roiOnly = env->GetFieldID(beautyConfigV2Class, "roiOnly", "Z");
     beautyConfigV2_protectEyes = env->GetFieldID(beautyConfigV2Class, "protectEyes", "Z");
     beautyConfigV2_protectLips = env->GetFieldID(beautyConfigV2Class, "protectLips", "Z");
+    beautyConfigV2_protectNose = env->GetFieldID(beautyConfigV2Class, "protectNose", "Z");
     beautyConfigV2_downscaleFactor = env->GetFieldID(beautyConfigV2Class, "downscaleFactor", "I");
     beautyConfigV2_vividIntensity = env->GetFieldID(beautyConfigV2Class, "vividIntensity", "F");
     beautyConfigV2_vividSaturation = env->GetFieldID(beautyConfigV2Class, "vividSaturation", "F");
@@ -176,7 +177,7 @@ bool JniCache::init(JNIEnv* env) {
         !beautyConfigV2_slimFace ||
         !beautyConfigV2_enlargeEyes || !beautyConfigV2_thinChin || !beautyConfigV2_useGpu ||
         !beautyConfigV2_roiOnly || !beautyConfigV2_protectEyes || !beautyConfigV2_protectLips ||
-        !beautyConfigV2_downscaleFactor ||
+        !beautyConfigV2_protectNose || !beautyConfigV2_downscaleFactor ||
         !beautyConfigV2_vividIntensity || !beautyConfigV2_vividSaturation ||
         !beautyConfigV2_vividBrightness || !beautyConfigV2_vividWarmth) {
         LOGE("Failed to get BeautyFilterConfigV2 field IDs");
@@ -440,6 +441,7 @@ bool copyBeautyConfigV2FromJava(JNIEnv* env, jobject src, IrisBeautyConfigV2& de
     dest.roi_only = env->GetBooleanField(src, g_jniCache.beautyConfigV2_roiOnly) ? 1 : 0;
     dest.protect_eyes = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectEyes) ? 1 : 0;
     dest.protect_lips = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectLips) ? 1 : 0;
+    dest.protect_nose = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectNose) ? 1 : 0;
     dest.downscale_factor = env->GetIntField(src, g_jniCache.beautyConfigV2_downscaleFactor);
     dest.vivid_intensity = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividIntensity);
     dest.vivid_saturation = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividSaturation);
@@ -474,6 +476,7 @@ bool copyBeautyConfigV2ToJava(JNIEnv* env, const IrisBeautyConfigV2& src, jobjec
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_roiOnly, src.roi_only != 0);
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectEyes, src.protect_eyes != 0);
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectLips, src.protect_lips != 0);
+    env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectNose, src.protect_nose != 0);
     env->SetIntField(dest, g_jniCache.beautyConfigV2_downscaleFactor, src.downscale_factor);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividIntensity, src.vivid_intensity);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividSaturation, src.vivid_saturation);

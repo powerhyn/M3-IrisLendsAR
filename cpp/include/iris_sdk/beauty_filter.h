@@ -120,6 +120,10 @@ typedef struct BeautyFilterConfigV2 {
     float vividBrightness;
     /** @brief 웜톤 시프트 (0.0~1.0, 기본값 0.0) */
     float vividWarmth;
+
+    //===== 추가 보호 옵션 =====
+    /** @brief 코 영역 보호 (기본값 false) */
+    bool protectNose;
 } BeautyFilterConfigV2;
 
 // ============================================================================
@@ -358,6 +362,7 @@ struct BeautyFilterConfigV2Helper {
         v2.vividSaturation = 0.0f;
         v2.vividBrightness = 0.0f;
         v2.vividWarmth = 0.0f;
+        v2.protectNose = false;
         return v2;
     }
 
@@ -456,6 +461,7 @@ struct BeautyFilterConfigV2Helper {
         cfg.vividSaturation = 0.0f;
         cfg.vividBrightness = 0.0f;
         cfg.vividWarmth = 0.0f;
+        cfg.protectNose = false;
         return cfg;
     }
 };

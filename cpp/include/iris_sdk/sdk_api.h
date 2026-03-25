@@ -623,6 +623,9 @@ typedef struct IrisBeautyConfigV2 {
     float vivid_saturation;    /**< 채도 부스트 (0.0~1.0) */
     float vivid_brightness;    /**< 밝기 리프트 (0.0~0.5) */
     float vivid_warmth;        /**< 웜톤 시프트 (0.0~1.0) */
+
+    /* 추가 보호 옵션 */
+    int protect_nose;          /**< 코 보호 (0=비활성, 1=활성, 기본 0) */
 } IrisBeautyConfigV2;
 
 /**
