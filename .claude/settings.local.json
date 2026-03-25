@@ -72,7 +72,14 @@
       "Bash(cat > /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK/.full-review/00-scope.md << 'SCOPEEOF'\n# Review Scope\n\n## Target\n\nVivid Post-Processing 필터 구현 — develop 브랜치 대비 현재 브랜치의 변경 사항 \\(PR 스타일 리뷰\\)\n\n화면 전체에 화사한 느낌을 주는 GPU 전용 포스트프로세싱 필터. Vibrance + 밝기 리프트 + 웜톤 시프트를 단일 패스 셰이더로 구현. 기존 beauty 필터 파이프라인과 독립적으로 동작하며, enabled=false 상태에서도 vivid만 활성화 가능.\n\n## Files \\(10 files, +307/-12 lines\\)\n\n### C++ Core\n- `cpp/include/iris_sdk/beauty_filter.h` — BeautyFilterConfigV2 구조체 + Helper 확장\n- `cpp/include/iris_sdk/sdk_api.h` — IrisBeautyConfigV2 C API 구조체 확장\n- `cpp/src/sdk_api_v2.cpp` — C API 변환 함수 + enabled 가드 + 기본값\n- `cpp/src/gpu/shader_sources.cpp` — VIVID_POSTPROCESS_FRAGMENT 셰이더\n- `cpp/include/iris_sdk/gpu/gpu_beauty_backend.h` — vivid 멤버/메서드 선언\n- `cpp/src/gpu/gpu_beauty_backend.cpp` — buildEffectiveConfig + vivid 패스 + applyTextureId 수정\n\n### Android JNI Bindings\n- `android/iris-sdk/src/main/java/com/irislenssdk/BeautyFilterConfigV2.java` — Java 필드 + Builder\n- `android/iris-sdk/src/main/cpp/jni_utils.h` — JniCache vivid field ID 선언\n- `android/iris-sdk/src/main/cpp/iris_jni.cpp` — JNI field ID 초기화 + 매핑 함수\n\n### Config\n- `.claude/settings.local.json` — \\(무관\\)\n\n## Flags\n\n- Security Focus: no\n- Performance Critical: no\n- Strict Mode: no\n- Framework: C++17 / OpenGL ES 3.1 / Android JNI\n\n## Review Phases\n\n1. Code Quality & Architecture\n2. Security & Performance\n3. Testing & Documentation\n4. Best Practices & Standards\n5. Consolidated Report\nSCOPEEOF)",
       "Bash(cd /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK/android && ./gradlew :demo-app:compileDebugKotlin 2>&1 | tail -15)",
       "Bash(./gradlew :demo-app:compileDebugKotlin 2>&1 | tail -10)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(./gradlew :demo-app:assembleDebug)",
+      "Bash(./gradlew :demo-app:installDebug)",
+      "Bash(./gradlew :iris-sdk:buildCMakeDebug)",
+      "Bash(./gradlew :demo-app:installDebug --stacktrace)",
+      "Bash(adb devices:*)",
+      "Bash(adb logcat:*)"
     ]
   },
   "enabledPlugins": {
