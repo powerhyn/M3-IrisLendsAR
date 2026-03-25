@@ -718,6 +718,123 @@ Codex가 지적한 `blur_radius` 문제는 이 토론의 핵심입니다.
 
 ---
 
+## 17. 프로토타이핑 실험 결과 (2026-03-24)
+
+> 브랜치: `feature/beauty-smoothing-prototype`
+> 비교 기준: B612 앱의 매끈하게/모공 기능 (실기기 스크린샷 비교)
+
+### 구현 내용
+
+- `BeautyFilterConfigV2`에 `smoothIntensity`, `poreReduction` 2개 필드 추가
+- `mapSmoothingAndPore()` 함수로 2축 독립 FreqSepParams 매핑
+- Composite 셰이더에 `uTextureBlendFloor` uniform 추가
+- 데모앱에 매끈하게/모공 독립 슬라이더 추가
+- 기존 `skinQuality`와 하위 호환 유지
+
+### 실험 1: 매끈하게 축
+
+#### 발견한 문제들과 수정 과정
+
+| 이터레이션 | 문제 | 원인 | 수정 |
+|-----------|------|------|------|
+| 1차 | 슬라이더를 올려도 변화 없음 | `active_filter_count`에 2축 파라미터 미포함 → fast-path 패스스루 (외부 리뷰에서 발견) | `active_filter_count` 조건에 `smoothIntensity`/`poreReduction` 추가 |
+| 2차 | 효과가 너무 미미 | `texture_blend_floor`가 `compression`에 종속 → compression 낮으면 floor 무의미 | `max(poreBlend, smoothFloorProtected)` 로직으로 변경 |
+| 3차 | 여전히 미미 | `high_freq_preserve=0.72` — 매끈하게 축에서 고주파 72% 보존 중 | `hfp`를 매끈하게 축에서도 제어 (`min(hfp_smooth, hfp_pore)`) |
+| 4차 | 효과 나지만 **뿌연 느낌** (haze) | `tone_lift`가 밝기를 올림 + 에지(안경테, 코)까지 같이 밀림 | `tone_lift` 최소화 + 에지/색차 보호를 `textureBlend`에도 적용 |
+
+#### 최종 매끈하게 파라미터 (극단 테스트 기준)
+
+```
+blur_radius:              face_w * 0.138 (clamp 5~28)
+low_freq_smooth_ratio:    0.22 ~ 0.70
+texture_blend_floor:      0.38 ~ 0.95
+tone_lift:                0.002 ~ 0.007
+high_freq_preserve:       0.72 ~ 0.17
+sharpen_amount:           0.11 ~ 0.25
+edge_weight:              0.42 ~ 0.62
+```
+
+#### 매끈하게 결론
+
+- **방향은 맞음** — FreqSep 내부 파라미터 분리로 매끈하게 효과가 동작함
+- **B612 대비 아직 부족** — 극단값에서도 B612보다 약하고 뿌연 느낌 있음
+- **핵심 병목: 마스크 정밀도** — 안경테, 콧볼, 헤어라인 등 비피부 영역에 스무딩이 먹혀서 뿌옇게 보임. B612은 이 영역을 정밀하게 제외함
+- **부차 병목: Gaussian blur의 한계** — 넓은 blur에서 에지 근처에 halo 발생. Guided Filter 도입이 여전히 유효한 후보
+
+### 실험 2: 모공 축
+
+#### 테스트 조건
+
+- 잡티보정 0, 매끈하게 0, 모공 100
+- B612 모공 100과 나란히 비교
+
+#### 결과
+
+| | B612 모공 | 우리 모공 |
+|---|---|---|
+| 모공 감소 | 볼/코 옆 확실히 줄어듦 | **변화 거의 없음** |
+| 톤 변화 | 없음 | 없음 |
+| 에지 보존 | 완벽 | 유지됨 |
+
+#### 로그 확인
+
+```
+[2AXIS] smooth=0.00 pore=1.00 face_w=621 enabled=1 blur_r=19 blendFloor=0.38 toneLift=0.002 hfp=0.20
+```
+
+파라미터는 정상 전달됨. `hfp=0.20`이면 고주파 80% 제거인데도 시각적 변화가 미미.
+
+#### 모공 축 문제 분석 (미해결)
+
+**가설 1: `microTextureBand`가 실제 모공 신호를 못 잡고 있음**
+- 현재 범위: magnitude 0.003 ~ 0.036
+- 실제 모공의 magnitude가 이 범위 밖일 수 있음
+- attenuation band를 더 넓히거나, 측정이 필요
+
+**가설 2: `blendFloor=0.38`이 너무 낮아서 압축이 되어도 블렌딩이 약함**
+- 모공 축에서도 compression이 높은 영역에서만 foundation이 적용됨
+- compression이 낮은 영역(미세 모공)은 원본이 거의 그대로
+
+**가설 3: `blur_radius=19`가 모공 제거에 적합하지 않음**
+- 모공은 고주파이므로 blur가 너무 크면 저주파에 모공이 안 남음 → high에 모공이 제대로 잡힘
+- 하지만 blur가 너무 작으면 저주파에 모공 일부가 남아서 foundation 자체에 모공이 있음
+
+### 참고 스크린샷
+
+| 파일 | 설명 |
+|------|------|
+| `b612_filter_none.jpg` | B612 필터 없음 (원본) |
+| `b612_filter_매끈하게.jpg` | B612 매끈하게 적용 |
+| `b612_filter_모공.jpg` | B612 모공 적용 |
+| `Screenshot_20260324_irislens.png` | SDK 매끈하게 100 (1차) |
+| `Screenshot_20260324_b618.png` | B612 매끈하게 (비교용) |
+| `Screenshot_20260324_irislens_after.png` | SDK 매끈하게 100 (blur 강화 후) |
+| `Screenshot_20260324_160519.png` | SDK 매끈하게 100 (극단값) |
+| `Screenshot_20260324_180653.png` | SDK 매끈하게 100 (hfp 수정 후) |
+| `Screenshot_20260324_181424.png` | SDK 매끈하게 100 (에지 보호 추가 후) |
+| `Screenshot_20260324_b162_mogong_off.png` | B612 모공 OFF |
+| `Screenshot_20260324_b162_mogong_full.png` | B612 모공 100 |
+| `Screenshot_20260324_iris_mogong_off.png` | SDK 모공 OFF |
+| `Screenshot_20260324_iris_mogong_full.png` | SDK 모공 100 |
+
+### 프로토타이핑 종합 판단
+
+| 항목 | 결과 |
+|------|------|
+| 2축 독립 제어 동작 | **확인** |
+| FreqSep 내부 파라미터 분리 가능성 | **확인** — 매끈하게/모공 각각 다른 파라미터 세트를 제어 |
+| 매끈하게 품질 | **부족** — 방향은 맞지만 마스크 정밀도 + blur 방식의 한계 |
+| 모공 품질 | **부족** — 효과가 거의 없음. 원인 분석 필요 |
+| B612 수준 도달 가능 여부 | **현 구조만으로는 어려움** — 마스크 정밀도 개선 또는 알고리즘 보강 필요 |
+
+### 다음 단계
+
+1. **모공 축 원인 분석** — `microTextureBand`가 실제 모공을 잡는지 시각적으로 디버깅
+2. **마스크 정밀도 개선 검토** — 피부 세그멘테이션 모델 도입 or ROI 마스크 고도화
+3. **Guided Filter 재검토** — 매끈하게의 Gaussian blur 한계가 확인됨, Guided Filter가 대안으로 유효
+
+---
+
 ## 수정이력
 
 | 날짜 | 작성자 | 내용 |
@@ -733,3 +850,4 @@ Codex가 지적한 `blur_radius` 문제는 이 토론의 핵심입니다.
 | 2026-03-23 | Codex (3차) | `14. Codex 의견 (3차)` 추가 — 2차 토론에 대한 보완 의견 정리, `effectStrength`/`largeDetailProtection`/`blur_radius`를 추가 검토 항목으로 제안 |
 | 2026-03-23 | Gemini (3차) | `15. Gemini 의견 (3차)` 추가 — 신호의 독립성(Orthogonality) 및 인지적 간섭 제어 관점 보완, `blur_radius`의 동적 결정 공식 및 구체적 수치 실험 프로토콜 제안 |
 | 2026-03-23 | Claude (5차) | 토론 마무리 — 확정 합의 8개 항목 정리, 미해결 질문을 실험 계획으로 전환, 다음 단계 실행 순서 확정 |
+| 2026-03-24 | Claude (6차) | 프로토타이핑 실험 결과 추가 — 매끈하게 4회 이터레이션, 모공 테스트, 종합 판단 및 다음 단계 기록 |

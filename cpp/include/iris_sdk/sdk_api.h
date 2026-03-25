@@ -601,6 +601,10 @@ typedef struct IrisBeautyConfigV2 {
     float wrinkle_remove;   /**< 주름 제거 (0.0~1.0) */
     float skin_quality;     /**< 피부 품질 개선 (0.0~1.0, Freq Sep 활성화) */
 
+    /* V2 확장 - 피부 2축 독립 제어 (둘 다 0이면 skin_quality 사용) */
+    float smooth_intensity; /**< 매끈하게 강도 (0.0~1.0, 0=비활성) */
+    float pore_reduction;   /**< 모공 축소 강도 (0.0~1.0, 0=비활성) */
+
     /* V2 확장 - 얼굴 형태 보정 */
     float slim_face;        /**< 얼굴 슬림화 (0.0~1.0) */
     float enlarge_eyes;     /**< 눈 확대 (0.0~1.0) */
@@ -702,6 +706,12 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
     uint32_t lut_texture_id,
     float lut_intensity
 );
+
+/**
+ * @brief FreqSep 디버그 모드 설정
+ * @param mode 0=off, 1=magnitude heatmap, 2=compression heatmap, 3=mask
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_freqsep_debug_mode(int mode);
 
 /**
  * @brief Face Warp 적용 (GPU)

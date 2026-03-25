@@ -479,6 +479,8 @@ uniform float uAttenuationHigh;    // smoothstep upper bound (default 0.15)
 uniform float uEdgeWeight;         // Edge preservation strength (0.3~0.7)
 uniform float uChromaWeight;       // Chroma deviation sensitivity (0.2~0.5)
 uniform float uToneLift;          // Mid-tone lift intensity (0.0~0.3, default 0.15)
+uniform float uTextureBlendFloor; // textureBlend mix lower bound (default 0.38)
+uniform int uDebugMode;           // 0=off, 1=magnitude heatmap, 2=compression heatmap, 3=mask
 
 // Rec.709 luminance coefficients (linear-space)
 const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
@@ -553,9 +555,14 @@ void main() {
     // use the smoother low-frequency base, then re-inject protected detail.
     vec3 foundationBase = clamp(smoothLow + adjusted_high, 0.0, 1.0);
 
-    // Even when micro-texture gating is conservative, the face should still
-    // read as "finished". A non-zero floor keeps the effect perceptible.
-    float textureBlend = mask * mix(0.38, 0.88, compression);
+    // Texture blend: max of (pore-driven compression blend) and (smooth floor).
+    // 매끈하게 floor에도 에지/그림자/색차 보호를 적용하여 경계가 무너지지 않게 함.
+    float poreBlend = mix(0.38, 0.88, compression);
+    float smoothFloorProtected = uTextureBlendFloor
+                               * clamp(edgeProtection, 0.0, 1.0)
+                               * clamp(chromaProtection, 0.0, 1.0)
+                               * effectStrength;
+    float textureBlend = mask * max(poreBlend, smoothFloorProtected);
     vec3 textureFinished = mix(orig, foundationBase, textureBlend);
 
     // Tone finish rides on top of the texture-compressed base so the result
@@ -565,6 +572,55 @@ void main() {
 
     // Tone finish is applied broadly within the face ROI.
     vec3 result = mix(textureFinished, toneFinish, mask * (0.65 * effectStrength));
+
+    // === Debug visualization ===
+    if (uDebugMode == 1) {
+        // Magnitude heatmap (확대: 0~0.04 범위 → 모공 대역에 집중)
+        float v = clamp(magnitude / 0.04, 0.0, 1.0);
+        vec3 heatmap = vec3(smoothstep(0.3, 0.7, v), smoothstep(0.0, 0.5, v) - smoothstep(0.7, 1.0, v), 0.0);
+        result = mix(orig, heatmap, mask * 0.8);
+        result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
+        fragColor = vec4(result, 1.0);
+        return;
+    } else if (uDebugMode == 2) {
+        // microTextureBand heatmap (compression의 첫 단계)
+        float v = clamp(microTextureBand, 0.0, 1.0);
+        vec3 heatmap = vec3(v, 1.0 - v, 0.0);
+        result = mix(orig, heatmap, mask * 0.8);
+        result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
+        fragColor = vec4(result, 1.0);
+        return;
+    } else if (uDebugMode == 3) {
+        // edgeProtection heatmap (1=보호안함 → 초록, 0=완전보호 → 빨강)
+        float v = clamp(edgeProtection, 0.0, 1.0);
+        vec3 heatmap = vec3(1.0 - v, v, 0.0);
+        result = mix(orig, heatmap, mask * 0.8);
+        result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
+        fragColor = vec4(result, 1.0);
+        return;
+    } else if (uDebugMode == 4) {
+        // effectStrength heatmap (그림자/하이라이트 보호)
+        float v = clamp(effectStrength, 0.0, 1.0);
+        vec3 heatmap = vec3(v, v, 0.0);
+        result = mix(orig, heatmap, mask * 0.8);
+        result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
+        fragColor = vec4(result, 1.0);
+        return;
+    } else if (uDebugMode == 5) {
+        // 최종 compression heatmap (모든 요소 곱한 결과)
+        float v = clamp(compression * 3.0, 0.0, 1.0); // 3x 증폭해서 미세한 차이도 보이게
+        vec3 heatmap = vec3(v, 1.0 - v, 0.0);
+        result = mix(orig, heatmap, mask * 0.8);
+        result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
+        fragColor = vec4(result, 1.0);
+        return;
+    } else if (uDebugMode == 6) {
+        // Mask visualization
+        result = mix(orig, vec3(0.0, mask, 0.0), 0.5);
+        result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
+        fragColor = vec4(result, 1.0);
+        return;
+    }
 
     // Linear → sRGB (음수 방어: pow(음수, 비정수)는 GLSL undefined behavior)
     result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));

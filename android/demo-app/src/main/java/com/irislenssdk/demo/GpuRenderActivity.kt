@@ -111,6 +111,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnPresetVividPop: Button
     private lateinit var btnPresetCustom: Button
     private lateinit var seekSkinQuality: SeekBar
+    private lateinit var seekSmoothIntensity: SeekBar
+    private lateinit var seekPoreReduction: SeekBar
     private lateinit var seekVividIntensity: SeekBar
     private lateinit var seekVividSaturation: SeekBar
     private lateinit var seekVividBrightness: SeekBar
@@ -202,6 +204,8 @@ class GpuRenderActivity : AppCompatActivity() {
         btnPresetVividPop = findViewById(R.id.btnPresetVividPop)
         btnPresetCustom = findViewById(R.id.btnPresetCustom)
         seekSkinQuality = findViewById(R.id.seekSkinQuality)
+        seekSmoothIntensity = findViewById(R.id.seekSmoothIntensity)
+        seekPoreReduction = findViewById(R.id.seekPoreReduction)
         seekVividIntensity = findViewById(R.id.seekVividIntensity)
         seekVividSaturation = findViewById(R.id.seekVividSaturation)
         seekVividBrightness = findViewById(R.id.seekVividBrightness)
@@ -425,6 +429,29 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // SmoothIntensity (매끈하게) 슬라이더
+        seekSmoothIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                beautyConfig.smoothIntensity = progress / 100f
+                android.util.Log.d("BEAUTY_2AXIS", "smoothIntensity=${beautyConfig.smoothIntensity} poreReduction=${beautyConfig.poreReduction} skinQuality=${beautyConfig.skinQuality}")
+                if (fromUser) onSliderManualChange()
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // PoreReduction (모공) 슬라이더
+        seekPoreReduction.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                beautyConfig.poreReduction = progress / 100f
+                if (fromUser) onSliderManualChange()
+                cameraGLView.setBeautyConfig(beautyConfig)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         // Vivid Intensity (0-100 → 0.0-1.0)
         seekVividIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -497,6 +524,8 @@ class GpuRenderActivity : AppCompatActivity() {
         isUpdatingSliders = true
 
         seekSkinQuality.progress = (beautyConfig.skinQuality * 100).toInt()
+        seekSmoothIntensity.progress = (beautyConfig.smoothIntensity * 100).toInt()
+        seekPoreReduction.progress = (beautyConfig.poreReduction * 100).toInt()
         seekVividIntensity.progress = (beautyConfig.vividIntensity * 100).toInt()
         seekVividSaturation.progress = (beautyConfig.vividSaturation * 100).toInt()
         seekVividBrightness.progress = (beautyConfig.vividBrightness * 200).toInt()
@@ -553,10 +582,16 @@ class GpuRenderActivity : AppCompatActivity() {
             Toast.makeText(this, "Face Mesh: ${if (overlayView.showFaceMesh) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
 
+        var freqSepDebugMode = 0
+        val debugModeNames = arrayOf("OFF", "Magnitude", "MicroBand", "EdgeProt", "EffectStr", "Compression×3", "Mask")
         btnToggleDebug.setOnClickListener {
-            overlayView.debugMode = !overlayView.debugMode
+            freqSepDebugMode = (freqSepDebugMode + 1) % 7
+            cameraGLView.queueEvent {
+                com.irislenssdk.IrisLensSDK.setFreqSepDebugMode(freqSepDebugMode)
+            }
+            overlayView.debugMode = freqSepDebugMode > 0
             updateButtonColors()
-            Toast.makeText(this, "Debug: ${if (overlayView.debugMode) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "FreqSep Debug: ${debugModeNames[freqSepDebugMode]}", Toast.LENGTH_SHORT).show()
         }
 
         btnToggleIris.setOnClickListener {

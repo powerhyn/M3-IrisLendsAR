@@ -84,6 +84,12 @@ typedef struct BeautyFilterConfigV2 {
     /** @brief 피부 품질 개선 (0~1, 기본 0.0, Freq Sep 활성화) */
     float skinQuality;
 
+    //===== 피부 2축 독립 제어 (smoothIntensity/poreReduction 둘 다 0이면 skinQuality 사용) =====
+    /** @brief 매끈하게 강도 (0~1, 기본 0.0) - 저주파 톤 정리 + texture blend + foundation finish */
+    float smoothIntensity;
+    /** @brief 모공 축소 강도 (0~1, 기본 0.0) - 고주파 미세 텍스처 압축 */
+    float poreReduction;
+
     //===== 얼굴 형태 보정 =====
     /** @brief 얼굴 슬림화 (0.0~1.0, 기본값 0.0) */
     float slimFace;
@@ -338,6 +344,8 @@ struct BeautyFilterConfigV2Helper {
         v2.colorBalance = 0.0f;
         v2.wrinkleRemove = 0.0f;
         v2.skinQuality = 0.0f;
+        v2.smoothIntensity = 0.0f;
+        v2.poreReduction = 0.0f;
         v2.slimFace = 0.0f;
         v2.enlargeEyes = 0.0f;
         v2.thinChin = 0.0f;
@@ -378,6 +386,8 @@ struct BeautyFilterConfigV2Helper {
                (cfg.colorBalance >= -1.0f && cfg.colorBalance <= 1.0f) &&
                (cfg.wrinkleRemove >= 0.0f && cfg.wrinkleRemove <= 1.0f) &&
                (cfg.skinQuality >= 0.0f && cfg.skinQuality <= 1.0f) &&
+               (cfg.smoothIntensity >= 0.0f && cfg.smoothIntensity <= 1.0f) &&
+               (cfg.poreReduction >= 0.0f && cfg.poreReduction <= 1.0f) &&
                (cfg.slimFace >= 0.0f && cfg.slimFace <= 1.0f) &&
                (cfg.enlargeEyes >= 0.0f && cfg.enlargeEyes <= 1.0f) &&
                (cfg.thinChin >= 0.0f && cfg.thinChin <= 1.0f) &&
@@ -405,6 +415,8 @@ struct BeautyFilterConfigV2Helper {
         cfg.colorBalance = clampf(cfg.colorBalance, -1.0f, 1.0f);
         cfg.wrinkleRemove = clampf(cfg.wrinkleRemove, 0.0f, 1.0f);
         cfg.skinQuality = clampf(cfg.skinQuality, 0.0f, 1.0f);
+        cfg.smoothIntensity = clampf(cfg.smoothIntensity, 0.0f, 1.0f);
+        cfg.poreReduction = clampf(cfg.poreReduction, 0.0f, 1.0f);
         cfg.slimFace = clampf(cfg.slimFace, 0.0f, 1.0f);
         cfg.enlargeEyes = clampf(cfg.enlargeEyes, 0.0f, 1.0f);
         cfg.thinChin = clampf(cfg.thinChin, 0.0f, 1.0f);
@@ -430,6 +442,8 @@ struct BeautyFilterConfigV2Helper {
         cfg.colorBalance = 0.0f;
         cfg.wrinkleRemove = 0.0f;
         cfg.skinQuality = 0.0f;
+        cfg.smoothIntensity = 0.0f;
+        cfg.poreReduction = 0.0f;
         cfg.slimFace = 0.0f;
         cfg.enlargeEyes = 0.0f;
         cfg.thinChin = 0.0f;

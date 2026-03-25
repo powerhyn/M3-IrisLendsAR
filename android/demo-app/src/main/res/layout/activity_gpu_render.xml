@@ -549,6 +549,56 @@
 
                 </LinearLayout>
 
+                <!-- 매끈하게 슬라이더 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="80dp"
+                        android:layout_height="wrap_content"
+                        android:text="매끈하게"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekSmoothIntensity"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+
+                </LinearLayout>
+
+                <!-- 모공 슬라이더 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="80dp"
+                        android:layout_height="wrap_content"
+                        android:text="모공"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekPoreReduction"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+
+                </LinearLayout>
+
                 <!-- Vivid 구분선 -->
                 <View
                     android:layout_width="match_parent"
