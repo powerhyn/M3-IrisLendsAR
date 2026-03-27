@@ -422,6 +422,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
         freq_sep_composite_uniforms_.uToneLift = glGetUniformLocation(freq_sep_composite_program_, "uToneLift");
         freq_sep_composite_uniforms_.uTextureBlendFloor = glGetUniformLocation(freq_sep_composite_program_, "uTextureBlendFloor");
         freq_sep_composite_uniforms_.uDebugMode = glGetUniformLocation(freq_sep_composite_program_, "uDebugMode");
+        freq_sep_composite_uniforms_.uSkinColorFilter = glGetUniformLocation(freq_sep_composite_program_, "uSkinColorFilter");
     }
 
     // Luminance Sharpen Uniforms
@@ -1498,6 +1499,7 @@ bool GPUBeautyBackend::executeFreqSepPipelineImpl(
     glUniform1f(freq_sep_composite_uniforms_.uToneLift, params.tone_lift);
     glUniform1f(freq_sep_composite_uniforms_.uTextureBlendFloor, params.texture_blend_floor);
     glUniform1i(freq_sep_composite_uniforms_.uDebugMode, freqsep_debug_mode_);
+    glUniform1i(freq_sep_composite_uniforms_.uSkinColorFilter, skin_color_filter_ ? 1 : 0);
 
     glUniform1i(freq_sep_composite_uniforms_.uSmoothedLow, 0);
     glUniform1i(freq_sep_composite_uniforms_.uLowFreq, 1);

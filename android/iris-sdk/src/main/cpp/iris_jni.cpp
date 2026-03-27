@@ -1709,6 +1709,14 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetFreqSepDebugMode(
     iris_sdk_set_freqsep_debug_mode(static_cast<int>(mode));
 }
 
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetSkinColorFilter(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jint enabled) {
+    iris_sdk_set_skin_color_filter(static_cast<int>(enabled));
+}
+
 /**
  * @brief Face Warp 적용 (GPU)
  *

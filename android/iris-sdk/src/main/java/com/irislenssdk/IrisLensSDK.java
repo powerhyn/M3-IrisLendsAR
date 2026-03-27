@@ -850,6 +850,17 @@ public final class IrisLensSDK {
     }
 
     /**
+     * 피부색 기반 마스크 필터 설정 (실험용, FreqSep 전용).
+     * GL 스레드에서 호출.
+     * @param enabled true=on, false=off
+     */
+    public static void setSkinColorFilter(boolean enabled) {
+        if (sLibraryLoaded) {
+            nativeSetSkinColorFilter(enabled ? 1 : 0);
+        }
+    }
+
+    /**
      * 텍스처가 SDK 관리인지 확인합니다.
      *
      * @param texture 확인할 텍스처 ID
@@ -1130,6 +1141,7 @@ public final class IrisLensSDK {
             int lutTextureId, float lutIntensity);
 
     private static native void nativeSetFreqSepDebugMode(int mode);
+    private static native void nativeSetSkinColorFilter(int enabled);
 
     /**
      * Face Warp 적용 (GPU)

@@ -500,6 +500,7 @@ private:
         GLint uToneLift = -1;
         GLint uTextureBlendFloor = -1;
         GLint uDebugMode = -1;
+        GLint uSkinColorFilter = -1;
     } freq_sep_composite_uniforms_;
 
     // Luminance Sharpen Uniform 캐시
@@ -536,9 +537,12 @@ private:
 
     // FreqSep 디버그 모드 (0=off, 1=magnitude, 2=compression, 3=mask)
     int freqsep_debug_mode_ = 0;
+    bool skin_color_filter_ = false;
 public:
     void setFreqSepDebugMode(int mode) { freqsep_debug_mode_ = mode; }
     int getFreqSepDebugMode() const { return freqsep_debug_mode_; }
+    void setSkinColorFilter(bool enabled) { skin_color_filter_ = enabled; }
+    bool getSkinColorFilter() const { return skin_color_filter_; }
 private:
 
     /// Uniform Location 캐싱 (초기화 시 호출)

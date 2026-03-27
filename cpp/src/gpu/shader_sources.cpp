@@ -481,6 +481,7 @@ uniform float uChromaWeight;       // Chroma deviation sensitivity (0.2~0.5)
 uniform float uToneLift;          // Mid-tone lift intensity (0.0~0.3, default 0.15)
 uniform float uTextureBlendFloor; // textureBlend mix lower bound (default 0.38)
 uniform int uDebugMode;           // 0=off, 1=magnitude heatmap, 2=compression heatmap, 3=mask
+uniform int uSkinColorFilter;    // 0=off, 1=on (backend-local)
 
 // Rec.709 luminance coefficients (linear-space)
 const vec3 LUMA_709 = vec3(0.2126, 0.7152, 0.0722);
@@ -494,6 +495,22 @@ void main() {
     vec3 orig      = texture(uOriginal, vTexCoord).rgb;
     orig = pow(orig, vec3(2.2));  // sRGB → Linear
     float mask     = texture(uSkinMask, vec2(vTexCoord.x, 1.0 - vTexCoord.y)).r;
+
+    // --- Phase C: Color-space skin likelihood ---
+    float rawMask = mask;
+
+    vec3 gammaRGB = pow(max(orig, vec3(0.0)), vec3(1.0 / 2.2));
+    float lum = dot(gammaRGB, vec3(0.299, 0.587, 0.114));
+    float maxDev = max(max(abs(gammaRGB.r - lum), abs(gammaRGB.g - lum)),
+                       abs(gammaRGB.b - lum));
+
+    float darkLikelihood = smoothstep(0.08, 0.22, lum);
+    float chromaLikelihood = smoothstep(0.02, 0.08, maxDev);
+    float skinLikelihood = max(max(darkLikelihood, chromaLikelihood), 0.05);
+
+    if (uSkinColorFilter != 0) {
+        mask *= skinLikelihood;
+    }
 
     // High Frequency inline extraction (ALU operation, no separate pass/texture)
     vec3 high = orig - low;
@@ -617,6 +634,14 @@ void main() {
     } else if (uDebugMode == 6) {
         // Mask visualization
         result = mix(orig, vec3(0.0, mask, 0.0), 0.5);
+        result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
+        fragColor = vec4(result, 1.0);
+        return;
+    } else if (uDebugMode == 7) {
+        // Skin color likelihood heatmap (rawMask for overlay, not filtered mask)
+        float v = clamp(skinLikelihood, 0.0, 1.0);
+        vec3 heatmap = vec3(1.0 - v, v, 0.0);
+        result = mix(orig, heatmap, rawMask * 0.8);
         result = pow(max(result, vec3(0.0)), vec3(1.0 / 2.2));
         fragColor = vec4(result, 1.0);
         return;

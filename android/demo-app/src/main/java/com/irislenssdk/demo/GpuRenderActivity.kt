@@ -468,6 +468,18 @@ class GpuRenderActivity : AppCompatActivity() {
             cameraGLView.setBeautyConfig(beautyConfig)
         }
 
+        // 피부색 필터 토글 (실험용, backend-local)
+        var skinColorFilterEnabled = false
+        val btnSkinColorFilter = findViewById<Button>(R.id.btnSkinColorFilter)
+        btnSkinColorFilter.setOnClickListener {
+            skinColorFilterEnabled = !skinColorFilterEnabled
+            cameraGLView.queueEvent {
+                com.irislenssdk.IrisLensSDK.setSkinColorFilter(skinColorFilterEnabled)
+            }
+            btnSkinColorFilter.text = if (skinColorFilterEnabled) "피부색필터: ON" else "피부색필터: OFF"
+            btnSkinColorFilter.setTextColor(if (skinColorFilterEnabled) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt())
+        }
+
         // Vivid Intensity (0-100 → 0.0-1.0)
         seekVividIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -599,9 +611,9 @@ class GpuRenderActivity : AppCompatActivity() {
         }
 
         var freqSepDebugMode = 0
-        val debugModeNames = arrayOf("OFF", "Magnitude", "MicroBand", "EdgeProt", "EffectStr", "Compression×3", "Mask")
+        val debugModeNames = arrayOf("OFF", "Magnitude", "MicroBand", "EdgeProt", "EffectStr", "Compression×3", "Mask", "SkinColor")
         btnToggleDebug.setOnClickListener {
-            freqSepDebugMode = (freqSepDebugMode + 1) % 7
+            freqSepDebugMode = (freqSepDebugMode + 1) % 8
             cameraGLView.queueEvent {
                 com.irislenssdk.IrisLensSDK.setFreqSepDebugMode(freqSepDebugMode)
             }
