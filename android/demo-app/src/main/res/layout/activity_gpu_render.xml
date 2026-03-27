@@ -610,6 +610,17 @@
                     android:textColor="#FFAAAAAA"
                     android:backgroundTint="#44444444" />
 
+                <!-- 피부색 필터 토글 (실험용) -->
+                <Button
+                    android:id="@+id/btnSkinColorFilter"
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:layout_marginTop="4dp"
+                    android:text="피부색필터: OFF"
+                    android:textSize="11sp"
+                    android:textColor="#FFAAAAAA"
+                    android:backgroundTint="#44444444" />
+
                 <!-- Vivid 구분선 -->
                 <View
                     android:layout_width="match_parent"

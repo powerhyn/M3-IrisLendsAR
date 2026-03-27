@@ -717,6 +717,12 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
 IRIS_SDK_EXPORT void iris_sdk_set_freqsep_debug_mode(int mode);
 
 /**
+ * @brief 피부색 기반 마스크 필터 설정 (실험용, FreqSep 전용)
+ * @param enabled 0=off, 1=on
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_skin_color_filter(int enabled);
+
+/**
  * @brief Face Warp 적용 (GPU)
  *
  * GPU에서 얼굴 형태 보정(Face Warp)을 적용합니다.

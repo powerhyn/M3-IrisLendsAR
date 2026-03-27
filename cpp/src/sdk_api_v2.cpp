@@ -397,6 +397,17 @@ void iris_sdk_set_freqsep_debug_mode(int mode) {
 #endif
 }
 
+void iris_sdk_set_skin_color_filter(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_beauty && g_gpu_beauty->isInitialized()) {
+        g_gpu_beauty->setSkinColorFilter(enabled != 0);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
 IrisSdkError iris_sdk_apply_face_warp(
     uint32_t input_texture,
     uint32_t* output_texture,
