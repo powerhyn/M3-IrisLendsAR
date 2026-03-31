@@ -3,7 +3,7 @@
 ## 작업 개요
 - **Phase**: P5 (경쟁사 대비 품질 갭 해소)
 - **기간**: 2026-04 ~
-- **상태**: ⏳ 대기
+- **상태**: 🔄 진행 중 (W1-01~03 완료, W1-04~05 대기)
 - **선행 조건**: 없음 (최우선 작업)
 - **근거**: 경쟁사 분석 — 시간적 안정성 아키텍처 정립 필요
 
@@ -17,7 +17,7 @@
 - 프레임 제어 없음
 
 **Android 데모 렌더러 (`CameraGLRenderer.kt`, `OverlayView.kt`)**:
-- OneEuroFilter **26개+** 이미 동작 중 (iris center/radius/eyelid/ellipse 각각)
+- OneEuroFilter **26개+** 이미 동작 중 (iris center/radius/eyelid/ellipse 각각) 
 - `EYELID_HOLD_FRAMES = 5` hold 구현
 - `lastValidFaceTimeMs` + `FACE_INVALID_TIMEOUT_MS` 기반 dropout 처리
 - `ellipseCacheValidFrames` 타원 캐시
@@ -49,7 +49,7 @@
 
 ## W1-01: SDK 코어 스무딩 전략 결정 + TemporalStabilizer 설계
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료 (2026-03-31)
 
 ### 배경
 
@@ -113,7 +113,7 @@
 
 ## W1-02: Confidence 이력현상 + Visibility Fade-in/out
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료 (2026-03-31)
 
 ### 배경
 
@@ -170,7 +170,7 @@ Android 데모에는 `lastValidFaceTimeMs` + `LENS_PERSISTENCE_TIMEOUT_MS` 기�
 
 ## W1-03: 아웃라이어 거부 + 눈깜빡임 감지
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료 (2026-03-31)
 
 ### 배경
 
@@ -329,6 +329,40 @@ W1-04 (비동기 API + Frame Controller) ← W1-01 후 병렬 가능
     ↓
 W1-05 (통합 테스트 + 데모 Kotlin 스무딩 제거) ← 모두 완료 후
 ```
+
+---
+
+## 실행 내역
+
+### W1-01~03 (2026-03-31)
+
+**생성 파일:**
+| 파일 | 내용 |
+|------|------|
+| `cpp/include/iris_sdk/temporal_stabilizer.h` | TemporalStabilizer 클래스 + StabilizerConfig + StabilizedResult |
+| `cpp/src/temporal_stabilizer.cpp` | OneEuroFilter 기반 스무딩/이력현상/fade/hold/outlier/blink 구현 |
+| `cpp/tests/test_temporal_stabilizer.cpp` | 22개 단위 테스트 (전부 통과) |
+
+**수정 파일:**
+| 파일 | 내용 |
+|------|------|
+| `cpp/include/iris_sdk/sdk_api.h` | IrisStabilizerConfig, IrisStabilizedResult, C API 6개 함수 추가 |
+| `cpp/src/sdk_api.cpp` | Stabilizer C API 구현 (핸들 기반 관리) |
+| `cpp/CMakeLists.txt` | temporal_stabilizer 소스/헤더 등록 |
+| `cpp/tests/CMakeLists.txt` | test_temporal_stabilizer 타겟 추가 |
+
+**설계 결정:**
+- 방안 C 채택: detector와 renderer 사이의 독립 레이어 (`TemporalStabilizer`)
+- `IrisResult` 수정 없이 `StabilizedResult`로 래핑 (ABI 안정성 유지)
+- 기존 `OneEuroFilter` 재사용 (재구현 없음)
+- 신호별 개별 파라미터: center(4.0/15.0), radius(4.0/7.5), eyelid(4.0/10.0)
+- C API: 핸들 기반 생성/해제 패턴 (다중 인스턴스 지원)
+
+**테스트 결과:**
+- 22/22 테스트 통과 (0ms)
+- 지터 감소, 빠른 추종, confidence 이력현상, visibility fade, dropout hold, 아웃라이어 거부, 눈깜빡임 감지 모두 검증
+
+---
 
 ## 예상 효과
 

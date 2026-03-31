@@ -767,6 +767,90 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_release_texture(uint32_t texture);
  */
 IRIS_SDK_EXPORT int iris_sdk_is_texture_managed(uint32_t texture);
 
+// ============================================================================
+// Temporal Stabilizer API (P5-W1)
+// ============================================================================
+
+/**
+ * @brief Stabilizer 설정 (C API용 POD 구조체)
+ */
+typedef struct IrisStabilizerConfig {
+    float iris_min_cutoff;          /**< 홍채 중심 OneEuro min_cutoff (기본 4.0) */
+    float iris_beta;                /**< 홍채 중심 OneEuro beta (기본 15.0) */
+    float radius_min_cutoff;        /**< 반지름 OneEuro min_cutoff (기본 4.0) */
+    float radius_beta;              /**< 반지름 OneEuro beta (기본 7.5) */
+    float eyelid_min_cutoff;        /**< 눈꺼풀 OneEuro min_cutoff (기본 4.0) */
+    float eyelid_beta;              /**< 눈꺼풀 OneEuro beta (기본 10.0) */
+    float confidence_low_threshold; /**< 이력현상 하한 (기본 0.3) */
+    float confidence_high_threshold;/**< 이력현상 상한 (기본 0.6) */
+    int confidence_low_frames;      /**< 연속 낮은 confidence 프레임 수 (기본 3) */
+    float fade_in_ms;               /**< Fade-in 시간 (기본 100ms) */
+    float fade_out_ms;              /**< Fade-out 시간 (기본 200ms) */
+    int hold_frames;                /**< Dropout hold 프레임 수 (기본 5) */
+    float outlier_radius_multiplier;/**< 아웃라이어 판정 반지름 배수 (기본 2.0) */
+    int outlier_confirm_frames;     /**< 아웃라이어 확인 프레임 수 (기본 2) */
+    float blink_ear_threshold;      /**< 눈깜빡임 EAR 임계값 (기본 0.2) */
+} IrisStabilizerConfig;
+
+/**
+ * @brief Stabilized 결과 (C API용 POD 구조체)
+ */
+typedef struct IrisStabilizedResult {
+    IrisResult raw;                 /**< 원본 raw 결과 */
+    IrisResult stabilized;          /**< 스무딩된 결과 */
+    float visibility;               /**< 전체 가시성 (0.0~1.0) */
+    int is_held;                    /**< dropout hold 중 (0/1) */
+    int64_t last_valid_ms;          /**< 마지막 유효 검출 타임스탬프 */
+} IrisStabilizedResult;
+
+/**
+ * @brief 기본 Stabilizer 설정 반환
+ * @param config 설정 구조체 포인터
+ */
+IRIS_SDK_EXPORT void iris_sdk_default_stabilizer_config(IrisStabilizerConfig* config);
+
+/**
+ * @brief Temporal Stabilizer 생성
+ *
+ * @param config 설정 (NULL이면 기본값 사용)
+ * @return 핸들 (0이면 실패)
+ */
+IRIS_SDK_EXPORT int64_t iris_sdk_create_stabilizer(const IrisStabilizerConfig* config);
+
+/**
+ * @brief Temporal Stabilizer 해제
+ * @param handle iris_sdk_create_stabilizer()에서 반환된 핸들
+ */
+IRIS_SDK_EXPORT void iris_sdk_destroy_stabilizer(int64_t handle);
+
+/**
+ * @brief 검출 결과 스무딩
+ *
+ * @param handle Stabilizer 핸들
+ * @param raw 원본 검출 결과
+ * @param timestamp_sec 타임스탬프 (초 단위)
+ * @param out 스무딩된 결과 출력
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_stabilize(
+    int64_t handle,
+    const IrisResult* raw,
+    double timestamp_sec,
+    IrisStabilizedResult* out);
+
+/**
+ * @brief Stabilizer 활성화/비활성화
+ * @param handle Stabilizer 핸들
+ * @param enabled 1=활성, 0=비활성(패스스루)
+ */
+IRIS_SDK_EXPORT void iris_sdk_stabilizer_set_enabled(int64_t handle, int enabled);
+
+/**
+ * @brief Stabilizer 상태 초기화
+ * @param handle Stabilizer 핸들
+ */
+IRIS_SDK_EXPORT void iris_sdk_stabilizer_reset(int64_t handle);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

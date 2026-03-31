@@ -646,3 +646,16 @@ if(OpenCV_FOUND)
 endif()
 
 gtest_discover_tests(test_quality_tuning DISCOVERY_TIMEOUT 120)
+
+# ============================================================
+# P5-W1: TemporalStabilizer 단위 테스트
+# ============================================================
+add_executable(test_temporal_stabilizer test_temporal_stabilizer.cpp)
+target_include_directories(test_temporal_stabilizer PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_temporal_stabilizer PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_temporal_stabilizer DISCOVERY_TIMEOUT 60)

@@ -11,6 +11,7 @@
 #include "iris_sdk/sdk_api.h"
 #include "iris_sdk/sdk_manager.h"
 #include "iris_sdk/frame_processor.h"
+#include "iris_sdk/temporal_stabilizer.h"
 #include "iris_sdk/types.h"
 
 #include <cstring>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 // Android 로그 매크로
 #ifdef __ANDROID__
@@ -52,6 +54,10 @@ bool g_gpu_request = false;
 
 /// InferenceThread 사용 여부 요청 플래그 (init 전에 설정)
 bool g_use_inference_thread_request = true;  // 기본값: InferenceThread 사용
+
+/// Temporal Stabilizer 인스턴스 관리
+std::unordered_map<int64_t, std::unique_ptr<iris_sdk::TemporalStabilizer>> g_stabilizers;
+int64_t g_next_stabilizer_handle = 1;
 
 /**
  * @brief 마지막 에러 메시지 설정
@@ -911,6 +917,113 @@ bool iris_sdk_is_using_inference_thread(void) {
     }
 
     return g_processor->isUsingInferenceThread();
+}
+
+// ============================================================================
+// Temporal Stabilizer API 구현
+// ============================================================================
+
+void iris_sdk_default_stabilizer_config(IrisStabilizerConfig* config) {
+    if (!config) return;
+    config->iris_min_cutoff = 4.0f;
+    config->iris_beta = 15.0f;
+    config->radius_min_cutoff = 4.0f;
+    config->radius_beta = 7.5f;
+    config->eyelid_min_cutoff = 4.0f;
+    config->eyelid_beta = 10.0f;
+    config->confidence_low_threshold = 0.3f;
+    config->confidence_high_threshold = 0.6f;
+    config->confidence_low_frames = 3;
+    config->fade_in_ms = 100.0f;
+    config->fade_out_ms = 200.0f;
+    config->hold_frames = 5;
+    config->outlier_radius_multiplier = 2.0f;
+    config->outlier_confirm_frames = 2;
+    config->blink_ear_threshold = 0.2f;
+}
+
+int64_t iris_sdk_create_stabilizer(const IrisStabilizerConfig* config) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    iris_sdk::StabilizerConfig cpp_config;
+    if (config) {
+        cpp_config.iris_min_cutoff = config->iris_min_cutoff;
+        cpp_config.iris_beta = config->iris_beta;
+        cpp_config.radius_min_cutoff = config->radius_min_cutoff;
+        cpp_config.radius_beta = config->radius_beta;
+        cpp_config.eyelid_min_cutoff = config->eyelid_min_cutoff;
+        cpp_config.eyelid_beta = config->eyelid_beta;
+        cpp_config.confidence_low_threshold = config->confidence_low_threshold;
+        cpp_config.confidence_high_threshold = config->confidence_high_threshold;
+        cpp_config.confidence_low_frames = config->confidence_low_frames;
+        cpp_config.fade_in_ms = config->fade_in_ms;
+        cpp_config.fade_out_ms = config->fade_out_ms;
+        cpp_config.hold_frames = config->hold_frames;
+        cpp_config.outlier_radius_multiplier = config->outlier_radius_multiplier;
+        cpp_config.outlier_confirm_frames = config->outlier_confirm_frames;
+        cpp_config.blink_ear_threshold = config->blink_ear_threshold;
+    }
+
+    int64_t handle = g_next_stabilizer_handle++;
+    g_stabilizers[handle] = std::make_unique<iris_sdk::TemporalStabilizer>(cpp_config);
+    return handle;
+}
+
+void iris_sdk_destroy_stabilizer(int64_t handle) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_stabilizers.erase(handle);
+}
+
+IrisSdkError iris_sdk_stabilize(
+    int64_t handle,
+    const IrisResult* raw,
+    double timestamp_sec,
+    IrisStabilizedResult* out) {
+
+    if (!raw || !out) {
+        set_last_error("null pointer");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    auto it = g_stabilizers.find(handle);
+    if (it == g_stabilizers.end()) {
+        set_last_error("invalid stabilizer handle");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    // C IrisResult → C++ IrisResult
+    iris_sdk::IrisResult cpp_raw = convert_to_cpp_iris_result(raw);
+
+    // Stabilize
+    iris_sdk::StabilizedResult cpp_result = it->second->stabilize(cpp_raw, timestamp_sec);
+
+    // Convert output
+    convert_to_c_iris_result(cpp_result.raw, &out->raw);
+    convert_to_c_iris_result(cpp_result.stabilized, &out->stabilized);
+    out->visibility = cpp_result.visibility;
+    out->is_held = cpp_result.is_held ? 1 : 0;
+    out->last_valid_ms = cpp_result.last_valid_ms;
+
+    set_last_error(nullptr);
+    return IRIS_SDK_OK;
+}
+
+void iris_sdk_stabilizer_set_enabled(int64_t handle, int enabled) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_stabilizers.find(handle);
+    if (it != g_stabilizers.end()) {
+        it->second->setEnabled(enabled != 0);
+    }
+}
+
+void iris_sdk_stabilizer_reset(int64_t handle) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_stabilizers.find(handle);
+    if (it != g_stabilizers.end()) {
+        it->second->reset();
+    }
 }
 
 }  // extern "C"
