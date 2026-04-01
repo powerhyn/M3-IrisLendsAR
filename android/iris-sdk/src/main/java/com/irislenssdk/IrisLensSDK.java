@@ -986,6 +986,50 @@ public final class IrisLensSDK {
     }
 
     // ========================================================================
+    // Temporal Stabilizer API (P5-W1)
+    // ========================================================================
+
+    /**
+     * Temporal Stabilizer를 생성합니다.
+     *
+     * <p>SDK 코어의 TemporalStabilizer를 생성하여 홍채 검출 결과의
+     * 시간적 안정화를 수행할 수 있게 합니다. OneEuroFilter + 이력현상 +
+     * dropout hold 등을 통합 제공합니다.</p>
+     *
+     * @return Stabilizer 핸들 (0이면 실패)
+     */
+    public static long createStabilizer() {
+        if (!sLibraryLoaded) return 0;
+        return nativeCreateStabilizer();
+    }
+
+    /**
+     * 검출 결과를 스무딩합니다 (in-place).
+     *
+     * <p>전달된 IrisResult 객체의 값이 스무딩된 결과로 덮어씌워집니다.
+     * 반환값은 현재 가시성(0.0~1.0)으로, fade-in/out 상태를 나타냅니다.</p>
+     *
+     * @param handle createStabilizer()에서 반환된 핸들
+     * @param result 검출 결과 (in-place로 스무딩됨)
+     * @param timestampSec 타임스탬프 (초 단위, System.nanoTime() / 1e9)
+     * @return visibility (0.0~1.0), 실패 시 0.0
+     */
+    public static float stabilize(long handle, @NonNull IrisResult result, double timestampSec) {
+        if (!sLibraryLoaded || handle == 0) return 0f;
+        return nativeStabilize(handle, result, timestampSec);
+    }
+
+    /**
+     * Temporal Stabilizer를 해제합니다.
+     *
+     * @param handle createStabilizer()에서 반환된 핸들
+     */
+    public static void destroyStabilizer(long handle) {
+        if (!sLibraryLoaded || handle == 0) return;
+        nativeDestroyStabilizer(handle);
+    }
+
+    // ========================================================================
     // 유틸리티 메서드
     // ========================================================================
 
@@ -1161,6 +1205,14 @@ public final class IrisLensSDK {
      * 텍스처가 SDK 관리인지 확인
      */
     private static native boolean nativeIsTextureManaged(int texture);
+
+    // ========================================================================
+    // Temporal Stabilizer Native Methods
+    // ========================================================================
+
+    private static native long nativeCreateStabilizer();
+    private static native float nativeStabilize(long handle, IrisResult result, double timestampSec);
+    private static native void nativeDestroyStabilizer(long handle);
 
     // ========================================================================
     // Detection Slot Native Methods

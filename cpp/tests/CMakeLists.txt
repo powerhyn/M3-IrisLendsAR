@@ -659,3 +659,16 @@ target_link_libraries(test_temporal_stabilizer PRIVATE
 )
 
 gtest_discover_tests(test_temporal_stabilizer DISCOVERY_TIMEOUT 60)
+
+# ============================================================
+# P5-W1: TemporalStabilizer 통합/안정성 메트릭 테스트
+# ============================================================
+add_executable(test_temporal_stability test_temporal_stability.cpp)
+target_include_directories(test_temporal_stability PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_temporal_stability PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_temporal_stability DISCOVERY_TIMEOUT 120)

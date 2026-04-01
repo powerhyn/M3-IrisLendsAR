@@ -102,14 +102,6 @@ class OverlayView @JvmOverloads constructor(
         private const val DETECTION_TIMEOUT_MS = 1000L  // 1초 (mesh, debug info 등)
         private const val LENS_PERSISTENCE_TIMEOUT_MS = 2000L  // 2초 (렌즈 전용 - 더 긴 유지)
 
-        // One Euro Filter 파라미터
-        // minCutoff: 정지 시 최소 컷오프 주파수. 낮을수록 스무딩 강함.
-        //   15.0 → α≈0.61 (pass-through), 1.5 → α≈0.14 (효과적 스무딩)
-        // beta: 높을수록 이동 시 필터가 빨리 풀림 (빠른 추적)
-        private const val ONE_EURO_MIN_CUTOFF = 4.0f   // 정지 시 스무딩 + 이동 초반 반응성 균형
-        private const val ONE_EURO_BETA = 15.0f        // 이동 시 필터 즉시 해제 수준
-        private const val ONE_EURO_D_CUTOFF = 1.0f     // 미분 컷오프 주파수
-
         // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)
         // 왼쪽 눈 (화면상 오른쪽) - 시계방향 순서
         private val LEFT_EYE_CONTOUR_INDICES = intArrayOf(
@@ -155,14 +147,7 @@ class OverlayView @JvmOverloads constructor(
         get() = screenMappingMode == ScreenMappingMode.COVER
         set(value) { screenMappingMode = if (value) ScreenMappingMode.COVER else ScreenMappingMode.FIT }
 
-    // === One Euro Filter를 사용한 스무딩 (깜빡임/흔들거림 방지) ===
-    private val leftXFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
-    private val leftYFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
-    private val leftRadiusFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA * 0.5f, ONE_EURO_D_CUTOFF)
-    private val rightXFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
-    private val rightYFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
-    private val rightRadiusFilter = OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA * 0.5f, ONE_EURO_D_CUTOFF)
-
+    // 스무딩된 결과값 (SDK 코어 TemporalStabilizer가 FrameAnalyzer에서 적용)
     // 필터링된 결과값
     private var filteredLeftX: Float = 0f
     private var filteredLeftY: Float = 0f
@@ -380,28 +365,24 @@ class OverlayView @JvmOverloads constructor(
                 // 단, 첫 검출(radius=0)에서는 confidence 무관하게 업데이트 (렌즈 표시 위해)
                 val hasGoodConfidence = it.confidence >= MIN_RENDER_CONFIDENCE
 
-                // 왼쪽 눈 필터링
+                // 왼쪽 눈 (SDK 코어 stabilization이 FrameAnalyzer에서 이미 적용됨)
                 if (it.leftDetected) {
                     hasLeftEverDetected = true
-                    // 첫 검출이거나 confidence가 충분하면 업데이트
                     if (hasGoodConfidence || filteredLeftRadius == 0f) {
-                        filteredLeftX = leftXFilter.filter(it.leftIrisX, currentTime)
-                        filteredLeftY = leftYFilter.filter(it.leftIrisY, currentTime)
-                        filteredLeftRadius = leftRadiusFilter.filter(it.leftRadius, currentTime)
+                        filteredLeftX = it.leftIrisX
+                        filteredLeftY = it.leftIrisY
+                        filteredLeftRadius = it.leftRadius
                     }
-                    // confidence 낮으면 마지막 필터링 값 유지 (깜빡임 방지)
                 }
 
-                // 오른쪽 눈 필터링
+                // 오른쪽 눈 (SDK 코어 stabilization이 FrameAnalyzer에서 이미 적용됨)
                 if (it.rightDetected) {
                     hasRightEverDetected = true
-                    // 첫 검출이거나 confidence가 충분하면 업데이트
                     if (hasGoodConfidence || filteredRightRadius == 0f) {
-                        filteredRightX = rightXFilter.filter(it.rightIrisX, currentTime)
-                        filteredRightY = rightYFilter.filter(it.rightIrisY, currentTime)
-                        filteredRightRadius = rightRadiusFilter.filter(it.rightRadius, currentTime)
+                        filteredRightX = it.rightIrisX
+                        filteredRightY = it.rightIrisY
+                        filteredRightRadius = it.rightRadius
                     }
-                    // confidence 낮으면 마지막 필터링 값 유지 (깜빡임 방지)
                 }
             }
             // 홍채 검출 실패 시에도 필터 상태 유지 (타임아웃 전까지 마지막 위치에 렌즈 유지)

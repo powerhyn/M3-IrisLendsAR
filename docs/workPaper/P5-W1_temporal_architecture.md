@@ -3,7 +3,7 @@
 ## 작업 개요
 - **Phase**: P5 (경쟁사 대비 품질 갭 해소)
 - **기간**: 2026-04 ~
-- **상태**: 🔄 진행 중 (W1-01~04 완료, W1-05 대기)
+- **상태**: ✅ 완료 (W1-01~05 전체 완료)
 - **선행 조건**: 없음 (최우선 작업)
 - **근거**: 경쟁사 분석 — 시간적 안정성 아키텍처 정립 필요
 
@@ -276,7 +276,7 @@ void FrameProcessor::renderWithResult(buffer, result, config);  // 결과로 렌
 
 ## W1-05: 통합 테스트 + 안정성 메트릭 측정
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료 (2026-04-01)
 
 ### 작업 내용
 
@@ -388,6 +388,44 @@ W1-05 (통합 테스트 + 데모 Kotlin 스무딩 제거) ← 모두 완료 후
 **빌드 검증:**
 - `libiris_sdkd.a` 정상 빌드 확인 (기존 테스트 링커 에러는 TFLite 미관련 이슈)
 - 하위 호환성: 기존 `process()`, `detectSync()`, `detectOnly()` 코드 변경 없음
+
+### W1-05 — 통합 테스트 + JNI Stabilizer 바인딩 + Kotlin OneEuroFilter 제거 (2026-04-01)
+
+**생성 파일:**
+| 파일 | 내용 |
+|------|------|
+| `cpp/tests/test_temporal_stability.cpp` | 13개 통합 안정성 메트릭 테스트 (jitter/lag/visibility/blink/outlier/sinusoidal/종합 시나리오) |
+
+**수정 파일:**
+| 파일 | 내용 |
+|------|------|
+| `cpp/tests/CMakeLists.txt` | test_temporal_stability 타겟 추가 |
+| `android/iris-sdk/src/main/cpp/iris_jni.cpp` | JNI 바인딩 3개 추가: `nativeCreateStabilizer`, `nativeStabilize`, `nativeDestroyStabilizer` |
+| `android/iris-sdk/src/main/java/com/irislenssdk/IrisLensSDK.java` | 공개 API 3개 + 네이티브 선언 3개 추가 (`createStabilizer`, `stabilize`, `destroyStabilizer`) |
+| `android/demo-app/.../camera/FrameAnalyzer.kt` | 검출 직후 SDK 코어 `stabilize()` 호출 (in-place 스무딩), 라이프사이클 관리 |
+| `android/demo-app/.../camera/OverlayView.kt` | OneEuroFilter 6개 제거, 상수 3개 제거, 직접 값 사용으로 교체 |
+| `android/demo-app/.../camera/gpu/CameraGLRenderer.kt` | OneEuroFilter 22개+ 제거, 상수 6개 제거, 데드밴드 로직 제거, 직접 값 사용으로 교체 |
+
+**삭제 파일:**
+| 파일 | 사유 |
+|------|------|
+| `android/demo-app/.../camera/OneEuroFilter.kt` | C++ TemporalStabilizer로 완전 대체 |
+
+**설계 결정:**
+- FrameAnalyzer에서 검출 직후 stabilize → 렌더러에 이미 스무딩된 IrisResult 전달 (단일 스무딩 레이어)
+- `nativeStabilize`가 Java IrisResult를 in-place 수정 (copyResultFromJava → iris_sdk_stabilize → copyResultToJava)
+- 눈꺼풀/타원 hold 로직, LENS_PERSISTENCE_TIMEOUT 등 비-스무딩 시간적 로직은 유지 (다른 관심사)
+- 타원 파라미터 필터도 제거 — SDK 코어 face_mesh 스무딩이 원본 랜드마크를 안정화하므로 타원 피팅 결과도 자동 안정화
+
+**C++ 테스트 결과:**
+- 기존 22/22 단위 테스트 통과 (test_temporal_stabilizer)
+- 신규 13/13 통합 메트릭 테스트 통과 (test_temporal_stability)
+- 주요 측정값: 지터 ~47% 감소 (XY), 추적 지연 0.004 (< 0.013 허용), fade-out 단조 감소 확인
+
+**검증 필요:**
+- [ ] Android 실기기에서 렌즈 안정성 확인 (이전 Kotlin 스무딩 대비 동등 이상)
+- [ ] 과도한 lag 없는지 확인
+- [ ] 빌드 성공 확인 (JNI 링킹)
 
 ---
 

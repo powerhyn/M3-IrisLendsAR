@@ -1888,4 +1888,98 @@ Java_com_irislenssdk_IrisLensSDK_nativeReleaseDetectionSlot(
     LOGI("Detection slots released");
 }
 
+// ============================================================================
+// Temporal Stabilizer API (P5-W1)
+// ============================================================================
+
+/**
+ * @brief Temporal Stabilizer 생성
+ *
+ * Java: native long nativeCreateStabilizer();
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizer(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+
+    // 기본 설정으로 Stabilizer 생성
+    int64_t handle = iris_sdk_create_stabilizer(nullptr);
+    if (handle == 0) {
+        LOGE("Failed to create stabilizer");
+    } else {
+        LOGI("Stabilizer created: handle=%lld", static_cast<long long>(handle));
+    }
+    return static_cast<jlong>(handle);
+}
+
+/**
+ * @brief 검출 결과 스무딩 (Java IrisResult를 in-place로 수정)
+ *
+ * Java: native float nativeStabilize(long handle, IrisResult result, double timestampSec);
+ *
+ * @return visibility (0.0~1.0)
+ */
+JNIEXPORT jfloat JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeStabilize(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jlong handle,
+    jobject resultObj,
+    jdouble timestampSec) {
+
+    using namespace iris::jni;
+
+    if (handle == 0 || !resultObj) {
+        LOGE("nativeStabilize: invalid args (handle=%lld, resultObj=%p)",
+             static_cast<long long>(handle), resultObj);
+        return 0.0f;
+    }
+
+    // 1. Java IrisResult → C IrisResult
+    IrisResult raw = {};
+    if (!copyResultFromJava(env, resultObj, raw)) {
+        LOGE("nativeStabilize: failed to read IrisResult from Java");
+        return 0.0f;
+    }
+
+    // 2. C API 스무딩
+    IrisStabilizedResult stabilized = {};
+    IrisSdkError error = iris_sdk_stabilize(
+        static_cast<int64_t>(handle),
+        &raw,
+        static_cast<double>(timestampSec),
+        &stabilized);
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("iris_sdk_stabilize failed: %d (%s)", error, iris_sdk_error_to_string(error));
+        return 0.0f;
+    }
+
+    // 3. 스무딩된 결과를 Java 객체에 다시 씀 (in-place 수정)
+    if (!copyResultToJava(env, stabilized.stabilized, resultObj)) {
+        LOGE("nativeStabilize: failed to write stabilized result to Java");
+        return 0.0f;
+    }
+
+    LOGV("Stabilize: visibility=%.2f, held=%d", stabilized.visibility, stabilized.is_held);
+    return static_cast<jfloat>(stabilized.visibility);
+}
+
+/**
+ * @brief Temporal Stabilizer 해제
+ *
+ * Java: native void nativeDestroyStabilizer(long handle);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeDestroyStabilizer(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jlong handle) {
+
+    if (handle != 0) {
+        iris_sdk_destroy_stabilizer(static_cast<int64_t>(handle));
+        LOGI("Stabilizer destroyed: handle=%lld", static_cast<long long>(handle));
+    }
+}
+
 }  // extern "C"

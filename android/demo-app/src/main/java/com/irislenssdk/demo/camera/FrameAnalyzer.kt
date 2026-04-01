@@ -65,6 +65,9 @@ class FrameAnalyzer(
         private const val BEAUTY_FILTER_FRAME_SKIP = 2  // 부드러움 개선: 3 → 2
     }
 
+    // Temporal Stabilizer (SDK 코어)
+    private var stabilizerHandle: Long = 0
+
     // NV21 버퍼 (재사용)
     private var nv21Buffer: ByteArray? = null
 
@@ -155,6 +158,17 @@ class FrameAnalyzer(
             )
 
             val processingTimeMs = (System.nanoTime() - startTime) / 1_000_000
+
+            // Temporal Stabilizer 적용 (SDK 코어 스무딩)
+            if (error == IrisLensSDK.OK && irisResult.detected) {
+                if (stabilizerHandle == 0L) {
+                    stabilizerHandle = IrisLensSDK.createStabilizer()
+                }
+                if (stabilizerHandle != 0L) {
+                    val timestampSec = System.nanoTime() / 1_000_000_000.0
+                    IrisLensSDK.stabilize(stabilizerHandle, irisResult, timestampSec)
+                }
+            }
 
             // 처리 시간 기록
             processingTimes.addLast(processingTimeMs)
@@ -414,6 +428,10 @@ class FrameAnalyzer(
      * 리소스 해제
      */
     fun release() {
+        if (stabilizerHandle != 0L) {
+            IrisLensSDK.destroyStabilizer(stabilizerHandle)
+            stabilizerHandle = 0
+        }
         nv21Buffer = null
         jpegOutputStream = null
         rgbaBitmap?.recycle()
