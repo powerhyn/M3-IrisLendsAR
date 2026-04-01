@@ -160,7 +160,8 @@ class FrameAnalyzer(
             val processingTimeMs = (System.nanoTime() - startTime) / 1_000_000
 
             // Temporal Stabilizer 적용 (SDK 코어 스무딩)
-            if (error == IrisLensSDK.OK && irisResult.detected) {
+            // 검출 실패 프레임도 반드시 전달해야 hold/fade-out이 동작함
+            if (error == IrisLensSDK.OK || error == IrisLensSDK.NO_FACE) {
                 if (stabilizerHandle == 0L) {
                     stabilizerHandle = IrisLensSDK.createStabilizer()
                 }

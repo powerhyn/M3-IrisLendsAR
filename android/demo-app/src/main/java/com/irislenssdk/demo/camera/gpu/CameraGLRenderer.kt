@@ -26,6 +26,7 @@ import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
+import com.irislenssdk.demo.camera.OneEuroFilter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -44,6 +45,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // FaceMesh 비유효 시 이전 눈꺼풀 클리핑 경계를 유지할 프레임 수
         private const val EYELID_HOLD_FRAMES = 5
+
+        // One Euro Filter 파라미터 (타원/눈꺼풀 파생 값 전용 — SDK 코어가 커버하지 않는 Kotlin 계산 값)
+        private const val GL_FILTER_MIN_CUTOFF = 4.0f
+        private const val GL_FILTER_BETA = 15.0f
+        private const val GL_FILTER_BETA_EYELID = 12.0f
+        private const val GL_FILTER_D_CUTOFF = 1.0f
 
         // 얼굴 미검출 시 avgIrisLum 유지 → 기본값 리셋 타임아웃 (P4-W1-03)
         private const val FACE_INVALID_TIMEOUT_MS = 2000L
@@ -553,6 +560,26 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var maxDetailValue: Float = 1.2f             // 홍채 밝기 보정 상한
     private var ellipseMaskEnabled: Boolean = false      // P4-W2-02: 기본 OFF (기존 Y-slab 유지)
 
+    // === One Euro Filter: 눈꺼풀 경계 안정화 (Kotlin 파생 값 — SDK 코어 미커버) ===
+    private val glLeftEyeTopFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glLeftEyeBottomFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEyeTopFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEyeBottomFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+
+    // === One Euro Filter: 타원 파라미터 안정화 (Kotlin 파생 값 — SDK 코어 미커버) ===
+    private val glLeftEllipseCxFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseCyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRxIFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRxOFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glLeftEllipseRotFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseCxFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseCyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRxIFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRxOFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRyFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+    private val glRightEllipseRotFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
+
     // P4-W2-02: 타원 파라미터 캐시 (temporal hold, eyelid 캐시와 동일 패턴)
     private var cachedLeftEllipseCx = 0f; private var cachedLeftEllipseCy = 0f
     private var cachedLeftEllipseRxI = 0f; private var cachedLeftEllipseRxO = 0f
@@ -974,7 +1001,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 rightEyeTop = tT; rightEyeBottom = tB
             }
 
-            // (SDK 코어 TemporalStabilizer가 눈꺼풀 랜드마크도 스무딩)
+            // 눈꺼풀 경계 OneEuro 스무딩 (다중 랜드마크 평균값 — Kotlin 파생)
+            val eyelidTs = System.currentTimeMillis()
+            leftEyeTop = glLeftEyeTopFilter.filter(leftEyeTop, eyelidTs)
+            leftEyeBottom = glLeftEyeBottomFilter.filter(leftEyeBottom, eyelidTs)
+            rightEyeTop = glRightEyeTopFilter.filter(rightEyeTop, eyelidTs)
+            rightEyeBottom = glRightEyeBottomFilter.filter(rightEyeBottom, eyelidTs)
 
             // 캐시 갱신 (temporal hold용)
             cachedLeftEyeTop = leftEyeTop
@@ -1048,20 +1080,21 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                     val tmp = leftEllipse; leftEllipse = rightEllipse; rightEllipse = tmp
                 }
 
-                // SDK 코어 stabilization이 적용됨 — 직접 사용
-                val fLCx = leftEllipse[0]
-                val fLCy = leftEllipse[1]
-                val fLRxI = leftEllipse[2]
-                val fLRxO = leftEllipse[3]
-                val fLRy = leftEllipse[4]
-                val fLRot = leftEllipse[5]
+                // 타원 파라미터 OneEuro 스무딩 (Kotlin 파생 값 — SDK 코어 미커버)
+                val ts = System.currentTimeMillis()
+                val fLCx = glLeftEllipseCxFilter.filter(leftEllipse[0], ts)
+                val fLCy = glLeftEllipseCyFilter.filter(leftEllipse[1], ts)
+                val fLRxI = glLeftEllipseRxIFilter.filter(leftEllipse[2], ts)
+                val fLRxO = glLeftEllipseRxOFilter.filter(leftEllipse[3], ts)
+                val fLRy = glLeftEllipseRyFilter.filter(leftEllipse[4], ts)
+                val fLRot = glLeftEllipseRotFilter.filter(leftEllipse[5], ts)
 
-                val fRCx = rightEllipse[0]
-                val fRCy = rightEllipse[1]
-                val fRRxI = rightEllipse[2]
-                val fRRxO = rightEllipse[3]
-                val fRRy = rightEllipse[4]
-                val fRRot = rightEllipse[5]
+                val fRCx = glRightEllipseCxFilter.filter(rightEllipse[0], ts)
+                val fRCy = glRightEllipseCyFilter.filter(rightEllipse[1], ts)
+                val fRRxI = glRightEllipseRxIFilter.filter(rightEllipse[2], ts)
+                val fRRxO = glRightEllipseRxOFilter.filter(rightEllipse[3], ts)
+                val fRRy = glRightEllipseRyFilter.filter(rightEllipse[4], ts)
+                val fRRot = glRightEllipseRotFilter.filter(rightEllipse[5], ts)
 
                 // 캐시 갱신
                 cachedLeftEllipseCx = fLCx; cachedLeftEllipseCy = fLCy
