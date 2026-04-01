@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 
 namespace iris_sdk {
 
@@ -60,8 +61,9 @@ void InferenceThread::stop() {
     // 중지 요청
     state_ = ThreadState::Stopping;
 
-    // 대기 중인 스레드 깨우기
+    // 대기 중인 스레드 깨우기 (동기 + 비동기)
     slot_cv_.notify_one();
+    async_cv_.notify_one();
 
     // 스레드 종료 대기
     if (thread_.joinable()) {
@@ -72,7 +74,7 @@ void InferenceThread::stop() {
     state_ = ThreadState::Stopped;
     gpu_active_ = false;
 
-    // 슬롯 초기화
+    // 동기 슬롯 초기화
     {
         std::lock_guard<std::mutex> lock(slot_mutex_);
         pending_data_ = nullptr;
@@ -80,6 +82,21 @@ void InferenceThread::stop() {
         pending_height_ = 0;
         pending_format_ = 0;
         pending_result_ = IrisResult{};
+    }
+
+    // 비동기 슬롯 초기화
+    {
+        std::lock_guard<std::mutex> lock(async_input_mutex_);
+        async_frame_buffer_.clear();
+        async_width_ = 0;
+        async_height_ = 0;
+        async_format_ = 0;
+        has_new_frame_ = false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(async_result_mutex_);
+        async_latest_result_ = IrisResult{};
+        has_async_result_ = false;
     }
 }
 
@@ -175,6 +192,66 @@ IrisResult InferenceThread::submitAndWait(const uint8_t* data, int width, int he
 }
 
 // ============================================================================
+// 비동기 검출 API (P5-W1-04)
+// ============================================================================
+
+void InferenceThread::submitFrameAsync(const uint8_t* data, int width, int height, int format) {
+    if (data == nullptr || width <= 0 || height <= 0) {
+        return;
+    }
+
+    if (!isRunning()) {
+        return;
+    }
+
+    // 프레임 크기 계산 (RGB 3채널 기준, 다른 포맷도 지원)
+    size_t frame_size = 0;
+    switch (static_cast<FrameFormat>(format)) {
+        case FrameFormat::RGB:
+        case FrameFormat::BGR:
+            frame_size = static_cast<size_t>(width) * height * 3;
+            break;
+        case FrameFormat::RGBA:
+        case FrameFormat::BGRA:
+            frame_size = static_cast<size_t>(width) * height * 4;
+            break;
+        case FrameFormat::Grayscale:
+            frame_size = static_cast<size_t>(width) * height;
+            break;
+        case FrameFormat::NV21:
+        case FrameFormat::NV12:
+            frame_size = static_cast<size_t>(width) * height * 3 / 2;
+            break;
+        default:
+            return;
+    }
+
+    // 딥카피 후 입력 슬롯에 저장
+    {
+        std::lock_guard<std::mutex> lock(async_input_mutex_);
+        async_frame_buffer_.resize(frame_size);
+        std::memcpy(async_frame_buffer_.data(), data, frame_size);
+        async_width_ = width;
+        async_height_ = height;
+        async_format_ = format;
+        has_new_frame_ = true;
+    }
+
+    // 워커 스레드 깨우기
+    async_cv_.notify_one();
+}
+
+bool InferenceThread::getLatestResult(IrisResult& out) {
+    if (!has_async_result_.load()) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(async_result_mutex_);
+    out = async_latest_result_;
+    return true;
+}
+
+// ============================================================================
 // 상태 조회
 // ============================================================================
 
@@ -240,16 +317,16 @@ void InferenceThread::threadLoop() {
     }
 
     // ========================================
-    // 2. 메인 루프 - 단일 슬롯 패턴
+    // 2. 메인 루프 - 동기 + 비동기 혼합 패턴
     // ========================================
     while (state_ != ThreadState::Stopping && state_ != ThreadState::Stopped) {
-        const uint8_t* data;
-        int width, height, format;
 
-        // 요청 대기
+        // --- 동기 요청 우선 처리 ---
         {
             std::unique_lock<std::mutex> lock(slot_mutex_);
-            slot_cv_.wait(lock, [this] {
+
+            // 동기 요청 또는 비동기 프레임 또는 중지 대기
+            auto wait_result = slot_cv_.wait_for(lock, std::chrono::milliseconds(5), [this] {
                 ThreadState s = state_.load();
                 return s == ThreadState::Processing ||
                        s == ThreadState::Stopping ||
@@ -261,37 +338,85 @@ void InferenceThread::threadLoop() {
                 break;
             }
 
-            // 입력 데이터 복사 (포인터만)
-            data = pending_data_;
-            width = pending_width_;
-            height = pending_height_;
-            format = pending_format_;
-        }
+            if (wait_result && current == ThreadState::Processing) {
+                // 동기 모드: 기존 단일 슬롯 패턴 그대로 수행
+                const uint8_t* data = pending_data_;
+                int width = pending_width_;
+                int height = pending_height_;
+                int format = pending_format_;
 
-        // 검출 수행 (락 없이 - GPU delegate와 동일 스레드에서)
-        IrisResult result = detector_->detect(
-            data,
-            width,
-            height,
-            static_cast<FrameFormat>(format));
+                lock.unlock();
 
-        // 랜드마크 데이터 저장 (디버그용)
-        if (result.detected) {
-            int count = detector_->getFaceLandmarkCount();
-            if (count > 0) {
-                std::lock_guard<std::mutex> lock(landmark_mutex_);
-                last_landmarks_.resize(static_cast<size_t>(count) * 3);
-                detector_->getFaceLandmarks(last_landmarks_.data());
+                // 검출 수행 (락 없이 - GPU delegate와 동일 스레드에서)
+                IrisResult result = detector_->detect(
+                    data,
+                    width,
+                    height,
+                    static_cast<FrameFormat>(format));
+
+                // 랜드마크 데이터 저장 (디버그용)
+                if (result.detected) {
+                    int count = detector_->getFaceLandmarkCount();
+                    if (count > 0) {
+                        std::lock_guard<std::mutex> lk(landmark_mutex_);
+                        last_landmarks_.resize(static_cast<size_t>(count) * 3);
+                        detector_->getFaceLandmarks(last_landmarks_.data());
+                    }
+                }
+
+                // 결과 저장 및 상태 전환
+                {
+                    std::lock_guard<std::mutex> lk(slot_mutex_);
+                    pending_result_ = result;
+                    state_ = ThreadState::ResultReady;
+                }
+                slot_cv_.notify_one();
+                continue;
             }
         }
 
-        // 결과 저장 및 상태 전환
-        {
-            std::lock_guard<std::mutex> lock(slot_mutex_);
-            pending_result_ = result;
-            state_ = ThreadState::ResultReady;
+        // --- 비동기 프레임 처리 ---
+        if (has_new_frame_.load()) {
+            std::vector<uint8_t> frame_copy;
+            int width, height, format;
+
+            // 입력 슬롯에서 딥카피
+            {
+                std::lock_guard<std::mutex> lock(async_input_mutex_);
+                if (!has_new_frame_.load()) {
+                    continue;  // 다른 스레드가 먼저 처리
+                }
+                frame_copy = async_frame_buffer_;  // 딥카피 (vector copy)
+                width = async_width_;
+                height = async_height_;
+                format = async_format_;
+                has_new_frame_ = false;
+            }
+
+            // 검출 수행 (락 없이 - GPU delegate와 동일 스레드에서)
+            IrisResult result = detector_->detect(
+                frame_copy.data(),
+                width,
+                height,
+                static_cast<FrameFormat>(format));
+
+            // 랜드마크 데이터 저장 (디버그용)
+            if (result.detected) {
+                int count = detector_->getFaceLandmarkCount();
+                if (count > 0) {
+                    std::lock_guard<std::mutex> lock(landmark_mutex_);
+                    last_landmarks_.resize(static_cast<size_t>(count) * 3);
+                    detector_->getFaceLandmarks(last_landmarks_.data());
+                }
+            }
+
+            // 비동기 결과 슬롯에 저장
+            {
+                std::lock_guard<std::mutex> lock(async_result_mutex_);
+                async_latest_result_ = result;
+                has_async_result_ = true;
+            }
         }
-        slot_cv_.notify_one();  // notify_all() → notify_one()
     }
 
     // ========================================

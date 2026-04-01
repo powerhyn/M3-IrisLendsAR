@@ -106,7 +106,7 @@ public:
     bool waitForInitialization(int timeout_ms = 5000);
 
     // ========================================
-    // 검출 API
+    // 검출 API (동기)
     // ========================================
 
     /**
@@ -125,6 +125,35 @@ public:
 
     // NOTE: 회전 처리는 FrameProcessor에서 수행 후 이 클래스에 전달합니다.
     //       따라서 별도의 회전 API는 제공하지 않습니다.
+
+    // ========================================
+    // 검출 API (비동기) — P5-W1-04
+    // ========================================
+
+    /**
+     * @brief 비동기 프레임 제출 (논블로킹)
+     *
+     * 프레임 데이터를 내부 최신 프레임 슬롯에 딥카피합니다.
+     * 이전에 제출된 미처리 프레임은 덮어씌워집니다 (drop-oldest).
+     * 워커 스레드가 깨어나 최신 프레임으로 추론을 수행합니다.
+     *
+     * @param data 프레임 데이터 (RGB 포맷, 호출자 버퍼 재사용 가능)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 픽셀 포맷 (FrameFormat enum)
+     */
+    void submitFrameAsync(const uint8_t* data, int width, int height, int format);
+
+    /**
+     * @brief 최신 추론 결과 조회 (논블로킹)
+     *
+     * 워커 스레드가 마지막으로 완료한 추론 결과를 반환합니다.
+     * 아직 결과가 없으면 false를 반환합니다.
+     *
+     * @param out 결과 출력
+     * @return 유효한 결과가 있으면 true, 없으면 false
+     */
+    bool getLatestResult(IrisResult& out);
 
     // ========================================
     // 상태 조회
@@ -208,6 +237,24 @@ private:
     // 마지막 랜드마크 데이터 (스레드 간 공유)
     mutable std::mutex landmark_mutex_;
     std::vector<float> last_landmarks_;
+
+    // ========================================
+    // 비동기 슬롯 (P5-W1-04)
+    // ========================================
+
+    // 비동기 입력 슬롯 (async_input_mutex_로 보호)
+    std::mutex async_input_mutex_;
+    std::condition_variable async_cv_;
+    std::vector<uint8_t> async_frame_buffer_;  ///< 딥카피된 프레임 데이터
+    int async_width_{0};
+    int async_height_{0};
+    int async_format_{0};
+    std::atomic<bool> has_new_frame_{false};
+
+    // 비동기 출력 슬롯 (async_result_mutex_로 보호)
+    mutable std::mutex async_result_mutex_;
+    IrisResult async_latest_result_;
+    std::atomic<bool> has_async_result_{false};
 };
 
 } // namespace iris_sdk

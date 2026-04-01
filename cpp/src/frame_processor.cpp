@@ -59,6 +59,16 @@ public:
                     FrameFormat format, const IrisResult& iris_result,
                     const LensConfig& config);
 
+    // 비동기 API (P5-W1-04)
+    void submitFrame(const uint8_t* frame_data, int width, int height,
+                     FrameFormat format);
+    void submitFrameWithRotation(const uint8_t* frame_data, int width, int height,
+                                  FrameFormat format, int rotation_degrees);
+    bool getLatestResult(IrisResult& out);
+    bool renderWithResult(uint8_t* frame_data, int width, int height,
+                           FrameFormat format, const IrisResult& iris_result,
+                           const LensConfig& config);
+
     // 설정
     void setMinConfidence(float min_confidence);
     void setMinDetectionConfidence(float min_confidence);
@@ -769,6 +779,121 @@ bool FrameProcessor::Impl::renderOnly(uint8_t* frame_data,
 }
 
 // ============================================================================
+// Impl 구현 - 비동기 API (P5-W1-04)
+// ============================================================================
+
+void FrameProcessor::Impl::submitFrame(const uint8_t* frame_data,
+                                        int width, int height,
+                                        FrameFormat format) {
+#ifdef IRIS_SDK_HAS_OPENCV
+    if (!initialized_ || frame_data == nullptr || width <= 0 || height <= 0) {
+        return;
+    }
+
+    if (!use_inference_thread_ || !inference_thread_) {
+        return;  // 비동기 API는 InferenceThread 모드에서만 지원
+    }
+
+    // 포맷을 RGB로 변환 (검출기 입력 포맷)
+    cv::Mat work_buf;
+    if (!convertToWorkingFormat(frame_data, width, height, format, work_buf)) {
+        return;
+    }
+
+    cv::Mat rgb_buf;
+    cv::cvtColor(work_buf, rgb_buf, cv::COLOR_BGR2RGB);
+
+    // InferenceThread에 비동기 제출 (내부에서 딥카피)
+    inference_thread_->submitFrameAsync(
+        rgb_buf.data, rgb_buf.cols, rgb_buf.rows,
+        static_cast<int>(FrameFormat::RGB));
+#endif
+}
+
+void FrameProcessor::Impl::submitFrameWithRotation(const uint8_t* frame_data,
+                                                     int width, int height,
+                                                     FrameFormat format,
+                                                     int rotation_degrees) {
+#ifdef IRIS_SDK_HAS_OPENCV
+    if (!initialized_ || frame_data == nullptr || width <= 0 || height <= 0) {
+        return;
+    }
+
+    if (!use_inference_thread_ || !inference_thread_) {
+        return;  // 비동기 API는 InferenceThread 모드에서만 지원
+    }
+
+    // 포맷을 BGR(작업 포맷)로 변환
+    cv::Mat work_buf;
+    if (!convertToWorkingFormat(frame_data, width, height, format, work_buf)) {
+        return;
+    }
+
+    // RGB로 변환
+    cv::Mat rgb_buf;
+    cv::cvtColor(work_buf, rgb_buf, cv::COLOR_BGR2RGB);
+
+    // 회전 적용
+    cv::Mat rotated_rgb;
+    switch (rotation_degrees) {
+        case 90:
+            cv::rotate(rgb_buf, rotated_rgb, cv::ROTATE_90_CLOCKWISE);
+            break;
+        case 180:
+            cv::rotate(rgb_buf, rotated_rgb, cv::ROTATE_180);
+            break;
+        case 270:
+            cv::rotate(rgb_buf, rotated_rgb, cv::ROTATE_90_COUNTERCLOCKWISE);
+            break;
+        default:
+            rotated_rgb = rgb_buf;
+            break;
+    }
+
+    // InferenceThread에 비동기 제출 (내부에서 딥카피)
+    inference_thread_->submitFrameAsync(
+        rotated_rgb.data, rotated_rgb.cols, rotated_rgb.rows,
+        static_cast<int>(FrameFormat::RGB));
+#endif
+}
+
+bool FrameProcessor::Impl::getLatestResult(IrisResult& out) {
+    if (!initialized_ || !use_inference_thread_ || !inference_thread_) {
+        return false;
+    }
+
+    IrisResult raw_result;
+    if (!inference_thread_->getLatestResult(raw_result)) {
+        return false;
+    }
+
+    // 캐싱 로직 (깜빡임 방지) — detectOnly()와 동일 패턴
+    if (raw_result.detected) {
+        cached_result_ = raw_result;
+        cache_miss_count_ = 0;
+        out = raw_result;
+    } else {
+        cache_miss_count_++;
+        if (cache_miss_count_ <= MAX_CACHE_MISS && cached_result_.detected) {
+            out = cached_result_;
+        } else {
+            out = raw_result;
+        }
+    }
+
+    return true;
+}
+
+bool FrameProcessor::Impl::renderWithResult(uint8_t* frame_data,
+                                              int width, int height,
+                                              FrameFormat format,
+                                              const IrisResult& iris_result,
+                                              const LensConfig& config) {
+    // renderOnly()와 동일 — 비동기 워크플로우를 위한 명시적 이름
+    return renderOnly(frame_data, width, height, format, iris_result, config);
+}
+
+// ============================================================================
 // Impl 구현 - 설정
 // ============================================================================
 
@@ -1013,6 +1138,34 @@ bool FrameProcessor::getFaceLandmarks(float* out_landmarks) const {
 
 int FrameProcessor::getModelVersion() const {
     return impl_ ? impl_->getModelVersion() : 0;
+}
+
+// ============================================================================
+// 비동기 API 공개 인터페이스 (P5-W1-04)
+// ============================================================================
+
+void FrameProcessor::submitFrame(const uint8_t* frame_data, int width, int height,
+                                  FrameFormat format) {
+    if (impl_) impl_->submitFrame(frame_data, width, height, format);
+}
+
+void FrameProcessor::submitFrameWithRotation(const uint8_t* frame_data,
+                                              int width, int height,
+                                              FrameFormat format,
+                                              int rotation_degrees) {
+    if (impl_) impl_->submitFrameWithRotation(frame_data, width, height, format, rotation_degrees);
+}
+
+bool FrameProcessor::getLatestResult(IrisResult& out) {
+    return impl_ ? impl_->getLatestResult(out) : false;
+}
+
+bool FrameProcessor::renderWithResult(uint8_t* frame_data, int width, int height,
+                                       FrameFormat format,
+                                       const IrisResult& iris_result,
+                                       const LensConfig& config) {
+    return impl_ ? impl_->renderWithResult(frame_data, width, height, format,
+                                            iris_result, config) : false;
 }
 
 } // namespace iris_sdk

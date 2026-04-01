@@ -243,6 +243,69 @@ public:
                     const LensConfig& config);
 
     // ========================================
+    // 비동기 API (추론/렌더링 분리) — P5-W1-04
+    // ========================================
+
+    /**
+     * @brief 프레임 제출 (비동기, 논블로킹)
+     *
+     * 프레임 데이터를 추론 큐에 제출합니다.
+     * 이전에 제출된 미처리 프레임은 덮어씌워집니다 (drop-oldest).
+     * 포맷 변환 및 딥카피가 수행됩니다.
+     *
+     * @param frame_data 프레임 데이터 (호출자 버퍼 재사용 가능)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 픽셀 포맷
+     */
+    void submitFrame(const uint8_t* frame_data, int width, int height,
+                     FrameFormat format);
+
+    /**
+     * @brief 프레임 제출 (비동기, 회전 지원)
+     *
+     * 이미지 회전을 처리하면서 프레임을 비동기 추론 큐에 제출합니다.
+     *
+     * @param frame_data 프레임 데이터 (호출자 버퍼 재사용 가능)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 픽셀 포맷
+     * @param rotation_degrees 회전 각도 (0, 90, 180, 270)
+     */
+    void submitFrameWithRotation(const uint8_t* frame_data, int width, int height,
+                                  FrameFormat format, int rotation_degrees);
+
+    /**
+     * @brief 최신 추론 결과 조회 (논블로킹)
+     *
+     * 가장 최근 완료된 추론 결과를 반환합니다.
+     * 아직 결과가 없으면 false를 반환합니다.
+     * 캐싱 로직이 적용되어 깜빡임을 방지합니다.
+     *
+     * @param out 결과 출력
+     * @return 유효한 결과가 있으면 true
+     */
+    bool getLatestResult(IrisResult& out);
+
+    /**
+     * @brief 기존 결과로 렌더링 (비동기 워크플로우용)
+     *
+     * getLatestResult()로 얻은 결과를 사용하여 렌더링만 수행합니다.
+     * renderOnly()와 동일한 동작이지만, 비동기 워크플로우를 위한 명시적 이름.
+     *
+     * @param frame_data 프레임 데이터 (in-place 수정됨)
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param format 픽셀 포맷
+     * @param iris_result 홍채 검출 결과
+     * @param config 렌더링 설정
+     * @return 렌더링 성공 여부
+     */
+    bool renderWithResult(uint8_t* frame_data, int width, int height,
+                           FrameFormat format, const IrisResult& iris_result,
+                           const LensConfig& config);
+
+    // ========================================
     // 설정
     // ========================================
 

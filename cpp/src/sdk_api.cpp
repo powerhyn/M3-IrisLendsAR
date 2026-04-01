@@ -1026,6 +1026,149 @@ void iris_sdk_stabilizer_reset(int64_t handle) {
     }
 }
 
+// ============================================================================
+// Async Frame API (P5-W1-04)
+// ============================================================================
+
+IrisSdkError iris_sdk_submit_frame(
+    const uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format) {
+
+    if (frame_data == nullptr) {
+        set_last_error("frame_data is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    if (width <= 0 || height <= 0) {
+        set_last_error("Invalid frame dimensions");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_processor || !g_processor->isInitialized()) {
+        set_last_error("SDK not initialized");
+        return IRIS_SDK_NOT_INITIALIZED;
+    }
+
+    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
+    g_processor->submitFrame(frame_data, width, height, cpp_format);
+
+    return IRIS_SDK_OK;
+}
+
+IrisSdkError iris_sdk_submit_frame_with_rotation(
+    const uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format,
+    int rotation_degrees) {
+
+    if (frame_data == nullptr) {
+        set_last_error("frame_data is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    if (width <= 0 || height <= 0) {
+        set_last_error("Invalid frame dimensions");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    // 회전 각도 정규화
+    int normalized_rotation = ((rotation_degrees % 360) + 360) % 360;
+    if (normalized_rotation != 0 && normalized_rotation != 90 &&
+        normalized_rotation != 180 && normalized_rotation != 270) {
+        set_last_error("Invalid rotation degrees (must be 0, 90, 180, or 270)");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_processor || !g_processor->isInitialized()) {
+        set_last_error("SDK not initialized");
+        return IRIS_SDK_NOT_INITIALIZED;
+    }
+
+    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
+    g_processor->submitFrameWithRotation(frame_data, width, height,
+                                          cpp_format, normalized_rotation);
+
+    return IRIS_SDK_OK;
+}
+
+IrisSdkError iris_sdk_get_latest_result(IrisResult* result) {
+    if (result == nullptr) {
+        set_last_error("result is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_processor || !g_processor->isInitialized()) {
+        set_last_error("SDK not initialized");
+        return IRIS_SDK_NOT_INITIALIZED;
+    }
+
+    iris_sdk::IrisResult cpp_result;
+    if (!g_processor->getLatestResult(cpp_result)) {
+        // 아직 결과 없음
+        std::memset(result, 0, sizeof(IrisResult));
+        result->detected = false;
+        return IRIS_SDK_NO_FACE;
+    }
+
+    convert_to_c_iris_result(cpp_result, result);
+    return IRIS_SDK_OK;
+}
+
+IrisSdkError iris_sdk_render_with_result(
+    uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format,
+    const IrisResult* iris_result,
+    const IrisLensConfig* config) {
+
+    if (frame_data == nullptr) {
+        set_last_error("frame_data is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    if (iris_result == nullptr || config == nullptr) {
+        set_last_error("iris_result or config is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    if (width <= 0 || height <= 0) {
+        set_last_error("Invalid frame dimensions");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_processor || !g_processor->isInitialized()) {
+        set_last_error("SDK not initialized");
+        return IRIS_SDK_NOT_INITIALIZED;
+    }
+
+    if (!g_processor->hasLensTexture()) {
+        set_last_error("No lens texture loaded");
+        return IRIS_SDK_NO_TEXTURE;
+    }
+
+    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
+    iris_sdk::IrisResult cpp_iris_result = convert_to_cpp_iris_result(iris_result);
+    iris_sdk::LensConfig cpp_config = convert_to_cpp_lens_config(config);
+
+    bool success = g_processor->renderWithResult(
+        frame_data, width, height, cpp_format, cpp_iris_result, cpp_config);
+
+    if (!success) {
+        set_last_error("Render with result failed");
+        return IRIS_SDK_RENDER_FAILED;
+    }
+
+    return IRIS_SDK_OK;
+}
+
 }  // extern "C"
 
 // ============================================================================

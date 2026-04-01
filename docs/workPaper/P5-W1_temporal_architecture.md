@@ -3,7 +3,7 @@
 ## 작업 개요
 - **Phase**: P5 (경쟁사 대비 품질 갭 해소)
 - **기간**: 2026-04 ~
-- **상태**: 🔄 진행 중 (W1-01~03 완료, W1-04~05 대기)
+- **상태**: 🔄 진행 중 (W1-01~04 완료, W1-05 대기)
 - **선행 조건**: 없음 (최우선 작업)
 - **근거**: 경쟁사 분석 — 시간적 안정성 아키텍처 정립 필요
 
@@ -215,7 +215,7 @@ Android 데모에는 `lastValidFaceTimeMs` + `LENS_PERSISTENCE_TIMEOUT_MS` 기�
 
 ## W1-04: Frame Controller (비동기 API 재설계 + 추론/렌더링 분리)
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료 (2026-04-01)
 
 ### 배경
 
@@ -361,6 +361,33 @@ W1-05 (통합 테스트 + 데모 Kotlin 스무딩 제거) ← 모두 완료 후
 **테스트 결과:**
 - 22/22 테스트 통과 (0ms)
 - 지터 감소, 빠른 추종, confidence 이력현상, visibility fade, dropout hold, 아웃라이어 거부, 눈깜빡임 감지 모두 검증
+
+### W1-04 (2026-04-01)
+
+**수정 파일:**
+| 파일 | 내용 |
+|------|------|
+| `cpp/include/iris_sdk/inference_thread.h` | 비동기 API 추가 (`submitFrameAsync`, `getLatestResult`) + 비동기 입출력 슬롯 멤버 |
+| `cpp/src/inference_thread.cpp` | 비동기 프레임 딥카피/제출, 결과 조회, 메인 루프 동기+비동기 혼합 패턴 |
+| `cpp/include/iris_sdk/frame_processor.h` | 비동기 공개 API 4개 추가 (`submitFrame`, `submitFrameWithRotation`, `getLatestResult`, `renderWithResult`) |
+| `cpp/src/frame_processor.cpp` | Impl 비동기 메서드 구현 (포맷 변환+회전+딥카피+캐싱) + 공개 인터페이스 위임 |
+| `cpp/include/iris_sdk/sdk_api.h` | C API 4개 함수 추가 (`iris_sdk_submit_frame`, `iris_sdk_submit_frame_with_rotation`, `iris_sdk_get_latest_result`, `iris_sdk_render_with_result`) |
+| `cpp/src/sdk_api.cpp` | C API 4개 함수 구현 (파라미터 검증, 포맷 변환, g_processor 호출) |
+
+**설계 결정:**
+- 동기/비동기 공존: 기존 `detectSync()` 경로 완전 보존, 비동기는 별도 입출력 슬롯 사용
+- 입력 슬롯: single-slot drop-oldest (최신 프레임만 유지), `async_input_mutex_` + `has_new_frame_` atomic 보호
+- 출력 슬롯: `async_result_mutex_` + `has_async_result_` atomic 보호, `getLatestResult()`는 논블로킹
+- 딥카피 필수: 카메라 콜백 버퍼 재사용 시 데이터 손상 방지 (`submitFrameAsync` 내부에서 `std::memcpy`)
+- 워커 루프: `slot_cv_.wait_for(5ms)` 타임아웃 사용 → 동기 요청 없을 때 비동기 프레임 처리
+- 캐싱 로직: `getLatestResult()`에 기존 `detectOnly()`와 동일한 3프레임 캐시 적용
+- `renderWithResult()`는 `renderOnly()`와 동일 동작 (명시적 이름 제공)
+- `submitFrame()`에서 RGB 변환 수행 → InferenceThread에는 항상 RGB 전달
+- No double-smoothing: 이 레이어는 raw 결과만 제공, TemporalStabilizer는 호출자가 별도 적용
+
+**빌드 검증:**
+- `libiris_sdkd.a` 정상 빌드 확인 (기존 테스트 링커 에러는 TFLite 미관련 이슈)
+- 하위 호환성: 기존 `process()`, `detectSync()`, `detectOnly()` 코드 변경 없음
 
 ---
 

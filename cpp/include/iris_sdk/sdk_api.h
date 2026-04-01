@@ -851,6 +851,81 @@ IRIS_SDK_EXPORT void iris_sdk_stabilizer_set_enabled(int64_t handle, int enabled
  */
 IRIS_SDK_EXPORT void iris_sdk_stabilizer_reset(int64_t handle);
 
+// ============================================================================
+// Async Frame API (P5-W1-04 — 추론/렌더링 분리)
+// ============================================================================
+
+/**
+ * @brief 프레임 비동기 제출
+ *
+ * 프레임 데이터를 추론 큐에 제출합니다 (논블로킹).
+ * 이전에 제출된 미처리 프레임은 덮어씌워집니다 (drop-oldest).
+ * 호출자는 제출 후 frame_data 버퍼를 즉시 재사용할 수 있습니다.
+ *
+ * @param frame_data 프레임 데이터
+ * @param width 프레임 너비
+ * @param height 프레임 높이
+ * @param format 픽셀 포맷
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_submit_frame(
+    const uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format);
+
+/**
+ * @brief 프레임 비동기 제출 (회전 지원)
+ *
+ * 이미지 회전을 처리하면서 프레임을 비동기 추론 큐에 제출합니다.
+ *
+ * @param frame_data 프레임 데이터
+ * @param width 프레임 너비
+ * @param height 프레임 높이
+ * @param format 픽셀 포맷
+ * @param rotation_degrees 회전 각도 (0, 90, 180, 270)
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_submit_frame_with_rotation(
+    const uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format,
+    int rotation_degrees);
+
+/**
+ * @brief 최신 추론 결과 조회 (논블로킹)
+ *
+ * 가장 최근 완료된 추론 결과를 반환합니다.
+ * 아직 결과가 없으면 IRIS_SDK_NO_FACE를 반환합니다.
+ *
+ * @param result 결과 출력 (NULL 불가)
+ * @return IRIS_SDK_OK 결과 있음, IRIS_SDK_NO_FACE 아직 결과 없음
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_get_latest_result(IrisResult* result);
+
+/**
+ * @brief 기존 결과로 렌더링 (비동기 워크플로우용)
+ *
+ * iris_sdk_get_latest_result()로 얻은 결과를 사용하여 렌더링만 수행합니다.
+ * 프레임 데이터는 in-place로 수정됩니다.
+ *
+ * @param frame_data 프레임 데이터 (in-place 수정됨)
+ * @param width 프레임 너비
+ * @param height 프레임 높이
+ * @param format 픽셀 포맷
+ * @param iris_result 홍채 검출 결과
+ * @param config 렌더링 설정
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_render_with_result(
+    uint8_t* frame_data,
+    int width,
+    int height,
+    IrisFrameFormat format,
+    const IrisResult* iris_result,
+    const IrisLensConfig* config);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
