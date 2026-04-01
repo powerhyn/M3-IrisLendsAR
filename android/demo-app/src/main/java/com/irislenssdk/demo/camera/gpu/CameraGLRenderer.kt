@@ -1107,9 +1107,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             val renderTimeUs = (System.nanoTime() - renderStartNs) / 1000L
             onStabilityFrame?.invoke(
                 result.detected,
-                leftX, leftY, rawLeftRadius,
+                leftX, leftY, filteredLeftR,
                 filteredLeftX, filteredLeftY, filteredLeftR,
-                rightX, rightY, rawRightRadius,
+                rightX, rightY, filteredRightR,
                 filteredRightX, filteredRightY, filteredRightR,
                 logEyelidLt, logEyelidLb, logEyelidRt, logEyelidRb,
                 logHoldActive, logHoldRemaining,
