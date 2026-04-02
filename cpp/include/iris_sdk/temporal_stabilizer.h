@@ -35,8 +35,8 @@ struct StabilizerConfig {
     int hold_frames = 5;
 
     // Outlier rejection
-    float outlier_radius_multiplier = 2.0f;
-    int outlier_confirm_frames = 2;
+    float outlier_radius_multiplier = 4.0f;   // 정규화 단위 기준: 반지름 4배 이상 이동 시 의심
+    int outlier_confirm_frames = 1;            // 1프레임만 확인 (지연 최소화)
 
     // Blink detection (Eye Aspect Ratio)
     float blink_ear_threshold = 0.2f;

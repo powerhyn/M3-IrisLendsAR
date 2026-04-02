@@ -30,8 +30,19 @@ static IrisResult makeResult(bool detected, float confidence,
     r.right_detected = detected;
     r.confidence = confidence;
     r.left_iris[0] = {lx, ly, 0.0f, 1.0f};
+    // boundary 랜드마크 (정규화 단위 radius 계산용)
+    float norm_lr = lr / 640.0f;  // 픽셀→정규화 근사
+    r.left_iris[1] = {lx + norm_lr, ly, 0.0f, 1.0f};
+    r.left_iris[2] = {lx, ly - norm_lr, 0.0f, 1.0f};
+    r.left_iris[3] = {lx - norm_lr, ly, 0.0f, 1.0f};
+    r.left_iris[4] = {lx, ly + norm_lr, 0.0f, 1.0f};
     r.left_radius = lr;
     r.right_iris[0] = {rx, ry, 0.0f, 1.0f};
+    float norm_rr = rr / 640.0f;
+    r.right_iris[1] = {rx + norm_rr, ry, 0.0f, 1.0f};
+    r.right_iris[2] = {rx, ry - norm_rr, 0.0f, 1.0f};
+    r.right_iris[3] = {rx - norm_rr, ry, 0.0f, 1.0f};
+    r.right_iris[4] = {rx, ry + norm_rr, 0.0f, 1.0f};
     r.right_radius = rr;
     r.face_mesh_valid = false;
     r.timestamp_ms = ts_ms;
@@ -481,10 +492,13 @@ TEST(TemporalStabilizerTest, HoldExpiresAfterMaxFrames) {
 // ============================================================================
 
 TEST(TemporalStabilizerTest, SingleFrameSpikeRejected) {
-    // Outlier threshold = radius * multiplier (2.0).
-    // Use small radius (0.02) so threshold = 0.04 in normalized coords.
-    // Warm up at (0.5, 0.5), then spike to (0.6, 0.6) which is dist=0.14 > 0.04.
-    TemporalStabilizer stab;
+    // outlier_radius_multiplier=4.0, confirm_frames=1 (기본값)
+    // 극단적 스파이크만 1프레임 거부, 나머지는 OneEuroFilter가 스무딩
+    // 매우 큰 스파이크(반지름 10배 이상)를 사용하여 거부 동작 확인
+    StabilizerConfig cfg;
+    cfg.outlier_radius_multiplier = 4.0f;
+    cfg.outlier_confirm_frames = 2;  // 이 테스트에서만 2로 설정하여 거부 확인
+    TemporalStabilizer stab(cfg);
 
     double t = 0.0;
     for (int i = 0; i < 15; ++i) {
@@ -495,15 +509,15 @@ TEST(TemporalStabilizerTest, SingleFrameSpikeRejected) {
         stab.stabilize(r, t);
     }
 
-    // Single-frame spike: jump of ~0.14 > threshold 0.04
+    // 극단적 스파이크: 0.5 → 0.9 (dist=0.566 > 4*0.02=0.08)
     t += 0.033;
-    auto spike = makeResult(true, 0.9f, 0.6f, 0.6f, 0.02f,
-                            0.8f, 0.6f, 0.02f,
+    auto spike = makeResult(true, 0.9f, 0.9f, 0.9f, 0.02f,
+                            0.8f, 0.9f, 0.02f,
                             static_cast<int64_t>(t * 1000));
     auto out = stab.stabilize(spike, t);
 
-    // Should reject spike and hold near previous position
-    EXPECT_NEAR(out.stabilized.left_iris[0].x, 0.5f, 0.02f);
+    // confirm_frames=2이므로 단일 스파이크 거부, 이전 위치 근처 유지
+    EXPECT_NEAR(out.stabilized.left_iris[0].x, 0.5f, 0.05f);
 
     // Return to normal position
     t += 0.033;

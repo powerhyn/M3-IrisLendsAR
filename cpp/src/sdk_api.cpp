@@ -937,8 +937,8 @@ void iris_sdk_default_stabilizer_config(IrisStabilizerConfig* config) {
     config->fade_in_ms = 100.0f;
     config->fade_out_ms = 200.0f;
     config->hold_frames = 5;
-    config->outlier_radius_multiplier = 2.0f;
-    config->outlier_confirm_frames = 2;
+    config->outlier_radius_multiplier = 4.0f;
+    config->outlier_confirm_frames = 1;
     config->blink_ear_threshold = 0.2f;
 }
 

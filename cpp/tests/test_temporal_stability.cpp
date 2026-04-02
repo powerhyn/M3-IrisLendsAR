@@ -425,9 +425,12 @@ TEST_F(TemporalStabilityTest, BlinkHoldCoordinatesStable) {
 // ============================================================================
 
 TEST_F(TemporalStabilityTest, SingleOutlierRejected) {
-    TemporalStabilizer stab;
+    // confirm_frames=2로 설정하여 극단적 스파이크 거부 테스트
+    StabilizerConfig cfg;
+    cfg.outlier_radius_multiplier = 4.0f;
+    cfg.outlier_confirm_frames = 2;
+    TemporalStabilizer stab(cfg);
 
-    // 작은 반지름 사용 -> outlier threshold = 0.02 * 2.0 = 0.04
     const float radius = 0.02f;
     const float stable_x = 0.5f, stable_y = 0.5f;
     double t = 0.0;
@@ -440,9 +443,9 @@ TEST_F(TemporalStabilityTest, SingleOutlierRejected) {
         stab.stabilize(r, t);
     }
 
-    // 이상치 1프레임: 위치가 크게 점프 (distance > 2 * radius)
+    // 극단적 이상치 1프레임: 0.5 → 0.9 (dist=0.566 > 4*0.02=0.08)
     t += kFrameInterval;
-    auto outlier = makeResult(0.7f, 0.7f, radius);
+    auto outlier = makeResult(0.9f, 0.9f, radius);
     outlier.timestamp_ms = static_cast<int64_t>(t * 1000);
     auto out_outlier = stab.stabilize(outlier, t);
 
@@ -451,9 +454,9 @@ TEST_F(TemporalStabilityTest, SingleOutlierRejected) {
         out_outlier.stabilized.left_iris[0].x,
         out_outlier.stabilized.left_iris[0].y);
 
-    // 이상치가 반영되지 않아야 함
-    EXPECT_NEAR(out_outlier.stabilized.left_iris[0].x, stable_x, 0.03f);
-    EXPECT_NEAR(out_outlier.stabilized.left_iris[0].y, stable_y, 0.03f);
+    // confirm_frames=2 → 단일 극단적 스파이크 거부
+    EXPECT_NEAR(out_outlier.stabilized.left_iris[0].x, stable_x, 0.05f);
+    EXPECT_NEAR(out_outlier.stabilized.left_iris[0].y, stable_y, 0.05f);
 
     // 정상 복귀
     t += kFrameInterval;

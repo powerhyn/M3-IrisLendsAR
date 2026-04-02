@@ -250,7 +250,8 @@ void TemporalStabilizer::smoothEye(EyeState& state,
         norm_radius = std::sqrt(bdx * bdx + bdy * bdy);
     }
     if (state.has_previous) {
-        if (isOutlier(state, cx, cy, norm_radius)) {
+        // 아웃라이어 판정은 이전 프레임의 정규화 반지름 기준 (현재 프레임 값은 스파이크와 함께 왜곡 가능)
+        if (isOutlier(state, cx, cy, state.prev_radius)) {
             ++state.consecutive_outlier_frames;
             if (state.consecutive_outlier_frames < config_.outlier_confirm_frames) {
                 // Single-frame outlier: reject center, keep previous position
