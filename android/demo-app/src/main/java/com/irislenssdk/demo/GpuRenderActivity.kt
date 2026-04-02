@@ -140,6 +140,9 @@ class GpuRenderActivity : AppCompatActivity() {
     private val glIrisResult = IrisResult()     // GL 스레드 전달용 스냅샷
     private val uiIrisResult = IrisResult()     // UI 스레드 전달용 스냅샷
 
+    // Temporal Stabilizer (SDK 코어 스무딩)
+    private var stabilizerHandle: Long = 0
+
     // NV21 버퍼 (재사용)
     private var nv21Buffer: ByteArray? = null
 
@@ -847,9 +850,18 @@ class GpuRenderActivity : AppCompatActivity() {
                 irisResult
             )
 
-            // GPU 렌더러에 검출 결과 전달 (매 프레임, 미검출 포함)
-            // detected=false 프레임도 전달하여 stale 스냅샷 방지
-            // → GL 쪽에서 렌즈 페이드아웃/클리핑 폴백 정책 적용 가능
+            // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요)
+            if (detectResult == IrisLensSDK.OK || detectResult == IrisLensSDK.NO_FACE) {
+                if (stabilizerHandle == 0L) {
+                    stabilizerHandle = IrisLensSDK.createStabilizer()
+                }
+                if (stabilizerHandle != 0L) {
+                    val timestampSec = System.nanoTime() / 1_000_000_000.0
+                    IrisLensSDK.stabilize(stabilizerHandle, irisResult, timestampSec)
+                }
+            }
+
+            // GPU 렌더러에 스무딩된 결과 전달 (매 프레임, 미검출 포함)
             glIrisResult.copyFrom(irisResult)
             cameraGLView.setIrisResult(glIrisResult)
 
@@ -1072,6 +1084,10 @@ class GpuRenderActivity : AppCompatActivity() {
             stopStabilityLog()
         }
         super.onDestroy()
+        if (stabilizerHandle != 0L) {
+            IrisLensSDK.destroyStabilizer(stabilizerHandle)
+            stabilizerHandle = 0
+        }
         cameraGLView.release()
         lensManager.release()
         analysisExecutor.shutdown()

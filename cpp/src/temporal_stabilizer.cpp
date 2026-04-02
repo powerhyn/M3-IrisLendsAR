@@ -242,17 +242,23 @@ void TemporalStabilizer::smoothEye(EyeState& state,
     float raw_radius = radius;  // Save raw radius before filtering
 
     // --- Outlier rejection ---
+    // ref_radius를 정규화 단위로 근사: boundary 랜드마크(iris[1])와 center(iris[0])의 거리
+    float norm_radius = 0.0f;
+    {
+        float bdx = iris[1].x - iris[0].x;
+        float bdy = iris[1].y - iris[0].y;
+        norm_radius = std::sqrt(bdx * bdx + bdy * bdy);
+    }
     if (state.has_previous) {
-        if (isOutlier(state, cx, cy, state.prev_radius)) {
+        if (isOutlier(state, cx, cy, norm_radius)) {
             ++state.consecutive_outlier_frames;
             if (state.consecutive_outlier_frames < config_.outlier_confirm_frames) {
-                // Single-frame outlier: reject, use previous values
+                // Single-frame outlier: reject center, keep previous position
+                // (radius는 OneEuroFilter가 스무딩하므로 되돌리지 않음)
                 iris[0].x = state.prev_center_x;
                 iris[0].y = state.prev_center_y;
-                radius = state.prev_radius;
                 cx = state.prev_center_x;
                 cy = state.prev_center_y;
-                raw_radius = state.prev_radius;
             } else {
                 // Consecutive outliers confirmed as real movement, accept and reset
                 state.consecutive_outlier_frames = 0;
@@ -268,9 +274,10 @@ void TemporalStabilizer::smoothEye(EyeState& state,
     radius = state.radius.filter(radius, timestamp_sec);
 
     // Store raw (pre-filter) values for next frame's outlier check
+    // prev_radius는 정규화 단위로 저장 (isOutlier에서 정규화 좌표와 비교)
     state.prev_center_x = cx;
     state.prev_center_y = cy;
-    state.prev_radius = raw_radius;
+    state.prev_radius = norm_radius;
     state.has_previous = true;
 
     // --- Smooth eyelid landmarks ---
