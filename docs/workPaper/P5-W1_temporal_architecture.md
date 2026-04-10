@@ -422,10 +422,19 @@ W1-05 (통합 테스트 + 데모 Kotlin 스무딩 제거) ← 모두 완료 후
 - 신규 13/13 통합 메트릭 테스트 통과 (test_temporal_stability)
 - 주요 측정값: 지터 ~47% 감소 (XY), 추적 지연 0.004 (< 0.013 허용), fade-out 단조 감소 확인
 
-**검증 필요:**
-- [ ] Android 실기기에서 렌즈 안정성 확인 (이전 Kotlin 스무딩 대비 동등 이상)
-- [ ] 과도한 lag 없는지 확인
-- [ ] 빌드 성공 확인 (JNI 링킹)
+**실기기 검증 결과 (2026-04-10):**
+- [x] Android 실기기에서 렌즈 안정성 확인 — 추적 속도 양호, 렌즈 튀는 현상 해결
+- [x] 과도한 lag 없는지 확인 — 아웃라이어 임계값 완화 후 개선 확인
+- [x] 빌드 성공 확인 (JNI 링킹 + Kotlin 빌드)
+- **잔존 이슈**: 미세한 잔떨림이 남아있음 (이전 Kotlin 28개 필터 대비 약간 열위). 추후 OneEuroFilter 파라미터 튜닝으로 점진 개선 예정
+
+---
+
+## 추후 개선 (Backlog)
+
+- **잔떨림 추가 개선**: C++ TemporalStabilizer의 min_cutoff/beta 파라미터 실기기 기반 미세 튜닝
+- **타원/눈꺼풀 Kotlin 필터 C++ 이관**: 현재 Kotlin 측에 16개 OneEuroFilter가 남아있음 (타원 12 + 눈꺼풀 4). C++ stabilizer에서 face_mesh 전체 랜드마크 스무딩 지원 시 제거 가능
+- **비동기 API 실기기 검증**: W1-04의 submitFrame/getLatestResult 비동기 경로는 아직 데모앱에서 미사용
 
 ---
 
