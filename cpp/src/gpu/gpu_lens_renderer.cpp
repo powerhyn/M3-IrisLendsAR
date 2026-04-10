@@ -626,7 +626,7 @@ ErrorCode GPULensRenderer::renderToTexture(
     auto* output_info = texture_pool_->acquireRenderTarget(width, height);
     if (!output_info) {
         LOGE("Failed to acquire render target %dx%d", width, height);
-        return IRIS_SDK_RENDER_FAILED;
+        return ErrorCode::RenderFailed;
     }
 
     // 이전 출력 텍스처 반환
