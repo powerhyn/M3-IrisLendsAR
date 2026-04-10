@@ -211,6 +211,12 @@ public:
     bool use_one_euro_filter = false;  ///< 필터 비활성화 (최대 반응 테스트)
 
     // ========================================
+    // Eye Refiner 설정
+    // ========================================
+    EyeRefinerPolicy eye_refiner_policy = EyeRefinerPolicy::Never;
+    bool eye_refiner_available = false;  ///< iris_landmark 모델 로드 여부 (V2+Refiner)
+
+    // ========================================
     // ISS-001 수정: Letterbox 전처리 파라미터
     // Face Detection 입력 이미지 전처리 시 aspect ratio 보존을 위해
     // letterbox (패딩) 방식을 사용하고, 이 정보를 저장하여
@@ -337,8 +343,16 @@ public:
             right_iris_input_buffer.resize(
                 IRIS_LANDMARK_INPUT_WIDTH * IRIS_LANDMARK_INPUT_HEIGHT *
                 IRIS_LANDMARK_INPUT_CHANNELS);
+        } else if (eye_refiner_policy != EyeRefinerPolicy::Never) {
+            // V2 + Eye Refiner: iris 입력 버퍼 필요
+            left_iris_input_buffer.resize(
+                IRIS_LANDMARK_INPUT_WIDTH * IRIS_LANDMARK_INPUT_HEIGHT *
+                IRIS_LANDMARK_INPUT_CHANNELS);
+            right_iris_input_buffer.resize(
+                IRIS_LANDMARK_INPUT_WIDTH * IRIS_LANDMARK_INPUT_HEIGHT *
+                IRIS_LANDMARK_INPUT_CHANNELS);
         } else {
-            // V2 모델에서는 iris 입력 버퍼 불필요
+            // V2, Eye Refiner 비활성화: iris 입력 버퍼 불필요
             left_iris_input_buffer.clear();
             right_iris_input_buffer.clear();
         }
@@ -721,12 +735,19 @@ public:
             iris_landmark_input_index = iris_landmark_interpreter->inputs()[0];
             iris_landmark_output_index = iris_landmark_interpreter->outputs()[0];
         } else {
-            // V2 모델은 별도 iris_landmark 모델 불필요
-            iris_landmark_model.reset();
-            iris_landmark_interpreter.reset();
-            iris_landmark_input_index = -1;
-            iris_landmark_output_index = -1;
-            std::fprintf(stderr, "[INFO] V2 model: iris_landmark model not required (embedded in face_landmark)\n");
+            // V2 + Eye Refiner: iris_landmark 모델을 2차 정밀화용으로 유지
+            if (eye_refiner_policy != EyeRefinerPolicy::Never) {
+                eye_refiner_available = true;
+                std::fprintf(stderr, "[INFO] V2 model: iris_landmark model retained for Eye Refiner (policy=%d)\n",
+                            static_cast<int>(eye_refiner_policy));
+            } else {
+                iris_landmark_model.reset();
+                iris_landmark_interpreter.reset();
+                iris_landmark_input_index = -1;
+                iris_landmark_output_index = -1;
+                eye_refiner_available = false;
+                std::fprintf(stderr, "[INFO] V2 model: iris_landmark model released (Eye Refiner disabled)\n");
+            }
         }
 
         // ========================================
@@ -1969,6 +1990,157 @@ public:
     }
 
     /**
+     * @brief Eye Refiner 실행 여부 판단
+     * @param confidence 현재 프레임 검출 신뢰도
+     * @param left_radius 왼쪽 홍채 반지름 (픽셀)
+     * @param right_radius 오른쪽 홍채 반지름 (픽셀)
+     * @return true이면 Eye Refiner 실행 필요
+     */
+    bool shouldRunEyeRefiner(float confidence, float left_radius, float right_radius) const {
+        if (!eye_refiner_available) return false;
+
+        switch (eye_refiner_policy) {
+            case EyeRefinerPolicy::Always:
+                return true;
+            case EyeRefinerPolicy::Never:
+                return false;
+            case EyeRefinerPolicy::Conditional:
+            default:
+                // 조건부: 신뢰도가 낮거나 홍채 반지름이 작으면 실행
+                if (confidence < 0.7f) return true;
+                // 홍채 반지름이 작음 = 원거리 = 정밀도 낮음
+                if (left_radius < 8.0f || right_radius < 8.0f) return true;
+                return false;
+        }
+    }
+
+    /**
+     * @brief Eye Refiner 실행: V2 coarse 홍채 좌표를 iris_landmark 모델로 정밀화
+     *
+     * 흐름:
+     * 1. V2 face landmark에서 눈 ROI 크롭 (extractEyeRegionMediaPipe 재활용)
+     * 2. iris_landmark 모델 추론 (runIrisLandmark 재활용)
+     * 3. 결과를 전체 이미지 좌표로 역변환
+     * 4. V2 coarse 좌표를 refined 좌표로 교체
+     *
+     * @param rgb_mat 원본 RGB 이미지
+     * @param face_landmarks Face Landmark V2 출력 버퍼
+     * @param left_iris 왼쪽 홍채 랜드마크 (입출력, 정밀화됨)
+     * @param right_iris 오른쪽 홍채 랜드마크 (입출력, 정밀화됨)
+     * @param left_detected 왼쪽 눈 검출 여부
+     * @param right_detected 오른쪽 눈 검출 여부
+     * @param out_quality_left 왼쪽 눈 품질 점수 출력
+     * @param out_quality_right 오른쪽 눈 품질 점수 출력
+     * @return true이면 정밀화 성공 (최소 한쪽)
+     */
+    bool runEyeRefiner(const cv::Mat& rgb_mat,
+                       const float* face_landmarks,
+                       float* left_iris, float* right_iris,
+                       bool left_detected, bool right_detected,
+                       float& out_quality_left, float& out_quality_right) {
+        if (!eye_refiner_available || !iris_landmark_interpreter) {
+            return false;
+        }
+
+        bool any_refined = false;
+        out_quality_left = 0.0f;
+        out_quality_right = 0.0f;
+
+        // 임시 버퍼 (refined 결과 저장)
+        std::vector<float> refined_landmarks(IRIS_LANDMARK_COUNT * 3);
+
+        // ========================================
+        // 왼쪽 눈 정밀화 (반전 없음)
+        // ========================================
+        if (left_detected) {
+            Rect left_eye_crop{};
+            if (extractEyeRegionMediaPipe(rgb_mat, face_landmarks,
+                                           LEFT_EYE_INNER_CORNER, LEFT_EYE_OUTER_CORNER,
+                                           IRIS_LANDMARK_INPUT_WIDTH,
+                                           left_iris_input_buffer.data(),
+                                           left_eye_crop,
+                                           false)) {
+                if (runIrisLandmark(left_iris_input_buffer.data(), refined_landmarks.data())) {
+                    // ROI 상대 좌표 → 전체 이미지 정규화 좌표로 역변환
+                    for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                        float local_x = refined_landmarks[i * 3 + 0];  // 0~1 (ROI 상대)
+                        float local_y = refined_landmarks[i * 3 + 1];
+                        float local_z = refined_landmarks[i * 3 + 2];
+
+                        // ROI 좌표 → 전체 이미지 좌표
+                        left_iris[i * 3 + 0] = left_eye_crop.x + local_x * left_eye_crop.width;
+                        left_iris[i * 3 + 1] = left_eye_crop.y + local_y * left_eye_crop.height;
+                        left_iris[i * 3 + 2] = local_z;
+                    }
+                    // 품질 점수: refined 중심이 원래 눈 영역 안에 있으면 높은 품질
+                    float cx = left_iris[0];
+                    float cy = left_iris[1];
+                    float eye_center_x = (face_landmarks[LEFT_EYE_INNER_CORNER * 3] + face_landmarks[LEFT_EYE_OUTER_CORNER * 3]) / 2.0f;
+                    float eye_center_y = (face_landmarks[LEFT_EYE_INNER_CORNER * 3 + 1] + face_landmarks[LEFT_EYE_OUTER_CORNER * 3 + 1]) / 2.0f;
+                    float dist = std::sqrt((cx - eye_center_x) * (cx - eye_center_x) + (cy - eye_center_y) * (cy - eye_center_y));
+                    float eye_width = std::sqrt(
+                        std::pow(face_landmarks[LEFT_EYE_INNER_CORNER * 3] - face_landmarks[LEFT_EYE_OUTER_CORNER * 3], 2.0f) +
+                        std::pow(face_landmarks[LEFT_EYE_INNER_CORNER * 3 + 1] - face_landmarks[LEFT_EYE_OUTER_CORNER * 3 + 1], 2.0f));
+                    out_quality_left = (eye_width > 0.001f) ? std::clamp(1.0f - (dist / (eye_width * 0.5f)), 0.0f, 1.0f) : 0.5f;
+                    any_refined = true;
+
+                    static bool refiner_left_debug = false;
+                    if (!refiner_left_debug) {
+                        std::fprintf(stderr, "[DEBUG] Eye Refiner LEFT: center=(%.4f, %.4f), quality=%.3f\n",
+                                    left_iris[0], left_iris[1], out_quality_left);
+                        refiner_left_debug = true;
+                    }
+                }
+            }
+        }
+
+        // ========================================
+        // 오른쪽 눈 정밀화 (수평 반전)
+        // ========================================
+        if (right_detected) {
+            Rect right_eye_crop{};
+            if (extractEyeRegionMediaPipe(rgb_mat, face_landmarks,
+                                           RIGHT_EYE_INNER_CORNER, RIGHT_EYE_OUTER_CORNER,
+                                           IRIS_LANDMARK_INPUT_WIDTH,
+                                           right_iris_input_buffer.data(),
+                                           right_eye_crop,
+                                           true)) {  // 오른쪽 눈: 수평 반전
+                if (runIrisLandmark(right_iris_input_buffer.data(), refined_landmarks.data())) {
+                    // 오른쪽 눈은 반전되었으므로 x좌표를 뒤집어서 역변환
+                    for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                        float local_x = 1.0f - refined_landmarks[i * 3 + 0];  // 반전 복원
+                        float local_y = refined_landmarks[i * 3 + 1];
+                        float local_z = refined_landmarks[i * 3 + 2];
+
+                        right_iris[i * 3 + 0] = right_eye_crop.x + local_x * right_eye_crop.width;
+                        right_iris[i * 3 + 1] = right_eye_crop.y + local_y * right_eye_crop.height;
+                        right_iris[i * 3 + 2] = local_z;
+                    }
+                    float cx = right_iris[0];
+                    float cy = right_iris[1];
+                    float eye_center_x = (face_landmarks[RIGHT_EYE_INNER_CORNER * 3] + face_landmarks[RIGHT_EYE_OUTER_CORNER * 3]) / 2.0f;
+                    float eye_center_y = (face_landmarks[RIGHT_EYE_INNER_CORNER * 3 + 1] + face_landmarks[RIGHT_EYE_OUTER_CORNER * 3 + 1]) / 2.0f;
+                    float dist = std::sqrt((cx - eye_center_x) * (cx - eye_center_x) + (cy - eye_center_y) * (cy - eye_center_y));
+                    float eye_width = std::sqrt(
+                        std::pow(face_landmarks[RIGHT_EYE_INNER_CORNER * 3] - face_landmarks[RIGHT_EYE_OUTER_CORNER * 3], 2.0f) +
+                        std::pow(face_landmarks[RIGHT_EYE_INNER_CORNER * 3 + 1] - face_landmarks[RIGHT_EYE_OUTER_CORNER * 3 + 1], 2.0f));
+                    out_quality_right = (eye_width > 0.001f) ? std::clamp(1.0f - (dist / (eye_width * 0.5f)), 0.0f, 1.0f) : 0.5f;
+                    any_refined = true;
+
+                    static bool refiner_right_debug = false;
+                    if (!refiner_right_debug) {
+                        std::fprintf(stderr, "[DEBUG] Eye Refiner RIGHT: center=(%.4f, %.4f), quality=%.3f\n",
+                                    right_iris[0], right_iris[1], out_quality_right);
+                        refiner_right_debug = true;
+                    }
+                }
+            }
+        }
+
+        return any_refined;
+    }
+
+    /**
      * @brief Iris Landmark 실행
      * @param input_data 전처리된 입력 데이터 (64x64 RGB float)
      * @param landmarks 출력 랜드마크 (5 * 3 = 15 floats, 항상 인덱스 0-4에 저장)
@@ -2626,6 +2798,63 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
             }
         }
 
+        // =========================================================
+        // Eye Refiner: 2차 홍채 정밀화 (V2 + iris_landmark)
+        // =========================================================
+        float quality_left = 0.0f, quality_right = 0.0f;
+        bool refiner_used = false;
+        if (left_detected || right_detected) {
+            // 임시 반지름 계산 (Eye Refiner 실행 판단용)
+            float temp_left_radius = 0.0f, temp_right_radius = 0.0f;
+            if (left_detected) {
+                IrisLandmark temp_left[5];
+                for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                    temp_left[i].x = impl_->left_iris_landmarks_buffer[i * 3 + 0];
+                    temp_left[i].y = impl_->left_iris_landmarks_buffer[i * 3 + 1];
+                }
+                temp_left_radius = impl_->calculateIrisRadius(temp_left, width, height);
+            }
+            if (right_detected) {
+                IrisLandmark temp_right[5];
+                for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                    temp_right[i].x = impl_->right_iris_landmarks_buffer[i * 3 + 0];
+                    temp_right[i].y = impl_->right_iris_landmarks_buffer[i * 3 + 1];
+                }
+                temp_right_radius = impl_->calculateIrisRadius(temp_right, width, height);
+            }
+
+            if (impl_->shouldRunEyeRefiner(result.confidence, temp_left_radius, temp_right_radius)) {
+                refiner_used = impl_->runEyeRefiner(
+                    rgb_mat,
+                    impl_->face_landmarks_buffer.data(),
+                    impl_->left_iris_landmarks_buffer.data(),
+                    impl_->right_iris_landmarks_buffer.data(),
+                    left_detected, right_detected,
+                    quality_left, quality_right
+                );
+
+                // Refiner 성공 시 face_landmarks_buffer에도 반영
+                if (refiner_used) {
+                    if (left_detected) {
+                        for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                            int idx = V2_LEFT_IRIS_INDICES[i];
+                            impl_->face_landmarks_buffer[idx * 3 + 0] = impl_->left_iris_landmarks_buffer[i * 3 + 0];
+                            impl_->face_landmarks_buffer[idx * 3 + 1] = impl_->left_iris_landmarks_buffer[i * 3 + 1];
+                            impl_->face_landmarks_buffer[idx * 3 + 2] = impl_->left_iris_landmarks_buffer[i * 3 + 2];
+                        }
+                    }
+                    if (right_detected) {
+                        for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
+                            int idx = V2_RIGHT_IRIS_INDICES[i];
+                            impl_->face_landmarks_buffer[idx * 3 + 0] = impl_->right_iris_landmarks_buffer[i * 3 + 0];
+                            impl_->face_landmarks_buffer[idx * 3 + 1] = impl_->right_iris_landmarks_buffer[i * 3 + 1];
+                            impl_->face_landmarks_buffer[idx * 3 + 2] = impl_->right_iris_landmarks_buffer[i * 3 + 2];
+                        }
+                    }
+                }
+            }
+        }
+
         // 왼쪽 홍채 결과 복사
         if (left_detected) {
             for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
@@ -2665,6 +2894,13 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                 v2_right_debug = true;
             }
         }
+
+        // Eye Refiner 메타데이터 설정
+        result.iris_quality_left = quality_left;
+        result.iris_quality_right = quality_right;
+        result.eyelid_ratio_left = 0.0f;   // W3에서 구현 예정
+        result.eyelid_ratio_right = 0.0f;
+        result.eye_refiner_used = refiner_used;
     } else {
         // =========================================================
         // V1 모델: 별도 iris_landmark 모델 사용
@@ -3063,6 +3299,26 @@ int MediaPipeDetector::getModelVersion() const {
     return impl_->model_version;
 #else
     return 0;
+#endif
+}
+
+void MediaPipeDetector::setEyeRefinerPolicy(EyeRefinerPolicy policy) {
+#if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_OPENCV)
+    if (impl_->initialized) {
+        std::fprintf(stderr, "[IrisSDK] Warning: setEyeRefinerPolicy() called after initialization, ignored\n");
+        return;
+    }
+    impl_->eye_refiner_policy = policy;
+#else
+    (void)policy;
+#endif
+}
+
+EyeRefinerPolicy MediaPipeDetector::getEyeRefinerPolicy() const {
+#if defined(IRIS_SDK_HAS_TFLITE) && defined(IRIS_SDK_HAS_OPENCV)
+    return impl_->eye_refiner_policy;
+#else
+    return EyeRefinerPolicy::Never;
 #endif
 }
 

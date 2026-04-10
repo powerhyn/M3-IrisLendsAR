@@ -88,6 +88,16 @@ enum class DetectorType : int {
     Hybrid = 3      ///< MediaPipe + EyeOnly 하이브리드
 };
 
+/**
+ * @brief Eye Refiner 실행 정책
+ * 2차 눈 정밀화 모델의 실행 조건
+ */
+enum class EyeRefinerPolicy : int {
+    Always = 0,       ///< 항상 실행 (HQ 모드: 사진 촬영, 녹화)
+    Conditional = 1,  ///< 조건부 실행 (기본값: confidence < 0.7 또는 iris_radius 작을 때)
+    Never = 2         ///< 비활성화 (저사양 기기)
+};
+
 // ============================================================
 // 기본 데이터 구조체
 // ============================================================
@@ -149,6 +159,13 @@ struct IrisResult {
     int64_t timestamp_ms;   ///< 타임스탬프 (밀리초)
     int32_t frame_width;    ///< 원본 프레임 너비
     int32_t frame_height;   ///< 원본 프레임 높이
+
+    // Eye Refiner 메타데이터
+    float iris_quality_left;    ///< 왼쪽 홍채 품질 점수 (0.0~1.0, Eye Refiner 사용시)
+    float iris_quality_right;   ///< 오른쪽 홍채 품질 점수 (0.0~1.0, Eye Refiner 사용시)
+    float eyelid_ratio_left;    ///< 왼쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
+    float eyelid_ratio_right;   ///< 오른쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
+    bool eye_refiner_used;      ///< Eye Refiner 사용 여부 (디버그용)
 };
 
 /**

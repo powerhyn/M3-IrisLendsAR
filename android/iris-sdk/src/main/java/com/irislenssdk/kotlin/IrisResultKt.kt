@@ -117,7 +117,12 @@ data class IrisResultKt(
     val faceRotation: FaceRotation,
     val frameWidth: Int,
     val frameHeight: Int,
-    val timestampMs: Long
+    val timestampMs: Long,
+    val irisQualityLeft: Float = 0f,
+    val irisQualityRight: Float = 0f,
+    val eyelidRatioLeft: Float = 0f,
+    val eyelidRatioRight: Float = 0f,
+    val eyeRefinerUsed: Boolean = false
 ) {
     /**
      * 양쪽 눈 모두 검출되었는지 확인합니다.
@@ -174,7 +179,12 @@ data class IrisResultKt(
             faceRotation = FaceRotation(0f, 0f, 0f),
             frameWidth = 0,
             frameHeight = 0,
-            timestampMs = 0
+            timestampMs = 0,
+            irisQualityLeft = 0f,
+            irisQualityRight = 0f,
+            eyelidRatioLeft = 0f,
+            eyelidRatioRight = 0f,
+            eyeRefinerUsed = false
         )
 
         /**
@@ -218,7 +228,12 @@ data class IrisResultKt(
                 ),
                 frameWidth = java.frameWidth,
                 frameHeight = java.frameHeight,
-                timestampMs = java.timestampMs
+                timestampMs = java.timestampMs,
+                irisQualityLeft = java.irisQualityLeft,
+                irisQualityRight = java.irisQualityRight,
+                eyelidRatioLeft = java.eyelidRatioLeft,
+                eyelidRatioRight = java.eyelidRatioRight,
+                eyeRefinerUsed = java.eyeRefinerUsed
             )
         }
     }

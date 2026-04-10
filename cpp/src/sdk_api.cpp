@@ -227,6 +227,13 @@ void convert_to_c_iris_result(const iris_sdk::IrisResult& cpp_result, IrisResult
     c_result->timestamp_ms = cpp_result.timestamp_ms;
     c_result->frame_width = cpp_result.frame_width;
     c_result->frame_height = cpp_result.frame_height;
+
+    // Eye Refiner 메타데이터
+    c_result->iris_quality_left = cpp_result.iris_quality_left;
+    c_result->iris_quality_right = cpp_result.iris_quality_right;
+    c_result->eyelid_ratio_left = cpp_result.eyelid_ratio_left;
+    c_result->eyelid_ratio_right = cpp_result.eyelid_ratio_right;
+    c_result->eye_refiner_used = cpp_result.eye_refiner_used;
 }
 
 /**
@@ -284,6 +291,13 @@ iris_sdk::IrisResult convert_to_cpp_iris_result(const IrisResult* c_result) {
     cpp_result.timestamp_ms = c_result->timestamp_ms;
     cpp_result.frame_width = c_result->frame_width;
     cpp_result.frame_height = c_result->frame_height;
+
+    // Eye Refiner 메타데이터
+    cpp_result.iris_quality_left = c_result->iris_quality_left;
+    cpp_result.iris_quality_right = c_result->iris_quality_right;
+    cpp_result.eyelid_ratio_left = c_result->eyelid_ratio_left;
+    cpp_result.eyelid_ratio_right = c_result->eyelid_ratio_right;
+    cpp_result.eye_refiner_used = c_result->eye_refiner_used;
 
     return cpp_result;
 }
@@ -1166,6 +1180,13 @@ IrisSdkError iris_sdk_render_with_result(
         return IRIS_SDK_RENDER_FAILED;
     }
 
+    return IRIS_SDK_OK;
+}
+
+IrisSdkError iris_sdk_set_eye_refiner_policy(IrisEyeRefinerPolicy policy) {
+    // This needs to access the SDK manager's detector
+    // For now, store and apply on next init
+    // TODO: Implement via SDKManager
     return IRIS_SDK_OK;
 }
 

@@ -172,6 +172,19 @@ public:
     void setTrackingEnabled(bool enable);
 
     /**
+     * @brief Eye Refiner 정책 설정
+     *
+     * V2 모델 사용 시 iris_landmark 모델을 2차 정밀화에 활용.
+     * 기본값: Conditional (confidence < 0.7 또는 iris_radius 작을 때 실행)
+     */
+    void setEyeRefinerPolicy(EyeRefinerPolicy policy);
+
+    /**
+     * @brief Eye Refiner 정책 반환
+     */
+    EyeRefinerPolicy getEyeRefinerPolicy() const;
+
+    /**
      * @brief 추적 캐시 초기화
      *
      * 이전 프레임 결과를 무효화하고 다음 detect() 호출에서

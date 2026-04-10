@@ -70,6 +70,13 @@ bool JniCache::init(JNIEnv* env) {
     irisResult_faceMeshValid = env->GetFieldID(irisResultClass, "faceMeshValid", "Z");
     irisResult_faceMesh = env->GetFieldID(irisResultClass, "faceMesh", "[F");
 
+    // Eye Refiner 메타데이터 필드 ID 캐시
+    irisResult_irisQualityLeft = env->GetFieldID(irisResultClass, "irisQualityLeft", "F");
+    irisResult_irisQualityRight = env->GetFieldID(irisResultClass, "irisQualityRight", "F");
+    irisResult_eyelidRatioLeft = env->GetFieldID(irisResultClass, "eyelidRatioLeft", "F");
+    irisResult_eyelidRatioRight = env->GetFieldID(irisResultClass, "eyelidRatioRight", "F");
+    irisResult_eyeRefinerUsed = env->GetFieldID(irisResultClass, "eyeRefinerUsed", "Z");
+
     // 필드 ID 검증
     if (!irisResult_detected || !irisResult_leftDetected || !irisResult_rightDetected ||
         !irisResult_confidence || !irisResult_leftIrisX || !irisResult_leftIrisY ||
@@ -78,7 +85,10 @@ bool JniCache::init(JNIEnv* env) {
         !irisResult_faceRectX || !irisResult_faceRectY || !irisResult_faceRectWidth ||
         !irisResult_faceRectHeight || !irisResult_facePitch || !irisResult_faceYaw ||
         !irisResult_faceRoll || !irisResult_timestampMs || !irisResult_frameWidth ||
-        !irisResult_frameHeight || !irisResult_faceMeshValid || !irisResult_faceMesh) {
+        !irisResult_frameHeight || !irisResult_faceMeshValid || !irisResult_faceMesh ||
+        !irisResult_irisQualityLeft || !irisResult_irisQualityRight ||
+        !irisResult_eyelidRatioLeft || !irisResult_eyelidRatioRight ||
+        !irisResult_eyeRefinerUsed) {
         LOGE("Failed to get IrisResult field IDs");
         return false;
     }
@@ -252,6 +262,13 @@ bool copyResultToJava(JNIEnv* env, const IrisResult& src, jobject dest) {
     env->SetIntField(dest, g_jniCache.irisResult_frameWidth, src.frame_width);
     env->SetIntField(dest, g_jniCache.irisResult_frameHeight, src.frame_height);
 
+    // Eye Refiner 메타데이터
+    env->SetFloatField(dest, g_jniCache.irisResult_irisQualityLeft, src.iris_quality_left);
+    env->SetFloatField(dest, g_jniCache.irisResult_irisQualityRight, src.iris_quality_right);
+    env->SetFloatField(dest, g_jniCache.irisResult_eyelidRatioLeft, src.eyelid_ratio_left);
+    env->SetFloatField(dest, g_jniCache.irisResult_eyelidRatioRight, src.eyelid_ratio_right);
+    env->SetBooleanField(dest, g_jniCache.irisResult_eyeRefinerUsed, src.eye_refiner_used);
+
     // Face Mesh 데이터 복사
     env->SetBooleanField(dest, g_jniCache.irisResult_faceMeshValid, src.face_mesh_valid);
 
@@ -324,6 +341,13 @@ bool copyResultFromJava(JNIEnv* env, jobject src, IrisResult& dest) {
     dest.timestamp_ms = env->GetLongField(src, g_jniCache.irisResult_timestampMs);
     dest.frame_width = env->GetIntField(src, g_jniCache.irisResult_frameWidth);
     dest.frame_height = env->GetIntField(src, g_jniCache.irisResult_frameHeight);
+
+    // Eye Refiner 메타데이터
+    dest.iris_quality_left = env->GetFloatField(src, g_jniCache.irisResult_irisQualityLeft);
+    dest.iris_quality_right = env->GetFloatField(src, g_jniCache.irisResult_irisQualityRight);
+    dest.eyelid_ratio_left = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioLeft);
+    dest.eyelid_ratio_right = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioRight);
+    dest.eye_refiner_used = env->GetBooleanField(src, g_jniCache.irisResult_eyeRefinerUsed);
 
     // Face Mesh
     dest.face_mesh_valid = env->GetBooleanField(src, g_jniCache.irisResult_faceMeshValid);

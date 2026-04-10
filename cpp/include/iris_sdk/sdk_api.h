@@ -96,6 +96,21 @@ typedef enum IrisFrameFormat {
 } IrisFrameFormat;
 
 // ============================================================================
+// Eye Refiner 정책
+// ============================================================================
+
+/**
+ * @brief Eye Refiner 실행 정책
+ *
+ * 2차 눈 정밀화 모델(iris_landmark)의 실행 조건을 지정합니다.
+ */
+typedef enum IrisEyeRefinerPolicy {
+    IRIS_EYE_REFINER_ALWAYS = 0,        /**< 항상 실행 (HQ 모드) */
+    IRIS_EYE_REFINER_CONDITIONAL = 1,   /**< 조건부 실행 (기본값) */
+    IRIS_EYE_REFINER_NEVER = 2          /**< 비활성화 (저사양 기기) */
+} IrisEyeRefinerPolicy;
+
+// ============================================================================
 // 블렌드 모드
 // ============================================================================
 
@@ -180,6 +195,13 @@ typedef struct IrisResult {
     int64_t timestamp_ms;       /**< 타임스탬프 (밀리초) */
     int32_t frame_width;        /**< 원본 프레임 너비 */
     int32_t frame_height;       /**< 원본 프레임 높이 */
+
+    /* Eye Refiner 메타데이터 */
+    float iris_quality_left;    /**< 왼쪽 홍채 품질 점수 (0.0~1.0) */
+    float iris_quality_right;   /**< 오른쪽 홍채 품질 점수 (0.0~1.0) */
+    float eyelid_ratio_left;    /**< 왼쪽 눈꺼풀 가림 비율 (0.0~1.0) */
+    float eyelid_ratio_right;   /**< 오른쪽 눈꺼풀 가림 비율 (0.0~1.0) */
+    bool eye_refiner_used;      /**< Eye Refiner 사용 여부 */
 } IrisResult;
 
 /**
@@ -528,6 +550,21 @@ IRIS_SDK_EXPORT void iris_sdk_set_use_inference_thread(bool enable);
  * @return true면 InferenceThread 사용, false면 직접 호출
  */
 IRIS_SDK_EXPORT bool iris_sdk_is_using_inference_thread(void);
+
+// ============================================================================
+// Eye Refiner 설정
+// ============================================================================
+
+/**
+ * @brief Eye Refiner 정책 설정
+ *
+ * V2 모델 사용 시 iris_landmark 모델을 2차 홍채 정밀화에 활용하는 정책을 설정합니다.
+ * 반드시 iris_sdk_init() 호출 전에 설정해야 합니다.
+ *
+ * @param policy Eye Refiner 실행 정책
+ * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_eye_refiner_policy(IrisEyeRefinerPolicy policy);
 
 // ============================================================================
 // 정보 함수

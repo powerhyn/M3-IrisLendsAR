@@ -183,6 +183,40 @@ public class IrisResult {
     public float[] faceMesh;
 
     // ========================================================================
+    // Eye Refiner 메타데이터
+    // ========================================================================
+
+    /**
+     * 왼쪽 홍채 품질 점수 (0.0 ~ 1.0).
+     * Eye Refiner 사용 시에만 유효합니다.
+     */
+    public float irisQualityLeft;
+
+    /**
+     * 오른쪽 홍채 품질 점수 (0.0 ~ 1.0).
+     * Eye Refiner 사용 시에만 유효합니다.
+     */
+    public float irisQualityRight;
+
+    /**
+     * 왼쪽 눈꺼풀 가림 비율 (0.0 ~ 1.0).
+     * 향후 구현 예정 (W3).
+     */
+    public float eyelidRatioLeft;
+
+    /**
+     * 오른쪽 눈꺼풀 가림 비율 (0.0 ~ 1.0).
+     * 향후 구현 예정 (W3).
+     */
+    public float eyelidRatioRight;
+
+    /**
+     * Eye Refiner 사용 여부.
+     * true이면 2차 정밀화가 적용된 결과입니다.
+     */
+    public boolean eyeRefinerUsed;
+
+    // ========================================================================
     // 프레임 정보
     // ========================================================================
 
@@ -244,6 +278,12 @@ public class IrisResult {
         facePitch = 0.0f;
         faceYaw = 0.0f;
         faceRoll = 0.0f;
+
+        irisQualityLeft = 0.0f;
+        irisQualityRight = 0.0f;
+        eyelidRatioLeft = 0.0f;
+        eyelidRatioRight = 0.0f;
+        eyeRefinerUsed = false;
 
         faceMeshValid = false;
         if (faceMesh == null) {
@@ -310,6 +350,12 @@ public class IrisResult {
         this.faceYaw = src.faceYaw;
         this.faceRoll = src.faceRoll;
 
+        this.irisQualityLeft = src.irisQualityLeft;
+        this.irisQualityRight = src.irisQualityRight;
+        this.eyelidRatioLeft = src.eyelidRatioLeft;
+        this.eyelidRatioRight = src.eyelidRatioRight;
+        this.eyeRefinerUsed = src.eyeRefinerUsed;
+
         this.faceMeshValid = src.faceMeshValid;
         if (src.faceMesh != null) {
             if (this.faceMesh == null || this.faceMesh.length != src.faceMesh.length) {
@@ -360,6 +406,8 @@ public class IrisResult {
                 faceRectWidth + ", " + faceRectHeight + ")" +
                 ", faceRotation=(pitch=" + facePitch + ", yaw=" + faceYaw +
                 ", roll=" + faceRoll + ")" +
+                ", eyeRefiner=" + eyeRefinerUsed +
+                ", irisQuality=(" + irisQualityLeft + ", " + irisQualityRight + ")" +
                 ", frame=" + frameWidth + "x" + frameHeight +
                 ", timestamp=" + timestampMs +
                 '}';

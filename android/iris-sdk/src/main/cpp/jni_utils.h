@@ -344,6 +344,13 @@ struct JniCache {
     jfieldID irisResult_faceMeshValid = nullptr;
     jfieldID irisResult_faceMesh = nullptr;
 
+    // Eye Refiner 메타데이터
+    jfieldID irisResult_irisQualityLeft = nullptr;
+    jfieldID irisResult_irisQualityRight = nullptr;
+    jfieldID irisResult_eyelidRatioLeft = nullptr;
+    jfieldID irisResult_eyelidRatioRight = nullptr;
+    jfieldID irisResult_eyeRefinerUsed = nullptr;
+
     // LensConfig 클래스
     jclass lensConfigClass = nullptr;
     jfieldID lensConfig_opacity = nullptr;

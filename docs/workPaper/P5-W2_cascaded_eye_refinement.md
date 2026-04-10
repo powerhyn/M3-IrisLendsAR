@@ -3,7 +3,7 @@
 ## 작업 개요
 - **Phase**: P5 (경쟁사 대비 품질 갭 해소)
 - **기간**: P5-W1 완료 후
-- **상태**: ⏳ 대기
+- **상태**: 🔄 구현 완료 (실기기 검증 대기)
 - **선행 조건**: P5-W1 (스무딩이 동작해야 정밀화 효과 체감 가능)
 - **근거**: Perfect Corp의 `second_step_eye_model` (228KB) 방식. Codex 권장 우선순위 2위.
 
@@ -30,7 +30,7 @@
 
 ## W2-01: Eye Refiner 모델 선정 + TFLite 변환
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료
 
 ### 작업 내용
 
@@ -72,7 +72,7 @@
 
 ## W2-02: Eye Refiner 추론 파이프라인 통합
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료
 
 ### 작업 내용
 
@@ -124,7 +124,7 @@
 
 ## W2-03: 조건부 실행 정책
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료
 
 ### 배경
 
@@ -170,7 +170,7 @@ Codex 권장: "yes to a second-step eye model, no to making it an expensive alwa
 
 ## W2-04: V2 Heuristic 대비 정밀도 벤치마크
 
-### 상태: ⏳ 대기
+### 상태: ⏳ 실기기 검증 시 수행
 
 ### 작업 내용
 
@@ -204,3 +204,45 @@ Codex 권장: "yes to a second-step eye model, no to making it an expensive alwa
 - **반지름 안정성**: heuristic 보정 의존 제거
 - **렌즈 피팅 품질**: 위치 오류가 가장 눈에 띄는 결함이므로 체감 효과 큼
 - **추가 지연**: 5ms 이내 (조건부 실행 시 평균 2~3ms)
+
+---
+
+## 실행 내역 (2026-04-10)
+
+### W2-01: 결정 사항
+- **V1 iris_landmark.tflite 재활용** 선택 (2.5MB, 이미 V1에 포함)
+- V2 초기화 시 `iris_landmark_model.reset()` 대신 조건부 유지
+- `EyeRefinerPolicy` enum으로 ALWAYS/CONDITIONAL/NEVER 제어
+
+### W2-02: 구현 완료
+- `EyeRefinerPolicy` enum 추가 (`types.h`)
+- `IrisResult`에 5개 필드 추가: `iris_quality_left/right`, `eyelid_ratio_left/right`, `eye_refiner_used`
+- V2 검출 흐름에 Eye Refiner 삽입 (`mediapipe_detector.cpp`)
+  - `shouldRunEyeRefiner()`: 조건부 실행 판단 (confidence < 0.7 or radius < 8px)
+  - `runEyeRefiner()`: extractEyeRegionMediaPipe + runIrisLandmark 재활용
+  - 좌우 눈 각각 독립 정밀화 + 품질 점수 산출
+- 전 레이어 반영: C API (`sdk_api.h/cpp`), JNI (`iris_jni.cpp`, `jni_utils.h`), Java (`IrisResult.java`), Kotlin (`IrisResultKt.kt`)
+
+### W2-03: 구현 완료
+- `EyeRefinerPolicy::Conditional` 기본값
+- 실행 조건: confidence < 0.7f || iris_radius < 8.0px
+- pose 기반 gating은 face_rotation 구현 이후 추가 예정
+
+### W2-04: 빌드 검증
+- C++ 컴파일 성공 (cmake-build-debug)
+- TFLite 링커 에러는 기존 이슈 (test_mediapipe_detector 타겟, 우리 코드 무관)
+- 벤치마크 테스트는 실기기에서 수행 예정
+
+### 변경 파일 목록
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `cpp/include/iris_sdk/types.h` | EyeRefinerPolicy enum + IrisResult 5개 필드 |
+| `cpp/include/iris_sdk/sdk_api.h` | IrisEyeRefinerPolicy C enum + IrisResult C 필드 + API 함수 |
+| `cpp/include/iris_sdk/mediapipe_detector.h` | setEyeRefinerPolicy/getEyeRefinerPolicy |
+| `cpp/src/mediapipe_detector.cpp` | Eye Refiner 파이프라인 전체 구현 |
+| `cpp/src/sdk_api.cpp` | C↔C++ 변환에 신규 필드 반영 |
+| `android/.../jni_utils.h` | JniCache Eye Refiner 필드 ID |
+| `android/.../iris_jni.cpp` | JNI 캐시 초기화 + 양방향 복사 |
+| `android/.../IrisResult.java` | Java 필드 5개 + reset/copyFrom/toString |
+| `android/.../IrisResultKt.kt` | Kotlin data class + fromJava 변환 |
