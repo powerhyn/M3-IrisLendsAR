@@ -68,6 +68,7 @@ set(IRIS_SDK_SOURCES
     src/gpu/shader_manager.cpp
     src/gpu/texture_pool.cpp
     src/gpu/gpu_beauty_backend.cpp
+    src/gpu/gpu_lens_renderer.cpp
     src/gpu/shader_sources.cpp
     src/gpu/gpu_profiler.cpp
     # Warp module

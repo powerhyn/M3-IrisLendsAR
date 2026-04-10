@@ -194,6 +194,12 @@ extern const char* FREQ_SEP_COMPOSITE_FRAGMENT;
 /// Luminance Sharpen 셰이더 (FreqSep 후 선명도 복구)
 extern const char* LUMINANCE_SHARPEN_FRAGMENT;
 
+/// 렌즈 오버레이 버텍스 셰이더
+extern const char* LENS_OVERLAY_VERTEX;
+
+/// 렌즈 오버레이 프래그먼트 셰이더 (8종 블렌드, 타원 마스크, Sclera Protection)
+extern const char* LENS_OVERLAY_FRAGMENT;
+
 } // namespace shaders
 
 } // namespace iris_sdk
