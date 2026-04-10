@@ -2006,4 +2006,158 @@ Java_com_irislenssdk_IrisLensSDK_nativeDestroyStabilizer(
     }
 }
 
+// ============================================================================
+// GPU 렌즈 렌더링 JNI
+// ============================================================================
+
+/**
+ * Java: native int nativeInitGpuLens();
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeInitGpuLens(
+    JNIEnv* /* env */, jclass /* clazz */)
+{
+    LOGD("nativeInitGpuLens called");
+    IrisSdkError result = iris_sdk_init_gpu_lens();
+    if (result == IRIS_SDK_OK) {
+        LOGI("GPU lens renderer initialized successfully");
+    } else {
+        LOGW("GPU lens renderer initialization failed: %d", result);
+    }
+    return static_cast<jint>(result);
+}
+
+/**
+ * Java: native void nativeReleaseGpuLens();
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeReleaseGpuLens(
+    JNIEnv* /* env */, jclass /* clazz */)
+{
+    LOGD("nativeReleaseGpuLens called");
+    iris_sdk_release_gpu_lens();
+    LOGI("GPU lens renderer released");
+}
+
+/**
+ * Java: native boolean nativeIsGpuLensInitialized();
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeIsGpuLensInitialized(
+    JNIEnv* /* env */, jclass /* clazz */)
+{
+    return iris_sdk_is_gpu_lens_initialized() ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * Java: native int nativeLoadLensTexture(byte[] data, int width, int height);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeLoadLensTexture(
+    JNIEnv* env, jclass /* clazz */,
+    jbyteArray data, jint width, jint height)
+{
+    if (!data) {
+        LOGE("nativeLoadLensTexture: data is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    ScopedByteArray arr(env, data, JNI_ABORT);
+    if (!arr.valid()) {
+        LOGE("nativeLoadLensTexture: failed to get byte array");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    return static_cast<jint>(iris_sdk_load_lens_texture(arr.data(), width, height));
+}
+
+/**
+ * Java: native void nativeUnloadLensTexture();
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeUnloadLensTexture(
+    JNIEnv* /* env */, jclass /* clazz */)
+{
+    iris_sdk_unload_lens_texture();
+}
+
+/**
+ * Java: native int nativeRenderLensTexture(int inputTexture, int width, int height,
+ *                                           long detectionPtr, LensConfig config);
+ * @return 출력 텍스처 ID (0이면 실패)
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeRenderLensTexture(
+    JNIEnv* env, jclass /* clazz */,
+    jint inputTexture, jint width, jint height,
+    jlong detectionPtr, jobject configObj)
+{
+    LOGV("nativeRenderLensTexture: texture=%d, %dx%d", inputTexture, width, height);
+
+    if (width <= 0 || height <= 0) {
+        LOGE("nativeRenderLensTexture: invalid dimensions %dx%d", width, height);
+        return 0;
+    }
+
+    // 검출 결과 (포인터)
+    const IrisResult* detection = nullptr;
+    if (detectionPtr != 0) {
+        detection = reinterpret_cast<const IrisResult*>(detectionPtr);
+    }
+
+    // LensConfig 변환
+    IrisLensConfig config = {};
+    if (configObj) {
+        if (!copyConfigFromJava(env, configObj, config)) {
+            LOGE("nativeRenderLensTexture: failed to copy LensConfig from Java");
+            return 0;
+        }
+    } else {
+        // 기본값
+        config.opacity = 0.7f;
+        config.scale = 1.0f;
+        config.edge_feather = 0.1f;
+        config.apply_left = true;
+        config.apply_right = true;
+        config.blend_mode = IRIS_BLEND_NORMAL;
+    }
+
+    uint32_t output_texture = 0;
+    IrisSdkError err = iris_sdk_render_lens_texture(
+        static_cast<uint32_t>(inputTexture),
+        &output_texture,
+        width, height,
+        detection,
+        &config);
+
+    if (err != IRIS_SDK_OK) {
+        LOGW("nativeRenderLensTexture failed: %d", err);
+        return 0;
+    }
+
+    return static_cast<jint>(output_texture);
+}
+
+/**
+ * Java: native void nativeSetLensScleraProtect(boolean enabled);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensScleraProtect(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jboolean enabled)
+{
+    iris_sdk_set_lens_sclera_protect(enabled ? 1 : 0);
+}
+
+/**
+ * Java: native void nativeSetLensEllipseMask(boolean enabled);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensEllipseMask(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jboolean enabled)
+{
+    iris_sdk_set_lens_ellipse_mask(enabled ? 1 : 0);
+}
+
 }  // extern "C"

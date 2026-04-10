@@ -874,6 +874,107 @@ public final class IrisLensSDK {
     }
 
     // ========================================================================
+    // GPU 렌즈 렌더링
+    // ========================================================================
+
+    /**
+     * GPU 렌즈 렌더러를 초기화합니다.
+     *
+     * <p>GL 스레드에서 호출해야 합니다.</p>
+     *
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int initGpuLens() {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeInitGpuLens();
+    }
+
+    /**
+     * GPU 렌즈 렌더러를 해제합니다.
+     */
+    public static void releaseGpuLens() {
+        if (sLibraryLoaded) {
+            nativeReleaseGpuLens();
+        }
+    }
+
+    /**
+     * GPU 렌즈 렌더러 초기화 여부를 확인합니다.
+     */
+    public static boolean isGpuLensInitialized() {
+        if (!sLibraryLoaded) {
+            return false;
+        }
+        return nativeIsGpuLensInitialized();
+    }
+
+    /**
+     * 렌즈 텍스처를 로드합니다 (RGBA 바이트 배열).
+     *
+     * @param rgbaData RGBA 픽셀 데이터
+     * @param width 너비
+     * @param height 높이
+     * @return 에러 코드
+     */
+    public static int loadLensTexture(byte[] rgbaData, int width, int height) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeLoadLensTexture(rgbaData, width, height);
+    }
+
+    /**
+     * 렌즈 텍스처를 해제합니다.
+     */
+    public static void unloadLensTexture() {
+        if (sLibraryLoaded) {
+            nativeUnloadLensTexture();
+        }
+    }
+
+    /**
+     * GPU 렌즈 렌더링을 수행합니다.
+     *
+     * @param inputTexture 입력 카메라 프레임 텍스처 ID
+     * @param width 프레임 너비
+     * @param height 프레임 높이
+     * @param detectionHandle 검출 결과 네이티브 포인터 (0이면 null)
+     * @param config 렌즈 설정
+     * @return 출력 텍스처 ID (0이면 실패)
+     */
+    public static int renderLensTexture(int inputTexture, int width, int height,
+                                         long detectionHandle, LensConfig config) {
+        if (!sLibraryLoaded) {
+            return 0;
+        }
+        return nativeRenderLensTexture(inputTexture, width, height, detectionHandle, config);
+    }
+
+    /**
+     * GPU 렌즈 Sclera Protection 설정.
+     * GL 스레드에서 호출.
+     * @param enabled true=on, false=off
+     */
+    public static void setLensScleraProtect(boolean enabled) {
+        if (sLibraryLoaded) {
+            nativeSetLensScleraProtect(enabled);
+        }
+    }
+
+    /**
+     * GPU 렌즈 타원 마스크 설정.
+     * GL 스레드에서 호출.
+     * @param enabled true=on, false=off
+     */
+    public static void setLensEllipseMask(boolean enabled) {
+        if (sLibraryLoaded) {
+            nativeSetLensEllipseMask(enabled);
+        }
+    }
+
+    // ========================================================================
     // Detection Slot API (더블 버퍼, Lock-free)
     // ========================================================================
 
@@ -1205,6 +1306,21 @@ public final class IrisLensSDK {
      * 텍스처가 SDK 관리인지 확인
      */
     private static native boolean nativeIsTextureManaged(int texture);
+
+    // ========================================================================
+    // GPU 렌즈 렌더링 Native Methods
+    // ========================================================================
+
+    private static native int nativeInitGpuLens();
+    private static native void nativeReleaseGpuLens();
+    private static native boolean nativeIsGpuLensInitialized();
+    private static native int nativeLoadLensTexture(byte[] data, int width, int height);
+    private static native void nativeUnloadLensTexture();
+    private static native int nativeRenderLensTexture(
+            int inputTexture, int width, int height,
+            long detectionPtr, LensConfig config);
+    private static native void nativeSetLensScleraProtect(boolean enabled);
+    private static native void nativeSetLensEllipseMask(boolean enabled);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods

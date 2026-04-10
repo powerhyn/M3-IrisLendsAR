@@ -1053,6 +1053,12 @@ void main() {
             blended = blendNormal(result, lensSample.rgb);
         }
 
+        // Limbal Darkening: 홍채 외곽에 자연스러운 어두운 고리
+        // 실제 눈의 림발 링(홍채-공막 경계)을 재현하여 렌즈 깊이감 부여
+        float limbalDist = dist / max(scaledRadius, 1e-5);
+        float limbal = smoothstep(0.7, 1.0, limbalDist);
+        blended = mix(blended, blended * 0.4, limbal * 0.8);
+
         // Contact Shadow 적용
         blended *= shadow;
 
