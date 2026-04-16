@@ -992,6 +992,25 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
     }
 
+    // 림발 다크닝: 홍채 외곽(r≈0.7~1.0)에 어두운 고리
+    // 현재 비활성 — 대부분의 렌즈 텍스처에 이미 림발이 포함되어 이중 적용 방지
+    const bool LIMBAL_ENABLED = false;
+    if (LIMBAL_ENABLED) {
+        float limbalDist = dist;
+        float limbal = smoothstep(0.7, 1.0, limbalDist);
+        blended = mix(blended, blended * 0.4, limbal * 0.8);
+    }
+
+    // [W3-03] 각막 하이라이트 (Corneal Specular) — 주석 보존
+    // mipmap + dynamic branching 조합에서 GL_INVALID_VALUE 발생 (Adreno)
+    // 원인 해결 후 블렌드 모드별 선택적 적용 검토
+    //
+    // vec2 highlightOffset = vec2(-0.15, -0.2);
+    // vec2 lensLocal = (lensCoord - 0.5) * 2.0;
+    // float highlightDist = distance(lensLocal, highlightOffset);
+    // float highlight = smoothstep(0.12, 0.0, highlightDist);
+    // blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
+
     if (uContactShadow == 1) {
         float eyeOpening = abs(maxY - minY);
         float shadow = calcContactShadow(vTexCoord.y, minY, eyelidFeather, eyeOpening);
