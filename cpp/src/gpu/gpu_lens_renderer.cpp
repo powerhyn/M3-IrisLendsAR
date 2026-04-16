@@ -238,13 +238,28 @@ bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height
     glGenTextures(1, &lens_texture_);
     glBindTexture(GL_TEXTURE_2D, lens_texture_);
 
+    while (glGetError() != GL_NO_ERROR) {} // 이전 누적 에러 클리어
+
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, data);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    // Mipmap 생성 — 매 프레임 다른 배율로 축소 샘플링되어 발생하는 shimmer 방지
+    // (Kotlin 참조 구현 5d845d8 동일 처리)
+    // 파라미터 먼저 설정 후 mipmap 생성 (드라이버 순서 민감)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    GLenum mipmap_err = glGetError();
+    if (mipmap_err == GL_NO_ERROR) {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        LOGI("Lens texture mipmap enabled (anti-shimmer)");
+    } else {
+        // mipmap-incomplete로 검은화면 방지: LINEAR 폴백
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        LOGW("glGenerateMipmap failed (GL err=0x%x), fallback to GL_LINEAR", mipmap_err);
+    }
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -346,10 +361,14 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uAvgIrisLum = glGetUniformLocation(lens_program_, "uAvgIrisLum");
     lens_uniforms_.uDetH = glGetUniformLocation(lens_program_, "uDetH");
 
-    LOGI("Lens uniforms cached (%d locations)",
-         (lens_uniforms_.uCameraTexture != -1 ? 1 : 0) +
-         (lens_uniforms_.uLensTexture != -1 ? 1 : 0) +
-         (lens_uniforms_.uLeftIrisCenter != -1 ? 1 : 0));
+    // 유효한 uniform location 카운트
+    int valid_count = 0;
+    const GLint* locs = reinterpret_cast<const GLint*>(&lens_uniforms_);
+    const int num_locs = sizeof(LensUniforms) / sizeof(GLint);
+    for (int i = 0; i < num_locs; ++i) {
+        if (locs[i] != -1) valid_count++;
+    }
+    LOGI("Lens uniforms cached (%d/%d locations)", valid_count, num_locs);
 #endif
 }
 
@@ -651,22 +670,52 @@ ErrorCode GPULensRenderer::renderToTexture(
     glBindTexture(GL_TEXTURE_2D, lens_texture_);
     glUniform1i(lens_uniforms_.uLensTexture, 1);
 
-    // 홍채 파라미터 설정
-    if (iris_result.left_detected && config.apply_left) {
-        glUniform2f(lens_uniforms_.uLeftIrisCenter,
-                    iris_result.left_iris[0].x,
-                    iris_result.left_iris[0].y);
-        glUniform1f(lens_uniforms_.uLeftIrisRadius, iris_result.left_radius);
+    // 검출 프레임 높이 (정규화 기준)
+    float det_hf = static_cast<float>(std::max(iris_result.frame_height, 1));
+    float det_wf = static_cast<float>(std::max(iris_result.frame_width, 1));
+
+    // 홍채 반경 정규화 (Bug A: 셰이더는 0~1 정규화 값을 기대)
+    float normalized_left_r = iris_result.left_radius / det_hf;
+    float normalized_right_r = iris_result.right_radius / det_hf;
+
+    // 홍채 좌표 (Y-flip 후, mirror 시 X-flip + 좌우 swap)
+    float left_x = iris_result.left_iris[0].x;
+    float left_y = 1.0f - iris_result.left_iris[0].y;
+    float right_x = iris_result.right_iris[0].x;
+    float right_y = 1.0f - iris_result.right_iris[0].y;
+    float left_r = normalized_left_r;
+    float right_r = normalized_right_r;
+    bool left_det = iris_result.left_detected;
+    bool right_det = iris_result.right_detected;
+
+    if (config.is_mirror) {
+        left_x = 1.0f - left_x;
+        right_x = 1.0f - right_x;
+        std::swap(left_x, right_x);
+        std::swap(left_y, right_y);
+        std::swap(left_r, right_r);
+        std::swap(left_det, right_det);
+    }
+
+    static bool first_frame_logged = false;
+    if (!first_frame_logged) {
+        LOGI("renderToTexture: det=%dx%d aspect=%.3f | mirror=%d tex=%dx%d | lens_tex=%u",
+             iris_result.frame_width, iris_result.frame_height, det_wf / det_hf,
+             config.is_mirror ? 1 : 0, width, height, lens_texture_);
+        first_frame_logged = true;
+    }
+
+    if (left_det && config.apply_left) {
+        glUniform2f(lens_uniforms_.uLeftIrisCenter, left_x, left_y);
+        glUniform1f(lens_uniforms_.uLeftIrisRadius, left_r);
         glUniform1i(lens_uniforms_.uApplyLeft, 1);
     } else {
         glUniform1i(lens_uniforms_.uApplyLeft, 0);
     }
 
-    if (iris_result.right_detected && config.apply_right) {
-        glUniform2f(lens_uniforms_.uRightIrisCenter,
-                    iris_result.right_iris[0].x,
-                    iris_result.right_iris[0].y);
-        glUniform1f(lens_uniforms_.uRightIrisRadius, iris_result.right_radius);
+    if (right_det && config.apply_right) {
+        glUniform2f(lens_uniforms_.uRightIrisCenter, right_x, right_y);
+        glUniform1f(lens_uniforms_.uRightIrisRadius, right_r);
         glUniform1i(lens_uniforms_.uApplyRight, 1);
     } else {
         glUniform1i(lens_uniforms_.uApplyRight, 0);
@@ -677,65 +726,87 @@ ErrorCode GPULensRenderer::renderToTexture(
     glUniform1f(lens_uniforms_.uLensScale, config.scale);
     glUniform1f(lens_uniforms_.uEdgeFeather, config.edge_feather);
     glUniform1i(lens_uniforms_.uBlendMode, static_cast<int>(config.blend_mode));
-    glUniform1f(lens_uniforms_.uFrameAspect,
-                static_cast<float>(width) / static_cast<float>(height));
+    // uFrameAspect: detection 프레임 기준 (Kotlin: detW/detH)
+    glUniform1f(lens_uniforms_.uFrameAspect, det_wf / det_hf);
 
-    // 눈꺼풀 클리핑 (캐시 사용)
-    if (eyelid_cache_[0].valid_frames > 0) {
-        glUniform1f(lens_uniforms_.uLeftEyeTop, eyelid_cache_[0].top);
-        glUniform1f(lens_uniforms_.uLeftEyeBottom, eyelid_cache_[0].bottom);
-    } else {
-        glUniform1f(lens_uniforms_.uLeftEyeTop, 0.0f);
-        glUniform1f(lens_uniforms_.uLeftEyeBottom, 1.0f);
+    // 눈꺼풀 (Y-flip만 적용; min/max 정렬은 셰이더 측에서 처리)
+    float l_top = eyelid_cache_[0].valid_frames > 0 ? 1.0f - eyelid_cache_[0].top : 0.0f;
+    float l_bot = eyelid_cache_[0].valid_frames > 0 ? 1.0f - eyelid_cache_[0].bottom : 1.0f;
+    float r_top = eyelid_cache_[1].valid_frames > 0 ? 1.0f - eyelid_cache_[1].top : 0.0f;
+    float r_bot = eyelid_cache_[1].valid_frames > 0 ? 1.0f - eyelid_cache_[1].bottom : 1.0f;
+    if (config.is_mirror) {
+        std::swap(l_top, r_top);
+        std::swap(l_bot, r_bot);
     }
-    if (eyelid_cache_[1].valid_frames > 0) {
-        glUniform1f(lens_uniforms_.uRightEyeTop, eyelid_cache_[1].top);
-        glUniform1f(lens_uniforms_.uRightEyeBottom, eyelid_cache_[1].bottom);
-    } else {
-        glUniform1f(lens_uniforms_.uRightEyeTop, 0.0f);
-        glUniform1f(lens_uniforms_.uRightEyeBottom, 1.0f);
-    }
-    glUniform1f(lens_uniforms_.uEyelidFeather, 0.008f);
+    glUniform1f(lens_uniforms_.uLeftEyeTop, l_top);
+    glUniform1f(lens_uniforms_.uLeftEyeBottom, l_bot);
+    glUniform1f(lens_uniforms_.uRightEyeTop, r_top);
+    glUniform1f(lens_uniforms_.uRightEyeBottom, r_bot);
+    // Bug E: eyelidFeather를 검출 높이로 정규화 (Kotlin: featherPx / detHf)
+    float feather_px = 4.0f;
+    glUniform1f(lens_uniforms_.uEyelidFeather, feather_px / det_hf);
 
     // 기능 플래그
     glUniform1i(lens_uniforms_.uScleraProtect, sclera_protect_ ? 1 : 0);
     glUniform1i(lens_uniforms_.uContactShadow, contact_shadow_ ? 1 : 0);
     glUniform1f(lens_uniforms_.uShadowIntensity, shadow_intensity_);
-    glUniform1i(lens_uniforms_.uMaxDetail, 1);
+    // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한 (Kotlin 기본 1.2)
+    glUniform1f(lens_uniforms_.uMaxDetail, 1.2f);
 
     // 비대칭 타원 마스크
     glUniform1i(lens_uniforms_.uUseEllipseMask, use_ellipse_mask_ ? 1 : 0);
 
     if (use_ellipse_mask_) {
-        // 왼쪽 눈 타원
-        if (ellipse_cache_[0].valid_frames > 0) {
-            glUniform2f(lens_uniforms_.uLeftEyeEllipseCenter,
-                        ellipse_cache_[0].cx, ellipse_cache_[0].cy);
-            glUniform3f(lens_uniforms_.uLeftEyeEllipseRadii,
-                        ellipse_cache_[0].rx_inner,
-                        ellipse_cache_[0].rx_outer,
-                        ellipse_cache_[0].ry);
-            glUniform1f(lens_uniforms_.uLeftEyeEllipseRot, ellipse_cache_[0].rotation);
+        // Y-flip: cy = 1 - cy, rot = -rot
+        float l_cx = ellipse_cache_[0].cx;
+        float l_cy = 1.0f - ellipse_cache_[0].cy;
+        float l_rxi = ellipse_cache_[0].rx_inner;
+        float l_rxo = ellipse_cache_[0].rx_outer;
+        float l_ry = ellipse_cache_[0].ry;
+        float l_rot = -ellipse_cache_[0].rotation;
+        int l_valid = ellipse_cache_[0].valid_frames;
+
+        float r_cx = ellipse_cache_[1].cx;
+        float r_cy = 1.0f - ellipse_cache_[1].cy;
+        float r_rxi = ellipse_cache_[1].rx_inner;
+        float r_rxo = ellipse_cache_[1].rx_outer;
+        float r_ry = ellipse_cache_[1].ry;
+        float r_rot = -ellipse_cache_[1].rotation;
+        int r_valid = ellipse_cache_[1].valid_frames;
+
+        if (config.is_mirror) {
+            // cx mirror, rot = π - rot, rx_inner/rx_outer swap
+            l_cx = 1.0f - l_cx;
+            r_cx = 1.0f - r_cx;
+            l_rot = static_cast<float>(M_PI) - l_rot;
+            r_rot = static_cast<float>(M_PI) - r_rot;
+            std::swap(l_rxi, l_rxo);
+            std::swap(r_rxi, r_rxo);
+            // 좌우 객체 스왑
+            std::swap(l_cx, r_cx); std::swap(l_cy, r_cy);
+            std::swap(l_rxi, r_rxi); std::swap(l_rxo, r_rxo); std::swap(l_ry, r_ry);
+            std::swap(l_rot, r_rot);
+            std::swap(l_valid, r_valid);
         }
-        // 오른쪽 눈 타원
-        if (ellipse_cache_[1].valid_frames > 0) {
-            glUniform2f(lens_uniforms_.uRightEyeEllipseCenter,
-                        ellipse_cache_[1].cx, ellipse_cache_[1].cy);
-            glUniform3f(lens_uniforms_.uRightEyeEllipseRadii,
-                        ellipse_cache_[1].rx_inner,
-                        ellipse_cache_[1].rx_outer,
-                        ellipse_cache_[1].ry);
-            glUniform1f(lens_uniforms_.uRightEyeEllipseRot, ellipse_cache_[1].rotation);
+
+        if (l_valid > 0) {
+            glUniform2f(lens_uniforms_.uLeftEyeEllipseCenter, l_cx, l_cy);
+            glUniform3f(lens_uniforms_.uLeftEyeEllipseRadii, l_rxi, l_rxo, l_ry);
+            glUniform1f(lens_uniforms_.uLeftEyeEllipseRot, l_rot);
+        }
+        if (r_valid > 0) {
+            glUniform2f(lens_uniforms_.uRightEyeEllipseCenter, r_cx, r_cy);
+            glUniform3f(lens_uniforms_.uRightEyeEllipseRadii, r_rxi, r_rxo, r_ry);
+            glUniform1f(lens_uniforms_.uRightEyeEllipseRot, r_rot);
         }
     }
 
-    // 평균 홍채 휘도 (Sclera Protection용 — 근사값)
-    glUniform1f(lens_uniforms_.uAvgIrisLum, 0.3f);
+    // 평균 홍채 휘도 (Kotlin 기본값 0.35 — 한국인 평균 근사)
+    // TODO: EMA 갱신 로직은 별도 setter 도입 시 외부 주입
+    glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f);
 
-    // 검출 높이 (정규화)
-    float det_h = static_cast<float>(iris_result.frame_height) /
-                  static_cast<float>(std::max(iris_result.frame_height, 1));
-    glUniform1f(lens_uniforms_.uDetH, det_h);
+    // 검출 높이 (Bug B: 픽셀 높이를 그대로 전달 — Kotlin의 detHf와 동일)
+    glUniform1f(lens_uniforms_.uDetH, det_hf);
 
     // 풀스크린 쿼드 렌더링
     glDisable(GL_DEPTH_TEST);

@@ -601,6 +601,7 @@ IrisSdkError iris_sdk_render_lens_texture(
         cpp_config.edge_feather = config->edge_feather;
         cpp_config.apply_left = config->apply_left;
         cpp_config.apply_right = config->apply_right;
+        cpp_config.is_mirror = config->is_mirror;
     }
 
     iris_sdk::ErrorCode err = g_gpu_lens->renderToTexture(

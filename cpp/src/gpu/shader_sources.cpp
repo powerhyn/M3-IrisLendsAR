@@ -780,24 +780,21 @@ void main() {
 
 //=============================================================================
 // 렌즈 오버레이 프래그먼트 셰이더
-// 8종 블렌드 모드, 비대칭 타원 마스크, 눈꺼풀 클리핑,
-// Sclera Protection, Contact Shadow
+// Kotlin 참조 구현(CameraGLRenderer.kt LENS_OVERLAY_FRAGMENT_SHADER)을
+// 1:1로 포팅. 함수/식/uniform 시그니처가 모두 동일해야 시각적 결과가 일치한다.
 //=============================================================================
 const char* LENS_OVERLAY_FRAGMENT = R"glsl(
 #version 310 es
 precision highp float;
 
-// === Samplers ===
 uniform sampler2D uCameraTexture;
 uniform sampler2D uLensTexture;
 
-// === 홍채 파라미터 ===
 uniform vec2 uLeftIrisCenter;
 uniform float uLeftIrisRadius;
 uniform vec2 uRightIrisCenter;
 uniform float uRightIrisRadius;
 
-// === 렌즈 설정 ===
 uniform float uOpacity;
 uniform float uLensScale;
 uniform float uEdgeFeather;
@@ -806,268 +803,223 @@ uniform int uApplyLeft;
 uniform int uApplyRight;
 uniform float uFrameAspect;
 
-// === 눈꺼풀 클리핑 ===
 uniform float uLeftEyeTop;
 uniform float uLeftEyeBottom;
 uniform float uRightEyeTop;
 uniform float uRightEyeBottom;
 uniform float uEyelidFeather;
+uniform float uAvgIrisLum;
+uniform float uDetH;
 
-// === 기능 플래그 ===
 uniform int uScleraProtect;
 uniform int uContactShadow;
 uniform float uShadowIntensity;
-uniform int uMaxDetail;
+uniform float uMaxDetail;
 
-// === 비대칭 타원 ===
 uniform int uUseEllipseMask;
 uniform vec2 uLeftEyeEllipseCenter;
-uniform vec3 uLeftEyeEllipseRadii;   // (rx_inner, rx_outer, ry)
+uniform vec3 uLeftEyeEllipseRadii;
 uniform float uLeftEyeEllipseRot;
 uniform vec2 uRightEyeEllipseCenter;
-uniform vec3 uRightEyeEllipseRadii;  // (rx_inner, rx_outer, ry)
+uniform vec3 uRightEyeEllipseRadii;
 uniform float uRightEyeEllipseRot;
-
-// === 기타 ===
-uniform float uAvgIrisLum;
-uniform float uDetH;
 
 in vec2 vTexCoord;
 out vec4 fragColor;
 
-// ========================================
-// sRGB <-> Linear 변환 (빠른 근사)
-// ========================================
-vec3 toLinearFast(vec3 srgb) {
-    return pow(srgb, vec3(2.2));
-}
-vec3 toSRGBFast(vec3 linear_color) {
-    return pow(max(linear_color, vec3(0.0)), vec3(1.0 / 2.2));
+vec3 blendNormal(vec3 base, vec3 blend, float opacity) {
+    return mix(base, blend, opacity);
 }
 
-// ========================================
-// 8종 블렌드 모드
-// ========================================
-vec3 blendNormal(vec3 base, vec3 blend) {
-    return blend;
+vec3 blendMultiply(vec3 base, vec3 blend, float opacity) {
+    return mix(base, base * blend, opacity);
 }
 
-vec3 blendMultiply(vec3 base, vec3 blend) {
-    return base * blend;
+vec3 blendScreen(vec3 base, vec3 blend, float opacity) {
+    return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
 }
 
-vec3 blendScreen(vec3 base, vec3 blend) {
-    return vec3(1.0) - (vec3(1.0) - base) * (vec3(1.0) - blend);
-}
-
-vec3 blendOverlay(vec3 base, vec3 blend) {
+vec3 blendOverlay(vec3 base, vec3 blend, float opacity) {
     vec3 result;
-    result.r = base.r < 0.5 ? 2.0 * base.r * blend.r : 1.0 - 2.0 * (1.0 - base.r) * (1.0 - blend.r);
-    result.g = base.g < 0.5 ? 2.0 * base.g * blend.g : 1.0 - 2.0 * (1.0 - base.g) * (1.0 - blend.g);
-    result.b = base.b < 0.5 ? 2.0 * base.b * blend.b : 1.0 - 2.0 * (1.0 - base.b) * (1.0 - blend.b);
-    return result;
-}
-
-vec3 blendLuminanceTint(vec3 base, vec3 lens) {
-    // sRGB 근사 luminance 보존 틴트
-    float baseLum = dot(base, vec3(0.299, 0.587, 0.114));
-    float lensLum = dot(lens, vec3(0.299, 0.587, 0.114));
-    float ratio = (lensLum > 0.001) ? baseLum / lensLum : 1.0;
-    return clamp(lens * ratio, 0.0, 1.0);
-}
-
-vec3 blendLuminanceTintLinear(vec3 base, vec3 lens) {
-    // 선형 색공간에서 정확한 luminance 보존 틴트
-    vec3 baseLinear = toLinearFast(base);
-    vec3 lensLinear = toLinearFast(lens);
-    float baseLum = dot(baseLinear, vec3(0.2126, 0.7152, 0.0722));
-    float lensLum = dot(lensLinear, vec3(0.2126, 0.7152, 0.0722));
-    float ratio = (lensLum > 0.001) ? baseLum / lensLum : 1.0;
-    return toSRGBFast(clamp(lensLinear * ratio, 0.0, 1.0));
-}
-
-vec3 blendSoftLight(vec3 base, vec3 blend) {
-    // W3C soft-light 공식
-    vec3 result;
-    result.r = blend.r < 0.5 ? base.r - (1.0 - 2.0 * blend.r) * base.r * (1.0 - base.r)
-                              : base.r + (2.0 * blend.r - 1.0) * (sqrt(base.r) - base.r);
-    result.g = blend.g < 0.5 ? base.g - (1.0 - 2.0 * blend.g) * base.g * (1.0 - base.g)
-                              : base.g + (2.0 * blend.g - 1.0) * (sqrt(base.g) - base.g);
-    result.b = blend.b < 0.5 ? base.b - (1.0 - 2.0 * blend.b) * base.b * (1.0 - base.b)
-                              : base.b + (2.0 * blend.b - 1.0) * (sqrt(base.b) - base.b);
-    return result;
-}
-
-vec3 blendColorReplace(vec3 base, vec3 lens) {
-    // 상대 밝기 정규화 색상 교체
-    float baseLum = dot(base, vec3(0.299, 0.587, 0.114));
-    float lensLum = dot(lens, vec3(0.299, 0.587, 0.114));
-    vec3 normalizedLens = (lensLum > 0.001) ? lens / lensLum : lens;
-    return clamp(normalizedLens * baseLum, 0.0, 1.0);
-}
-
-// ========================================
-// 비대칭 타원 마스크
-// ========================================
-float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rot) {
-    float rx_inner = radii.x;
-    float rx_outer = radii.y;
-    float ry = radii.z;
-
-    // UV -> 타원 로컬 좌표로 변환
-    vec2 delta = uv - center;
-    float cosR = cos(-rot);
-    float sinR = sin(-rot);
-    float localX = delta.x * cosR - delta.y * sinR;
-    float localY = delta.x * sinR + delta.y * cosR;
-
-    // 비대칭 rx 선택: localX < 0 이면 내안각, >= 0 이면 외안각
-    float rx = (localX < 0.0) ? rx_inner : rx_outer;
-
-    // 타원 거리 (1.0 = 경계)
-    float ex = localX / max(rx, 0.001);
-    float ey = localY / max(ry, 0.001);
-    float dist = ex * ex + ey * ey;
-
-    // 페더링 (부드러운 경계)
-    return 1.0 - smoothstep(0.7, 1.0, dist);
-}
-
-// ========================================
-// Sclera Protection (공막 보호)
-// ========================================
-float calcScleraFactor(vec3 baseColor, float irisDistNorm, float avgIrisLum) {
-    // 기하학적 팩터: 홍채 경계에 가까울수록 보호 강화
-    float geoFactor = smoothstep(0.65, 0.95, irisDistNorm);
-
-    // 색상 기반 팩터: 흰색(공막)에 가까울수록 보호 강화
-    float lum = dot(baseColor, vec3(0.299, 0.587, 0.114));
-    float sat = max(max(baseColor.r, baseColor.g), baseColor.b) -
-                min(min(baseColor.r, baseColor.g), baseColor.b);
-    // 밝고 채도 낮은 영역 = 공막
-    float colorFactor = smoothstep(0.4, 0.8, lum) * (1.0 - smoothstep(0.0, 0.15, sat));
-
-    // 홍채와의 밝기 차이가 클수록 보호 강화
-    float lumDiff = abs(lum - avgIrisLum);
-    float lumDiffFactor = smoothstep(0.08, 0.25, lumDiff);
-
-    return max(geoFactor, colorFactor * lumDiffFactor);
-}
-
-// ========================================
-// Contact Shadow (눈꺼풀 아래 그림자)
-// ========================================
-float calcContactShadow(float uvY, float eyelidTop, float irisCenterY, float intensity) {
-    // 눈꺼풀 상단과 홍채 중심 사이의 상대 위치
-    float range = max(irisCenterY - eyelidTop, 0.001);
-    float t = clamp((uvY - eyelidTop) / range, 0.0, 1.0);
-    // 눈꺼풀에 가까울수록 어둡게 (상단 30% 영역)
-    float shadow = 1.0 - intensity * smoothstep(0.3, 0.0, t);
-    return shadow;
-}
-
-// ========================================
-// 메인 함수
-// ========================================
-void main() {
-    vec4 camera = texture(uCameraTexture, vTexCoord);
-    vec3 base = camera.rgb;
-
-    // 두 눈 각각 처리 후 합성
-    vec3 result = base;
-
-    for (int eye = 0; eye < 2; eye++) {
-        vec2 irisCenter = (eye == 0) ? uLeftIrisCenter : uRightIrisCenter;
-        float irisRadius = (eye == 0) ? uLeftIrisRadius : uRightIrisRadius;
-        int applyEye = (eye == 0) ? uApplyLeft : uApplyRight;
-
-        if (applyEye == 0) continue;
-        if (irisRadius <= 0.001) continue;
-
-        // 홍채 중심에서의 거리 (정규화)
-        vec2 aspect = vec2(uFrameAspect, 1.0);
-        vec2 diff = (vTexCoord - irisCenter) * aspect;
-        float scaledRadius = irisRadius * uLensScale;
-        float dist = length(diff);
-        float irisDistNorm = dist / max(scaledRadius, 0.001);
-
-        // 원형 마스크 (기본)
-        float circleMask = 1.0 - smoothstep(1.0 - uEdgeFeather, 1.0, irisDistNorm);
-
-        // 타원 마스크 (활성 시)
-        float ellipseMask = 1.0;
-        if (uUseEllipseMask != 0) {
-            vec2 eCenter = (eye == 0) ? uLeftEyeEllipseCenter : uRightEyeEllipseCenter;
-            vec3 eRadii = (eye == 0) ? uLeftEyeEllipseRadii : uRightEyeEllipseRadii;
-            float eRot = (eye == 0) ? uLeftEyeEllipseRot : uRightEyeEllipseRot;
-            ellipseMask = asymmetricEllipseMask(vTexCoord, eCenter, eRadii, eRot);
-        }
-
-        // 눈꺼풀 Y-slab 클리핑
-        float eyeTop = (eye == 0) ? uLeftEyeTop : uRightEyeTop;
-        float eyeBot = (eye == 0) ? uLeftEyeBottom : uRightEyeBottom;
-        float eyelidMask = smoothstep(eyeTop - uEyelidFeather, eyeTop + uEyelidFeather, vTexCoord.y)
-                         * (1.0 - smoothstep(eyeBot - uEyelidFeather, eyeBot + uEyelidFeather, vTexCoord.y));
-
-        // 최종 마스크: 원형 x 타원 x 눈꺼풀
-        float mask = circleMask * ellipseMask * eyelidMask;
-
-        if (mask < 0.001) continue;
-
-        // 렌즈 텍스처 샘플링 (홍채 영역을 렌즈 UV로 매핑)
-        vec2 lensUV = (diff / max(scaledRadius, 0.001)) * 0.5 + 0.5;
-        lensUV = clamp(lensUV, 0.0, 1.0);
-        vec4 lensSample = texture(uLensTexture, lensUV);
-
-        // Sclera Protection
-        float scleraFade = 1.0;
-        if (uScleraProtect != 0) {
-            scleraFade = 1.0 - calcScleraFactor(result, irisDistNorm, uAvgIrisLum);
-        }
-
-        // Contact Shadow
-        float shadow = 1.0;
-        if (uContactShadow != 0) {
-            shadow = calcContactShadow(vTexCoord.y, eyeTop, irisCenter.y, uShadowIntensity);
-        }
-
-        // 블렌드 모드 디스패치
-        vec3 blended;
-        if (uBlendMode == 0) {
-            blended = blendNormal(result, lensSample.rgb);
-        } else if (uBlendMode == 1) {
-            blended = blendMultiply(result, lensSample.rgb);
-        } else if (uBlendMode == 2) {
-            blended = blendScreen(result, lensSample.rgb);
-        } else if (uBlendMode == 3) {
-            blended = blendOverlay(result, lensSample.rgb);
-        } else if (uBlendMode == 4) {
-            blended = blendLuminanceTint(result, lensSample.rgb);
-        } else if (uBlendMode == 5) {
-            blended = blendLuminanceTintLinear(result, lensSample.rgb);
-        } else if (uBlendMode == 6) {
-            blended = blendSoftLight(result, lensSample.rgb);
-        } else if (uBlendMode == 7) {
-            blended = blendColorReplace(result, lensSample.rgb);
+    for (int i = 0; i < 3; i++) {
+        if (base[i] < 0.5) {
+            result[i] = 2.0 * base[i] * blend[i];
         } else {
-            blended = blendNormal(result, lensSample.rgb);
+            result[i] = 1.0 - 2.0 * (1.0 - base[i]) * (1.0 - blend[i]);
         }
+    }
+    return mix(base, result, opacity);
+}
 
-        // Limbal Darkening: 홍채 외곽에 자연스러운 어두운 고리
-        // 실제 눈의 림발 링(홍채-공막 경계)을 재현하여 렌즈 깊이감 부여
-        float limbalDist = dist / max(scaledRadius, 1e-5);
-        float limbal = smoothstep(0.7, 1.0, limbalDist);
-        blended = mix(blended, blended * 0.4, limbal * 0.8);
+vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
+vec3 toSRGBFast(vec3 linear_color) { return sqrt(max(linear_color, vec3(0.0))); }
 
-        // Contact Shadow 적용
-        blended *= shadow;
+vec3 blendLuminanceTint(vec3 base, vec3 blend, float opacity) {
+    float lum = dot(base, vec3(0.299, 0.587, 0.114));
+    float scale = clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5);
+    vec3 tinted = blend * lum * scale;
+    return mix(base, tinted, opacity);
+}
 
-        // 최종 알파 합성: mask * opacity * scleraFade * 렌즈 알파
-        float finalAlpha = mask * uOpacity * scleraFade * lensSample.a;
-        result = mix(result, blended, finalAlpha);
+vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
+    float avgLumLinear = uAvgIrisLum * uAvgIrisLum;
+    float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
+    vec3 tinted = toLinearFast(blend) * lum * scale;
+    vec3 result = mix(baseL, tinted, opacity);
+    float realSpec = smoothstep(0.7, 0.95, lum);
+    result = mix(result, baseL, realSpec);
+    return toSRGBFast(result);
+}
+
+vec3 blendSoftLight(vec3 base, vec3 blend, float opacity) {
+    vec3 lo = base - (1.0 - 2.0 * blend) * base * (1.0 - base);
+    vec3 hi = base + (2.0 * blend - 1.0) * (sqrt(base) - base);
+    vec3 result = mix(lo, hi, step(vec3(0.5), blend));
+    return mix(base, result, opacity);
+}
+
+vec3 blendColorReplace(vec3 base, vec3 blend, float opacity, float maxDetail) {
+    float lum = dot(base, vec3(0.299, 0.587, 0.114));
+    float detail = lum / max(0.01, uAvgIrisLum);
+    detail = clamp(detail, 0.2, maxDetail);
+    vec3 colored = blend * detail;
+    return mix(base, colored, opacity);
+}
+
+float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
+    vec2 d = uv - center;
+    float cosR = cos(rotation);
+    float sinR = sin(rotation);
+    d = vec2(d.x * cosR + d.y * sinR, -d.x * sinR + d.y * cosR);
+    float rx = (d.x < 0.0) ? radii.x : radii.y;
+    float ry = radii.z;
+    float ellipseDist = length(vec2(d.x / max(rx, 1e-5), d.y / max(ry, 1e-5)));
+    return smoothstep(1.0, 1.0 - feather, ellipseDist);
+}
+
+float calcScleraFactor(vec3 cameraColor) {
+    float brightness = dot(cameraColor, vec3(0.299, 0.587, 0.114));
+    float maxC = max(cameraColor.r, max(cameraColor.g, cameraColor.b));
+    float minC = min(cameraColor.r, min(cameraColor.g, cameraColor.b));
+    float saturation = (maxC - minC) / max(maxC, 1e-4);
+    float brightFactor = smoothstep(0.3, 0.5, brightness);
+    float lowSatFactor = 1.0 - smoothstep(0.1, 0.3, saturation);
+    return brightFactor * lowSatFactor;
+}
+
+float calcContactShadow(float fragY, float minY, float eyelidFeather, float eyeOpening) {
+    float shadowDepthPx = 4.0;
+    float shadowDepth = shadowDepthPx / max(uDetH, 1.0);
+    float shadowIntensity = clamp(uShadowIntensity, 0.0, 0.25);
+    float shadowZone = smoothstep(
+        minY + eyelidFeather,
+        minY + eyelidFeather + shadowDepth,
+        fragY
+    );
+    float shadowFactor = (1.0 - shadowZone) * shadowIntensity;
+    float shadowEnable = smoothstep(0.015, 0.025, eyeOpening);
+    shadowFactor *= shadowEnable;
+    float maskAlpha = smoothstep(minY, minY + eyelidFeather, fragY);
+    return shadowFactor * maskAlpha;
+}
+
+vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
+               float eyeTop, float eyeBottom,
+               vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot) {
+    if (irisRadius <= 0.0) return camera;
+
+    vec2 adjustedCoord = vec2(vTexCoord.x * aspectRatio, vTexCoord.y);
+    vec2 adjustedCenter = vec2(irisCenter.x * aspectRatio, irisCenter.y);
+
+    float scaledRadius = irisRadius * uLensScale;
+    float dist = distance(adjustedCoord, adjustedCenter) / scaledRadius;
+
+    if (dist >= 1.0) return camera;
+
+    vec2 lensCoord = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
+
+    vec4 lens = texture(uLensTexture, lensCoord);
+    if (lens.a > 0.001) lens.rgb /= lens.a;
+
+    float featherStart = 1.0 - uEdgeFeather;
+    float edgeAlpha = smoothstep(1.0, featherStart, dist);
+
+    float eyelidFeather = uEyelidFeather;
+    float minY = min(eyeTop, eyeBottom);
+    float maxY = max(eyeTop, eyeBottom);
+    float eyelidMask;
+
+    if (uUseEllipseMask == 1 && ellipseRadii.z > 0.0) {
+        eyelidMask = asymmetricEllipseMask(vTexCoord, ellipseCenter, ellipseRadii, ellipseRot, eyelidFeather * 3.0);
+    } else {
+        float topClip = smoothstep(minY - eyelidFeather, minY + eyelidFeather, vTexCoord.y);
+        float bottomClip = 1.0 - smoothstep(maxY - eyelidFeather, maxY + eyelidFeather, vTexCoord.y);
+        eyelidMask = topClip * bottomClip;
     }
 
-    fragColor = vec4(clamp(result, 0.0, 1.0), camera.a);
+    float finalAlpha = lens.a * uOpacity * edgeAlpha * eyelidMask;
+
+    float irisEdgeDist = dist * uLensScale;
+    if (uScleraProtect == 1) {
+        float geomFactor = smoothstep(0.75, 1.0, irisEdgeDist);
+        float colorFactor = calcScleraFactor(camera.rgb);
+        float scleraFade = 1.0 - geomFactor * (0.5 + 0.5 * colorFactor);
+        finalAlpha *= scleraFade;
+    }
+
+    float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
+
+    vec3 blended;
+    if (uBlendMode == 0) {
+        blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 1) {
+        blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 2) {
+        blended = blendScreen(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 3) {
+        blended = blendOverlay(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 4) {
+        blended = blendLuminanceTint(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 5) {
+        blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 6) {
+        blended = blendSoftLight(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 7) {
+        blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha, maxDetail);
+    } else {
+        blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
+    }
+
+    if (uContactShadow == 1) {
+        float eyeOpening = abs(maxY - minY);
+        float shadow = calcContactShadow(vTexCoord.y, minY, eyelidFeather, eyeOpening);
+        blended *= (1.0 - shadow);
+    }
+
+    return vec4(blended, camera.a);
+}
+
+void main() {
+    vec4 camera = texture(uCameraTexture, vTexCoord);
+    vec4 result = camera;
+
+    float aspectRatio = uFrameAspect;
+
+    if (uApplyLeft == 1 && uLeftIrisRadius > 0.0) {
+        result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio,
+                           uLeftEyeTop, uLeftEyeBottom,
+                           uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot);
+    }
+
+    if (uApplyRight == 1 && uRightIrisRadius > 0.0) {
+        result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio,
+                           uRightEyeTop, uRightEyeBottom,
+                           uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot);
+    }
+
+    fragColor = result;
 }
 )glsl";
 

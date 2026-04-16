@@ -167,10 +167,11 @@ private:
     int lens_texture_height_ = 0;
 
     // 설정
+    // 기본값은 Kotlin 데모 참조 구현(CameraGLRenderer.kt 558~562)과 일치
     bool sclera_protect_ = true;
-    bool contact_shadow_ = true;
+    bool contact_shadow_ = false;
     float shadow_intensity_ = 0.15f;
-    bool use_ellipse_mask_ = true;
+    bool use_ellipse_mask_ = false;
 
     // ========================================
     // Uniform Location 캐시

@@ -149,6 +149,11 @@ public class LensConfig {
      */
     public boolean applyRight;
 
+    /**
+     * 전면 카메라 mirror 여부 (X-flip + 좌우 눈 swap).
+     */
+    public boolean isMirror;
+
     // ========================================================================
     // 생성자
     // ========================================================================
@@ -175,6 +180,7 @@ public class LensConfig {
         this.edgeFeather = other.edgeFeather;
         this.applyLeft = other.applyLeft;
         this.applyRight = other.applyRight;
+        this.isMirror = other.isMirror;
     }
 
     // ========================================================================
@@ -194,6 +200,7 @@ public class LensConfig {
         edgeFeather = 0.15f;
         applyLeft = true;
         applyRight = true;
+        isMirror = false;
     }
 
     /**
@@ -236,6 +243,7 @@ public class LensConfig {
                 ", edgeFeather=" + edgeFeather +
                 ", applyLeft=" + applyLeft +
                 ", applyRight=" + applyRight +
+                ", isMirror=" + isMirror +
                 '}';
     }
 
@@ -409,6 +417,17 @@ public class LensConfig {
         public Builder apply(boolean left, boolean right) {
             config.applyLeft = left;
             config.applyRight = right;
+            return this;
+        }
+
+        /**
+         * 전면 카메라 mirror 여부를 설정합니다.
+         *
+         * @param mirror X-flip + 좌우 눈 swap 적용 여부
+         * @return this
+         */
+        public Builder isMirror(boolean mirror) {
+            config.isMirror = mirror;
             return this;
         }
 

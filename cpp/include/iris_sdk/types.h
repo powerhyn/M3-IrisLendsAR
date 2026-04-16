@@ -183,6 +183,7 @@ struct LensConfig {
     float edge_feather = 0.1f;  ///< 가장자리 페더링 (0.0~1.0)
     bool apply_left = true;     ///< 왼쪽 눈 적용 여부
     bool apply_right = true;    ///< 오른쪽 눈 적용 여부
+    bool is_mirror = false;     ///< 전면 카메라 mirror (X-flip + 좌우 swap)
 };
 
 } // namespace iris_sdk

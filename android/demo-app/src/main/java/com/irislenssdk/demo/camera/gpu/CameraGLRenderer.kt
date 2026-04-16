@@ -552,6 +552,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     // 렌즈 설정
     private var lensConfig: LensConfig = LensConfig()
     private var lensEnabled: Boolean = false
+    private var sdkLensLoggedOnce: Boolean = false
 
     // Feature flags (P4-W2-01: Sclera Protection + Contact Shadow)
     private var scleraProtectEnabled: Boolean = true   // 기본 ON
@@ -732,9 +733,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 2단계: 렌즈 오버레이 (홍채 위치에 렌즈 합성)
         var currentTexture = rgbaTextureId
         if (lensEnabled && lensImageTextureId != 0 && irisResult?.detected == true) {
-            // TODO: SDK GPULensRenderer 디버깅 후 전환
-            // currentTexture = applyGpuLensRenderer(currentTexture)
-            currentTexture = renderLensOverlay(currentTexture)
+            currentTexture = applyGpuLensRenderer(currentTexture)
         } else if (stabilityLogEnabled && lensEnabled && lensImageTextureId != 0) {
             // 렌즈 파이프라인 활성 상태에서 검출 실패 시에만 기록
             // (렌즈 미선택/텍스처 미준비 시에는 기록하지 않음)
@@ -1238,6 +1237,8 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // Detection Slot에서 최신 검출 결과 포인터 취득
         val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
 
+        lensConfig.isMirror = isMirror
+
         val outputTexture = IrisLensSDK.renderLensTexture(
             inputTexture,
             texWidth,
@@ -1247,6 +1248,10 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         )
 
         return if (outputTexture != 0 && outputTexture != inputTexture) {
+            if (!sdkLensLoggedOnce) {
+                Log.i(TAG, "SDK C++ GPULensRenderer active (out=$outputTexture, ${texWidth}x${texHeight})")
+                sdkLensLoggedOnce = true
+            }
             outputTexture
         } else {
             // SDK 렌더링 실패 시 기존 Kotlin 셰이더로 폴백

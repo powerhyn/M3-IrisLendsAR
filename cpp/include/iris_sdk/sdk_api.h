@@ -220,6 +220,7 @@ typedef struct IrisLensConfig {
     float edge_feather;         /**< 가장자리 페더링 (0.0~1.0, 기본값 0.1) */
     bool apply_left;            /**< 왼쪽 눈 적용 여부 (기본값 true) */
     bool apply_right;           /**< 오른쪽 눈 적용 여부 (기본값 true) */
+    bool is_mirror;             /**< 전면 카메라 mirror 여부 (기본값 false) */
 } IrisLensConfig;
 
 /**

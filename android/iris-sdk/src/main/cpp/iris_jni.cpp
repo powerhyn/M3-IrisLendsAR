@@ -112,11 +112,12 @@ bool JniCache::init(JNIEnv* env) {
     lensConfig_edgeFeather = env->GetFieldID(lensConfigClass, "edgeFeather", "F");
     lensConfig_applyLeft = env->GetFieldID(lensConfigClass, "applyLeft", "Z");
     lensConfig_applyRight = env->GetFieldID(lensConfigClass, "applyRight", "Z");
+    lensConfig_isMirror = env->GetFieldID(lensConfigClass, "isMirror", "Z");
 
     // 필드 ID 검증
     if (!lensConfig_opacity || !lensConfig_scale || !lensConfig_offsetX ||
         !lensConfig_offsetY || !lensConfig_rotation || !lensConfig_blendMode || !lensConfig_edgeFeather ||
-        !lensConfig_applyLeft || !lensConfig_applyRight) {
+        !lensConfig_applyLeft || !lensConfig_applyRight || !lensConfig_isMirror) {
         LOGE("Failed to get LensConfig field IDs");
         return false;
     }
@@ -400,6 +401,7 @@ bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     dest.edge_feather = env->GetFloatField(src, g_jniCache.lensConfig_edgeFeather);
     dest.apply_left = env->GetBooleanField(src, g_jniCache.lensConfig_applyLeft);
     dest.apply_right = env->GetBooleanField(src, g_jniCache.lensConfig_applyRight);
+    dest.is_mirror = env->GetBooleanField(src, g_jniCache.lensConfig_isMirror);
 
     return !checkAndLogException(env);
 }
