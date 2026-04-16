@@ -643,4 +643,15 @@ void iris_sdk_set_lens_ellipse_mask(int enabled) {
 #endif
 }
 
+void iris_sdk_set_lens_highlight(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setHighlightEnabled(enabled != 0);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
 } // extern "C"

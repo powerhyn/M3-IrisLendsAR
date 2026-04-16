@@ -2162,4 +2162,15 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensEllipseMask(
     iris_sdk_set_lens_ellipse_mask(enabled ? 1 : 0);
 }
 
+/**
+ * Java: native void nativeSetLensHighlight(boolean enabled);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensHighlight(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jboolean enabled)
+{
+    iris_sdk_set_lens_highlight(enabled ? 1 : 0);
+}
+
 }  // extern "C"

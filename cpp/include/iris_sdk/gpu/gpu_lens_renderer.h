@@ -111,6 +111,7 @@ public:
     void setContactShadowEnabled(bool enabled);
     void setContactShadowIntensity(float intensity);
     void setEllipseMaskEnabled(bool enabled);
+    void setHighlightEnabled(bool enabled);
 
     // ========================================
     // 타원 피팅 (공개 유틸리티)
@@ -172,6 +173,7 @@ private:
     bool contact_shadow_ = false;
     float shadow_intensity_ = 0.15f;
     bool use_ellipse_mask_ = false;
+    bool highlight_enabled_ = false;
 
     // ========================================
     // Uniform Location 캐시
@@ -220,6 +222,7 @@ private:
         // 기타
         GLint uAvgIrisLum = -1;
         GLint uDetH = -1;
+        GLint uHighlightEnabled = -1;
     } lens_uniforms_;
 
     void cacheLensUniforms();

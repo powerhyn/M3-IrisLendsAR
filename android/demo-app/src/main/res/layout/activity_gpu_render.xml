@@ -357,7 +357,19 @@
                             android:layout_height="36dp"
                             android:layout_weight="1"
                             android:layout_marginStart="4dp"
+                            android:layout_marginEnd="4dp"
                             android:text="Ellipse: OFF"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:background="#44FF0000" />
+
+                        <Button
+                            android:id="@+id/btnToggleHighlight"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="4dp"
+                            android:text="Highlight: OFF"
                             android:textSize="11sp"
                             android:textAllCaps="false"
                             android:background="#44FF0000" />

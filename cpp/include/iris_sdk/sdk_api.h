@@ -871,6 +871,11 @@ IRIS_SDK_EXPORT void iris_sdk_set_lens_sclera_protect(int enabled);
  */
 IRIS_SDK_EXPORT void iris_sdk_set_lens_ellipse_mask(int enabled);
 
+/**
+ * @brief GPU 렌즈 각막 하이라이트 설정
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_lens_highlight(int enabled);
+
 // ============================================================================
 // Temporal Stabilizer API (P5-W1)
 // ============================================================================

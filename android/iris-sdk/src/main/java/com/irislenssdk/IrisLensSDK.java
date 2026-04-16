@@ -974,6 +974,17 @@ public final class IrisLensSDK {
         }
     }
 
+    /**
+     * GPU 렌즈 각막 하이라이트 설정.
+     * GL 스레드에서 호출.
+     * @param enabled true=on, false=off
+     */
+    public static void setLensHighlight(boolean enabled) {
+        if (sLibraryLoaded) {
+            nativeSetLensHighlight(enabled);
+        }
+    }
+
     // ========================================================================
     // Detection Slot API (더블 버퍼, Lock-free)
     // ========================================================================
@@ -1321,6 +1332,7 @@ public final class IrisLensSDK {
             long detectionPtr, LensConfig config);
     private static native void nativeSetLensScleraProtect(boolean enabled);
     private static native void nativeSetLensEllipseMask(boolean enabled);
+    private static native void nativeSetLensHighlight(boolean enabled);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods

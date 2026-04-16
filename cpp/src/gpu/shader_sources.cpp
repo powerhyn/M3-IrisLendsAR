@@ -815,6 +815,7 @@ uniform int uScleraProtect;
 uniform int uContactShadow;
 uniform float uShadowIntensity;
 uniform float uMaxDetail;
+uniform int uHighlightEnabled;
 
 uniform int uUseEllipseMask;
 uniform vec2 uLeftEyeEllipseCenter;
@@ -936,9 +937,12 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     float scaledRadius = irisRadius * uLensScale;
     float dist = distance(adjustedCoord, adjustedCenter) / scaledRadius;
 
-    if (dist >= 1.0) return camera;
-
-    vec2 lensCoord = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
+    // early return 제거 — mipmap + dynamic branch에서 texture() gradient가
+    // undefined되어 검은 화면 발생하는 Adreno 드라이버 이슈 방지.
+    // dist >= 1.0이면 edgeAlpha=0 → finalAlpha=0 → mix 결과=camera로 동일 결과.
+    vec2 lensCoord = clamp(
+        (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5,
+        vec2(0.0), vec2(1.0));
 
     vec4 lens = texture(uLensTexture, lensCoord);
     if (lens.a > 0.001) lens.rgb /= lens.a;
@@ -1001,15 +1005,14 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended = mix(blended, blended * 0.4, limbal * 0.8);
     }
 
-    // [W3-03] 각막 하이라이트 (Corneal Specular) — 주석 보존
-    // mipmap + dynamic branching 조합에서 GL_INVALID_VALUE 발생 (Adreno)
-    // 원인 해결 후 블렌드 모드별 선택적 적용 검토
-    //
-    // vec2 highlightOffset = vec2(-0.15, -0.2);
-    // vec2 lensLocal = (lensCoord - 0.5) * 2.0;
-    // float highlightDist = distance(lensLocal, highlightOffset);
-    // float highlight = smoothstep(0.12, 0.0, highlightDist);
-    // blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
+    // 각막 하이라이트: 홍채 로컬 좌표 기반 (lensCoord 미사용 — mipmap gradient 회피)
+    if (uHighlightEnabled == 1) {
+        vec2 localDir = (adjustedCoord - adjustedCenter) / max(scaledRadius, 1e-5);
+        vec2 highlightCenter = vec2(-0.3, 0.4);
+        float highlightDist = distance(localDir, highlightCenter);
+        float highlight = smoothstep(0.25, 0.0, highlightDist);
+        blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
+    }
 
     if (uContactShadow == 1) {
         float eyeOpening = abs(maxY - minY);

@@ -1600,6 +1600,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     }
 
     /**
+     * 각막 하이라이트(Corneal Specular) 활성화/비활성화
+     */
+    fun setHighlight(enabled: Boolean) {
+        IrisLensSDK.setLensHighlight(enabled)
+    }
+
+    /**
      * 렌즈 텍스처 설정 (비트맵)
      *
      * GL 스레드가 아닌 곳에서 호출해도 안전 (펜딩 처리)

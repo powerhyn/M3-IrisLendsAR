@@ -360,6 +360,7 @@ void GPULensRenderer::cacheLensUniforms() {
 
     lens_uniforms_.uAvgIrisLum = glGetUniformLocation(lens_program_, "uAvgIrisLum");
     lens_uniforms_.uDetH = glGetUniformLocation(lens_program_, "uDetH");
+    lens_uniforms_.uHighlightEnabled = glGetUniformLocation(lens_program_, "uHighlightEnabled");
 
     // 유효한 uniform location 카운트
     int valid_count = 0;
@@ -446,6 +447,11 @@ void GPULensRenderer::setContactShadowIntensity(float intensity) {
 void GPULensRenderer::setEllipseMaskEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     use_ellipse_mask_ = enabled;
+}
+
+void GPULensRenderer::setHighlightEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    highlight_enabled_ = enabled;
 }
 
 // ============================================================================
@@ -748,6 +754,7 @@ ErrorCode GPULensRenderer::renderToTexture(
 
     // 기능 플래그
     glUniform1i(lens_uniforms_.uScleraProtect, sclera_protect_ ? 1 : 0);
+    glUniform1i(lens_uniforms_.uHighlightEnabled, highlight_enabled_ ? 1 : 0);
     glUniform1i(lens_uniforms_.uContactShadow, contact_shadow_ ? 1 : 0);
     glUniform1f(lens_uniforms_.uShadowIntensity, shadow_intensity_);
     // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한 (Kotlin 기본 1.2)
