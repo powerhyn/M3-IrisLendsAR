@@ -1005,13 +1005,30 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended = mix(blended, blended * 0.4, limbal * 0.8);
     }
 
-    // 각막 하이라이트: 홍채 로컬 좌표 기반 (lensCoord 미사용 — mipmap gradient 회피)
+    // W3-04: Normal Map 라이팅 (분석적 구면 노말 + Diffuse/Specular)
+    // 렌즈 영역에만 곡면감 적용 — finalAlpha로 마스킹하여 카메라 영역 보호
     if (uHighlightEnabled == 1) {
         vec2 localDir = (adjustedCoord - adjustedCenter) / max(scaledRadius, 1e-5);
-        vec2 highlightCenter = vec2(-0.3, 0.4);
-        float highlightDist = distance(localDir, highlightCenter);
-        float highlight = smoothstep(0.25, 0.0, highlightDist);
-        blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
+
+        vec3 normal;
+        normal.x = localDir.x;
+        normal.y = localDir.y;
+        float r2 = dot(normal.xy, normal.xy);
+        normal.z = sqrt(max(1.0 - r2, 0.0));
+
+        vec3 lightDir = normalize(vec3(0.3, 0.4, 1.0));
+        vec3 viewDir = vec3(0.0, 0.0, 1.0);
+
+        float diffuse = max(dot(normal, lightDir), 0.0);
+        vec3 reflectDir = reflect(-lightDir, normal);
+        float specular = pow(max(dot(reflectDir, viewDir), 0.0), 24.0);
+
+        // 렌즈 영역에만 라이팅 (finalAlpha=0인 카메라 영역은 원본 유지)
+        // ON/OFF 체감을 위해 강도 상향 (추후 자연스럽게 튜닝)
+        float lighting = 0.5 + 0.5 * diffuse;
+        float lightMask = 1.0 - smoothstep(0.0, 1.0, sqrt(r2));
+        blended = blended * mix(1.0, lighting, finalAlpha)
+                + vec3(1.0) * specular * 0.7 * lightMask * finalAlpha;
     }
 
     if (uContactShadow == 1) {

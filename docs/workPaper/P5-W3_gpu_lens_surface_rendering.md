@@ -205,7 +205,14 @@ Android 데모 `CameraGLRenderer.kt`에 이미 검증된 구현이 있다:
 
 ## W3-04: 선택적 Normal Map + IBL
 
-### 상태: ⏳ 대기 (선택적)
+### 상태: ✅ 완료 (2026-04-22, 분석적 노말만)
+
+### 구현 내역
+- 셰이더에 분석적 구면 노말 + Diffuse/Specular 라이팅 추가
+- 좌표: `localDir = (adjustedCoord - adjustedCenter) / scaledRadius` 홍채 로컬 (mipmap gradient 회피)
+- 라이팅 마스킹: `mix(1.0, lighting, finalAlpha)`로 렌즈 영역에만 적용 (카메라 영역 보호)
+- 토글: 기존 Highlight uniform 인프라 재활용 → "3D Light" 버튼 (기본 OFF)
+- IBL/텍스처 노말맵은 Phase 6로 보류
 
 ### 배경
 

@@ -396,12 +396,12 @@ class GpuRenderActivity : AppCompatActivity() {
             btnToggleEllipse.setBackgroundColor(if (ellipseOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
-        // 각막 하이라이트 토글 (P5-W3, 기본 OFF)
+        // Normal Map 라이팅 토글 (P5-W3-04, 기본 OFF)
         var highlightOn = false
         btnToggleHighlight.setOnClickListener {
             highlightOn = !highlightOn
             cameraGLView.setHighlight(highlightOn)
-            btnToggleHighlight.text = if (highlightOn) "Highlight: ON" else "Highlight: OFF"
+            btnToggleHighlight.text = if (highlightOn) "3D Light: ON" else "3D Light: OFF"
             btnToggleHighlight.setBackgroundColor(if (highlightOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
