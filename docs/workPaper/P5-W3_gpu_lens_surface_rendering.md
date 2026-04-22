@@ -3,7 +3,7 @@
 ## 작업 개요
 - **Phase**: P5 (경쟁사 대비 품질 갭 해소)
 - **기간**: P5-W1 완료 후 (W2와 병렬 가능)
-- **상태**: ⏳ 대기
+- **상태**: 🔄 진행 중
 - **선행 조건**: P5-W1-01 (스무딩 전략 결정). W3-00 (데모 기존 구현 분석) 선행 필수.
 - **근거**: Codex — "Full PBR can wait. Lid occlusion plus corneal specular cannot."
 
@@ -52,7 +52,7 @@ Android 데모의 검증된 GPU 렌즈 렌더링을 **SDK C++ 코어로 이관**
 
 ## W3-00: 데모 CameraGLRenderer 기능 분석 + C++ 포팅 범위 결정
 
-### 상태: ⏳ 대기 (W3 선행 필수)
+### 상태: ✅ 완료 (2026-04-10)
 
 ### 작업 내용
 
@@ -93,7 +93,7 @@ Android 데모의 검증된 GPU 렌즈 렌더링을 **SDK C++ 코어로 이관**
 
 ## W3-01: 데모 타원 마스크/눈꺼풀 클리핑 → C++ 포팅
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료 (2026-04-10)
 
 ### 배경
 
@@ -127,7 +127,7 @@ Android 데모 `CameraGLRenderer.kt`에 이미 검증된 구현이 있다:
 
 ## W3-02: 데모 8종 블렌드 + Sclera Protection → C++ GPU 셰이더 이관
 
-### 상태: ⏳ 대기
+### 상태: ✅ 완료 (2026-04-10)
 
 ### 배경
 
@@ -205,7 +205,14 @@ Android 데모 `CameraGLRenderer.kt`에 이미 검증된 구현이 있다:
 
 ## W3-04: 선택적 Normal Map + IBL
 
-### 상태: ⏳ 대기 (선택적)
+### 상태: ✅ 완료 (2026-04-22, 분석적 노말만)
+
+### 구현 내역
+- 셰이더에 분석적 구면 노말 + Diffuse/Specular 라이팅 추가
+- 좌표: `localDir = (adjustedCoord - adjustedCenter) / scaledRadius` 홍채 로컬 (mipmap gradient 회피)
+- 라이팅 마스킹: `mix(1.0, lighting, finalAlpha)`로 렌즈 영역에만 적용 (카메라 영역 보호)
+- 토글: 기존 Highlight uniform 인프라 재활용 → "3D Light" 버튼 (기본 OFF)
+- IBL/텍스처 노말맵은 Phase 6로 보류
 
 ### 배경
 
@@ -266,3 +273,43 @@ W3-04 (Normal Map) ← W3-03 후 (선택적, 신규)
 - **림발 다크닝**: 렌즈-공막 경계 자연스러움
 - **경쟁사 대비**: 피팅몬스터와 동등, Perfect Corp의 70~80% 수준 달성
 - **이중 구현 방지**: 데모 검증 코드를 SDK 코어 C++로 정립. Android 데모는 W1 완료 후 Kotlin 스무딩 제거, W3 완료 후 Kotlin 셰이더도 SDK 코어 호출로 점진 전환
+
+---
+
+## 실행 내역 (2026-04-10)
+
+### W3-00: 데모 분석 완료
+- CameraGLRenderer.kt 전체 분석 (~1500줄)
+- GLSL 셰이더 코드 추출 (47개 uniform, 8종 블렌드, 타원 마스크)
+- fitEyeEllipse 알고리즘 분석 (16점 contour → 비대칭 타원 6파라미터)
+- Sclera Protection 공식 (기하학적 + 색상 기반)
+- Contact Shadow 공식 (4px 깊이, 눈 감김 시 비활성화)
+- 기존 C++ GPU 인프라 확인: IRenderContext, ShaderManager, TexturePool, GPUBeautyBackend
+
+### W3-01 + W3-02: GPULensRenderer 통합 구현
+- GPUBeautyBackend DI 패턴 기반 GPULensRenderer 클래스 생성
+- 완전한 GLSL ES 3.1 프래그먼트 셰이더 포팅 (~300줄)
+  - 8종 블렌드: Normal, Multiply, Screen, Overlay, LuminanceTint, LuminanceTintLinear, SoftLight, ColorReplace
+  - asymmetricEllipseMask(): 비대칭 타원 마스크 (rxInner/rxOuter 분리, 회전)
+  - calcScleraFactor(): 기하학적 + 색상 기반 공막 보호
+  - calcContactShadow(): 눈꺼풀 아래 그림자
+- fitEyeEllipse() C++ 포팅 (16점 contour 평균 중심, atan2 회전, inner*0.85/outer*1.0 비대칭)
+- medianLandmarkY() C++ 포팅 (3점 중앙값)
+- OneEuroFilter 스무딩 16개 (타원 12 + 눈꺼풀 4)
+- 눈꺼풀/타원 캐시 5프레임 홀드
+- Desktop stub (IRIS_SDK_GPU_AVAILABLE == 0)
+
+### 변경 파일 목록
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `cpp/include/iris_sdk/gpu/gpu_lens_renderer.h` (신규) | GPULensRenderer 클래스 헤더 (284줄) |
+| `cpp/src/gpu/gpu_lens_renderer.cpp` (신규) | 전체 구현 (761줄) |
+| `cpp/include/iris_sdk/gpu/shader_manager.h` | LENS_OVERLAY_VERTEX/FRAGMENT 셰이더 선언 추가 |
+| `cpp/src/gpu/shader_sources.cpp` | 렌즈 셰이더 GLSL 소스 문자열 추가 |
+| `cpp/CMakeLists.txt` | gpu_lens_renderer.cpp 빌드 타겟 추가 |
+
+### 남은 작업
+- W3-03 (각막 하이라이트 + 림발 다크닝): 셰이더 확장 필요
+- W3-04 (Normal Map): 선택적
+- Android 데모에서 SDK 코어 GPULensRenderer 호출로 전환 (JNI 연결)

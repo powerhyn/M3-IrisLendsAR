@@ -777,6 +777,7 @@ void iris_sdk_default_lens_config(IrisLensConfig* config) {
     config->edge_feather = 0.1f;
     config->apply_left = true;
     config->apply_right = true;
+    config->is_mirror = false;
 }
 
 // ============================================================================

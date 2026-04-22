@@ -362,6 +362,7 @@ struct JniCache {
     jfieldID lensConfig_edgeFeather = nullptr;
     jfieldID lensConfig_applyLeft = nullptr;
     jfieldID lensConfig_applyRight = nullptr;
+    jfieldID lensConfig_isMirror = nullptr;
 
     // BeautyFilterConfig 클래스
     jclass beautyConfigClass = nullptr;

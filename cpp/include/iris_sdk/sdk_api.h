@@ -220,6 +220,7 @@ typedef struct IrisLensConfig {
     float edge_feather;         /**< 가장자리 페더링 (0.0~1.0, 기본값 0.1) */
     bool apply_left;            /**< 왼쪽 눈 적용 여부 (기본값 true) */
     bool apply_right;           /**< 오른쪽 눈 적용 여부 (기본값 true) */
+    bool is_mirror;             /**< 전면 카메라 mirror 여부 (기본값 false) */
 } IrisLensConfig;
 
 /**
@@ -803,6 +804,77 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_release_texture(uint32_t texture);
  * @return 1 SDK 관리, 0 외부 텍스처
  */
 IRIS_SDK_EXPORT int iris_sdk_is_texture_managed(uint32_t texture);
+
+// ============================================================================
+// GPU 렌즈 렌더링
+// ============================================================================
+
+/**
+ * @brief GPU 렌즈 렌더러 초기화
+ *
+ * OpenGL ES 기반 GPU 렌즈 렌더러를 초기화합니다.
+ * EGL 컨텍스트가 현재 스레드에 바인딩되어 있어야 합니다.
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_init_gpu_lens(void);
+
+/**
+ * @brief GPU 렌즈 렌더러 해제
+ */
+IRIS_SDK_EXPORT void iris_sdk_release_gpu_lens(void);
+
+/**
+ * @brief GPU 렌즈 렌더러 초기화 여부 확인
+ */
+IRIS_SDK_EXPORT int iris_sdk_is_gpu_lens_initialized(void);
+
+/**
+ * @brief 렌즈 텍스처 로드 (RGBA 데이터)
+ *
+ * @param data RGBA 픽셀 데이터
+ * @param width 너비
+ * @param height 높이
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_lens_texture(
+    const uint8_t* data, int width, int height);
+
+/**
+ * @brief 렌즈 텍스처 해제
+ */
+IRIS_SDK_EXPORT void iris_sdk_unload_lens_texture(void);
+
+/**
+ * @brief GPU 렌즈 렌더링 (텍스처)
+ *
+ * @param input_texture 입력 카메라 프레임 텍스처 ID
+ * @param output_texture 출력 텍스처 ID 포인터
+ * @param width 프레임 너비
+ * @param height 프레임 높이
+ * @param detection 홍채 검출 결과 (필수)
+ * @param config 렌즈 설정 (NULL이면 기본값)
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_render_lens_texture(
+    uint32_t input_texture,
+    uint32_t* output_texture,
+    int width, int height,
+    const IrisResult* detection,
+    const IrisLensConfig* config);
+
+/**
+ * @brief GPU 렌즈 Sclera Protection 설정
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_lens_sclera_protect(int enabled);
+
+/**
+ * @brief GPU 렌즈 타원 마스크 설정
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_lens_ellipse_mask(int enabled);
+
+/**
+ * @brief GPU 렌즈 각막 하이라이트 설정
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_lens_highlight(int enabled);
 
 // ============================================================================
 // Temporal Stabilizer API (P5-W1)

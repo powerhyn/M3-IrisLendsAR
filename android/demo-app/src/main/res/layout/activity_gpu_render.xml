@@ -321,7 +321,7 @@
 
                     </LinearLayout>
 
-                    <!-- Sclera Protection / Contact Shadow 토글 (P4-W2-01) -->
+                    <!-- Sclera / Shadow 토글 (P4-W2-01) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -335,7 +335,7 @@
                             android:layout_weight="1"
                             android:layout_marginEnd="4dp"
                             android:text="Sclera: ON"
-                            android:textSize="11sp"
+                            android:textSize="12sp"
                             android:textAllCaps="false"
                             android:background="#4400CC00" />
 
@@ -345,20 +345,39 @@
                             android:layout_height="36dp"
                             android:layout_weight="1"
                             android:layout_marginStart="4dp"
-                            android:layout_marginEnd="4dp"
                             android:text="Shadow: OFF"
-                            android:textSize="11sp"
+                            android:textSize="12sp"
                             android:textAllCaps="false"
                             android:background="#44FF0000" />
+
+                    </LinearLayout>
+
+                    <!-- Ellipse / 3D Light 토글 (P5-W3) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="4dp">
 
                         <Button
                             android:id="@+id/btnToggleEllipse"
                             android:layout_width="0dp"
                             android:layout_height="36dp"
                             android:layout_weight="1"
-                            android:layout_marginStart="4dp"
+                            android:layout_marginEnd="4dp"
                             android:text="Ellipse: OFF"
-                            android:textSize="11sp"
+                            android:textSize="12sp"
+                            android:textAllCaps="false"
+                            android:background="#44FF0000" />
+
+                        <Button
+                            android:id="@+id/btnToggleHighlight"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="4dp"
+                            android:text="3D Light: OFF"
+                            android:textSize="12sp"
                             android:textAllCaps="false"
                             android:background="#44FF0000" />
 

@@ -552,6 +552,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     // 렌즈 설정
     private var lensConfig: LensConfig = LensConfig()
     private var lensEnabled: Boolean = false
+    private var sdkLensLoggedOnce: Boolean = false
 
     // Feature flags (P4-W2-01: Sclera Protection + Contact Shadow)
     private var scleraProtectEnabled: Boolean = true   // 기본 ON
@@ -688,6 +689,10 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val gpuSuccess = (gpuInitResult == IrisLensSDK.OK || gpuInitResult == IrisLensSDK.ALREADY_INITIALIZED)
         Log.d(TAG, "GPU Beauty Backend init: $gpuInitResult (success: $gpuSuccess)")
 
+        // GPU Lens Renderer 초기화
+        val gpuLensResult = IrisLensSDK.initGpuLens()
+        Log.d(TAG, "GPU Lens Renderer init: $gpuLensResult")
+
         isInitialized = true
 
         // 콜백으로 SurfaceTexture 전달 (카메라 연결용)
@@ -728,7 +733,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 2단계: 렌즈 오버레이 (홍채 위치에 렌즈 합성)
         var currentTexture = rgbaTextureId
         if (lensEnabled && lensImageTextureId != 0 && irisResult?.detected == true) {
-            currentTexture = renderLensOverlay(currentTexture)
+            currentTexture = applyGpuLensRenderer(currentTexture)
         } else if (stabilityLogEnabled && lensEnabled && lensImageTextureId != 0) {
             // 렌즈 파이프라인 활성 상태에서 검출 실패 시에만 기록
             // (렌즈 미선택/텍스처 미준비 시에는 기록하지 않음)
@@ -849,6 +854,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR_MIPMAP_LINEAR)
 
         GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, 0)
+
+        // SDK GPULensRenderer에도 렌즈 텍스처 전달 (RGBA 바이트)
+        if (IrisLensSDK.isGpuLensInitialized()) {
+            val rgbaBytes = ByteArray(bitmap.width * bitmap.height * 4)
+            val buffer = java.nio.ByteBuffer.wrap(rgbaBytes)
+            bitmap.copyPixelsToBuffer(buffer)
+            val loadResult = IrisLensSDK.loadLensTexture(rgbaBytes, bitmap.width, bitmap.height)
+            Log.d(TAG, "SDK lens texture loaded: ${bitmap.width}x${bitmap.height}, result=$loadResult")
+        }
 
         Log.d(TAG, "Lens texture uploaded: ${bitmap.width}x${bitmap.height}, id=$lensImageTextureId")
     }
@@ -1206,6 +1220,47 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     }
 
     /**
+     * SDK GPULensRenderer를 통한 렌즈 렌더링
+     *
+     * SDK C++ 코어의 GPULensRenderer를 호출하여 렌즈를 합성합니다.
+     * SDK 초기화 실패 시 기존 Kotlin 셰이더(renderLensOverlay)로 폴백합니다.
+     */
+    private fun applyGpuLensRenderer(inputTexture: Int): Int {
+        if (!IrisLensSDK.isGpuLensInitialized()) {
+            Log.w(TAG, "GPU Lens not initialized, fallback to Kotlin shader")
+            return renderLensOverlay(inputTexture)
+        }
+
+        val texWidth = if (frameWidth > 0) frameWidth else viewWidth
+        val texHeight = if (frameHeight > 0) frameHeight else viewHeight
+
+        // Detection Slot에서 최신 검출 결과 포인터 취득
+        val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
+
+        lensConfig.isMirror = isMirror
+
+        val outputTexture = IrisLensSDK.renderLensTexture(
+            inputTexture,
+            texWidth,
+            texHeight,
+            detectionHandle,
+            lensConfig
+        )
+
+        return if (outputTexture != 0 && outputTexture != inputTexture) {
+            if (!sdkLensLoggedOnce) {
+                Log.i(TAG, "SDK C++ GPULensRenderer active (out=$outputTexture, ${texWidth}x${texHeight})")
+                sdkLensLoggedOnce = true
+            }
+            outputTexture
+        } else {
+            // SDK 렌더링 실패 시 기존 Kotlin 셰이더로 폴백
+            Log.w(TAG, "SDK lens render failed (output=$outputTexture), fallback to Kotlin shader")
+            renderLensOverlay(inputTexture)
+        }
+    }
+
+    /**
      * GPU 뷰티 필터 적용
      *
      * @param inputTexture 입력 텍스처 ID
@@ -1545,6 +1600,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     }
 
     /**
+     * 각막 하이라이트(Corneal Specular) 활성화/비활성화
+     */
+    fun setHighlight(enabled: Boolean) {
+        IrisLensSDK.setLensHighlight(enabled)
+    }
+
+    /**
      * 렌즈 텍스처 설정 (비트맵)
      *
      * GL 스레드가 아닌 곳에서 호출해도 안전 (펜딩 처리)
@@ -1827,6 +1889,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 리소스 해제
      */
     fun release() {
+        // SDK GPU 렌즈 렌더러 해제
+        IrisLensSDK.releaseGpuLens()
+
         // beautyOutputTextureId는 TexturePool 소유 → releaseGpuBeauty()에서 일괄 해제
         // 여기서 releaseTexture() 호출하면 이중 해제 발생
         beautyOutputTextureId = 0

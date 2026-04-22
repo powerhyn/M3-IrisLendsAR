@@ -761,5 +761,306 @@ void main() {
 }
 )glsl";
 
+//=============================================================================
+// 렌즈 오버레이 버텍스 셰이더 (풀스크린 쿼드, 텍스처 좌표 패스스루)
+//=============================================================================
+const char* LENS_OVERLAY_VERTEX = R"glsl(
+#version 310 es
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aTexCoord;
+
+out vec2 vTexCoord;
+
+void main() {
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vTexCoord = aTexCoord;
+}
+)glsl";
+
+//=============================================================================
+// 렌즈 오버레이 프래그먼트 셰이더
+// Kotlin 참조 구현(CameraGLRenderer.kt LENS_OVERLAY_FRAGMENT_SHADER)을
+// 1:1로 포팅. 함수/식/uniform 시그니처가 모두 동일해야 시각적 결과가 일치한다.
+//=============================================================================
+const char* LENS_OVERLAY_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+
+uniform sampler2D uCameraTexture;
+uniform sampler2D uLensTexture;
+
+uniform vec2 uLeftIrisCenter;
+uniform float uLeftIrisRadius;
+uniform vec2 uRightIrisCenter;
+uniform float uRightIrisRadius;
+
+uniform float uOpacity;
+uniform float uLensScale;
+uniform float uEdgeFeather;
+uniform int uBlendMode;
+uniform int uApplyLeft;
+uniform int uApplyRight;
+uniform float uFrameAspect;
+
+uniform float uLeftEyeTop;
+uniform float uLeftEyeBottom;
+uniform float uRightEyeTop;
+uniform float uRightEyeBottom;
+uniform float uEyelidFeather;
+uniform float uAvgIrisLum;
+uniform float uDetH;
+
+uniform int uScleraProtect;
+uniform int uContactShadow;
+uniform float uShadowIntensity;
+uniform float uMaxDetail;
+uniform int uHighlightEnabled;
+
+uniform int uUseEllipseMask;
+uniform vec2 uLeftEyeEllipseCenter;
+uniform vec3 uLeftEyeEllipseRadii;
+uniform float uLeftEyeEllipseRot;
+uniform vec2 uRightEyeEllipseCenter;
+uniform vec3 uRightEyeEllipseRadii;
+uniform float uRightEyeEllipseRot;
+
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+vec3 blendNormal(vec3 base, vec3 blend, float opacity) {
+    return mix(base, blend, opacity);
+}
+
+vec3 blendMultiply(vec3 base, vec3 blend, float opacity) {
+    return mix(base, base * blend, opacity);
+}
+
+vec3 blendScreen(vec3 base, vec3 blend, float opacity) {
+    return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
+}
+
+vec3 blendOverlay(vec3 base, vec3 blend, float opacity) {
+    vec3 result;
+    for (int i = 0; i < 3; i++) {
+        if (base[i] < 0.5) {
+            result[i] = 2.0 * base[i] * blend[i];
+        } else {
+            result[i] = 1.0 - 2.0 * (1.0 - base[i]) * (1.0 - blend[i]);
+        }
+    }
+    return mix(base, result, opacity);
+}
+
+vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
+vec3 toSRGBFast(vec3 linear_color) { return sqrt(max(linear_color, vec3(0.0))); }
+
+vec3 blendLuminanceTint(vec3 base, vec3 blend, float opacity) {
+    float lum = dot(base, vec3(0.299, 0.587, 0.114));
+    float scale = clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5);
+    vec3 tinted = blend * lum * scale;
+    return mix(base, tinted, opacity);
+}
+
+vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
+    float avgLumLinear = uAvgIrisLum * uAvgIrisLum;
+    float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
+    vec3 tinted = toLinearFast(blend) * lum * scale;
+    vec3 result = mix(baseL, tinted, opacity);
+    float realSpec = smoothstep(0.7, 0.95, lum);
+    result = mix(result, baseL, realSpec);
+    return toSRGBFast(result);
+}
+
+vec3 blendSoftLight(vec3 base, vec3 blend, float opacity) {
+    vec3 lo = base - (1.0 - 2.0 * blend) * base * (1.0 - base);
+    vec3 hi = base + (2.0 * blend - 1.0) * (sqrt(base) - base);
+    vec3 result = mix(lo, hi, step(vec3(0.5), blend));
+    return mix(base, result, opacity);
+}
+
+vec3 blendColorReplace(vec3 base, vec3 blend, float opacity, float maxDetail) {
+    float lum = dot(base, vec3(0.299, 0.587, 0.114));
+    float detail = lum / max(0.01, uAvgIrisLum);
+    detail = clamp(detail, 0.2, maxDetail);
+    vec3 colored = blend * detail;
+    return mix(base, colored, opacity);
+}
+
+float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
+    vec2 d = uv - center;
+    float cosR = cos(rotation);
+    float sinR = sin(rotation);
+    d = vec2(d.x * cosR + d.y * sinR, -d.x * sinR + d.y * cosR);
+    float rx = (d.x < 0.0) ? radii.x : radii.y;
+    float ry = radii.z;
+    float ellipseDist = length(vec2(d.x / max(rx, 1e-5), d.y / max(ry, 1e-5)));
+    return smoothstep(1.0, 1.0 - feather, ellipseDist);
+}
+
+float calcScleraFactor(vec3 cameraColor) {
+    float brightness = dot(cameraColor, vec3(0.299, 0.587, 0.114));
+    float maxC = max(cameraColor.r, max(cameraColor.g, cameraColor.b));
+    float minC = min(cameraColor.r, min(cameraColor.g, cameraColor.b));
+    float saturation = (maxC - minC) / max(maxC, 1e-4);
+    float brightFactor = smoothstep(0.3, 0.5, brightness);
+    float lowSatFactor = 1.0 - smoothstep(0.1, 0.3, saturation);
+    return brightFactor * lowSatFactor;
+}
+
+float calcContactShadow(float fragY, float minY, float eyelidFeather, float eyeOpening) {
+    float shadowDepthPx = 4.0;
+    float shadowDepth = shadowDepthPx / max(uDetH, 1.0);
+    float shadowIntensity = clamp(uShadowIntensity, 0.0, 0.25);
+    float shadowZone = smoothstep(
+        minY + eyelidFeather,
+        minY + eyelidFeather + shadowDepth,
+        fragY
+    );
+    float shadowFactor = (1.0 - shadowZone) * shadowIntensity;
+    float shadowEnable = smoothstep(0.015, 0.025, eyeOpening);
+    shadowFactor *= shadowEnable;
+    float maskAlpha = smoothstep(minY, minY + eyelidFeather, fragY);
+    return shadowFactor * maskAlpha;
+}
+
+vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
+               float eyeTop, float eyeBottom,
+               vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot) {
+    if (irisRadius <= 0.0) return camera;
+
+    vec2 adjustedCoord = vec2(vTexCoord.x * aspectRatio, vTexCoord.y);
+    vec2 adjustedCenter = vec2(irisCenter.x * aspectRatio, irisCenter.y);
+
+    float scaledRadius = irisRadius * uLensScale;
+    float dist = distance(adjustedCoord, adjustedCenter) / scaledRadius;
+
+    // early return 제거 — mipmap + dynamic branch에서 texture() gradient가
+    // undefined되어 검은 화면 발생하는 Adreno 드라이버 이슈 방지.
+    // dist >= 1.0이면 edgeAlpha=0 → finalAlpha=0 → mix 결과=camera로 동일 결과.
+    vec2 lensCoord = clamp(
+        (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5,
+        vec2(0.0), vec2(1.0));
+
+    vec4 lens = texture(uLensTexture, lensCoord);
+    if (lens.a > 0.001) lens.rgb /= lens.a;
+
+    float featherStart = 1.0 - uEdgeFeather;
+    float edgeAlpha = smoothstep(1.0, featherStart, dist);
+
+    float eyelidFeather = uEyelidFeather;
+    float minY = min(eyeTop, eyeBottom);
+    float maxY = max(eyeTop, eyeBottom);
+    float eyelidMask;
+
+    if (uUseEllipseMask == 1 && ellipseRadii.z > 0.0) {
+        eyelidMask = asymmetricEllipseMask(vTexCoord, ellipseCenter, ellipseRadii, ellipseRot, eyelidFeather * 3.0);
+    } else {
+        float topClip = smoothstep(minY - eyelidFeather, minY + eyelidFeather, vTexCoord.y);
+        float bottomClip = 1.0 - smoothstep(maxY - eyelidFeather, maxY + eyelidFeather, vTexCoord.y);
+        eyelidMask = topClip * bottomClip;
+    }
+
+    float finalAlpha = lens.a * uOpacity * edgeAlpha * eyelidMask;
+
+    float irisEdgeDist = dist * uLensScale;
+    if (uScleraProtect == 1) {
+        float geomFactor = smoothstep(0.75, 1.0, irisEdgeDist);
+        float colorFactor = calcScleraFactor(camera.rgb);
+        float scleraFade = 1.0 - geomFactor * (0.5 + 0.5 * colorFactor);
+        finalAlpha *= scleraFade;
+    }
+
+    float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
+
+    vec3 blended;
+    if (uBlendMode == 0) {
+        blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 1) {
+        blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 2) {
+        blended = blendScreen(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 3) {
+        blended = blendOverlay(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 4) {
+        blended = blendLuminanceTint(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 5) {
+        blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 6) {
+        blended = blendSoftLight(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 7) {
+        blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha, maxDetail);
+    } else {
+        blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
+    }
+
+    // 림발 다크닝: 홍채 외곽(r≈0.7~1.0)에 어두운 고리
+    // 현재 비활성 — 대부분의 렌즈 텍스처에 이미 림발이 포함되어 이중 적용 방지
+    const bool LIMBAL_ENABLED = false;
+    if (LIMBAL_ENABLED) {
+        float limbalDist = dist;
+        float limbal = smoothstep(0.7, 1.0, limbalDist);
+        blended = mix(blended, blended * 0.4, limbal * 0.8);
+    }
+
+    // W3-04: Normal Map 라이팅 (분석적 구면 노말 + Diffuse/Specular)
+    // 렌즈 영역에만 곡면감 적용 — finalAlpha로 마스킹하여 카메라 영역 보호
+    if (uHighlightEnabled == 1) {
+        vec2 localDir = (adjustedCoord - adjustedCenter) / max(scaledRadius, 1e-5);
+
+        vec3 normal;
+        normal.x = localDir.x;
+        normal.y = localDir.y;
+        float r2 = dot(normal.xy, normal.xy);
+        normal.z = sqrt(max(1.0 - r2, 0.0));
+
+        vec3 lightDir = normalize(vec3(0.3, 0.4, 1.0));
+        vec3 viewDir = vec3(0.0, 0.0, 1.0);
+
+        float diffuse = max(dot(normal, lightDir), 0.0);
+        vec3 reflectDir = reflect(-lightDir, normal);
+        float specular = pow(max(dot(reflectDir, viewDir), 0.0), 24.0);
+
+        // 렌즈 영역에만 라이팅 (finalAlpha=0인 카메라 영역은 원본 유지)
+        // ON/OFF 체감을 위해 강도 상향 (추후 자연스럽게 튜닝)
+        float lighting = 0.5 + 0.5 * diffuse;
+        float lightMask = 1.0 - smoothstep(0.0, 1.0, sqrt(r2));
+        blended = blended * mix(1.0, lighting, finalAlpha)
+                + vec3(1.0) * specular * 0.7 * lightMask * finalAlpha;
+    }
+
+    if (uContactShadow == 1) {
+        float eyeOpening = abs(maxY - minY);
+        float shadow = calcContactShadow(vTexCoord.y, minY, eyelidFeather, eyeOpening);
+        blended *= (1.0 - shadow);
+    }
+
+    return vec4(blended, camera.a);
+}
+
+void main() {
+    vec4 camera = texture(uCameraTexture, vTexCoord);
+    vec4 result = camera;
+
+    float aspectRatio = uFrameAspect;
+
+    if (uApplyLeft == 1 && uLeftIrisRadius > 0.0) {
+        result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio,
+                           uLeftEyeTop, uLeftEyeBottom,
+                           uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot);
+    }
+
+    if (uApplyRight == 1 && uRightIrisRadius > 0.0) {
+        result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio,
+                           uRightEyeTop, uRightEyeBottom,
+                           uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot);
+    }
+
+    fragColor = result;
+}
+)glsl";
+
 } // namespace shaders
 } // namespace iris_sdk

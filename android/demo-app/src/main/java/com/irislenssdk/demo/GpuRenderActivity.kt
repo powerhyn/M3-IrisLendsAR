@@ -99,6 +99,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnToggleSclera: Button
     private lateinit var btnToggleShadow: Button
     private lateinit var btnToggleEllipse: Button
+    private lateinit var btnToggleHighlight: Button
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -196,6 +197,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnToggleSclera = findViewById(R.id.btnToggleSclera)
         btnToggleShadow = findViewById(R.id.btnToggleShadow)
         btnToggleEllipse = findViewById(R.id.btnToggleEllipse)
+        btnToggleHighlight = findViewById(R.id.btnToggleHighlight)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -392,6 +394,15 @@ class GpuRenderActivity : AppCompatActivity() {
             cameraGLView.setEllipseMask(ellipseOn)
             btnToggleEllipse.text = if (ellipseOn) "Ellipse: ON" else "Ellipse: OFF"
             btnToggleEllipse.setBackgroundColor(if (ellipseOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+        }
+
+        // Normal Map 라이팅 토글 (P5-W3-04, 기본 OFF)
+        var highlightOn = false
+        btnToggleHighlight.setOnClickListener {
+            highlightOn = !highlightOn
+            cameraGLView.setHighlight(highlightOn)
+            btnToggleHighlight.text = if (highlightOn) "3D Light: ON" else "3D Light: OFF"
+            btnToggleHighlight.setBackgroundColor(if (highlightOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
         // 홍채 밝기 보정 슬라이더 (P4-W2-01, 0.8~1.4 / 0.1 스텝 / 기본 1.2)

@@ -16,6 +16,7 @@
 
 #ifdef IRIS_SDK_HAS_GLES
 #include "iris_sdk/gpu/gpu_beauty_backend.h"
+#include "iris_sdk/gpu/gpu_lens_renderer.h"
 #include "iris_sdk/gpu/texture_handle.h"
 #endif
 
@@ -35,6 +36,7 @@ std::mutex g_gpu_mutex;
 
 #ifdef IRIS_SDK_HAS_GLES
 std::unique_ptr<iris_sdk::GPUBeautyBackend> g_gpu_beauty;
+std::unique_ptr<iris_sdk::GPULensRenderer> g_gpu_lens;
 std::set<uint32_t> g_managed_textures;
 #endif
 
@@ -496,6 +498,159 @@ int iris_sdk_is_texture_managed(uint32_t texture) {
     return (g_managed_textures.count(texture) > 0) ? 1 : 0;
 #else
     return 0;
+#endif
+}
+
+// ============================================================================
+// GPU 렌즈 렌더링 C API
+// ============================================================================
+
+IrisSdkError iris_sdk_init_gpu_lens(void) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+
+    if (g_gpu_lens && g_gpu_lens->isInitialized()) {
+        return IRIS_SDK_OK;
+    }
+
+    g_gpu_lens = std::make_unique<iris_sdk::GPULensRenderer>();
+    if (!g_gpu_lens->initialize(nullptr)) {
+        g_gpu_lens.reset();
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+
+    return IRIS_SDK_OK;
+#else
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+void iris_sdk_release_gpu_lens(void) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->release();
+        g_gpu_lens.reset();
+    }
+#endif
+}
+
+int iris_sdk_is_gpu_lens_initialized(void) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    return (g_gpu_lens && g_gpu_lens->isInitialized()) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+IrisSdkError iris_sdk_load_lens_texture(const uint8_t* data, int width, int height) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+    if (!data || width <= 0 || height <= 0) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+    return g_gpu_lens->loadLensTexture(data, width, height) ? IRIS_SDK_OK : IRIS_SDK_RENDER_FAILED;
+#else
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+void iris_sdk_unload_lens_texture(void) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->unloadLensTexture();
+    }
+#endif
+}
+
+IrisSdkError iris_sdk_render_lens_texture(
+    uint32_t input_texture,
+    uint32_t* output_texture,
+    int width, int height,
+    const IrisResult* detection,
+    const IrisLensConfig* config)
+{
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+
+    if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+    if (!output_texture || !detection) {
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    // C IrisResult → C++ iris_sdk::IrisResult 변환 (동일 POD 레이아웃)
+    const iris_sdk::IrisResult* cpp_result =
+        reinterpret_cast<const iris_sdk::IrisResult*>(detection);
+
+    // C IrisLensConfig → C++ iris_sdk::LensConfig 변환
+    iris_sdk::LensConfig cpp_config;
+    if (config) {
+        cpp_config.opacity = config->opacity;
+        cpp_config.scale = config->scale;
+        cpp_config.offset_x = config->offset_x;
+        cpp_config.offset_y = config->offset_y;
+        cpp_config.rotation = config->rotation;
+        cpp_config.blend_mode = static_cast<iris_sdk::BlendMode>(config->blend_mode);
+        cpp_config.edge_feather = config->edge_feather;
+        cpp_config.apply_left = config->apply_left;
+        cpp_config.apply_right = config->apply_right;
+        cpp_config.is_mirror = config->is_mirror;
+    }
+
+    iris_sdk::ErrorCode err = g_gpu_lens->renderToTexture(
+        input_texture, output_texture,
+        width, height, *cpp_result, cpp_config);
+
+    // C++ ErrorCode → C IrisSdkError 변환
+    switch (err) {
+        case iris_sdk::ErrorCode::Success: return IRIS_SDK_OK;
+        case iris_sdk::ErrorCode::NotInitialized: return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        case iris_sdk::ErrorCode::NullPointer: return IRIS_SDK_NULL_POINTER;
+        case iris_sdk::ErrorCode::NoTextureLoaded: return IRIS_SDK_NO_TEXTURE;
+        default: return IRIS_SDK_RENDER_FAILED;
+    }
+#else
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+void iris_sdk_set_lens_sclera_protect(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setScleraProtectEnabled(enabled != 0);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
+void iris_sdk_set_lens_ellipse_mask(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setEllipseMaskEnabled(enabled != 0);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
+void iris_sdk_set_lens_highlight(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setHighlightEnabled(enabled != 0);
+    }
+#else
+    (void)enabled;
 #endif
 }
 
