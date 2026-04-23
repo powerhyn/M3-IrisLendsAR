@@ -643,15 +643,11 @@ void iris_sdk_set_lens_ellipse_mask(int enabled) {
 #endif
 }
 
+// P5-W3-05 S1 D5: iris_sdk_set_lens_highlight는 no-op으로 축소.
+// 고정 조명 하이라이트 기능 폐기. 공개 C API 호환성을 위해 심볼은 유지.
+// C5 환경 반사 가산 계층(B2 결과 후)이 대체 역할 수행.
 void iris_sdk_set_lens_highlight(int enabled) {
-#ifdef IRIS_SDK_HAS_GLES
-    std::lock_guard<std::mutex> lock(g_gpu_mutex);
-    if (g_gpu_lens) {
-        g_gpu_lens->setHighlightEnabled(enabled != 0);
-    }
-#else
-    (void)enabled;
-#endif
+    (void)enabled;  // no-op
 }
 
 } // extern "C"

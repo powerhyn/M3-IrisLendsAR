@@ -102,3 +102,4 @@ docs/tensorflow-lite-2.16.1
 docs/demo_app/
 docs/fittingMonster
 docs/perfect
+android/demo-app/src/main/assets/models/selfie_multiclass_256x256.tflite

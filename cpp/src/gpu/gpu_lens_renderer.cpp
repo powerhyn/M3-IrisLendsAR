@@ -360,7 +360,7 @@ void GPULensRenderer::cacheLensUniforms() {
 
     lens_uniforms_.uAvgIrisLum = glGetUniformLocation(lens_program_, "uAvgIrisLum");
     lens_uniforms_.uDetH = glGetUniformLocation(lens_program_, "uDetH");
-    lens_uniforms_.uHighlightEnabled = glGetUniformLocation(lens_program_, "uHighlightEnabled");
+    // P5-W3-05 S1 D5: uHighlightEnabled uniform 제거
 
     // 유효한 uniform location 카운트
     int valid_count = 0;
@@ -449,9 +449,12 @@ void GPULensRenderer::setEllipseMaskEnabled(bool enabled) {
     use_ellipse_mask_ = enabled;
 }
 
-void GPULensRenderer::setHighlightEnabled(bool enabled) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    highlight_enabled_ = enabled;
+// P5-W3-05 S1 D5: setHighlightEnabled API 제거
+// 고정 조명 하이라이트는 C5 환경 반사 가산 계층(B2 결과 후)이 대체.
+// 공개 API 호환성을 위해 no-op 스텁만 유지 (deprecated 플래그)
+[[deprecated("P5-W3-05 S1: 고정 조명 하이라이트 폐기. C5 환경 반사 계층이 대체.")]]
+void GPULensRenderer::setHighlightEnabled(bool /*enabled*/) {
+    // no-op
 }
 
 // ============================================================================
@@ -754,7 +757,7 @@ ErrorCode GPULensRenderer::renderToTexture(
 
     // 기능 플래그
     glUniform1i(lens_uniforms_.uScleraProtect, sclera_protect_ ? 1 : 0);
-    glUniform1i(lens_uniforms_.uHighlightEnabled, highlight_enabled_ ? 1 : 0);
+    // P5-W3-05 S1 D5: uHighlightEnabled uniform 설정 제거
     glUniform1i(lens_uniforms_.uContactShadow, contact_shadow_ ? 1 : 0);
     glUniform1f(lens_uniforms_.uShadowIntensity, shadow_intensity_);
     // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한 (Kotlin 기본 1.2)
@@ -808,9 +811,13 @@ ErrorCode GPULensRenderer::renderToTexture(
         }
     }
 
-    // 평균 홍채 휘도 (Kotlin 기본값 0.35 — 한국인 평균 근사)
-    // TODO: EMA 갱신 로직은 별도 setter 도입 시 외부 주입
-    glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f);
+    // P5-W3-05 S1 D4: uAvgIrisLum = 0.35f 하드코드 제거
+    // 근거: "priors 덮어씌움" (Codex R2/R3). 사용자 홍채 편차(0.2~0.6) + 조명 노출 편차 커서
+    //       고정값은 정규화를 망친다.
+    // S2에서 C9 (masked ROI 평균 실측) 도입 예정. 그전까지 uniform 미설정 → GL 기본값 0.0
+    //       → 셰이더 clamp 하한(0.01)에 걸려 scale이 최대(2.5 or 5.0)로 고정됨. 이는 임시 동작.
+    //       S2에서 EyeRenderPacket.avg_iris_luma 또는 self-measure로 교체.
+    // glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f);  // 제거됨
 
     // 검출 높이 (Bug B: 픽셀 높이를 그대로 전달 — Kotlin의 detHf와 동일)
     glUniform1f(lens_uniforms_.uDetH, det_hf);

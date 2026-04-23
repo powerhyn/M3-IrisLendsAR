@@ -815,7 +815,7 @@ uniform int uScleraProtect;
 uniform int uContactShadow;
 uniform float uShadowIntensity;
 uniform float uMaxDetail;
-uniform int uHighlightEnabled;
+// P5-W3-05 S1 D5: uHighlightEnabled uniform 제거
 
 uniform int uUseEllipseMask;
 uniform vec2 uLeftEyeEllipseCenter;
@@ -840,28 +840,20 @@ vec3 blendScreen(vec3 base, vec3 blend, float opacity) {
     return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
 }
 
-vec3 blendOverlay(vec3 base, vec3 blend, float opacity) {
-    vec3 result;
-    for (int i = 0; i < 3; i++) {
-        if (base[i] < 0.5) {
-            result[i] = 2.0 * base[i] * blend[i];
-        } else {
-            result[i] = 1.0 - 2.0 * (1.0 - base[i]) * (1.0 - blend[i]);
-        }
-    }
-    return mix(base, result, opacity);
-}
+// P5-W3-05 S1 D6: blendOverlay / blendLuminanceTint(non-linear) / blendSoftLight 제거
+// 이유:
+//   - Overlay: 렌즈 도메인에서 대비 과장 → 플라스틱 느낌
+//   - LuminanceTint(non-linear): LuminanceTintLinear의 감마 오차 버전(하위호환)
+//   - SoftLight: Normal과 체감 차이 미미
+// uBlendMode 3/4/6가 들어오면 blendNormal로 자동 fallback (분기 default)
 
 vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
 vec3 toSRGBFast(vec3 linear_color) { return sqrt(max(linear_color, vec3(0.0))); }
 
-vec3 blendLuminanceTint(vec3 base, vec3 blend, float opacity) {
-    float lum = dot(base, vec3(0.299, 0.587, 0.114));
-    float scale = clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5);
-    vec3 tinted = blend * lum * scale;
-    return mix(base, tinted, opacity);
-}
-
+// P5-W3-05 S1 D3: realSpec 2줄 제거 (환경 반사 분리 계층에서 담당 예정)
+// 삭제된 원본: float realSpec = smoothstep(0.7, 0.95, lum);
+//              result = mix(result, baseL, realSpec);
+// 근거: "밝은 픽셀 보호"이지 "실반사 보호"가 아닌 개념 오류. C5 참조.
 vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
     vec3 baseL = toLinearFast(base);
     float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
@@ -869,16 +861,7 @@ vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
     float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
     vec3 tinted = toLinearFast(blend) * lum * scale;
     vec3 result = mix(baseL, tinted, opacity);
-    float realSpec = smoothstep(0.7, 0.95, lum);
-    result = mix(result, baseL, realSpec);
     return toSRGBFast(result);
-}
-
-vec3 blendSoftLight(vec3 base, vec3 blend, float opacity) {
-    vec3 lo = base - (1.0 - 2.0 * blend) * base * (1.0 - base);
-    vec3 hi = base + (2.0 * blend - 1.0) * (sqrt(base) - base);
-    vec3 result = mix(lo, hi, step(vec3(0.5), blend));
-    return mix(base, result, opacity);
 }
 
 vec3 blendColorReplace(vec3 base, vec3 blend, float opacity, float maxDetail) {
@@ -975,6 +958,9 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
 
     float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
 
+    // P5-W3-05 S1 D6: uBlendMode 3/4/6 (Overlay/LuminanceTint/SoftLight) 분기 제거
+    // 해당 값이 들어오면 default(blendNormal)로 fallback
+    // Normal(0) 유지는 B1 벤치 (Normal vs ColorReplaceLinear) 대기용
     vec3 blended;
     if (uBlendMode == 0) {
         blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
@@ -982,54 +968,27 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 2) {
         blended = blendScreen(camera.rgb, lens.rgb, finalAlpha);
-    } else if (uBlendMode == 3) {
-        blended = blendOverlay(camera.rgb, lens.rgb, finalAlpha);
-    } else if (uBlendMode == 4) {
-        blended = blendLuminanceTint(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 5) {
         blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
-    } else if (uBlendMode == 6) {
-        blended = blendSoftLight(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 7) {
         blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha, maxDetail);
     } else {
         blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
     }
 
-    // 림발 다크닝: 홍채 외곽(r≈0.7~1.0)에 어두운 고리
-    // 현재 비활성 — 대부분의 렌즈 텍스처에 이미 림발이 포함되어 이중 적용 방지
-    const bool LIMBAL_ENABLED = false;
-    if (LIMBAL_ENABLED) {
-        float limbalDist = dist;
-        float limbal = smoothstep(0.7, 1.0, limbalDist);
-        blended = mix(blended, blended * 0.4, limbal * 0.8);
-    }
-
-    // W3-04: Normal Map 라이팅 (분석적 구면 노말 + Diffuse/Specular)
-    // 렌즈 영역에만 곡면감 적용 — finalAlpha로 마스킹하여 카메라 영역 보호
-    if (uHighlightEnabled == 1) {
-        vec2 localDir = (adjustedCoord - adjustedCenter) / max(scaledRadius, 1e-5);
-
-        vec3 normal;
-        normal.x = localDir.x;
-        normal.y = localDir.y;
-        float r2 = dot(normal.xy, normal.xy);
-        normal.z = sqrt(max(1.0 - r2, 0.0));
-
-        vec3 lightDir = normalize(vec3(0.3, 0.4, 1.0));
-        vec3 viewDir = vec3(0.0, 0.0, 1.0);
-
-        float diffuse = max(dot(normal, lightDir), 0.0);
-        vec3 reflectDir = reflect(-lightDir, normal);
-        float specular = pow(max(dot(reflectDir, viewDir), 0.0), 24.0);
-
-        // 렌즈 영역에만 라이팅 (finalAlpha=0인 카메라 영역은 원본 유지)
-        // ON/OFF 체감을 위해 강도 상향 (추후 자연스럽게 튜닝)
-        float lighting = 0.5 + 0.5 * diffuse;
-        float lightMask = 1.0 - smoothstep(0.0, 1.0, sqrt(r2));
-        blended = blended * mix(1.0, lighting, finalAlpha)
-                + vec3(1.0) * specular * 0.7 * lightMask * finalAlpha;
-    }
+    // P5-W3-05 S1 D2: LIMBAL_ENABLED=false 하드코드 블록 제거
+    // 림발 처리는 C6 (에셋 기반) + B4 벤치로 재평가 예정
+    //
+    // P5-W3-05 S1 D5: uHighlightEnabled 각막 하이라이트 블록 제거
+    // 고정 위치 하이라이트는 환경과 무관해 어색함. C5 환경 반사 가산 계층(B2 결과 후)이 대체
+    // 삭제된 수식:
+    //   if (uHighlightEnabled == 1) {
+    //     vec2 localDir = (adjustedCoord - adjustedCenter) / max(scaledRadius, 1e-5);
+    //     vec2 highlightCenter = vec2(-0.3, 0.4);
+    //     float highlightDist = distance(localDir, highlightCenter);
+    //     float highlight = smoothstep(0.25, 0.0, highlightDist);
+    //     blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
+    //   }
 
     if (uContactShadow == 1) {
         float eyeOpening = abs(maxY - minY);
