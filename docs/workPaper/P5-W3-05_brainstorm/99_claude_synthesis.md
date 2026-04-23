@@ -1,8 +1,12 @@
-# P5-W3-05 렌즈 렌더링 자연스러움 — 최종 결정
+# P5-W3-05 렌즈 렌더링 자연스러움 — **Claude 종합 초안** (⚠️ 최종본 아님)
 
 > **작성**: Claude Opus 4.7 (모더레이터)
 > **시점**: 2026-04-22 R2 종료 직후
-> **Base**: Codex(gpt-5.4 xhigh), Gemini(3-flash-preview), Claude 3라운드(R1 독립 + R2 교차 비판) 결과 종합
+> **Base**: Codex(gpt-5.4 xhigh), Gemini(3-flash-preview), Claude 2라운드(R1 독립 + R2 교차 비판) 응답을 **Claude 혼자** 종합한 것
+>
+> ⚠️ **이 문서는 Claude 1인이 R2 응답을 읽고 수렴 판단한 초안이다. Codex/Gemini는 이 문서를 검토하지 않았다.**
+> 실제 합의본은 R3 검토 라운드(세 모델이 이 문서를 정면 비판) 이후의 `99_final_decision.md`로 작성된다.
+> 원래 파일명은 `99_final_decision.md`였으나 "합의 아닌 1인 종합"임을 명시하기 위해 `99_claude_synthesis.md`로 rename함.
 
 ---
 
@@ -216,15 +220,18 @@ struct EyeRenderPacket {
 
 | 파일 | 크기 | 설명 |
 |------|------|------|
-| `brief.md` | 20KB | R1 공통 브리프 |
-| `claude_response.md` | 14KB | Claude R1 |
-| `gemini_response.md` | 7.5KB | Gemini R1 |
-| `codex_response.md` | 19KB | Codex R1 (가장 상세, 파일:라인 레퍼런스 포함) |
-| `r2_issues.md` | 13KB | Claude 작성 R2 쟁점 목록 (닫힘 12 + 열림 10) |
-| `claude_r2.md` | 13KB | Claude R2 (9/10 쟁점 Codex 수용) |
-| `codex_r2.md` | 12KB | Codex R2 (I10만 철회, 나머지 근거 보강) |
-| `gemini_r2.md` | 5.8KB | Gemini R2 (I7 전격 수용, I1/I4/I8/I10 유지) |
-| `final_decision.md` | 이 파일 | 종합 결론 |
+| `01_brief.md` | 20KB | R1 공통 브리프 |
+| `02_claude_response.md` | 14KB | Claude R1 |
+| `03_gemini_response.md` | 7.5KB | Gemini R1 |
+| `04_codex_response.md` | 19KB | Codex R1 (가장 상세, 파일:라인 레퍼런스 포함) |
+| `05_r1_summary.md` | — | **R1 결론 요약** (Claude 1인 종합) |
+| `06_r2_issues.md` | 13KB | Claude 작성 R2 쟁점 목록 (닫힘 12 + 열림 10) |
+| `07_claude_r2.md` | 13KB | Claude R2 (9/10 쟁점 Codex 수용) |
+| `08_codex_r2.md` | 12KB | Codex R2 (I10만 철회, 나머지 근거 보강) |
+| `09_gemini_r2.md` | 5.8KB | Gemini R2 (I7 전격 수용, I1/I4/I8/I10 유지) |
+| `10_r2_summary.md` | — | **R2 결론 요약** (Claude 1인 종합) |
+| `99_claude_synthesis.md` | 이 파일 | Claude 종합 초안 (R3 검토 대상, 최종본 아님) |
+| `99_final_decision.md` | (R3 후 생성) | R3 합의 반영한 진짜 최종 결정 |
 
 ---
 
