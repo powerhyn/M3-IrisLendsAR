@@ -79,7 +79,14 @@
       "Bash(./gradlew :iris-sdk:buildCMakeDebug)",
       "Bash(./gradlew :demo-app:installDebug --stacktrace)",
       "Bash(adb devices:*)",
-      "Bash(adb logcat:*)"
+      "Bash(adb logcat:*)",
+      "Bash(git mv *)",
+      "Bash(tmux capture-pane *)",
+      "Bash(tmux send-keys *)",
+      "WebFetch(domain:o-lens.com)",
+      "WebFetch(domain:lensvery.com)",
+      "WebFetch(domain:sungyesa.com)",
+      "Bash(git push *)"
     ]
   },
   "enabledPlugins": {
