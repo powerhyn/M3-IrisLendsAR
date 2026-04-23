@@ -273,13 +273,26 @@ struct EyeRenderPacket {
 ### 5.2 avg_iris_luma self-measure 수식 (99 §1.2 C9, Codex R2 원문)
 
 ```
+// dist는 이미 iris_radius 기준 정규화된 값 (shader `float dist = distance(...) / scaledRadius`)
+// CPU 측정 경로에서는 iris_center (정규화 좌표)와 iris_radius를 기준으로 ROI 크롭
 avg = sum(dot(rgb, LUMA_COEFFS) * mask) / sum(mask)
 
-mask = (distance(uv, iris_center) < 0.65 * iris_radius) AND eyelid_mask(uv)
-LUMA_COEFFS = vec3(0.2126, 0.7152, 0.0722)  // Rec.709 linear
+mask = (dist_from_iris_center_norm < 0.65) AND eyelid_mask(uv)   // 0~1 정규화 거리
 ```
 
-**Codex R3 명시**: "1프레임 지연은 허용 가능하다" → CPU 경로 기본. 프레임 캡처 완료 직후 CPU에서 iris ROI 추출 → 평균 휘도 계산 → 다음 프레임 렌더링 시 uniform 주입.
+### 5.2.1 색공간 계약 (Codex R4 리뷰 반영 — 중요)
+
+**`uAvgIrisLum`는 sRGB 공간의 평균 luma 값으로 통일**. W2의 `blendTintLinearV2` 수식이 `avgLumLinear = uAvgIrisLum * uAvgIrisLum` (감마 2.0 근사로 sRGB→linear)를 가정하기 때문.
+
+**LUMA_COEFFS 선택**:
+- 표준: `vec3(0.299, 0.587, 0.114)` (Rec.601 sRGB luma — sRGB 픽셀에 직접 적용)
+- 대안: `vec3(0.2126, 0.7152, 0.0722)` (Rec.709 — 원래 linear 공간용이지만 sRGB에 근사 적용 가능)
+
+**Claude 추천**: Rec.601 (0.299/0.587/0.114). sRGB 공간 픽셀에 가장 자연스러움. W1 브레인스토밍에서 Codex/Gemini와 재확인.
+
+→ **결과적으로 renderer 전체에서 uAvgIrisLum 사용 = sRGB 평균 luma 값**. W2/W6에서 필요 시 제곱 (`* uAvgIrisLum`)으로 linear 근사 변환.
+
+**Codex R3 명시**: "1프레임 지연은 허용 가능하다" → CPU 경로 기본. 프레임 캡처 완료 직후 CPU에서 iris ROI 추출 → 평균 luma 계산 → 다음 프레임 렌더링 시 uniform 주입.
 
 ### 5.3 Fallback 체인 (W1에서 확정됨)
 
@@ -308,27 +321,23 @@ LUMA_COEFFS = vec3(0.2126, 0.7152, 0.0722)  // Rec.709 linear
 
 ### 5.5 공개 C API 불변 (99 §1.2 C8)
 
-기존:
-```c
-// cpp/include/iris_sdk/sdk_api.h — 변경 없음
-iris_sdk_result_t iris_sdk_render_lens_gpu(
-    const uint8_t* frame_data,
-    int width, int height,
-    int format,
-    IrisResult* result,    // ← raw 유지
-    LensConfig* lens_config
-);
-```
+실제 관련 exported API (sdk_api.h 기준):
+- `iris_sdk_render_lens_texture` (line 857) — GPU 경로. 이 W에서 내부 어댑터 경유로 전환.
+- `iris_sdk_render_with_result` (line 1030) — result 포함 경로.
 
-내부에서만 어댑터 경유:
+어느 API도 **공개 시그니처 변경 없음**. 내부 구현만 수정:
+
 ```c++
-// cpp/src/sdk_api_v2.cpp 수정
-iris_sdk_result_t iris_sdk_render_lens_gpu(...) {
+// cpp/src/sdk_api_v2.cpp 수정 예시 (pseudocode)
+// 실제 함수명: iris_sdk_render_lens_texture
+IrisSdkError iris_sdk_render_lens_texture(...) {
     // IrisResult → EyeRenderPacket 어댑터 호출
     auto packet = adapt_iris_result_to_packet(*result);
     return g_gpu_lens->render(packet, lens_config);
 }
 ```
+
+**W1 브레인스토밍 시 확인**: 실제 수정 대상 함수가 위 둘(lens_texture, with_result) 외에 더 있는지.
 
 ---
 

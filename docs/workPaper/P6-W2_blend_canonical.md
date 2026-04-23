@@ -310,7 +310,12 @@ vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDeta
 | 4 | [빈] → fallback blendNormal | 이전 LumTint(non-linear) | S1에서 분기 제거 |
 | 5 | blendTintLinearV2 | **기본값** | W2 리네이밍 |
 | 6 | [빈] → fallback blendNormal | 이전 SoftLight | S1에서 분기 제거 |
-| 7 | blendColorReplaceLinear (수식 대기) | W5 B1 후 결정 | W2에서 함수 정의만 |
+| 7 | blendColorReplaceLinear | W5 B1 결과 대기 | **함수만 정의, ID 7 분기 등록은 W5 결과 후** |
+
+**⚠️ CRL 등록 상태 명확화** (Codex R4 리뷰 반영):
+- W2 시점: `blendColorReplaceLinear` **함수 정의 존재**. uBlendMode==7 분기는 **미등록 또는 fallback 분기**.
+- 벤치 토글용 별도 플래그로 임시 활성 가능 (W5 B1 비교 시).
+- 정식 활성(분기 등록)은 W5 B1 결과가 "CRL 채택" 또는 "조건부" 일 때만.
 
 ### 5.5 내부 이전 함수 제거 판정
 

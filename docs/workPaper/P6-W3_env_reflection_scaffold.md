@@ -305,7 +305,8 @@ float fresnel = 1.0 - abs(dot(N, V));
 
 **옵션 C (가짜 Fresnel — iris 거리 기반)**: 노멀 계산 없음, 비용 최저. 외곽일수록 반사 강함
 ```glsl
-float fresnel = pow(dist / iris_radius, 2.0);
+// dist는 이미 /scaledRadius로 정규화됨 (0~1). 추가 나누기 금지.
+float fresnel = pow(dist, 2.0);
 ```
 
 **Claude 추천**: 옵션 C — 노멀 계산(D1 변주)을 회피. 외곽 반사 강화는 실제 각막 특성과도 일치 (limbal 근처 하이라이트). 구현 비용도 최저.
@@ -324,12 +325,15 @@ float fresnel = pow(dist / iris_radius, 2.0);
 ### 5.5 renderMask hook 구조 (Codex R4 Patch 4 단서)
 
 ```glsl
+// 참고: 기존 shader의 dist는 이미 iris_radius 기준 정규화 (0~1 범위)
+//       → float dist = distance(adjustedCoord, adjustedCenter) / scaledRadius;
 float renderMask = finalAlpha;
 
 #ifdef ENABLE_PUPIL_MATERIAL_RESTORE
     // W8에서 활성 — 동공 영역까지 반사 확장
     // 아래 smoothstep 수식은 예시. W8 구현 시 실제 수식 재확정.
-    renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist));
+    // dist는 이미 정규화됐으므로 iris_radius 곱하기 금지 (이중 정규화 오류)
+    renderMask = max(finalAlpha, smoothstep(1.2, 0.0, dist));
 #endif
 ```
 

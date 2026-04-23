@@ -36,8 +36,9 @@
 // 중앙 완전 투명 영역에 렌즈 재질감을 약하게 씌움
 // 원본 홍채 건드리지 않음 — 렌즈만 옅게 덧씌움
 
-float centerProximity = 1.0 - smoothstep(0.0, iris_radius * 0.4, 
-                                          distance(uv, iris_center));
+// dist는 이미 /scaledRadius로 정규화됨 (0~1). 중심=0, 외곽=1.
+// iris_radius * 0.4 대신 정규화 거리 0.4로 직접 비교.
+float centerProximity = 1.0 - smoothstep(0.0, 0.4, dist);
 float materialAlpha = 0.12 * centerProximity;  // 0.10~0.15 튜닝 대상
 
 // 렌즈 색을 평균으로 요약 → 옅은 오버레이
@@ -270,8 +271,9 @@ Gemini는 W3-05 포함을 강하게 주장했으나 사용자가 "자연 커버 
 
 ```glsl
 // applyLens 말미, C5 반사 합성 이후 or 이전 (W8 브레인스토밍에서 순서 결정)
-float centerProximity = 1.0 - smoothstep(0.0, iris_radius * 0.4, 
-                                          distance(uv, iris_center));
+// dist는 이미 /scaledRadius로 정규화됨 (0~1). 중심=0, 외곽=1.
+// iris_radius * 0.4 대신 정규화 거리 0.4로 직접 비교.
+float centerProximity = 1.0 - smoothstep(0.0, 0.4, dist);
 float materialAlpha = uPupilMaterialStrength * centerProximity;
 
 vec3 lensMaterial = uLensAverageColor;  // CPU 계산 후 주입
@@ -308,7 +310,8 @@ vec3 compute_average_color(const Bitmap& lens_texture) {
 
 ```glsl
 #ifdef ENABLE_PUPIL_MATERIAL_RESTORE
-    renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist));
+    // dist는 이미 정규화됨. 1.2는 iris_radius 단위 정규화 값 (바깥 20% 포함).
+    renderMask = max(finalAlpha, smoothstep(1.2, 0.0, dist));
 #endif
 ```
 
@@ -364,7 +367,7 @@ B2 벤치 중 체감 지표가 "애매"하면 (1/3 Y) → Option A (baseLum 하�
 
 ### 7.1 읽을 파일
 
-**필수**: P6-W0, P6-W8, P6-W4 B2 결과 report, 99 §4 (P6-W1 조건부 트랙)
+**필수**: P6-W0, P6-W8, P6-W4 B2 결과 report, 99 §4 (Pupil cutout 조건부 트랙)
 **필수**: `14_gemini_r3.md` §6 (Gemini Pupil cutout 강조 원문)
 
 ### 7.2 송신 프롬프트
@@ -435,7 +438,7 @@ Gemini는 R2/R3 Pupil cutout 우려의 실증(B2 체감 Y)에 대한 소회.
 
 ## 참조
 
-- 99_final_decision.md §4 (P6-W1 조건부 트랙 — 이제 P6-W8로 재명명)
+- 99_final_decision.md §4 (Pupil cutout 조건부 트랙 — 99 원문에선 "P6-W1"이라 명명됐으나 P6 구조화 시 P6-W8로 재배치됨)
 - 14_gemini_r3.md §6 (W3-05 포함 주장 원문)
 - 사용자 대화 기록 (이번 세션) — "자연 커버 기대" 입장
 - 15_asset_analysis.md §2.3 (20/20 중심 투명 실측)

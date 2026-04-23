@@ -2,7 +2,7 @@
 
 > **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
 > **작성**: 2026-04-23
-> **선행 의존**: P6-W3 (환경 반사 계층 스캐폴드)
+> **선행 의존**: P6-W1 (avg_iris_luma — B9 gate 입력), P6-W3 (환경 반사 계층 스캐폴드 — detail 합성 순서)
 > **병렬 가능**: P6-W4, W5, W7와 병렬
 
 ---
@@ -49,16 +49,9 @@
 
 즉 `α_close=0.15`, `α_open=0.08` 같은 계수가 30fps 기준 60~120ms 시간 목표와 안 맞음. W6 구현 시 **시간 목표 → EMA 계수 계산식** 필요:
 
-```
-EMA: new = α * target + (1-α) * current
-거의 0에서 95% 도달 시간: T ≈ -ln(0.05) / (fps * α) ≈ 3 / (fps * α)
+※ 위 근사 `α ≈ 3 / (fps * target_sec)`는 참고용. **실제 계수 산정은 §5.1의 정밀 공식 `computeEmaAlpha(target_ms, fps) = 1 - pow(0.05, dt/target_ms)` 채택**. Codex/Gemini R4 리뷰 공통 지적 반영.
 
-30fps 기준:
-  60ms (2 프레임) → α = 3 / (30 * 0.060) ≈ 0.22... 실제론 더 큰 α 필요
-  실측해보면 α=0.5가 약 100ms 소요
-```
-
-→ **수학 공식 검증 + 실기기 타이밍 측정** 필요. W6 브레인스토밍에서 정확화.
+→ 정밀 공식 구현 + 실기기 타이밍 측정으로 목표 ms 달성 검증.
 
 ### 1.5 B5 판정 메트릭
 
@@ -319,7 +312,8 @@ if (eye_closing) {
 
 ```glsl
 // iris inner mask (동공 제외 iris 영역)
-float innerMask = smoothstep(0.7, 0.5, dist / iris_radius);  // r<0.65 근방
+// dist는 shader에서 이미 /scaledRadius로 정규화됨 (0~1 범위). 추가 나누기 금지.
+float innerMask = smoothstep(0.7, 0.5, dist);  // r<0.65 근방
 
 // 3x3 blur (이웃 평균)
 float blurLum = (lum_center * 2.0 + lum_n + lum_s + lum_e + lum_w + 
