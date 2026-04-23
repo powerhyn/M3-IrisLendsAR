@@ -202,25 +202,234 @@ Gemini는 W3-05 포함을 강하게 주장했으나 사용자가 "자연 커버 
 ---
 
 ## 2. 배경/맥락
-_TODO_
+
+### 2.1 조건부 트랙의 자기 정체
+
+- **자동 발동 아님**. P6-W4 B2 "중앙 공동 체감" 지표 기반 **2/3 룰**로 판정.
+- **폐기 가능성 존재**. 3명 모두 체감 없으면 이 W 전체 미수행.
+
+### 2.2 사용자 입장 재확인
+
+> "재질에서 오는 감도가 있는거니까... 이게 사실 눈에 있는 수분들과 만나면 투명에 가까워지는 효과가 날거같아서... 자연스럽게 빛 반사 효과나 이런거로 인해 커버되지 않을까... 정 어색하면 그때 가서 방향을 다시 결정하자"
+
+**사용자는 W8 발동을 원하지 않음** — 자연 커버 기대. 발동 시 "어색하게 나왔다"는 반증.
+
+### 2.3 Option E (재질 반투명 복원) 채택 배경
+
+- Option A (baseLum 하한): 원본 홍채 detail 훼손 → 기각
+- Option E (렌즈 재질 오버레이): 원본 건드리지 않음, 렌즈 평균 색을 옅게 덧씌움 → 채택
+
+### 2.4 W3 renderMask hook과의 연결
+
+이미 W3에서 `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 분기 준비됨. W8 착수 시:
+1. 해당 `#ifdef` 플래그 활성화
+2. Option E 수식 구현
+
+### 2.5 W8이 해결하지 않는 것
+
+- Pupil 자체 검출 정확도 — W2 refiner 영역 (Phase 7+)
+- 동공 동적 크기 변화 — 생리학적 반응, 범위 밖
+
+---
 
 ## 3. 전제 조건
-_TODO: P6-W4 B2 벤치 결과, 2/3 이상 공동 체감_
+
+1. ✅ **P6-W4 B2 벤치 완료**
+2. ✅ **Pupil 체감 지표 2/3 이상 Y** — 그렇지 않으면 W8 폐기
+3. ✅ W3 완료 (renderMask hook 존재)
+4. ✅ 사용자 최종 승인 (1/3만 Y인 경우)
+
+---
 
 ## 4. 목표
-_TODO_
+
+1. **Option E 수식 최종 확정** — centerProximity 범위, materialAlpha 강도
+2. **렌즈 평균 색 uniform 주입** — CPU 계산 (SKU 로딩 시 1회)
+3. **renderMask hook 활성** — `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE`
+4. **실기기 재검증** — B2 시나리오 재촬영, W8 적용 전/후 비교
+
+### 4.1 Definition of Done
+
+- [ ] Option E 수식 셰이더 구현
+- [ ] 렌즈 평균 색 계산 + uniform 주입
+- [ ] renderMask hook 활성 빌드 variant
+- [ ] B2 시나리오 4개 재촬영 (Pupil 체감 SKU 중심)
+- [ ] 3명 재평가: "공동 체감 개선" Y/N
+- [ ] 개선 확인 시 정식 빌드에 포함. 없으면 롤백.
+
+### 4.2 Out of scope
+
+- Pupil 동공 추적 정확도 향상 — W2 refiner 영역
+- 각막 specular 하이라이트 추가 — W4 환경 반사 담당
+
+---
 
 ## 5. 99에서 확정된 사항
-_TODO_
+
+### 5.1 Option E 수식 초안 (W8 시작 시 확정)
+
+```glsl
+// applyLens 말미, C5 반사 합성 이후 or 이전 (W8 브레인스토밍에서 순서 결정)
+float centerProximity = 1.0 - smoothstep(0.0, iris_radius * 0.4, 
+                                          distance(uv, iris_center));
+float materialAlpha = uPupilMaterialStrength * centerProximity;
+
+vec3 lensMaterial = uLensAverageColor;  // CPU 계산 후 주입
+blended = mix(blended, lensMaterial, materialAlpha);
+```
+
+⚠️ **Codex R4 단서**: "smoothstep 수식은 예시. 실제 구현 시 재확정".
+
+### 5.2 uPupilMaterialStrength 기본값: 0.12
+
+범위 0.10~0.15 튜닝. W8 시작 시 확정.
+
+### 5.3 렌즈 평균 색 계산 (CPU)
+
+```cpp
+// SKU 로딩 시 1회
+vec3 compute_average_color(const Bitmap& lens_texture) {
+    // 외곽 링(r ∈ [0.5, 0.85]) 평균 색 추출
+    // 내부 투명 영역과 바깥 페이드 제외
+    glm::vec3 sum(0.0f);
+    int count = 0;
+    for (pixels) {
+        float dist_norm = ...;
+        if (dist_norm > 0.5 && dist_norm < 0.85) {
+            sum += pixel.rgb;
+            count++;
+        }
+    }
+    return sum / float(count);
+}
+```
+
+### 5.4 renderMask hook 활성
+
+```glsl
+#ifdef ENABLE_PUPIL_MATERIAL_RESTORE
+    renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist));
+#endif
+```
+
+**W8에서 실제 수식 재확정** (Codex R4 단서).
+
+### 5.5 B2 재검증 매트릭스
+
+- W4 B2 벤치 시 "공동 체감 Y"로 판정된 시나리오만 재촬영
+- 이전 : Option E ON/OFF 비교
+- 3명 재평가: "공동 체감 개선" Y/N
+
+---
 
 ## 6. 미결 사항
-_TODO_
 
-## 7. W 브레인스토밍 시작 체크리스트
-_TODO_
+### 6.1 centerProximity 범위 (0.3/0.4/0.5)
+
+Pupil 영역 넓이 조절. 브레인스토밍 시 3안 비교.
+
+### 6.2 materialAlpha 강도 (0.10/0.12/0.15)
+
+W8 브레인스토밍에서 결정. 기본 0.12.
+
+### 6.3 렌즈 평균 색 계산 ROI
+
+외곽 링 `[0.5, 0.85]` vs 중심부 제외 전체? 패턴 영향 고려.
+
+### 6.4 순서: C5 반사 전/후
+
+- **옵션 A**: 반사 전에 재질 오버레이 (반사가 재질 위에 얹힘)
+- **옵션 B**: 반사 후에 재질 오버레이 (재질이 반사도 덮음)
+
+**Claude 추천**: 옵션 A. 반사는 재질 위에 얹히는 것이 물리적.
+
+### 6.5 `#ifdef` vs runtime flag
+
+W3에서 `#ifdef` 선택 확정됨. W8도 그 방침 따름.
+
+### 6.6 Option A 재고려?
+
+B2 벤치 중 체감 지표가 "애매"하면 (1/3 Y) → Option A (baseLum 하한) 다시 고려? 
+- **Claude 입장**: 기각 유지. 원본 훼손 리스크 여전.
+
+### 6.7 W8 실패 시 (재검증 개선 없음)
+
+- 롤백: renderMask hook `#ifdef` 비활성
+- 사용자 보고: "체감 지표로는 Y였지만 실제 수식이 문제 해결 못함"
+- Phase 7+로 이월 (다른 접근 필요)
+
+---
+
+## 7. W8 브레인스토밍 시작 체크리스트
+
+### 7.1 읽을 파일
+
+**필수**: P6-W0, P6-W8, P6-W4 B2 결과 report, 99 §4 (P6-W1 조건부 트랙)
+**필수**: `14_gemini_r3.md` §6 (Gemini Pupil cutout 강조 원문)
+
+### 7.2 송신 프롬프트
+
+```
+@docs/workPaper/P6-W8_pupil_material_conditional.md 읽고, 섹션 6 미결에
+대해 입장 정리. docs/workPaper/P6-W8_brainstorm/{codex|gemini}_w8.md.
+
+전제: W4 B2 벤치에서 2/3 체감 Y로 W8 착수 확정된 상태.
+
+특히:
+- 6.1 centerProximity 범위
+- 6.2 materialAlpha 강도
+- 6.4 반사 전/후 순서
+
+Gemini는 R2/R3 Pupil cutout 우려의 실증(B2 체감 Y)에 대한 소회.
+
+규칙: 새 쟁점 금지.
+```
+
+### 7.3 소요
+
+- 수식 확정 + 셰이더 구현: 2h
+- 렌즈 평균 색 CPU 계산: 1h
+- 재검증 촬영 + 평가: 1.5h
+- 튜닝 반복: 1~2h
+
+**총 6h** (발동 시).
+
+---
 
 ## 8. 완료 정의 + 다음 W 트리거
-_TODO_
+
+### 8.1 완료 정의 (발동 시)
+
+§4.1 체크리스트 + 재검증 결과 "공동 체감 개선" 다수 동의.
+
+### 8.2 완료 정의 (폐기 시)
+
+- B2 체감 3/3 N → 문서에 "P6-W8 폐기 (W4 결과 근거)" 기록
+- renderMask hook은 `#ifdef` 상태로 유지 (향후 재검토 여지)
+- 99 §4 표에 "P6-W8 폐기" 갱신
+
+### 8.3 커밋 전략 (발동 시)
+
+- `docs(P6-W8): 섹션 2~8`
+- `feat(gpu-lens): P6-W8 Option E 재질 반투명 복원 구현 (#ifdef 활성)`
+- `feat(sdk): P6-W8 렌즈 평균 색 CPU 계산`
+- `chore(bench): P6-W8 재검증 결과 + 튜닝 반영`
+
+### 8.4 커밋 전략 (폐기 시)
+
+- `docs(P6-W8): 폐기 결정 — W4 B2 결과 공동 체감 없음`
+- (코드 변경 없음)
+
+### 8.5 W9 머지 직전 확인
+
+- W8 활성 빌드 variant가 기본 빌드에 포함될지?
+- 개발 시 `-DENABLE_PUPIL_MATERIAL_RESTORE=ON` 등 CMake 옵션으로 제어
+
+### 8.6 기대 효과 (발동 시)
+
+- 경쟁사 대비 "Pupil 구멍" 약점 해소 (Gemini R2/R3 우려 해소)
+- 렌즈 재질감 전체적 통일성 (동공 영역만 매끈함 다름 해소)
+- Phase 7+에서 Pupil center 정교화 시 Option B 업그레이드 경로 확보
 
 ---
 

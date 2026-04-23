@@ -160,25 +160,365 @@ blended = mix(blended, contact_shadow);     // 기존
 ---
 
 ## 2. 배경/맥락
-_TODO_
+
+### 2.1 W3의 핵심 — "구조만 먼저"
+
+환경 반사 **가산 합성 구조**를 셰이더에 박는 W. 소스(env-map vs periphery vs OFF)는 W4 벤치에서 확정. W3는:
+- `blended += reflection * fresnel * renderMask` 합성 지점 확립
+- `sampleReflection()` 추상화 함수 정의 (기본은 no-op)
+- renderMask hook 구조 (W8 조건부 활성화용)
+- Fresnel 수식 확정
+
+W3 완료 시점에 실기기 렌더링은 **변하지 않아야 함** — 반사 소스가 no-op이므로 기존과 동일 결과.
+
+### 2.2 99 C5가 이 W에서 실현되는 것
+
+99 §1.2 C5 원문:
+```
+환경 반사 가산 계층 분리. 기본: float renderMask = finalAlpha;
+blended += reflection * fresnel * renderMask;
+**반사 소스는 B2 벤치로 결정**. **renderMask hook**: P6-W8 활성화 시
+#ifdef ENABLE_PUPIL_MATERIAL_RESTORE 분기로 ... 확장 가능.
+```
+
+W3는 이 C5의 **구조 부분만** 실현. 반사 소스 확정은 W4, hook 활성화는 W8.
+
+### 2.3 이 W가 해결하는 다른 결정
+
+- **D3 realSpec 폐기** (99 §1.1): realSpec은 S1에서 **코드 삭제됨**. 99 상태는 "조건부 폐기" — B2 성공 시 확정 폐기. W3가 **반사 계층 구조를 도입**하면, B2 결과에 따라 W4에서 최종 폐기 결정. W3 자체는 realSpec을 건드리지 않음 (이미 삭제 상태).
+
+### 2.4 이 W가 해결하지 **않는** 것
+
+- 반사 소스 확정 — W4
+- 반사 강도 실제 튜닝 — W4 (벤치 중 관찰), W9 (통합)
+- renderMask hook 활성 — W8 조건부
+- Pupil material 오버레이 — W8
+
+### 2.5 Claude 편향 경계
+
+**Claude R1 "분석 노멀 + 고정 조명" 폐기 이후**: S1에서 D1 코드 삭제됨. W3에서 **다시 Claude가 "가짜 Fresnel" 수식을 제안**하는데, 이게 D1의 변주일 수 있음.
+
+**경계선**:
+- ❌ 고정 light vector (`vec3(0.3, 0.4, 1.0)`) 재도입 — D1 복귀 금지
+- ❌ 분석 노멀 라이팅 계산 — D1 복귀 금지
+- ✅ 분석 노멀을 **Fresnel 계산 입력**으로만 사용 — 라이팅 아닌 반사 방향 가중치
+
+"가짜 Fresnel"도 S1 D1 재도입으로 비판받을 수 있음. W3 브레인스토밍에서 재검증.
+
+---
 
 ## 3. 전제 조건
-_TODO: P6-W2 블렌드 3종 안정 상태_
+
+1. ✅ **W2 완료** — 블렌드 3종 안정. TintLinearV2/Multiply/ScreenLinear 등록 + realSpec 삭제 확인.
+2. ✅ **W1 완료** — EyeRenderPacket. `reflection_dir` optional 필드 준비됨.
+3. ✅ **S1 상태 확인** — shader_sources.cpp에 `uHighlightEnabled` 및 각막 하이라이트 블록 없는지 재확인 (있으면 W3 구현 충돌).
+4. ✅ **99 §1.2 C5 + 12_claude_r3.md §Watch out** 읽기 (Claude 편향 회피)
+
+---
 
 ## 4. 목표
-_TODO_
+
+**W3 완료 시 달성 상태**:
+
+1. **셰이더에 반사 계층 통합점 존재**: `applyLens` 말미에 `blended += reflection * fresnel * renderMask;` 패턴 등록
+2. **`sampleReflection()` 추상화 함수 정의** — 기본 `return vec3(0.0)`, 즉 no-op
+3. **Fresnel 수식 확정 및 구현** (W3 브레인스토밍에서 결정)
+4. **renderMask hook 준비** — `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 분기 구조
+5. **새 uniform 선언**: `uReflectionIntensity` (0.0~1.0, 기본 0.3), `uSourceType` (0=OFF, 1=EnvMap, 2=Periphery) 등
+6. **실기기 회귀 없음** — 반사 소스 OFF 상태라 기존 렌더링과 동일 결과
+
+### 4.1 Definition of Done
+
+- [ ] shader_sources.cpp `applyLens` 함수에 반사 합성 지점 존재
+- [ ] `sampleReflection()` 함수 정의, no-op 기본 동작
+- [ ] Fresnel 항 구체 수식 문서화 + 구현
+- [ ] renderMask hook `#ifdef` 블록 존재
+- [ ] 새 uniform들 gpu_lens_renderer.cpp에서 location 캐시 + 주입
+- [ ] 빌드 통과
+- [ ] 실기기 회귀 없음 — W2 시각 결과와 동일
+
+### 4.2 Out of scope
+
+- 반사 소스 실제 소스 구현 — W4
+- 반사 강도 값 튜닝 — W9
+- Pupil material 오버레이 — W8
+- compute shader 도입 — 99에서 기각 상태
+
+---
 
 ## 5. 99에서 확정된 사항
-_TODO_
+
+### 5.1 C5 합성 수식 구조
+
+```glsl
+// applyLens 내부, blendMode 분기 후
+vec3 blended = [블렌드 결과];  // ID별 분기 결과
+
+// [선택적] C10 디테일 재주입 (W6에서 추가, spec/reflection 제외 영역)
+// blended *= detail_inner;  ← W6에서 결정
+
+// C5 반사 합성 (W3 도입)
+float renderMask = finalAlpha;
+
+// W8 활성화 시 renderMask 확장
+#ifdef ENABLE_PUPIL_MATERIAL_RESTORE
+    renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist));
+    // ⚠️ Codex R4 단서: 이 smoothstep은 예시. W8 구현 시 재확정.
+#endif
+
+vec3 reflection = sampleReflection(reflectUV, normal, viewDir);
+float fresnel = calcFresnel(normal, viewDir);  // W3에서 확정
+
+blended += reflection * fresnel * uReflectionIntensity * renderMask;
+
+// contact shadow 기존 적용
+blended = apply_contact_shadow(blended);
+```
+
+### 5.2 sampleReflection 추상화 (W3 no-op 구현)
+
+```glsl
+// W3 기본 (no-op)
+vec3 sampleReflection(vec2 reflectUV, vec3 normal, vec3 viewDir) {
+    return vec3(0.0);
+}
+
+// W4에서 각 프로토타입이 이 함수를 치환:
+// 프로토타입 2 (env-map):
+//   return texture(uEnvMap, reflectUV).rgb;
+// 프로토타입 3 (periphery):
+//   return sample_periphery_avg();
+```
+
+### 5.3 Fresnel 옵션 (W3에서 선택)
+
+**옵션 A (Schlick)**: 물리적 정확도 ↑, 비용 중간
+```glsl
+float F0 = 0.04;  // 각막
+float fresnel = F0 + (1.0 - F0) * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+```
+
+**옵션 B (각도 기반 단순)**: 비용 저, 직관적
+```glsl
+float fresnel = 1.0 - abs(dot(N, V));
+```
+
+**옵션 C (가짜 Fresnel — iris 거리 기반)**: 노멀 계산 없음, 비용 최저. 외곽일수록 반사 강함
+```glsl
+float fresnel = pow(dist / iris_radius, 2.0);
+```
+
+**Claude 추천**: 옵션 C — 노멀 계산(D1 변주)을 회피. 외곽 반사 강화는 실제 각막 특성과도 일치 (limbal 근처 하이라이트). 구현 비용도 최저.
+
+**W3 브레인스토밍에서 확정**.
+
+### 5.4 composition 순서 (고정)
+
+1. 블렌드 (W2) → `blended`
+2. 디테일 재주입 (W6, 예정) → `blended *= detail`
+3. **반사 합성 (W3)** → `blended += reflection * fresnel * renderMask`
+4. contact shadow → `blended = apply_shadow(blended)`
+
+**Codex R3 §1 C10 경고**: "detail reinjection은 반사 위에 다시 곱해지면 안 된다" → 이 순서(디테일 먼저 → 반사 나중)로 고정.
+
+### 5.5 renderMask hook 구조 (Codex R4 Patch 4 단서)
+
+```glsl
+float renderMask = finalAlpha;
+
+#ifdef ENABLE_PUPIL_MATERIAL_RESTORE
+    // W8에서 활성 — 동공 영역까지 반사 확장
+    // 아래 smoothstep 수식은 예시. W8 구현 시 실제 수식 재확정.
+    renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist));
+#endif
+```
+
+**`#ifdef` vs runtime flag**:
+- **`#ifdef`**: 컴파일 타임 분기. 바이너리 2종. 깔끔하지만 변경 시 재컴파일.
+- **`uniform int uPupilRestoreEnabled`**: 런타임 분기. 단일 바이너리. 동적 토글 가능.
+
+**Claude 추천**: **`#ifdef`**. 이유: W8이 조건부 발동이라 "빌드에 포함하느냐"가 결정 포인트. 발동 안 하면 코드 자체 미포함이 깔끔.
+
+**W3 브레인스토밍에서 확정**.
+
+### 5.6 uniform 신규
+
+```cpp
+// gpu_lens_renderer.h LensUniforms struct 추가
+GLint uReflectionIntensity = -1;   // float 0~1, 기본 0.3
+GLint uSourceType = -1;            // int 0=OFF, 1=EnvMap, 2=Periphery
+GLint uEnvMap = -1;                // sampler2D (W4에서 env-map 프로토타입 사용 시)
+// ... W4에서 더 추가 가능
+```
+
+### 5.7 반사 강도 기본값: 0.3 (Claude R1 자기비판 §12)
+
+S1에서 삭제된 D1의 specular 강도는 0.7. Claude가 자기비판에서 "자연스러운 값 0.25~0.35" 인정. W3 초기값 **0.3** (uniform으로 튜닝 가능).
+
+---
 
 ## 6. 미결 사항
-_TODO_
 
-## 7. W 브레인스토밍 시작 체크리스트
-_TODO_
+### 6.1 Fresnel 수식 확정 (CRITICAL)
+
+옵션 A/B/C 중 선택. Claude 추천: C (가짜 Fresnel). W3 브레인스토밍에서 재검증.
+
+### 6.2 분석 노멀 계산의 W3 포함 여부
+
+옵션 C Fresnel은 노멀 불필요. 옵션 A/B는 노멀 필요.
+
+**노멀 계산 포함 시 리스크**: S1에서 삭제한 D1 분석 노멀 수식 일부를 W3에서 부활 → "해체한 걸 다시 조립" 비판 가능.
+
+**Claude 추천**: 옵션 C 선택으로 노멀 계산 회피. W3에서 노멀 관련 코드 재도입 금지.
+
+### 6.3 renderMask hook 활성 방식
+
+`#ifdef` vs `uniform flag` — Claude 추천 `#ifdef`. 6.1과 함께 W3에서 확정.
+
+### 6.4 sampleReflection 함수 추상화 방식
+
+- **방식 A**: 셰이더 내 `sampleReflection()` 함수 분기 (uniform `uSourceType`으로 스위치). 단일 바이너리.
+- **방식 B**: 셰이더 variant 2~3개 (OFF / env-map / periphery). 런타임 선택 불가, 컴파일 시 결정.
+- **방식 C**: compute shader 전용 pass — 기각 (GLES 3.1 드라이버 이슈).
+
+**Claude 추천**: 방식 A. W4 벤치 중 런타임 토글 가능. 단일 바이너리.
+
+### 6.5 reflectUV 계산 수식
+
+옵션 C Fresnel에서도 반사 방향 → UV 매핑 필요:
+
+```glsl
+// 옵션 A: normal 기반 (spherical env map)
+vec2 reflectUV = normalize(normal).xy * 0.5 + 0.5;
+
+// 옵션 B: viewDir + normal 반사
+vec3 reflectDir = reflect(-viewDir, normal);
+vec2 reflectUV = reflectDir.xy * 0.5 + 0.5;
+
+// 옵션 C: iris local 좌표 그대로
+vec2 reflectUV = (uv - iris_center) / iris_radius * 0.5 + 0.5;
+```
+
+**Claude 추천**: 옵션 C (iris local). 노멀 계산 회피. env map이든 periphery든 같은 UV 쓸 수 있음.
+
+### 6.6 env_map 에셋 크기 및 포맷
+
+99 §2 B2에 "256×128 LDR/RGBM 에셋" 명시. W3에서 **파일 위치** 결정:
+- `android/demo-app/src/main/assets/env/` 디렉토리 신규
+- 또는 SDK 내장 (크기 100~500KB 수준)
+
+**W3 브레인스토밍**: 위치, 이름 (`office_ldr.png`, `default_env.png` 등) 확정.
+
+### 6.7 B2 벤치 매트릭스 draft (W3에서 미리 준비)
+
+W3 브레인스토밍 말미에 **W4 벤치 매트릭스 초안** 작성 권장:
+- 환경 4종 (실내 형광/창가 측광/야간 실내/실외 낮)
+- 동작 2종 (정면 미세/head turn)
+- 프로토타입 3종 (OFF/env-map/periphery)
+- SKU 우선순위 (Pupil 체감 관찰용)
+
+이렇게 해두면 W4 시작 시 프로토타입 구현 바로 돌입 가능.
+
+---
+
+## 7. W3 브레인스토밍 시작 체크리스트
+
+### 7.1 읽을 파일
+
+**필수**:
+1. P6-W0 §1
+2. P6-W3 이 문서 전체
+3. 99 §1.2 C5 + §1.1 D3 + R4 Patch 4
+4. 02_claude_response.md §Claude 자기비판 — D1 폐기 근거
+5. 13_codex_r3.md §6 C5 "조건부 동의" 원문
+
+**선택**:
+- 04_codex_response.md §A — Codex env-map 주장 원문
+- 14_gemini_r3.md §7 — Gemini Periphery 재강조
+
+### 7.2 송신 프롬프트
+
+```
+@docs/workPaper/P6-W3_env_reflection_scaffold.md 읽고, 섹션 6 미결 7개에
+대해 각자 입장 정리 후 docs/workPaper/P6-W3_brainstorm/{codex|gemini}_w3.md
+로 작성해줘.
+
+특히:
+- 6.1 Fresnel 수식 (A Schlick / B 각도 / C 가짜)
+- 6.2 분석 노멀 계산 포함 여부 (D1 재도입 리스크)
+- 6.3 hook 활성 방식 (#ifdef vs uniform)
+- 6.4 sampleReflection 추상화 방식
+
+규칙:
+- 새 쟁점 제기 금지
+- 각 항목 "추천 + 근거 1~2줄"
+- Fresnel C 옵션이 D1 재도입으로 보이는지 명시 판단
+```
+
+### 7.3 예상 대립 지점
+
+- 6.1 Fresnel: Codex가 옵션 A (Schlick) 주장할 가능성. Claude C 옵션 "가짜 Fresnel"이 정교함 부족으로 비판받을 수도.
+- 6.4 추상화: Codex가 "셰이더 variant 2~3개" 주장 가능. 성능 최적 주장으로.
+
+### 7.4 1시간 브레인스토밍 예상
+
+```
+0~5분    송신
+5~20분   응답 대기
+20~35분  7개 쟁점 정리
+35~50분  Fresnel 심층 논의 (주된 대립)
+50~60분  합의 + W4 벤치 매트릭스 draft
+```
+
+### 7.5 구현 예상 소요
+
+- Fresnel + reflectUV + sampleReflection 추상화: 1.5h
+- renderMask hook + #ifdef 구조: 30분
+- uniform 추가 + 주입: 45분
+- 실기기 회귀 없음 확인: 30분
+
+**총 2.5~3h**.
+
+---
 
 ## 8. 완료 정의 + 다음 W 트리거
-_TODO_
+
+### 8.1 완료 정의
+
+§4.1 체크리스트 전체 ✅.
+
+### 8.2 커밋 전략
+
+**커밋 1**: `docs(P6-W3): 섹션 2~8 본문 작성`
+**커밋 2**: `feat(gpu-lens): P6-W3 환경 반사 가산 계층 구조 + sampleReflection 추상화 (no-op 기본)`
+**커밋 3**: `feat(gpu-lens): P6-W3 renderMask hook #ifdef 구조 (W8 활성 대기)`
+**커밋 4** (선택): `feat(gpu-lens): P6-W3 Fresnel 수식 구현 (옵션 C)`
+
+### 8.3 다음 W 트리거
+
+**P6-W4 (B2 벤치) 시작 조건**:
+- W3 완료 (구조 + 추상화)
+- env-map 에셋 준비 방안 확정
+- Pupil 체감 지표 수집 방법 확정
+
+**P6-W5 / W6 / W7 시작 조건**:
+- W3 완료 (이들은 W3 구조 위에서 돌아감)
+- W5/W6/W7는 **W4와 병렬 가능** (반사 소스 확정 안 돼도 진행 가능)
+
+### 8.4 W3 실패 시 롤백 전략
+
+- W3 커밋 revert → W2 상태 복귀
+- 반사 계층 구조만 되돌리면 렌더링 동작 영향 없음 (no-op이었으므로)
+
+### 8.5 W3 성공 시 기대 효과
+
+- **구조 완성**: 반사 합성 지점 확립. W4/W8에서 즉시 활용.
+- **realSpec 대체 경로 확보**: W4 B2 성공 시 "반사 계층이 있으므로 realSpec 완전 폐기" 바로 확정.
+- **W8 조건부 트랙 준비**: renderMask hook이 이미 있음. W8 착수 시 `#ifdef` 활성만으로 Pupil material restore 시작 가능.
+
+### 8.6 W3이 Phase 6에서 갖는 "기반 역할"
+
+W1이 "입력 계약", W2가 "블렌드 수식"이라면 W3는 **"확장 포인트"** — 반사, Pupil material, 향후 Phase 7+ 기능 추가 시 여기서 통합. Phase 6 중반부에 구조 설계 완료된다는 의미.
 
 ---
 

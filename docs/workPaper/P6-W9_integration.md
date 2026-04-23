@@ -241,25 +241,250 @@ feature/P5-W3-05 (현재)
 ---
 
 ## 2. 배경/맥락
-_TODO_
+
+### 2.1 Phase 6 최종 관문
+
+모든 단위 검증(W1~W8)이 끝난 상태에서 **통합 동작 재검증**. 특히:
+- W 간 상호작용 (예: C9 avg_iris_luma × C10 저조도 gate × C7 블링크 ramp)
+- 3 tier 디바이스 실기기 성능
+- develop 머지 시 W3-04 코드 처리
+
+### 2.2 W9 = 구현보다 검증/머지 위주
+
+브레인스토밍 경량. 구현은 거의 없음 (fix-up 수준). 시간 대부분은:
+- 실기기 테스트
+- 성능 프로파일링
+- 머지 준비 (PR, 충돌 해결)
+
+### 2.3 W3-04 코드 처리 (feature 머지 전)
+
+- 현재 develop: W3-04(고정 조명, realSpec 등) 포함
+- feature/P5-W3-05: 70633ac(W3-04 이전) 기반 + W1~W8
+- 머지 시 **W3-04 코드 삭제** 필요 → 충돌 해결 전략 확정.
+
+---
 
 ## 3. 전제 조건
-_TODO: W1~W7 완료 + W8 결정_
+
+1. ✅ **W1~W7 완료**
+2. ✅ **W8 판정 완료** (발동 시 구현, 폐기 시 문서화)
+3. ✅ 3 tier 디바이스 각 1대 이상 확보 (HIGH/MID/LOW)
+4. ✅ 평가자 1~2명 (단위 W와 다른 사람 권장, fresh eye)
+5. ✅ develop 브랜치 최신 상태 확인
+
+---
 
 ## 4. 목표
-_TODO_
 
-## 5. 99에서 확정된 사항
-_TODO_
+1. **통합 테스트 완료** — 전체 기능 3 tier 회귀 없음
+2. **성능 프로파일링 완료** — FPS 목표 유지
+3. **feature/P5-W3-05 → develop 머지**
+4. **W3-04 코드 완전 제거** (develop에서 사라진 상태 확정)
+5. **99_final_decision.md 최종 상태 갱신** — 모든 벤치 결과 반영
+6. **CHANGELOG / Release notes** 작성 (해당 시)
+
+### 4.1 Definition of Done
+
+- [ ] 6 SKU × 3 tier = 18 시나리오 실기기 테스트
+- [ ] FPS: HIGH 60+, MID 30+, LOW 20+ 유지
+- [ ] 메모리 누수 없음 (10분+ 연속 사용)
+- [ ] develop 머지 PR 작성 + CI 통과
+- [ ] W3-04 코드 전부 삭제된 상태
+- [ ] 99 및 모든 P6-W 문서 상태 "완료" 갱신
+- [ ] 통합 테스트 리포트 (`docs/workPaper/P6-W9_integration_report.md`)
+
+### 4.2 Out of scope
+
+- Phase 7+ 이월 작업 (Head-pose 기반 env 회전, 3D FaceGeometry, HDR IBL 등)
+- Android demo UI 대대적 재디자인 — 별도 PR 권장
+
+---
+
+## 5. 99에서 확정된 사항 (W9 최종 반영 대상)
+
+### 5.1 전체 기능 체크리스트 (§1.14 템플릿)
+
+```
+□ W1 EyeRenderPacket + avg_iris_luma ROI
+□ W2 블렌드 3종 + realSpec 폐기
+□ W3 환경 반사 가산 계층 + renderMask hook
+□ W4 B2 결과 반영 (env / periphery / OFF)
+□ W5 B1 결과 (Normal or CRL)
+□ W5 B8 결과 (color-veto or luma-only)
+□ W6 B5 결과 (블링크 up)
+□ W6 B9 결과 (저조도 gate)
+□ W6 C10 디테일 재주입
+□ W7 B4 결과 (자동감지 fallback or 드롭)
+□ W7 SKU 메타데이터
+□ W8 발동/폐기 상태
+```
+
+### 5.2 성능 목표
+
+| tier | FPS 목표 | 추가 GPU ms (Phase 6) |
+|------|---------|---------------------|
+| HIGH | 60+ | +0.4~0.7ms |
+| MID | 30+ | +0.3~0.5ms |
+| LOW | 20+ | +0.2~0.4ms |
+
+### 5.3 머지 전략 (Claude 추천: 옵션 A — 머지 커밋)
+
+```bash
+git checkout develop
+git merge feature/P5-W3-05  # fast-forward 아닌 merge commit 생성
+# 충돌 발생 시 W3-04 코드(D1/D5 관련) 삭제 쪽 선택
+git push origin develop
+```
+
+---
 
 ## 6. 미결 사항
-_TODO_
 
-## 7. W 통합 테스트 체크리스트
-_TODO (§1.13 템플릿 확장)_
+### 6.1 머지 방식 (A/B/C)
+
+- A: 머지 커밋 (권장)
+- B: 리베이스
+- C: squash
+
+**Claude 추천**: A. 이유: W별 커밋이 의미 있음 (벤치 결과 역추적).
+
+### 6.2 Android demo UI 정리 범위
+
+- W9 포함: 블렌드 drop-down 3종으로 축소, 3D Light 버튼 제거
+- W9 범위 밖: 머지 후 별도 PR
+
+**Claude 추천**: 후자. W9 범위 최소화.
+
+### 6.3 deprecated no-op 함수 완전 제거 시점
+
+- S1에서 `setHighlightEnabled` deprecated no-op 상태
+- W9 머지 전에 완전 제거? 유지?
+
+**Claude 추천**: 머지 유지, Phase 7 초기에 제거. 호환성 transition 기간 확보.
+
+### 6.4 W9 브레인스토밍 필수 여부
+
+W9는 검증 위주 → 경량. 단 머지 전 Codex/Gemini에게 최종 리뷰 요청 가능:
+- "전체 Phase 6 작업이 99와 일치하는가?"
+- "놓친 부분 없는가?"
+
+**Claude 추천**: 경량 리뷰 1라운드 권장. 결과 파일 `20_w9_final_review.md`.
+
+### 6.5 성능 벤치 자동화
+
+Android demo에 FPS 측정 로직 이미 존재 여부?
+- 있으면 그대로 활용
+- 없으면 간단한 frame counter 추가
+
+### 6.6 릴리즈 노트 작성
+
+- Phase 6 전체 변경사항 요약 (CHANGELOG)
+- 각 W 주요 결정 + 벤치 결과
+- 사용자/고객사에 전달할 내용
+
+### 6.7 CI 통과 확인 항목
+
+- C++ 빌드 (3 platform 가능 시)
+- 단위 테스트
+- Android demo APK 빌드
+- 정적 분석 (clang-tidy 등, 해당 시)
+
+---
+
+## 7. W9 통합 테스트 체크리스트
+
+### 7.1 각 tier 테스트 시나리오 (6 SKU × 3 tier = 18 시나리오)
+
+**SKU 6종** (P6-W0 §1.5):
+- 클라셋_돌 초코, 클라셋_런웨이 그레이, 오(OH)_베이글
+- 엔비_퍼퓸 글로우, 엔비_샤모 브라운, 클라셋_누드 애쉬 로제
+
+**각 시나리오 확인 항목** (P6-W9 §1.3):
+1. 양안 정상 동작
+2. 블링크 ramp 자연스러움
+3. Sclera veto 흰자 번짐 없음
+4. 환경 반사 (W4 채택 소스) 자연 반응
+5. 블렌드 모드 전환 매끄러움
+6. 림발 표시 (메타 있음/없음)
+7. Pupil 체감 (W8 발동 시)
+8. 디테일 재주입 저조도 노이즈 없음
+9. FPS 목표 유지
+10. 메모리 누수 없음
+
+### 7.2 머지 전 체크리스트
+
+```
+□ 전체 기능 테스트 완료
+□ 성능 목표 달성
+□ 모든 W 문서 상태 "완료"
+□ 99_final_decision.md 최종 반영
+□ W3-04 코드 완전 삭제 확인
+□ CHANGELOG 작성
+□ PR 제목 + 본문 작성
+□ CI 통과
+□ Codex/Gemini 경량 리뷰 (선택)
+□ 리뷰어 승인
+```
+
+### 7.3 머지 후 Post-mortem (선택)
+
+- Phase 6 전체 소요 시간 vs 예상 (99 §3: 20~28h)
+- 브레인스토밍 오버헤드 평가
+- R4 Patch 방식 유효성
+- Claude 편향 교정 횟수 집계
+- 메모리/로그 갱신 필요 사항
+
+---
 
 ## 8. 완료 정의 + Phase 6 종료
-_TODO_
+
+### 8.1 완료 정의
+
+§4.1 체크리스트 + develop 머지 완료.
+
+### 8.2 커밋 전략
+
+- `docs(P6-W9): 섹션 2~8`
+- `chore(integration): P6-W9 통합 테스트 리포트`
+- `docs(99): 모든 벤치 결과 최종 반영`
+- `chore(demo): W3-04 잔여 코드 정리` (머지 충돌 해결 커밋)
+
+### 8.3 Phase 6 종료 선언
+
+W9 머지 완료 시점에:
+- 99_final_decision.md 전체 "완료" 상태
+- MEMORY.md 갱신 (feedback 관련 업데이트)
+- Phase 7 계획서 초안 (별도 워크페이퍼 `P7-W0_index.md` 등)
+
+### 8.4 Phase 7+ 이월 목록 (§1.10 반복)
+
+- 3D Face Geometry 기반 렌더링
+- HDR IBL
+- Full PBR
+- Neural rendering
+- Corneal refraction 실시간
+- 속눈썹 전용 세그멘테이션
+- Head-pose 기반 env 회전 실제 활용 (W2 refiner 출력 후)
+- Pupil 검출 정확도 향상 (Pupil_center 기반 Option B 업그레이드)
+
+### 8.5 W9 완료 시 파일 상태
+
+```
+docs/workPaper/
+├── P5-W3-05_brainstorm/  (전체, 브레인스토밍 히스토리)
+│   └── 99_final_decision.md  (최종 완료 상태)
+├── P6-W0_index.md        ("완료" 표기)
+├── P6-W1~W9              (모든 상태 완료)
+├── (W8 발동 시) P6-W8 결과
+└── P7-W0_index.md        (Phase 7 시작)
+```
+
+### 8.6 기대 효과
+
+- **렌즈 렌더링 자연스러움 경쟁사 Parity 달성** (Perfect Corp, 피팅몬스터 수준)
+- **SDK 코드 품질 향상** — 블렌드 단순화, realSpec 제거, 구조화된 계약
+- **확장성 확보** — renderMask hook, EyeRenderPacket, SKU 메타 등 향후 기능 추가 기반
+- **프로세스 모범 사례** — 4라운드 브레인스토밍 + 실측 반영 + 다중 AI 교차 검증 (메모리 기록 완료)
 
 ---
 

@@ -224,25 +224,263 @@ W6 완료 시점:
 ---
 
 ## 2. 배경/맥락
-_TODO_
+
+### 2.1 세 가지 과제 묶음
+
+- **B5**: 블링크 up ramp 시간 (60/80/120ms) — Gemini가 R3에서 명시 부동의한 마지막 쟁점
+- **B9**: 디테일 재주입 저조도 gate 임계값 (0.10/0.15/0.25) — R3에서 Claude도 Gemini도 미확정 인정
+- **C10**: 홍채 디테일 재주입 실제 구현 — 수식은 확정, 하지만 **spec/reflection 제외 조건** (Codex R3 지적) + gate 임계값이 미완
+
+세 작업 모두 "저조도 조건 + 시간적 변동"이라는 공통 관찰 상황에서 확인 가능.
+
+### 2.2 W1 TemporalStabilizer와의 경계 재확인
+
+**Claude R2 확정** (99 §1.2 C7): "렌더러는 material-only temporal envelope만". 좌표 스무딩은 W1 TemporalStabilizer 소유.
+
+W6에서 다룰 것:
+- **블링크 ramp (material)**: render_alpha EMA, ok
+- **디테일 재주입 (material)**: detail multiplier, ok
+
+다루지 않을 것:
+- iris_center/iris_radius 스무딩 — W1 소유
+- visibility hysteresis — W1 소유 또는 render_confidence 영역
+
+### 2.3 W6가 해결하는 것
+
+- **C7 블링크 ramp 구현 완료**: down 50~80ms + up 60/80/120ms (B5 결과 반영)
+- **C10 디테일 재주입 구현 완료**: 수식 + inner mask + spec/reflection 제외 + gate (B9 결과 반영)
+- **C9 avg_iris_luma** 활용 — 저조도 gate가 이 값을 입력으로 사용 (W1에서 준비됨)
+
+### 2.4 W6 해결하지 않는 것
+
+- render_alpha 기본 스무딩 이외의 시간적 처리 (visibility fade, confidence hysteresis 등) — W1 영역
+- 환경 반사 intensity 튜닝 — W4
+
+---
 
 ## 3. 전제 조건
-_TODO_
+
+1. ✅ **W3 완료** — 반사 계층 구조 (디테일 재주입이 반사 전에 와야 하므로 순서 확립)
+2. ✅ **W1 완료** — avg_iris_luma 측정 경로. B9 gate 입력.
+3. ✅ **실기기 + 블링크 촬영 가능** (60fps 이상 권장)
+4. ✅ **저조도 환경 확보** — 어두운 실내 (야간 or 커튼 닫은 방)
+
+---
 
 ## 4. 목표
-_TODO_
+
+1. **B5 결과 확정** — up ramp 시간 (60/80/120ms 중)
+2. **B9 결과 확정** — 저조도 gate 임계값
+3. **C7 블링크 ramp 구현 완료**
+4. **C10 디테일 재주입 구현 완료** (spec/reflection 제외 포함)
+5. **EMA 계수 공식화** — 시간 목표 → α 계산 로직 (Codex R3 "계수 검증 안 됨" 해결)
+
+### 4.1 Definition of Done
+
+- [ ] `computeEmaAlpha(target_ms, fps)` 유틸 함수 구현
+- [ ] B5 3 프로토타입 (60/80/120ms up) 토글 구현
+- [ ] B9 3 프로토타입 (0.10/0.15/0.25 gate) 토글 구현
+- [ ] C10 수식 (iris inner 마스크 + spec/reflection 제외) 셰이더 반영
+- [ ] 벤치 촬영 + 평가 완료
+- [ ] 결과 반영 커밋
+- [ ] 99 §1.2 C7/C10 + §2 B5/B9 업데이트
+
+### 4.2 Out of scope
+
+- 블링크 감지 자체 로직 — W1 detector 영역 (visibility, eye_top/bottom)
+- Contact shadow 강도 — 현 W에선 기존 유지
+
+---
 
 ## 5. 99에서 확정된 사항
-_TODO_
+
+### 5.1 C7 블링크 ramp 구조
+
+```cpp
+// gpu_lens_renderer.cpp
+float computeEmaAlpha(float target_ms, float fps) {
+    float dt = 1000.0f / fps;
+    return 1.0f - std::pow(0.05f, dt / target_ms);
+}
+
+// 프레임 단위 업데이트
+if (eye_closing) {
+    float alpha_close = computeEmaAlpha(60.0f, fps);  // down 60ms
+    render_alpha_ = alpha_close * 0.0f + (1.0f - alpha_close) * render_alpha_;
+} else {
+    float alpha_open = computeEmaAlpha(target_up_ms, fps);  // B5 결과
+    render_alpha_ = alpha_open * target_alpha + (1.0f - alpha_open) * render_alpha_;
+}
+```
+
+**`target_up_ms`**: B5 결과 (60/80/120).
+
+### 5.2 C10 디테일 재주입 수식
+
+```glsl
+// iris inner mask (동공 제외 iris 영역)
+float innerMask = smoothstep(0.7, 0.5, dist / iris_radius);  // r<0.65 근방
+
+// 3x3 blur (이웃 평균)
+float blurLum = (lum_center * 2.0 + lum_n + lum_s + lum_e + lum_w + 
+                 lum_ne + lum_nw + lum_se + lum_sw) / 10.0;
+
+// detail 계수
+float baseLum = dot(baseL, LUMA_709);
+float detail = clamp(baseLum / max(blurLum, 0.001), 0.85, 1.15);
+
+// 저조도 gate (B9 결과)
+float gateStrength = smoothstep(GATE_LOW, GATE_HIGH, uAvgIrisLum);
+
+// 최종 multiplier
+float detailMul = mix(1.0, detail, gateStrength * innerMask);
+
+// 순서: 블렌드 → 디테일 → 반사 (Codex R3 §1.11 순서)
+blended *= vec3(detailMul);
+// 이후 블렌드 += reflection * fresnel * renderMask (C5, W3)
+```
+
+**spec/reflection 제외**: 순서상 디테일이 반사보다 앞서 적용 → 반사 결과는 재주입 영향 없음 (Codex R3 우려 해결).
+
+### 5.3 B5 매트릭스 (99 §2 B5)
+
+- 사용자 5명 × 블링크 10회 × 3 up 시간 = **150 이벤트**
+- 축소 가능: 사용자 3명 × 5 블링크 × 3 = 45 이벤트
+
+### 5.4 B9 매트릭스
+
+- 3 조도 × 3 gate = **9 클립**
+- SKU: 오(OH)_베이글 (중간 톤, 디테일 관찰 용이)
+
+---
 
 ## 6. 미결 사항
-_TODO_
 
-## 7. W 브레인스토밍 시작 체크리스트
-_TODO_
+### 6.1 EMA α → ms 공식 정확도
+
+Codex R3 "α=0.15 계수가 60~120ms 시간 목표와 수학적으로 안 맞음" 지적.
+- `computeEmaAlpha` 공식 검증 필요 (`pow(0.05, dt/target)`).
+- 30fps 가정 맞나? 실기기 측정?
+
+**Claude 제안**: 공식 구현 후 실제 로그 기반 타이밍 측정.
+
+### 6.2 B5 user 수 축소
+
+99는 5명 × 10 블링크. 축소(3×5 = 15 이벤트) 허용?
+- Gemini가 "정성 판정이면 충분" 주장 가능
+- Codex가 "통계적 유의성 필요 5명"
+
+**Claude 추천**: 3명 × 5 블링크 × 3 시간 = 45 이벤트. 정성 판정엔 충분.
+
+### 6.3 B9 gate smoothstep 경계값
+
+`smoothstep(GATE_LOW, GATE_HIGH, avg_iris_luma)` — 두 값 어떻게?
+- 예: GATE_LOW=0.10, GATE_HIGH=0.20 → 어두우면 완전 off
+- B9는 "임계값 하나"인데 smoothstep은 두 값 필요 → 실제로 `smoothstep(threshold-0.05, threshold+0.05, ...)` 식?
+
+**Claude 제안**: `GATE_LOW = threshold - 0.03`, `GATE_HIGH = threshold + 0.03`. B9 결과가 threshold 값 결정.
+
+### 6.4 디테일 재주입 blur 커널 크기
+
+3x3 vs 5x5 vs 2-tap 방향성 분리?
+- 3x3: 9 fetch, iris 영역만 → 성능 미미
+- 5x5: 25 fetch, 과도
+- 분리 가능 가우시안 (h+v 2패스): single pass 금지라 부적합
+
+**Claude 추천**: 3x3 유지. Codex R1 원안.
+
+### 6.5 innerMask 경계
+
+`smoothstep(0.7, 0.5, dist/iris_radius)` vs `(dist < 0.65) ? 1.0 : 0.0` (hard)?
+- 부드러운 전환 vs 명확한 경계
+- 림발 영역과의 겹침 주의
+
+**Claude 제안**: 부드러운 smoothstep. 림발 영역(0.7~1.0)과 자연 분리.
+
+### 6.6 저조도 환경 정의
+
+"저조도 = avg_iris_luma 몇 이하?"
+- 0.10: 매우 어두움 (야간 실내)
+- 0.15: 보통 저조도 (창문 없는 실내)
+- 0.20: 실내 형광 기준값
+
+**B9는 임계값 자체가 이 질문에 답**.
+
+### 6.7 B5/B9 동시 측정 가능성
+
+- B5는 "블링크 반복" 필요
+- B9는 "저조도 환경" 필요
+- **동시 측정**: 저조도 환경에서 블링크 반복 → 한 번에 두 벤치 데이터
+
+**Claude 추천**: 동시 측정. 단 판정 지표는 독립.
+
+---
+
+## 7. W6 브레인스토밍 시작 체크리스트
+
+### 7.1 읽을 파일
+
+**필수**: P6-W0, P6-W6, 99 §2 B5/B9 + §1.2 C7/C10, 13_codex_r3.md §1 (EMA 계수 불일치)
+**선택**: 14_gemini_r3.md §2 (up 120ms 부동의), §4 C10 (gate 0.15 우려)
+
+### 7.2 송신 프롬프트
+
+```
+@docs/workPaper/P6-W6_temporal_detail_bench.md 읽고, 섹션 6 미결 7개에 대해
+각자 입장 정리. docs/workPaper/P6-W6_brainstorm/{codex|gemini}_w6.md.
+
+특히:
+- 6.1 EMA 공식 정확도 (Codex 계수 검증 지적)
+- 6.2 B5 user 수 (통계 유의 vs 정성)
+- 6.3 gate smoothstep 경계 방식
+- 6.5 innerMask 경계 smoothstep vs hard
+
+규칙:
+- 새 쟁점 금지
+- B5/B9/C10 동시 수행 타당성 평가
+```
+
+### 7.3 W6 소요
+
+- 프로토타입 구현 (B5 3안 + B9 3안 토글): 1.5h
+- 벤치 (블링크 녹화 + 저조도 3조도 × 3 gate): 2h
+- 평가: 1h
+- C10 실제 구현 (spec/reflection 제외 순서): 1.5h
+- 반영 + 문서: 1h
+
+**총 7h**.
+
+---
 
 ## 8. 완료 정의 + 다음 W 트리거
-_TODO_
+
+### 8.1 완료 정의
+
+§4.1 체크리스트.
+
+### 8.2 커밋 전략
+
+- `docs(P6-W6): 섹션 2~8 본문 작성`
+- `feat(gpu-lens): P6-W6 computeEmaAlpha 유틸 + 블링크 ramp 토글`
+- `feat(gpu-lens): P6-W6 C10 디테일 재주입 구현 (spec/reflection 제외 순서)`
+- `chore(bench): P6-W6 B5/B9 결과 report`
+- `feat(gpu-lens): P6-W6 B5/B9 결과 반영`
+
+### 8.3 다음 W 트리거
+
+W6는 독립. 완료 후 W7/W8/W9로.
+
+### 8.4 W6 실패 시
+
+- B5 결과 모호 → 80ms 중간값 채택 (타협)
+- B9 결과 모호 → 0.15 중간값 유지
+- EMA 공식 오류 → 실기기 측정 기반 경험적 조정
+
+### 8.5 기대 효과
+
+- 블링크 "팝 느낌" 제거 → 사용자 체감 개선
+- 저조도 노이즈 증폭 방지 → 야간 사용 품질 확보
+- EMA 계수 공식화 → 다른 temporal 값에도 재사용 가능
 
 ---
 

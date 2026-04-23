@@ -186,25 +186,288 @@ B8: 기존 `calcScleraFactor`와 동일 호출 수. 수식 내부만 변경 → 
 ---
 
 ## 2. 배경/맥락
-_TODO_
+
+### 2.1 두 벤치 묶음의 논리
+
+**B1**(블렌드 4번째 슬롯 Normal vs ColorReplaceLinear) + **B8**(sclera color-veto vs luma-only) 모두 **iris 경계 처리 관련**. 같은 SKU로 동시 촬영해 조합형 평가 가능.
+
+### 2.2 W2에서 준비된 것
+
+W2 완료 시점에:
+- blendTintLinearV2/Multiply/ScreenLinear 3종 정식 등록
+- blendColorReplaceLinear **수식 구현**만 (ID 7 등록 보류 or 조건부)
+- Normal(0) 유지
+
+W5는 여기서 **B1 A/B 테스트**로 Normal(0) 대 ColorReplaceLinear(7) 비교.
+
+### 2.3 B8의 상태
+
+- 현재 `calcScleraFactor` 함수 (기하학적 + 색상 기반) 존재 (S1 이전부터)
+- 99에서 "geometry-first + color-veto"로 방향 전환
+- 하지만 **수식 변경은 아직 안 됨** → W5에서 Codex 수식(color+luma) vs Gemini 수식(luma-only)으로 변경 + 벤치
+
+### 2.4 독립성
+
+**B1 결과와 B8 결과는 개별 해석**. 블렌드 수식 결정과 sclera veto는 서로 영향 없음. 판정도 따로.
+
+### 2.5 W5가 해결하는 것
+
+- B1 결과 → 99 §1.1 D6 "Normal 제거/유지" 확정, §1.2 C4 "CRL 채택/기각" 확정
+- B8 결과 → 99 §1.2 "sclera color-veto 수식" 확정
+
+### 2.6 W5가 해결하지 않는 것
+
+- 다른 블렌드 수식 변경 (TintLinearV2 등) — W2 범위
+- 환경 반사 — W4 범위
+- 림발 처리 — W7 범위
+
+---
 
 ## 3. 전제 조건
-_TODO_
+
+1. ✅ **W2 완료** — 블렌드 3종 확정, blendColorReplaceLinear 수식 존재
+2. ✅ **W3 완료** — 환경 반사 계층 (이 벤치 동안 OFF로 두거나 W4 결과 반영 상태)
+3. ✅ **실기기 + SKU 6종 준비** — 99 §2 B1 요구 SKU 5종 + B8 SKU 2종. 중복 SKU 활용 가능.
+4. ✅ **평가자 3명** (W4와 동일 구성 or 교체)
+
+---
 
 ## 4. 목표
-_TODO_
+
+**W5 완료 시 달성 상태**:
+
+1. **B1 판정 완료** — Normal(0), ColorReplaceLinear(7) 중 채택/기각/조건부
+2. **B8 판정 완료** — color-veto vs luma-only 중 채택
+3. **셰이더 수식 최종 반영** — calcScleraFactor 교체, Normal/CRL ID 정리
+4. **벤치 리포트 작성** — `docs/bench/P6-W5/report.md`
+
+### 4.1 Definition of Done
+
+- [ ] B1 조합 4종 동시 프로토타입 (Normal+color, Normal+luma, CRL+color, CRL+luma) 구현
+- [ ] 5 SKU × 매트릭스 = ~24 클립 촬영
+- [ ] 3명 블라인드 평가 완료
+- [ ] B1/B8 결과 문서화
+- [ ] 셰이더 반영 (ID 0/7 처리, calcScleraFactor 수정)
+- [ ] 99_final_decision.md §1.1 D6 / §1.2 C4 업데이트
+- [ ] 회귀 확인
+
+### 4.2 Out of scope
+
+- 블렌드 완전 재설계 — 현재 결정 범위만
+- ColorReplaceLinear 외 새 블렌드 추가 제안 — R4 이후 종결
+
+---
 
 ## 5. 99에서 확정된 사항
-_TODO_
+
+### 5.1 B1 매트릭스 (R4 Patch 반영, 5 SKU)
+
+**SKU**:
+1. 다크브라운 자연 → 클라셋_돌 초코
+2. 헤이즐 자연 → 오(OH)_베이글
+3. 밝은 그레이/블루 → 엔비_퍼퓸 글로우 또는 클라셋_런웨이 그레이
+4. 불투명 서클 → 로뮤_디어 멜로우 또는 클라셋_돌 초코 중복
+5. **화이트/그래픽** → 엔비_샤모 브라운 (CRL 존재 이유의 핵심 셀)
+
+**홍채 톤**: 짙음(아시아인 주류, 50% 비중), 중간, 밝음
+
+**모드**: Normal(ID 0), ColorReplaceLinear(ID 7)
+
+총 5 × 3 × 2 = **30 클립** (또는 조합형으로 축소)
+
+### 5.2 B1 판정 시나리오 (99 §2 B1)
+
+```
+CRL 17/30+ 승리 → 4종 확정 (TintLinearV2 + Multiply + ScreenLinear + CRL)
+CRL 특정 SKU(화이트/그래픽)에서만 승리 → 조건부 채택 (SKU meta `prefers_crl`)
+Normal 17/30+ 승리 → 3종 유지 + Normal
+차이 미미 → 3종 유지 + Normal (단순성 우선)
+```
+
+R4 Patch 1 반영: **"17/30"은 정량 가이드이지 엄격 임계값 아님**. 다수 의견 기반 정성 판정.
+
+### 5.3 B8 매트릭스 (99 §2 B8)
+
+- SKU 2: 밝은 그레이/블루 (채도 낮음, 위험 영역), 다크브라운 (대조)
+- 조명 3: 형광, 측광, 저조도
+- 방식 2: color-veto, luma-only
+
+12 클립.
+
+### 5.4 B8 수식 후보
+
+**Codex color-veto (R3 §8)**:
+```glsl
+float geom = smoothstep(0.75, 1.0, irisEdgeDist);
+float veto = smoothstep(0.18, 0.32, sat) 
+           * (1.0 - smoothstep(0.45, 0.65, lum));
+finalAlpha *= 1.0 - geom * (1.0 - 0.6 * veto);
+```
+
+**Gemini luma-only (R3 §8)**:
+```glsl
+float geom = smoothstep(0.75, 1.0, irisEdgeDist);
+float veto = 1.0 - smoothstep(0.45, 0.65, lum);  // sat 항 제거
+finalAlpha *= 1.0 - geom * (1.0 - 0.6 * veto);
+```
+
+### 5.5 B8 판정 시나리오
+
+- color-veto 명확 우세 → Codex 수식 채택
+- luma-only 명확 우세 → Gemini 수식 (더 단순)
+- 차이 미미 → Gemini 수식 (Occam's razor)
+
+### 5.6 동시 캡처 전략 (효율)
+
+4 조합 (Normal+color / Normal+luma / CRL+color / CRL+luma)을 **같은 촬영에서 셰이더 토글**로 녹화:
+
+- 평가자는 A/B/C/D 라벨만 보고 블라인드 평가
+- SKU 5종 × 환경 1~2종 × 4 조합 = 20~40 클립
+
+### 5.7 기존 calcScleraFactor 제거 정책
+
+S1 이전부터 존재하는 `calcScleraFactor` 함수는 **현재 기하학적 + 색상** 혼합식. W5 시작 시:
+- W2에서 건드리지 않았음 (W5 범위)
+- Codex 또는 Gemini 수식으로 교체
+- 함수명 유지 or `calcScleraVeto`로 명확화?
+
+**W5 브레인스토밍에서 결정**.
+
+---
 
 ## 6. 미결 사항
-_TODO_
 
-## 7. W 브레인스토밍 시작 체크리스트
-_TODO_
+### 6.1 SKU 중복 사용 여부
+
+5 SKU 중 "불투명 서클"과 "다크브라운"이 겹칠 수 있음. 별도 SKU vs 중복?
+- 별도 확보: 로뮤_디어 멜로우 (불투명 서클), 클라셋_돌 초코 (다크브라운)
+- 중복: 클라셋_돌 초코 하나로 겸용
+
+**Claude 제안**: 별도. 디자인 차이(랜덤 도트 vs 균일 채움) 관찰 가치.
+
+### 6.2 B1과 B8 동시 캡처 조합 라벨링
+
+4 조합을 A/B/C/D로 라벨:
+- 평가자에게 라벨만 보여주고 어느 게 어느 조합인지 숨김 (블라인드)
+- 판정 후 라벨 매핑 공개
+
+**확인 필요**: 실기기에서 4 조합 토글 방식 (UI 버튼 vs 디버그 커맨드).
+
+### 6.3 CRL `detail` clamp 범위 재확인
+
+**현재 수식**: `detail = clamp(pow(lum/avgLum, 0.7), 0.75, 1.25)`
+
+**maxDetail uniform**: `mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist))`
+
+이게 `clamp(..., 0.75, maxDetail)`로 상한 대체. W5 벤치 결과 따라 maxDetail 기본값 조정 가능.
+
+### 6.4 B1에서 "조건부 채택" 결과 시 구현
+
+CRL이 화이트/그래픽에서만 승리 → SKU 메타데이터 `prefers_crl` 플래그:
+- 메타 있는 SKU: CRL 자동 선택
+- 메타 없는 SKU: Normal or TintLinearV2 자동
+- UI에 노출? (사용자가 수동 덮어쓰기 가능?)
+
+**W5 브레인스토밍에서 결정**.
+
+### 6.5 Gemini luma-only 임계값 재확인
+
+`smoothstep(0.45, 0.65, lum)` 값 그대로 쓸지, 튜닝?
+- Codex 원 수식도 같은 값 사용
+- 저조도 시나리오에선 0.45 하한이 너무 높을 수도 (실제 iris 외곽도 0.2~0.4 영역이 있음)
+
+**W5 브레인스토밍에서 확인**.
+
+### 6.6 calcScleraFactor 기존 구현과 새 수식의 관계
+
+- 이름만 바꿔서 재작성?
+- 새 함수 추가 + 기존 deprecated?
+- 단순 수식 교체?
+
+**Claude 추천**: 단순 수식 교체. 함수명 유지로 호출부 영향 없음.
+
+### 6.7 color-veto 수식의 Codex 의도 재확인
+
+Codex R3 §8 원문:
+> "즉 색상은 감쇄를 켜는 스위치가 아니라 감쇄를 일부 되돌리는 veto다."
+
+`veto` 가 **감쇄 해제**(1.0 - 0.6 * veto)로 쓰임. W5 브레인스토밍 시 Codex에게 재확인: "0.6"은 veto 강도 조절. 튜닝 가능?
+
+---
+
+## 7. W5 브레인스토밍 시작 체크리스트
+
+### 7.1 읽을 파일
+
+**필수**: P6-W0, P6-W5, 99 §2 B1/B8, P6-W2 (블렌드 수식 맥락)
+**선택**: 13_codex_r3.md §8 (color-veto 원문), 14_gemini_r3.md §8 (luma-only)
+
+### 7.2 송신 프롬프트 초안
+
+```
+@docs/workPaper/P6-W5_blend_sclera_bench.md 읽고, 섹션 6 미결 7개에 대해
+각자 입장 정리. docs/workPaper/P6-W5_brainstorm/{codex|gemini}_w5.md.
+
+특히:
+- 6.3 CRL detail clamp 범위 (maxDetail 기본값)
+- 6.4 "조건부 채택" 시 구현 (SKU 메타 플래그)
+- 6.7 color-veto `0.6` 강도 튜닝 가능성
+
+규칙:
+- 새 쟁점 금지
+- B1/B8 독립 판정 인정
+- 조합형 캡처 전략 타당성 평가
+```
+
+### 7.3 예상 대립
+
+- 6.4 조건부 채택: Codex가 "UI 숨김 자동 선택" vs "수동 덮어쓰기 허용" 중 입장 갈림 가능
+- 6.7 Codex가 "0.6 엄수" 주장 가능 — Gemini는 "수식 자체 단순화 주장 (sat 항 제거)"와 별도 논점
+
+### 7.4 예상 합의
+
+- B1/B8 독립 판정 — 쉽게 합의
+- 조합형 캡처 효율성 — Gemini 동의 예상
+
+### 7.5 W5 소요
+
+- 셰이더 조합 4종 토글 구현: 1h
+- 벤치 촬영: 1.5h
+- 평가: 1h
+- 반영 + 문서: 1h
+
+**총 ~4.5h**.
+
+---
 
 ## 8. 완료 정의 + 다음 W 트리거
-_TODO_
+
+### 8.1 완료 정의
+
+§4.1 체크리스트 전체 ✅.
+
+### 8.2 커밋 전략
+
+**커밋 1**: `docs(P6-W5): 섹션 2~8 본문 작성`
+**커밋 2**: `feat(gpu-lens): P6-W5 블렌드/sclera 조합 토글 (B1/B8 벤치용)`
+**커밋 3** (벤치 후): `chore(bench): P6-W5 B1/B8 결과 report`
+**커밋 4** (반영): `feat(gpu-lens): P6-W5 B1/B8 결과 반영 — {Normal 유지|CRL 채택} / {color-veto|luma-only}`
+
+### 8.3 다음 W 트리거
+
+W5는 독립적. 완료 후 바로 W6, W7로 넘어감 (이미 병렬 가능).
+W9 통합 테스트 단계에서 B1/B8 결과 재검증.
+
+### 8.4 W5 실패 시 전략
+
+- 4 조합 모두 "차이 없음"이면 → 99 단순성 원칙 적용 (Normal + Gemini luma-only)
+- 일부 조합만 문제 → 해당 항목 수식 미세 조정 후 재측정 (별도 W는 아님)
+
+### 8.5 W5 성공 시 기대
+
+- 블렌드 모드 최종 3종 or 4종 확정 → SDK 사용성 단순화
+- sclera veto 단순화 가능성 → 저조도 안정성 향상
+- 99 §1.1/§1.2 최종 확정 → Phase 6 마무리 단계 가시화
 
 ---
 

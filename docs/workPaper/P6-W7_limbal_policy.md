@@ -211,25 +211,200 @@ bool has_baked_limbal = sku_meta.has_baked_limbal.value_or(auto_detected_limbal)
 ---
 
 ## 2. 배경/맥락
-_TODO_
+
+### 2.1 가장 작은 W
+
+벤치 시간 1h + 구현 2~3h. 하지만 **Claude 편향 가장 심했던 지점** (R1→R2→R3 세 번 뒤집힘). 세션 간 맥락 보존 중요.
+
+### 2.2 실측이 R3 결정을 흔든 사례
+
+- R3 합의: "림발 기본 ON + 메타데이터 + 자동감지 fallback"
+- R4 실측: 20개 중 14개 림발 없음/미미 → 기본 ON 재검토 여지
+- 16 웹 교차검증 (보정 리스크 명시): 업계 트렌드도 "얇은 써클라인" → Claude R1 원안(기본 OFF) 재부상
+
+**W7 결론 도출 전 **실측 + 교차검증 한계** 모두 고려**.
+
+### 2.3 W7이 해결하는 것
+
+- **B4 자동감지 fallback 채택 여부** (정확도 기반)
+- **SKU 메타데이터 구조** 확정
+- **셰이더 림발 수식 부활** (S1에서 삭제된 것 재도입)
+- **기본 ON vs OFF 최종 판정** (B10 같은 신규 벤치 논의 여지)
+
+---
 
 ## 3. 전제 조건
-_TODO_
+
+1. ✅ W3 완료 (환경 반사 구조 — 림발이 반사 전/후 순서 명확)
+2. ✅ 20 SKU 에셋 접근 + 분류 결과 (15_asset_analysis.md §2.2)
+3. ✅ 5 + 5 테스트 SKU 선정됨
+
+---
 
 ## 4. 목표
-_TODO_
+
+1. **B4 결과 확정** — 자동감지 fallback 채택/드롭/완화
+2. **SKU 메타데이터 구조 정의** (`LensSkuMetadata`)
+3. **셰이더 림발 수식 부활** (기본 OFF 또는 기본 ON 최종)
+4. **20 SKU 메타 플래그 설정** (W7 산출물로 `lens_sku_metadata.json`)
+
+### 4.1 Definition of Done
+
+- [ ] B4 프로토타입 + 10 SKU 정확도 측정 완료
+- [ ] SKU 메타 구조 구현 (header + 로딩 로직)
+- [ ] 셰이더 림발 수식 부활 (uniform 스위치)
+- [ ] 20 SKU 메타 플래그 초기 설정
+- [ ] B4 결과에 따른 자동감지 채택/드롭 반영
+- [ ] 99 §1.2 C6 + §2 B4 업데이트
+
+---
 
 ## 5. 99에서 확정된 사항
-_TODO_
+
+### 5.1 메타데이터 구조 (내부, 공개 API 불변)
+
+```cpp
+struct LensSkuMetadata {
+    std::string sku_id;
+    bool has_baked_limbal = false;         // 기본 false (실측 반영)
+    bool prefers_graphic_outline = false;  // 엔비_샤모 브라운 같은 그래픽
+};
+```
+
+### 5.2 자동감지 수식 (B4 프로토타입)
+
+```
+edge_lum = mean(pixels in r ∈ [0.85, 1.0])
+center_lum = mean(pixels in r < 0.3)
+ratio = edge_lum / max(center_lum, 0.001)
+baked_limbal_detected = (ratio < 0.75)
+```
+
+### 5.3 셰이더 림발 수식 (부활)
+
+```glsl
+// uHasBakedLimbal = 0 → 셰이더 림발 활성
+// uHasBakedLimbal = 1 → 비활성 (에셋이 이미 포함)
+if (uHasBakedLimbal == 0) {
+    float limbal = smoothstep(0.7, 1.0, dist);
+    blended = mix(blended, blended * 0.4, limbal * 0.8);
+}
+```
+
+### 5.4 B4 판정 시나리오
+
+- 10/10 정확도 → 자동감지 fallback 채택
+- 9/10 (Gemini 완화안 수용 시) → 동일. false positive 1회 허용 경고 로그
+- 7~8/10 → fallback only 한계. 메타 누락 시 "기본 ON" 폴백
+- 6/10 이하 → 자동감지 완전 드롭
+
+### 5.5 테스트 SKU (15 §2.2)
+
+**림발 내장 5**: 로뮤_그레이 토프, 로뮤_디어 멜로우, 로뮤_러브 글림, 엔비_플럼 블랙, 오(OH)_베이글
+**림발 없음 5**: 클라셋_돌 초코, 클라셋_런웨이 그레이, 클라셋_클라우드 그레이, 엔비_퍼퓸 글로우, 오(OH)_키위
+
+---
 
 ## 6. 미결 사항
-_TODO_
 
-## 7. W 브레인스토밍 시작 체크리스트
-_TODO_
+### 6.1 자동감지 ROI 경계 튜닝
+
+`[0.85, 1.0]` vs `[0.80, 1.0]` 등. W7 브레인스토밍에서 여러 값 시도 권장.
+
+### 6.2 임계값 `0.75` 튜닝
+
+`0.70` (엄격) / `0.75` (기본) / `0.80` (느슨) 비교 가능.
+
+### 6.3 메타데이터 저장 방식
+
+- JSON 파일 (`android/demo-app/src/main/assets/lens_meta.json`)
+- 코드 내 하드코드 레지스트리 (`LensSkuRegistry`)
+- SKU 파일명 규약 (파일명에 `_bl` 접미사 = has_baked_limbal)
+
+**Claude 추천**: JSON 파일. 외부 편집 용이.
+
+### 6.4 메타 누락 경고 로그 레벨
+
+DEBUG (조용) / WARN (알림) / ERROR (에러)?
+
+**Claude 추천**: WARN. 앱은 안 깨지고 개발자 모니터링만.
+
+### 6.5 Gemini 완화안 채택 여부
+
+"9/10도 OK" vs "10/10 엄수". W7 브레인스토밍에서 결정.
+
+### 6.6 엔비_샤모 브라운 특별 처리
+
+`prefers_graphic_outline = true` 플래그 별도. 셰이더 림발 수식도 건드리지 않음 (에셋 자체가 강한 아웃라인).
+
+**확인**: 이 플래그의 셰이더 효과 명확화.
+
+### 6.7 B10 신규 벤치 필요성
+
+16_product_crosscheck.md에서 제안한 "같은 SKU로 셰이더 림발 ON/OFF 비교" — W7에서 추가 수행?
+
+**Claude 제안**: B4 결과 후 판정. 자동감지가 채택되면 B10 불필요. 드롭되면 B10으로 "기본 ON/OFF" 재확인 가능.
+
+---
+
+## 7. W7 브레인스토밍 시작 체크리스트
+
+### 7.1 읽을 파일
+
+**필수**: P6-W0, P6-W7, 99 §1.2 C6 + §2 B4, 15_asset_analysis.md §2.2, 16_product_crosscheck.md
+**선택**: 13_codex_r3.md §3 I4 (엄격 기준), 14_gemini_r3.md §3 I4 (벤치 불필요 주장)
+
+### 7.2 송신 프롬프트
+
+```
+@docs/workPaper/P6-W7_limbal_policy.md 읽고, 섹션 6 미결 7개에 대해
+입장 정리. docs/workPaper/P6-W7_brainstorm/{codex|gemini}_w7.md.
+
+특히:
+- 6.5 9/10 vs 10/10 엄수
+- 6.3 JSON vs 하드코드 레지스트리
+- 6.7 B10 신규 벤치 추가 여부
+
+규칙: 새 쟁점 금지. R1~R3 Claude 편향 3번 뒤집힘 맥락 인식.
+```
+
+### 7.3 예상 대립
+
+- 6.5 Gemini 9/10 완화안 vs Codex 10/10 엄수
+- 6.7 B10 벤치 — Codex는 "필요 없음", Gemini는 "이미 B4로 충분"
+
+### 7.4 소요
+
+- 자동감지 CPU 구현 + 10 SKU 측정: 1h
+- SKU 메타 구조 + JSON 로딩: 1h
+- 셰이더 림발 수식 부활 + uniform: 30min
+- B4 평가 + 결과 반영: 30min
+
+**총 3h**.
+
+---
 
 ## 8. 완료 정의 + 다음 W 트리거
-_TODO_
+
+### 8.1 완료 정의
+
+§4.1 체크리스트.
+
+### 8.2 커밋
+
+- `docs(P6-W7): 섹션 2~8`
+- `feat(sdk): P6-W7 LensSkuMetadata 구조 + JSON 로딩`
+- `feat(gpu-lens): P6-W7 림발 셰이더 수식 부활 + uHasBakedLimbal uniform`
+- `chore(bench): P6-W7 B4 결과 report + 20 SKU 메타 플래그 초기 설정`
+
+### 8.3 다음 W
+
+W9 통합 테스트. W7은 독립.
+
+### 8.4 W7 기대
+
+- 림발 처리 정책 최종 확정 → Claude 3번 뒤집기 종결
+- SKU 메타 구조 확립 → Phase 7+에서 활용 가능 (향후 SKU별 특수 설정 가능)
 
 ---
 

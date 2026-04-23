@@ -180,25 +180,335 @@ Codex도 R1에서 약점 인정:
 ---
 
 ## 2. 배경/맥락
-_TODO_
+
+### 2.1 W4가 Phase 6 중간 관문인 이유
+
+**"말로 결론낼 수 없는 쟁점"**의 첫 벤치. R3까지의 논쟁(Codex env-map vs Gemini Periphery vs Claude hybrid)을 **실기기 블라인드 비교**로 종결. 결과에 따라:
+- W3에서 스캐폴드만 둔 **반사 소스 확정**
+- **realSpec 폐기 확정 여부** (W2에서 "조건부" 상태)
+- **W8 Pupil material 조건부 트랙 발동 여부**
+
+즉 W4 하나가 **3개 후속 결정**을 연쇄 해결.
+
+### 2.2 두 가지 목적 동시 수행
+
+1. **B2 벤치**: 반사 소스 비교 (OFF/env-map/periphery)
+2. **Pupil 체감 수집**: B2 촬영 중 "중앙 공동(cavity) 체감" 지표 Y/N 수집
+
+두 목적이 **같은 촬영 세트**에서 동시 수행 가능 → 비용 절약 + 판정 일관성.
+
+### 2.3 Claude 편향 결과 ("hybrid" 안 축소)
+
+**R4 Patch 기반** (99 §2 B2):
+> "Claude의 'hybrid(env + 상단 crop)'는 프로토타입 복잡도만 늘리므로 **1차 대결에서 제외**. env-only vs periphery-only 선행, 두 프로토타입 모두 OFF 대비 유의미 개선 시 2차로 hybrid 검토."
+
+→ W4 **1차 벤치는 3 프로토타입 (OFF / env-map / periphery)**. Hybrid 제외.
+
+### 2.4 이 W가 해결하지 않는 것
+
+- 실제 반사 소스 구현 **외** 다른 결정 — W5/W6/W7 범위
+- Pupil material 실제 구현 — W8 (조건부 발동 시)
+- 반사 intensity 세밀 튜닝 — W9 통합 단계
+
+### 2.5 W4의 독특한 성격 — "구현 비중 < 벤치 비중"
+
+W1~W3는 브레인스토밍 + 구현. W4는 브레인스토밍 + **실기기 촬영** + 평가가 주. 프로토타입 구현 2~3h, 촬영 1.5h, 평가 1h 구조.
+
+---
 
 ## 3. 전제 조건
-_TODO: P6-W3 완료 (sampleReflection 추상화 + renderMask hook 존재)_
+
+1. ✅ **W3 완료** — sampleReflection 추상화 존재, renderMask hook 구조. 단일 셰이더에서 uniform으로 OFF/env-map/periphery 전환 가능해야.
+2. ✅ **W1 완료** — EyeRenderPacket.reflection_dir 필드 활용 가능 (env-map 회전 여부 판단)
+3. ✅ **실기기 4 환경 이동 가능** — 실내 형광/창가 측광/야간 실내/실외 낮
+4. ✅ **평가자 3명 확보** — 아시아 짙은 홍채 1 + 밝은 홍채 1 + 개발자/디자이너 1 권장
+5. ✅ **env_map 에셋 공급** — W3 브레인스토밍에서 확정된 포맷 (256×128 LDR/RGBM)
+6. ✅ **6개 대표 SKU 준비** — 15_asset_analysis.md에서 선정된 것
+7. ✅ **녹화 장비** — 실기기 + 스크린 레코딩 or 외부 카메라
+
+---
 
 ## 4. 목표
-_TODO_
+
+**W4 완료 시 달성 상태**:
+
+1. **B2 결과 확정**: 3 프로토타입 중 하나 채택 or "Phase 6 이월"
+2. **D3 realSpec 상태 확정**: 완전 폐기 or 조건부 유지
+3. **Pupil 체감 지표 수집 완료** → W8 착수 판정 근거
+4. **env_map 에셋 완성** (채택 시) — 실제 사용 가능 상태
+5. **채택 소스의 sampleReflection 실제 구현 완료** — W3 no-op 교체
+
+### 4.1 Definition of Done
+
+- [ ] 3 프로토타입 구현 (env-map, periphery, OFF baseline)
+- [ ] 4 환경 × 2 동작 × 3 프로토타입 = **24 클립** 촬영 완료
+- [ ] 평가자 3명 블라인드 평가 완료
+- [ ] 판정 결과 문서화 (`docs/bench/P6-W4/report.md` or 유사)
+- [ ] 채택 소스의 sampleReflection 실제 구현 머지 완료
+- [ ] "중앙 공동 체감" Y/N 3명×24클립 = 72 응답 수집
+- [ ] W8 착수/폐기 판정 (2/3 룰)
+- [ ] 99_final_decision.md §1.2 C5 "반사 소스 확정" 업데이트
+- [ ] 99 §1.1 D3 "realSpec 상태 확정" 업데이트
+- [ ] 실기기 회귀 확인 (채택 소스 적용 후 성능 유지)
+
+### 4.2 Out of scope
+
+- Hybrid 프로토타입 — 1차 결과가 "둘 다 유의미 개선"일 때만 2차
+- Head-pose 기반 env 회전 — W4 범위에선 static env map 우선, 회전은 선택
+- W8 실제 구현 — 조건 발동 시 별도 W
+
+---
 
 ## 5. 99에서 확정된 사항
-_TODO_
+
+### 5.1 B2 프로토타입 3종 (R4 Patch 반영)
+
+**프로토타입 1: OFF (baseline)**
+```glsl
+vec3 sampleReflection(vec2 uv, vec3 n, vec3 v) { return vec3(0.0); }
+```
+- W3 기본 동작. 추가 작업 0.
+
+**프로토타입 2: env-map-only (Codex)**
+```glsl
+vec3 sampleReflection(vec2 reflectUV, vec3 normal, vec3 viewDir) {
+    vec3 env = texture(uEnvMap, reflectUV).rgb;
+    return env;
+}
+```
+- 에셋: 256×128 LDR/RGBM PNG. W3 브레인스토밍에서 파일 위치/이름 확정.
+- reflection_dir가 있으면 env 회전 적용 가능 (W4에서 추가 결정).
+
+**프로토타입 3: periphery-camera (Gemini)**
+```glsl
+vec3 sampleReflection(vec2 reflectUV, vec3 normal, vec3 viewDir) {
+    // 화면 가장자리 8포인트 샘플링
+    const vec2 PERIPHERY[8] = vec2[](
+        vec2(0.1, 0.1), vec2(0.5, 0.05), vec2(0.9, 0.1),
+        vec2(0.05, 0.5),                 vec2(0.95, 0.5),
+        vec2(0.1, 0.9), vec2(0.5, 0.95), vec2(0.9, 0.9)
+    );
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 8; i++) {
+        sum += textureLod(uCameraTexture, PERIPHERY[i], 3.0).rgb;
+    }
+    return sum / 8.0;
+}
+```
+- **`face_region_mask`**: 99 §2 B2 "미확정" 명시. W4에서 "대략적 얼굴 영역 제외" 근사.
+- 초기 구현: 화면 **중앙 70% 제외** (포인트 좌표 자체를 가장자리로 제한). 더 정교한 마스크는 1차 결과 후.
+
+### 5.2 판정 메트릭 (R4 Patch 1 + 2 반영)
+
+**정성 체감 Y/N 체크 + 다수 의견 판정**:
+
+| 지표 | 성격 | 낮을수록 좋음 |
+|------|------|--------------|
+| 자연스러움 블라인드 선호도 | 양성 (1순위) | ❌ 높을수록 좋음 |
+| 가운데 붙은 반짝이 체감 | 음성 | ✅ |
+| 얼굴 재귀 반사처럼 보임 (Codex 우려) | 음성 | ✅ |
+| 좌우 눈 불일치 체감 | 음성 | ✅ |
+| 환경과 무관해 보임 (Gemini 우려) | 음성 | ✅ |
+| **중앙 공동(cavity) 체감** (P6-W8 근거) | 음성 + Y/N | ✅ |
+
+### 5.3 매트릭스: 4 환경 × 2 동작 × 3 프로토타입 = 24 클립
+
+**환경**:
+1. 실내 형광 (사무실/카페)
+2. 창가 측광 (한쪽 자연광)
+3. 야간 실내 (어두운 조명, 노란 불빛)
+4. 실외 낮 (자연광)
+
+**동작**:
+1. 정면 미세 움직임
+2. 좌우 head turn
+
+**프로토타입**: OFF / env-map / periphery
+
+### 5.4 Pupil 체감 집중 관찰 SKU
+
+**밝은 렌즈 × 짙은 홍채** 조합에서 공동 체감 최대:
+- **핵심 SKU**: 엔비_퍼퓸 글로우, 클라셋_런웨이 그레이
+- **대조 SKU**: 클라셋_돌 초코 (짙은 렌즈, 체감 거의 없음)
+
+**테스터 조건**: 아시아 짙은 홍채 주류.
+
+### 5.5 결론 시나리오 (99 §2 B2)
+
+| 결과 | C5 소스 확정 | D3 realSpec | W8 착수 |
+|------|------------|-------------|---------|
+| env-map 명확 우세 | env-map | 완전 폐기 | 체감 지표 별도 판정 |
+| periphery 명확 우세 | periphery | 완전 폐기 | 체감 지표 별도 판정 |
+| 둘 다 OFF 대비 개선 | 2차 hybrid 검토 | 완전 폐기 | 체감 지표 별도 판정 |
+| 둘 다 차이 미미 | **Phase 6 이월** | **조건부 유지** (재도입 검토) | 보통 체감 높음 → 착수 |
+
+### 5.6 Pupil 체감 W8 착수 판정 (Hard)
+
+- 3명 중 2명 이상 "중앙 공동 체감" Y → **P6-W8 착수**
+- 모두 "체감 없음" → P6-W8 폐기
+- 1명만 Y → **사용자 최종 판단**
+
+---
 
 ## 6. 미결 사항
-_TODO: §1.12 질문 정리_
 
-## 7. W 브레인스토밍 시작 체크리스트
-_TODO_
+### 6.1 env_map 에셋 제작
+
+- **장면 선정**: 실내 사무실? 카페? 일반적 형광 환경?
+- **HDR → LDR 톤매핑**: 어느 방식? (Reinhard, ACES 등)
+- **알파 채널**: 없음 (RGB only)
+- **포맷**: PNG vs KTX? GPU 메모리 효율 고려 시 KTX RGBM이 나을 수도. 단 로딩 복잡성 증가.
+
+**Claude 제안**: PNG RGBM 8bit — 호환성 최고. 200~400KB.
+
+### 6.2 Periphery face_region_mask 근사
+
+99 §2 "미확정" 명시. W4 구현 시:
+- **옵션 A (간단)**: 8포인트 좌표 자체를 가장자리 고정. 얼굴 중앙 70% 자동 제외.
+- **옵션 B (정교)**: MediaPipe Face Detector 결과로 face ROI 동적 계산 후 그 외 영역만 샘플링.
+
+**Claude 추천**: 옵션 A 우선. 1차 벤치 결과 보고 옵션 B 필요성 판단.
+
+### 6.3 Env map 회전 (reflection_dir 활용)
+
+EyeRenderPacket.reflection_dir 또는 head_pose_yaw_roll optional 활용 여부:
+- **옵션 A**: W4 1차 벤치는 **정적 env**로만. pose 회전은 별도 2차 벤치.
+- **옵션 B**: W4부터 회전 적용. Pose 없으면 정적 fallback.
+
+**Claude 추천**: 옵션 A. 벤치 변수 증가 방지.
+
+### 6.4 평가자 3명 구성
+
+- 아시아 짙은 홍채 1명 (필수 — Pupil 체감)
+- 밝은 홍채 or 중간 1명 (대조)
+- 개발자/디자이너 1명 (기술 관점)
+
+**확인 필요**: 실제 평가자 섭외 경로.
+
+### 6.5 촬영 절차 표준화
+
+- 스크린 레코딩 vs 외부 카메라?
+- 프레임율 (30 vs 60)?
+- 녹화 길이 (클립당 3초 vs 10초)?
+- 프로토타입 전환은 셰이더 uniform 토글 (런타임) vs 별도 APK 3종?
+
+**Claude 추천**: 셰이더 uniform 토글 + 스크린 레코딩. 평가자 모름 (블라인드).
+
+### 6.6 클립당 녹화 내용
+
+- 한 클립 = 한 환경 + 한 동작 + 한 프로토타입 (단일 SKU)
+- 여러 SKU 섞으면 평가 복잡 → 일단 1~2 SKU로 24 클립 돌리고, 필요 시 SKU 늘림.
+
+### 6.7 결과 반영 절차
+
+W4 완료 후:
+- 99_final_decision.md §1.2 C5 업데이트
+- §1.1 D3 상태 업데이트 ("조건부" → "완전 폐기" or "유지")
+- §2 B2 결과 섹션 추가
+- P6-W3의 sampleReflection no-op → 실제 구현 교체 (W4 산출물)
+
+---
+
+## 7. W4 브레인스토밍 시작 체크리스트
+
+### 7.1 읽을 파일
+
+**필수**:
+1. P6-W0 §1
+2. P6-W4 이 문서
+3. P6-W3 완료 상태 확인 (hook/추상화 존재)
+4. 99 §2 B2
+5. R4 Patch (Patch 1 정성 메트릭, Patch 2 Pupil 체감 지표)
+
+**선택**:
+- 04_codex_response.md §A (env-map 원문)
+- 14_gemini_r3.md §7 (Periphery 재강조)
+- 15_asset_analysis.md §3 (SKU 선정)
+
+### 7.2 송신 프롬프트 초안
+
+```
+@docs/workPaper/P6-W4_env_reflection_bench.md 읽고, 섹션 6 미결 7개에 
+대해 각자 입장 정리 후 docs/workPaper/P6-W4_brainstorm/{codex|gemini}_w4.md
+로 작성해줘.
+
+특히:
+- 6.1 env_map 에셋 제작 (Codex 원하는 장면/톤매핑)
+- 6.2 Periphery face_region_mask 근사 (Gemini가 구체화 어디까지)
+- 6.3 Env map 회전 (pose 있을 때 어떻게)
+- 6.5 촬영 절차 (블라인드 보장 방법)
+
+규칙:
+- 새 쟁점 제기 금지
+- 각 항목 "추천 + 근거 1~2줄"
+- Pupil 체감 판정 2/3 룰 재확인
+```
+
+### 7.3 예상 대립
+
+- 6.1 env 장면: Codex가 "사무실 실내" vs Gemini가 "다양한 환경 복수 에셋" 주장 가능. 벤치 범위 관리 필요.
+- 6.3 env 회전: Codex가 "pose 있으면 회전 필수" 주장, Claude가 "1차에선 정적" 주장.
+
+### 7.4 W4 실행 소요
+
+- 프로토타입 구현: 2~3h (env-map 에셋 제작 포함)
+- 벤치 촬영: 1.5~2h (환경 4 × 동작 2 × 프로토타입 3, 이동 시간 포함)
+- 평가 1h
+- 결과 반영 0.5~1h
+
+**총 5~7h**.
+
+---
 
 ## 8. 완료 정의 + 다음 W 트리거
-_TODO_
+
+### 8.1 완료 정의
+
+§4.1 체크리스트 + `docs/bench/P6-W4/report.md` 존재.
+
+### 8.2 커밋 전략
+
+**커밋 1**: `docs(P6-W4): 섹션 2~8 본문 작성`
+**커밋 2**: `feat(gpu-lens): P6-W4 env-map 프로토타입 추가 (B2 벤치용)`
+**커밋 3**: `feat(gpu-lens): P6-W4 periphery 프로토타입 추가`
+**커밋 4**: `feat(android): P6-W4 벤치용 프로토타입 토글 UI`
+**커밋 5** (벤치 후): `chore(bench): P6-W4 B2 결과 report 및 산출물`
+**커밋 6** (반영): `feat(gpu-lens): P6-W4 채택 소스 정식 적용 + realSpec 폐기 확정`
+
+### 8.3 다음 W 트리거
+
+**P6-W8 (조건부) 시작**:
+- Pupil 체감 지표 2/3 이상 Y → W8 브레인스토밍 + 구현
+- 1/3 Y → 사용자 판단 대기
+- 0/3 Y → W8 폐기 + 관련 hook 정리
+
+**W5/W6/W7**: W4와 **독립적** (반사 결과와 무관). W3 완료 후부터 병렬 진행 가능.
+
+**W9**: 모든 W 완료 후.
+
+### 8.4 W4 실패 시 전략
+
+- 3 프로토타입 모두 OFF 대비 차이 미미 → **Phase 6 이월** 판정. D3 realSpec 조건부 유지.
+- 이 경우 99 §4에 "환경 반사 Phase 6 이월" 명시. Phase 7+ 검토.
+- W8 Pupil material은 여전히 조건부 발동 가능 (체감 지표 별도).
+
+### 8.5 B2 결과가 Phase 6 전체에 주는 영향
+
+**env-map 채택 시**:
+- env_map.png 에셋 추가 (~300KB)
+- 반사 계층 정식 동작 → C5 완전 실행
+- realSpec 완전 폐기
+
+**periphery 채택 시**:
+- 추가 에셋 없음
+- 반사 계층 정식 동작 → C5 완전 실행
+- realSpec 완전 폐기
+- face_region_mask 정교화 후속 작업 가능 (Phase 7+)
+
+**OFF 확정 시** (모두 미미):
+- 99 §4 Phase 6 이월 명시
+- realSpec 재도입 or 대체 안 검토
+- W8은 체감 지표 따라 여전히 발동 가능 → **가장 중요한 pivot**
 
 ---
 
