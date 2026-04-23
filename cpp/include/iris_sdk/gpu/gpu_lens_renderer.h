@@ -111,6 +111,11 @@ public:
     void setContactShadowEnabled(bool enabled);
     void setContactShadowIntensity(float intensity);
     void setEllipseMaskEnabled(bool enabled);
+    /**
+     * @deprecated P5-W3-05 S1에서 고정 조명 하이라이트 폐기. C5 환경 반사 계층이 대체.
+     * 호환성 위해 선언은 유지하지만 no-op. 호출부는 제거 권장.
+     */
+    [[deprecated("P5-W3-05 S1: 고정 조명 하이라이트 폐기. C5 환경 반사 계층이 대체.")]]
     void setHighlightEnabled(bool enabled);
 
     // ========================================
@@ -173,7 +178,7 @@ private:
     bool contact_shadow_ = false;
     float shadow_intensity_ = 0.15f;
     bool use_ellipse_mask_ = false;
-    bool highlight_enabled_ = false;
+    // P5-W3-05 S1 D5: highlight_enabled_ 멤버 제거 (uniform/기능 모두 폐기)
 
     // ========================================
     // Uniform Location 캐시
@@ -222,7 +227,7 @@ private:
         // 기타
         GLint uAvgIrisLum = -1;
         GLint uDetH = -1;
-        GLint uHighlightEnabled = -1;
+        // P5-W3-05 S1 D5: uHighlightEnabled 멤버 제거
     } lens_uniforms_;
 
     void cacheLensUniforms();
