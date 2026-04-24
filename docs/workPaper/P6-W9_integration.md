@@ -302,6 +302,8 @@ feature/P5-W3-05 (현재)
 
 ## 5. 99에서 확정된 사항 (W9 최종 반영 대상)
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §7 CI / 머지 전 체크리스트 (**LUMA 오차 테스트 / 메모리 누수 / 3 tier jitter / W1 §6.2 ROI closure / 99 naming rename / W4 B2 결과 확정** 6개 Phase 6 특이 체크 포함), §2 소프트 갭 3건 처리 방침.
+
 ### 5.1 전체 기능 체크리스트 (§1.14 템플릿)
 
 ```
@@ -336,9 +338,108 @@ git merge feature/P5-W3-05  # fast-forward 아닌 merge commit 생성
 git push origin develop
 ```
 
+### 5.4 머지 방식 — **옵션 A (머지 커밋) 확정** (W9 R1 합의 3/3)
+
+- W별 커밋 히스토리 보존 (벤치/판정 역추적).
+- 충돌 발생 시 W3-04 삭제 쪽 선택.
+- 머지 커밋 메시지: "P6 통합 — W1~W8 완료, 99 §1/§2 전 항목 반영".
+- 출처: `P6-W9_brainstorm/synthesis.md` §1.
+
+### 5.5 Android demo UI 정리 — **W9 범위 밖, Phase 7 초반 cleanup PR 확정** (W9 R1 합의 3/3)
+
+- 블렌드 drop-down 축소, 3D Light 버튼 제거, 기본 blendMode TintLinearV2 ID=5 설정 포함.
+- deprecated no-op 제거와 함께 Phase 7 초반 cleanup PR로 묶기 권장.
+- 출처: `P6-W9_brainstorm/synthesis.md` §1, §2.
+
+### 5.6 deprecated no-op 제거 — **W9 머지 유지 + Phase 7 초반 PR 확정** (W9 R1 합의 3/3)
+
+- `setHighlightEnabled` 등 호환성 유예 기간 제공.
+- Phase 7 초반 "호환성 transition 종료" 릴리즈에서 제거 + 릴리즈 노트 명기.
+- 출처: `P6-W9_brainstorm/synthesis.md` §1.
+
+### 5.7 W9 브레인스토밍 — **1라운드 경량 리뷰 완결 확정** (W9 R1 합의 3/3)
+
+- 본 synthesis가 그 경량 리뷰. R2 불필요.
+- W1~W8과 `99_final_decision.md` 정합성 확인 완료. 일치 매우 높음.
+- 출처: `P6-W9_brainstorm/synthesis.md` §2.
+
+### 5.8 성능 벤치 자동화 — **기존 FPS 재사용 + 최소 추가 확정** (W9 R1 합의 3/3)
+
+- Android demo 기존 frame counter/timer 있으면 재사용.
+- 없으면 `Choreographer.FrameCallback` 기반 60프레임 평균 FPS logcat 출력 (10줄 이내).
+- CI 게이트 아닌 통합 리포트 항목으로 분리.
+- **성능 기준 (CLAUDE.md):** 30fps+, 검출 33ms 이하, 메모리 100MB 이하, SDK 20MB 이하.
+- 출처: `P6-W9_brainstorm/synthesis.md` §1.
+
+### 5.9 릴리즈 노트 — **Phase 6 단일 1장 + 벤치 결과 요약 확정** (W9 R1 합의 3/3)
+
+구조:
+- 제목: "Phase 6: AR Lens Material & Sclera Bench"
+- W1~W8 주요 결정 1줄씩
+- 99 §1/§2 최종 상태 요약 (Fresnel C, TintLinearV2 canonical, 림발 10/10 등)
+- **벤치 지표 수치화** (Gemini 강조): B1~B9 결과 정량 + 정성 체감 Y/N 집계
+- **W8 조건부 여부 명기** (Codex 강조)
+- **이월 항목 명기** (W1 §6.2 ROI closure 상태 등)
+- Breaking change: 없음 (공개 API 불변)
+- New features: env reflection scaffold, blend 3종 확정, conditional Pupil material restore
+- 출처: `P6-W9_brainstorm/synthesis.md` §1.
+
+### 5.10 CI 통과 확인 — **체크리스트 확정** (W9 R1 합의 3/3 기본 + 놓친 점 통합)
+
+필수:
+- [ ] C++ 빌드 (CLion `cmake-build-debug` + `scripts/build_android.sh` + `scripts/build_ios.sh`)
+- [ ] 단위 테스트 (`cd cpp/cmake-build-debug && ctest`)
+- [ ] Android demo APK 빌드 성공
+- [ ] iOS Framework 빌드 성공 (해당 시)
+- [ ] 기존 연결된 정적 분석/린트 통과
+- [ ] **shader compile 에러/warning 0** (Phase 6 대규모 shader 수정)
+- [ ] **LUMA 계수 shader vs CPU 오차 ≤1% 테스트 케이스** (Claude)
+- [ ] **메모리 누수 테스트** — EyeRenderPacket/LensSkuMetadata 교체 시나리오 (Gemini)
+- [ ] **3 tier 기기 프레임 타임 프로파일링** — jitter 확인 (Gemini)
+- [ ] `docs/workPaper/` 각 W 문서 §5 최종 반영 확인
+- [ ] `99_final_decision.md` §1.2 C5/D3 + §2 B1~B9 상태 "확정/구현됨" 반영
+- [ ] **W1 §6.2 ROI 마스크 반경 closure 상태 명기** (Codex)
+- [ ] **99 P6-W1 → P6-W8 rename cross-reference 추가** (Codex)
+- [ ] **W4 B2 실측 결과 확정** — W8 포함 여부 결정
+- 출처: `P6-W9_brainstorm/synthesis.md` §1, §2.
+
+### 5.11 Phase 6 전체 점검 — **완료** (W9 R1 3모델 분업 병합)
+
+3모델이 각자 다른 관점으로 Phase 6 전체 훑기 완료:
+- **Codex:** 문서 정합성 (W1 ROI 이관 상태, 99 naming)
+- **Gemini:** 런타임 건전성 (메모리 누수, jitter)
+- **Claude:** 테스트 및 조건부 경로 (LUMA 테스트, W8 대기, demo blendMode)
+
+놓친 점 7개 모두 §5.10 CI 체크리스트에 통합됨.
+
+**99 정합성:** "매우 높음" (Gemini) / "전반적 일치" (Codex) / 전 축 매핑 (Claude §Phase 6 전체 점검 표).
+
+출처: `P6-W9_brainstorm/synthesis.md` §2.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W9 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | 머지 방식 | ✅ **닫힘** (3/3 옵션 A) | §5.4 |
+| 6.2 | Android demo UI | ✅ **닫힘** (3/3 별도 PR) | §5.5 |
+| 6.3 | deprecated 제거 | ✅ **닫힘** (3/3 Phase 7) | §5.6 |
+| 6.4 | W9 브레인스토밍 필수 | ✅ **닫힘** (3/3 경량 R1 완결) | §5.7 |
+| 6.5 | 성능 벤치 | ✅ **닫힘** (3/3 기존 재사용) | §5.8 |
+| 6.6 | 릴리즈 노트 | ✅ **닫힘** (3/3 단일 1장) | §5.9 |
+| 6.7 | CI 통과 항목 | ✅ **닫힘** (3/3 기본 + 보완) | §5.10 |
+
+**미결 없음.** Phase 6 전체 점검 3모델 분업 완료 (§5.11).
+
+원문: `docs/workPaper/P6-W9_brainstorm/{codex,gemini,claude}_w9.md`.
+종합: `docs/workPaper/P6-W9_brainstorm/synthesis.md`.
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 머지 방식 (A/B/C)
 

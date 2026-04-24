@@ -260,6 +260,8 @@ W5는 여기서 **B1 A/B 테스트**로 Normal(0) 대 ColorReplaceLinear(7) 비�
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.5 SKU 메타 규약 (`lens_meta.json` 스키마, **W7과 공유 파일**), §2 소프트 갭 A (SKU 5 or 6 구현 단계 조정).
+
 ### 5.1 B1 매트릭스 (R4 Patch 반영, 5 SKU)
 
 **SKU**:
@@ -333,9 +335,88 @@ S1 이전부터 존재하는 `calcScleraFactor` 함수는 **현재 기하학적 
 
 **W5 브레인스토밍에서 결정**.
 
+### 5.8 SKU 구성 — **별도 확보 확정** (W5 R1 합의 3/3)
+
+- **로뮤_디어 멜로우** (불투명 서클) + **클라셋_돌 초코** (다크브라운) 별도 SKU.
+- 디자인 차이(랜덤 도트 vs 균일 채움)가 CRL 수식 감수성에 차이를 만들 수 있어 겸용 불가.
+- 5 → 6 SKU 가능. 매트릭스 변경은 W5 구현 단계에서 조정.
+- 출처: `P6-W5_brainstorm/synthesis.md` §1.
+
+### 5.9 조합 라벨링 — **A/B/C/D 블라인드 + 런타임 UI 확정** (W5 R1 합의 3/3)
+
+- 같은 take에서 **4조합 연속 토글 캡처**:
+  - A = Normal + color-veto
+  - B = Normal + luma-only
+  - C = CRL + color-veto
+  - D = CRL + luma-only
+- 평가자에게는 A/B/C/D만 노출. 정답표 암호화 별도 관리.
+- **런타임 UI 버튼 4개** (디버그 커맨드 대신 — 평가 흐름 끊김 방지).
+- **판정표에서 B1 점수(Normal vs CRL)와 B8 점수(color-veto vs luma-only) 분리 기록** → 독립 판정 보장.
+- 출처: `P6-W5_brainstorm/synthesis.md` §1.
+
+### 5.10 CRL clamp 범위 — **`[0.75, 1.25]` 유지 확정** (W5 R1 합의 3/3)
+
+- `detail = clamp(pow(lum/avgLum, 0.7), 0.75, 1.25)`.
+- `uMaxDetail` 기본값 = 1.25 (상한 그대로).
+- **W5 1차에서 clamp 튜닝 금지** — 모드 비교(Normal vs CRL)에 집중, 튜닝 변수 배제.
+- 1차 결과 "CRL 채택 + 과함" 피드백 시 후속 phase에서 1.15로 하향 검토.
+- 출처: `P6-W5_brainstorm/synthesis.md` §1.
+
+### 5.11 조건부 채택 — **`prefers_crl: bool` 메타 플래그 확정** (W5 R1 합의 3/3)
+
+- SKU 메타데이터에 `prefers_crl: bool` (기본 `false`) 추가.
+- 런타임 자동 선택: 플래그 있으면 CRL, 없으면 TintLinearV2 (W2 §5.12 default).
+- **공개 UI/C API 오버라이드 없음**. `has_baked_limbal` 기존 패턴 동일.
+- 근거: "사용자가 블렌드 모드 선택"은 W3-04 실패 패턴 (피팅 체험 자연스러움 저해).
+- 출처: `P6-W5_brainstorm/synthesis.md` §1.
+
+### 5.12 Gemini luma-only 임계값 — **`smoothstep(0.45, 0.65, lum)` 유지 확정** (W5 R1 다수 2/3)
+
+- W5 1차 B8 벤치에서 원 임계 유지. 변수 분리 (color vs luma 구조만 비교, 임계 조정 배제).
+- **Claude R1 원안 0.35/0.60 조정 제안은 소수 의견**으로 Codex+Gemini 다수에 의해 정정.
+- 1차 결과 "luma-only 채택 + 저조도 홍채 외곽 깎임" 피드백 시 후속 W에서 0.3~0.5 하향 검토.
+- 출처: `P6-W5_brainstorm/synthesis.md` §2.
+
+### 5.13 calcScleraFactor — **함수명 유지 + 수식 교체 확정** (W5 R1 합의 3/3)
+
+- 함수명 `calcScleraFactor` 유지. 호출부 영향 0.
+- 내부 수식만 B8 채택 수식(color-veto 또는 luma-only)으로 전면 교체.
+- 기존 수식 주석 유지 금지 (W2 §5.11 원칙 적용).
+- 출처: `P6-W5_brainstorm/synthesis.md` §1.
+
+### 5.14 color-veto `0.6` 강도 — **W5 1차 고정, phase-2 스위프 여지** (W5 R1 절충)
+
+- **W5 1차 B8 벤치: `0.6` 고정** (Codex 원칙 — 구조 비교와 강도 분리).
+- **phase-2 (B8 color-veto 채택 시):** 대표 SKU 2종에 `0.4 / 0.6 / 0.8` 스위프.
+- **B8 luma-only 채택 시:** color-veto 튜닝 skip.
+- 출처: `P6-W5_brainstorm/synthesis.md` §2.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W5 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | SKU 중복 | ✅ **닫힘** (3/3 별도) | §5.8 |
+| 6.2 | 조합 라벨링 | ✅ **닫힘** (3/3 A/B/C/D + UI) | §5.9 |
+| 6.3 | CRL clamp | ✅ **닫힘** (3/3 유지) | §5.10 |
+| 6.4 | 조건부 채택 | ✅ **닫힘** (3/3 prefers_crl) | §5.11 |
+| 6.5 | luma 임계 | ✅ **닫힘** (2/3 유지, Claude 편향 정정) | §5.12 |
+| 6.6 | calcScleraFactor | ✅ **닫힘** (3/3 함수명 유지+수식 교체) | §5.13 |
+| 6.7 | color-veto 강도 | ✅ **닫힘** (1차 고정, phase-2 스위프) | §5.14 |
+
+**B1/B8 독립 판정 + 조합형 캡처 타당성 (3/3 재확인).**
+
+**미결 없음.** 조건부 후속 작업: phase-2 color-veto 스위프 (B8 color-veto 채택 시), luma 임계 조정 (luma-only 채택 시).
+
+원문: `docs/workPaper/P6-W5_brainstorm/{codex,gemini,claude}_w5.md`.
+종합: `docs/workPaper/P6-W5_brainstorm/synthesis.md`.
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 SKU 중복 사용 여부
 

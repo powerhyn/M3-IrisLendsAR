@@ -261,6 +261,8 @@ W1~W3는 브레인스토밍 + 구현. W4는 브레인스토밍 + **실기기 촬
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.3 영역 경계 매핑 (Periphery annular ring 1.8~2.5r), §6 W4 핵심 포인트 (매트릭스·촬영·평가자·블라인드 절차). **W4 B2 결과에 따라 W8 활성 여부 결정 — Pupil 체감 Y/N 별도 기록 필수.**
+
 ### 5.1 B2 프로토타입 3종 (R4 Patch 반영)
 
 **프로토타입 1: OFF (baseline)**
@@ -348,9 +350,95 @@ vec3 sampleReflection(vec2 reflectUV, vec3 normal, vec3 viewDir) {
 - 모두 "체감 없음" → P6-W8 폐기
 - 1명만 Y → **사용자 최종 판단**
 
+### 5.7 env_map 에셋 — **1장, ACES, PNG RGB 8bit 확정** (W4 R1 다수/합의)
+
+- **장면:** 1장 generic 실내 사무실(중립 톤). 1차 벤치에서 변수 통제.
+- **톤매핑:** **ACES Filmic** (Gemini+Claude 다수). highlight roll-off 자연스러움.
+- **포맷:** PNG RGB 8bit 256×128. RGBM 불채택 (GPU decode 복잡도).
+- **위치:** `android/demo-app/src/main/assets/env/env_default_256x128.png`.
+- **확장 조항:** 1차 벤치 결과가 "env-map 채택 + 환경별 편차 큼"이면 2~3장(office/outdoor)으로 확장 판단 (W4-phase-2).
+- 출처: `P6-W4_brainstorm/synthesis.md` §2.
+
+### 5.8 Periphery face_region_mask — **옵션 A 확정** (W4 R1 합의 3/3)
+
+- 중앙 70% 영역 제외 + 가장자리 고정 샘플 포인트.
+- **구현 제안:** iris_center_uv 기준 **annular ring r ∈ [1.8, 2.5]** 에서 연속 샘플링 (Claude R1 제안). 동공 중심 공백을 채우면서 얼굴 피부 재귀 반사 방지.
+- 동적 Face ROI(옵션 B)는 1차 벤치 결과 Periphery가 유효하면 후속 W에서 검토.
+- 출처: `P6-W4_brainstorm/synthesis.md` §1.
+
+### 5.9 Env map 회전 — **옵션 A (정적) 확정** (W4 R1 합의 3/3)
+
+- 1차 벤치 정적 env only. `reflection_dir` / `head_pose_yaw_roll` optional 필드(W1 §5.11)는 예약 상태 그대로.
+- 회전 검토는 "env-map 채택 후 자연스러움 부족" 피드백 시 2차 변수로.
+- 출처: `P6-W4_brainstorm/synthesis.md` §1.
+
+### 5.10 평가자 3명 — **구성 확정** (W4 R1 합의 3/3)
+
+| # | 프로파일 | 필수 여부 |
+|---|----------|-----------|
+| 1 | 아시아 짙은 홍채 | **필수** (Pupil 체감 타겟) |
+| 2 | 밝은/중간 홍채 | 대조군 |
+| 3 | 개발자 또는 디자이너 | 기술/심미 관점 |
+
+- 내부 3명 섭외로 1차 R1. 외부 평가자는 W4-phase-2 또는 W8 시점에 추가 수집.
+- 출처: `P6-W4_brainstorm/synthesis.md` §1.
+
+### 5.11 촬영 절차 — **표준화 확정** (W4 R1 합의/절충)
+
+- **매체:** Android demo 앱 내 스크린 레코딩 (실기기).
+- **디바이스:** 기준 1대 통일 (Galaxy S23 또는 사용자 지정 타겟).
+- **프레임율:** 30fps.
+- **클립 길이:** **동일 take 10초 녹화 → 평가용 5초 trim**. 블링크 1~2회 포착 + 평가자 부담 제한.
+- **프로토타입 전환:** 같은 take에서 uniform 토글로 3프로토타입 연속 캡처 → 후편집으로 분리. 동작 차이 배제 (Codex 제안).
+- **블라인드:** 파일명 무작위 ID(`clip_01.mp4`~`clip_24.mp4`) + 정답표 별도 암호화.
+- 출처: `P6-W4_brainstorm/synthesis.md` §2.
+
+### 5.12 SKU 및 클립 수 — **1차 단일 SKU 24 + 2차 부가 6 확정** (W4 R1 합의+Gemini 제안)
+
+- **원칙:** 한 클립 = 1 환경 × 1 동작 × 1 프로토타입 × 1 SKU (3/3 합의).
+- **1차 (필수):** **TintLinearV2 + iris_mat_B (고발광)** → 4×2×3=24 클립.
+- **2차 (시간 여유 시):** 자연색 대조 SKU (iris_mat_A 등) → 환경 4 × 프로토타입 3 중 핵심 케이스 6 클립.
+- 총 최대 30 클립 예상 시간: 녹화 30분 + 편집 60분 + 평가 3명 × 40분.
+- 출처: `P6-W4_brainstorm/synthesis.md` §2.
+
+### 5.13 결과 반영 체크리스트 — **일괄 PR 1개로 통합** (W4 R1 합의 3/3)
+
+W4 종료 직후 체크:
+- [ ] `99_final_decision.md` §1.2 C5 상태 업데이트
+- [ ] 99 §1.1 D3 상태 업데이트
+- [ ] 99 §2 B2 결과 섹션 신규 추가 (정량 + 정성 + Pupil Y/N 집계 + 2/3 판정)
+- [ ] `P6-W3_env_reflection_scaffold.md` §5.11 sampleReflection no-op → 실제 구현 커밋 SHA 참조
+- [ ] `P6-W4_env_reflection_bench.md` §5 최종 반영 (채택 프로토타입 명시)
+- [ ] **Pupil 2/3 판정 결과 → W8 착수/폐기/사용자 판단 트리거**
+- [ ] 반사 소스 판정 + realSpec 상태 + W8 착수는 연결 — 분리 업데이트 금지 (Codex 강조)
+- 출처: `P6-W4_brainstorm/synthesis.md` §3.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W4 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | env_map 에셋 | ✅ **닫힘** (장면 Codex / 톤매핑 Gemini+Claude / 포맷 Codex+Claude) | §5.7 |
+| 6.2 | face_region_mask | ✅ **닫힘** (3/3 합의 옵션 A) | §5.8 |
+| 6.3 | env 회전 | ✅ **닫힘** (3/3 합의 정적) | §5.9 |
+| 6.4 | 평가자 3명 | ✅ **닫힘** (3/3 합의) | §5.10 |
+| 6.5 | 촬영 절차 | ✅ **닫힘** (합의 + 클립 길이 5초 절충) | §5.11 |
+| 6.6 | SKU | ✅ **닫힘** (1차 단일 + 2차 부가) | §5.12 |
+| 6.7 | 결과 반영 | ✅ **닫힘** (3/3 합의 일괄 PR) | §5.13 |
+
+**Pupil 2/3 룰 재확인 (3/3 합의):** 2~3Y → W8 착수 / 0Y → W8 폐기 / 1Y → 사용자 판단.
+
+원문: `docs/workPaper/P6-W4_brainstorm/{codex,gemini,claude}_w4.md`.
+종합: `docs/workPaper/P6-W4_brainstorm/synthesis.md`.
+
+**실기기 이관 항목 (W4 실행 시 수집):** env_map 장면 확장 여부, 2차 SKU 촬영 여부, 디바이스 편차 검증.
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 env_map 에셋 제작
 

@@ -263,6 +263,8 @@ bool has_baked_limbal = sku_meta.has_baked_limbal.value_or(auto_detected_limbal)
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.5 SKU 메타 규약 (`lens_meta.json` — **W5와 공유 파일**, 스키마 3 필드), §4.3 영역 경계 매핑 (림발 0.85~1.0, 자동감지 ROI).
+
 ### 5.1 메타데이터 구조 (내부, 공개 API 불변)
 
 ```cpp
@@ -305,9 +307,95 @@ if (uHasBakedLimbal == 0) {
 **림발 내장 5**: 로뮤_그레이 토프, 로뮤_디어 멜로우, 로뮤_러브 글림, 엔비_플럼 블랙, 오(OH)_베이글
 **림발 없음 5**: 클라셋_돌 초코, 클라셋_런웨이 그레이, 클라셋_클라우드 그레이, 엔비_퍼퓸 글로우, 오(OH)_키위
 
+### 5.6 자동감지 ROI — **`[0.85, 1.0]` 유지 확정** (W7 R1 합의 3/3)
+
+- false positive 방지 우선. 경계를 안쪽으로 넓히면 홍채 내부 패턴 간섭 위험.
+- W7 1차 튜닝 금지. 배포 후 false negative 반복 시 `[0.82, 1.0]` 하향 검토.
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.7 임계값 — **`0.75` 유지 확정** (W7 R1 합의 3/3)
+
+- 99 합의본 기준값. ROI/threshold 축을 고정한 채 정확도만 확인.
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.8 메타 저장 방식 — **JSON `lens_meta.json` 확정** (W7 R1 다수 2/3)
+
+- 위치: `android/demo-app/src/main/assets/lens_meta.json`.
+- 스키마:
+  ```json
+  [
+    {
+      "sku_id": "클라셋_돌_초코",
+      "display_name": "다크브라운",
+      "has_baked_limbal": true,
+      "prefers_crl": false,
+      "prefers_graphic_outline": false
+    }
+  ]
+  ```
+- SDK 공용 JSON 파서 우선 재사용, 없으면 경량 파서 추가.
+- **Default fallback:** 메타 누락 SKU는 모든 플래그 `false` (§5.9 WARN 병행).
+- Git 체크인으로 Codex 원안 "버전 고정" 우려 흡수.
+- 출처: `P6-W7_brainstorm/synthesis.md` §2.
+
+### 5.9 메타 누락 로그 — **WARN 확정** (W7 R1 합의 3/3)
+
+- 형식: `[IrisSDK] SKU meta missing for "<sku_id>", using default (has_baked_limbal=false, prefers_crl=false, prefers_graphic_outline=false)`.
+- 앱 정상 동작 유지. 개발자 모니터링에 포착.
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.10 9/10 vs 10/10 — **10/10 엄수 + 개별 메타 fallback 확정** (W7 R1 다수 2/3)
+
+- 자동감지 rule: **10/10 엄수** (R4 실기기 실측 결과).
+- **개별 실패 처리:** 배포 후 특정 디바이스에서 자동감지 실패 발견 시, 해당 SKU만 `has_baked_limbal: true` 메타 플래그로 명시 fallback.
+- 자동감지 완화 아님. "일관 rule + 예외 명시" 구조.
+- **배포 후 1개월 모니터링** 필수.
+- Gemini R1 원안 9/10 완화안은 소수 의견이며 "개별 메타 fallback"으로 우려 흡수.
+- 출처: `P6-W7_brainstorm/synthesis.md` §2.
+
+### 5.11 엔비_샤모 브라운 특별 처리 — **`prefers_graphic_outline: true` 확정** (W7 R1 합의 3/3)
+
+- 메타 플래그 `prefers_graphic_outline: true` 설정.
+- 효과: `has_baked_limbal OR prefers_graphic_outline` → `uApplyLimbal = 0` (셰이더 림발 강제 OFF).
+- 셰이더 내부 분기 없음. Uniform 레벨에서 제어.
+- **플래그 구분:**
+  - `has_baked_limbal`: 림발 링 텍스처가 에셋에 구워져 있음.
+  - `prefers_graphic_outline`: 그래픽 자체가 강한 outline 포함 (일반 림발 아님).
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.12 B10 신규 벤치 — **불허 확정** (W7 R1 합의 3/3)
+
+- 99 합의본 out of scope. W7이 B10 재공론화 금지.
+- W7 범위: 99 §1.2 C6 "림발 기본 ON + 메타 플래그" 내 한정.
+- 신규 벤치 필요 시 별도 제안 문서 (P7 이후).
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W7 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | ROI 경계 | ✅ **닫힘** (3/3) | §5.6 |
+| 6.2 | 임계값 | ✅ **닫힘** (3/3) | §5.7 |
+| 6.3 | 메타 저장 | ✅ **닫힘** (2/3 JSON) | §5.8 |
+| 6.4 | 로그 레벨 | ✅ **닫힘** (3/3 WARN) | §5.9 |
+| 6.5 | 9/10 vs 10/10 | ✅ **닫힘** (2/3 10/10 + 메타 fallback) | §5.10 |
+| 6.6 | 엔비_샤모 | ✅ **닫힘** (3/3) | §5.11 |
+| 6.7 | B10 신규 | ✅ **닫힘** (3/3 불허) | §5.12 |
+
+**Claude 편향 경계 재확인:** 6.5 10/10 입장은 R4 실측 팩트 수렴, 주관적 뒤집힘 없음. P5 R1~R3 3번 뒤집힘 맥락과 다름.
+
+**미결 없음.** 후속: 배포 후 1개월 자동감지 결과 모니터링.
+
+원문: `docs/workPaper/P6-W7_brainstorm/{codex,gemini,claude}_w7.md`.
+종합: `docs/workPaper/P6-W7_brainstorm/synthesis.md`.
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 자동감지 ROI 경계 튜닝
 

@@ -248,26 +248,35 @@ W3는 이 C5의 **구조 부분만** 실현. 반사 소스 확정은 W4, hook �
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.2 dist 정규화 규약 (**`iris_radius` 곱하기 금지, 이중 정규화**), §4.3 영역 경계 매핑 (Fresnel 0.7~1.0), §4.4 GLSL 패스 규약 (블렌드→디테일→W8 hook→C5 반사→Pupil material→contact shadow).
+
 ### 5.1 C5 합성 수식 구조
 
 ```glsl
 // applyLens 내부, blendMode 분기 후
+// 사전 조건: dist는 이미 /scaledRadius로 정규화된 값 (0=중심, 1=외곽).
 vec3 blended = [블렌드 결과];  // ID별 분기 결과
 
-// [선택적] C10 디테일 재주입 (W6에서 추가, spec/reflection 제외 영역)
-// blended *= detail_inner;  ← W6에서 결정
+// [선택적] C10 디테일 재주입 (W6 §5.2 구현, spec/reflection 제외 영역)
+// blended *= vec3(detailMul);  ← W6 §5.2 순서: 블렌드 → 디테일 → 반사
 
-// C5 반사 합성 (W3 도입)
+// C5 반사 합성 (W3 §5.8/§5.11/§5.12 R1 확정 반영)
 float renderMask = finalAlpha;
 
-// W8 활성화 시 renderMask 확장
+// W8 활성화 시 renderMask 확장 (§5.5 참조, dist는 정규화 — iris_radius 곱하기 금지)
 #ifdef ENABLE_PUPIL_MATERIAL_RESTORE
-    renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist));
-    // ⚠️ Codex R4 단서: 이 smoothstep은 예시. W8 구현 시 재확정.
+    renderMask = max(finalAlpha, smoothstep(1.2, 0.0, dist));
+    // ⚠️ Codex R4 단서: smoothstep 인자 예시. W8 구현 시 실기기 튜닝.
 #endif
 
-vec3 reflection = sampleReflection(reflectUV, normal, viewDir);
-float fresnel = calcFresnel(normal, viewDir);  // W3에서 확정
+// reflectUV: iris local 좌표 (§5.12 R1 확정 — 노멀 없음)
+vec2 reflectUV = (uv - iris_center_uv) / iris_radius_uv * 0.5 + 0.5;
+
+// sampleReflection: uniform 스위치 방식 A (§5.11 R1 확정)
+vec3 reflection = sampleReflection(reflectUV);
+
+// calcFresnel: 옵션 C 가짜 Fresnel (§5.8 R1 확정 — dist 기반, 노멀 없음)
+float fresnel = calcFresnel(dist);
 
 blended += reflection * fresnel * uReflectionIntensity * renderMask;
 
@@ -359,69 +368,112 @@ GLint uEnvMap = -1;                // sampler2D (W4에서 env-map 프로토타�
 
 S1에서 삭제된 D1의 specular 강도는 0.7. Claude가 자기비판에서 "자연스러운 값 0.25~0.35" 인정. W3 초기값 **0.3** (uniform으로 튜닝 가능).
 
----
+### 5.8 Fresnel 수식 — **옵션 C (가짜 Fresnel) 확정** (W3 R1 다수 2/3)
 
-## 6. 미결 사항
-
-### 6.1 Fresnel 수식 확정 (CRITICAL)
-
-옵션 A/B/C 중 선택. Claude 추천: C (가짜 Fresnel). W3 브레인스토밍에서 재검증.
-
-### 6.2 분석 노멀 계산의 W3 포함 여부
-
-옵션 C Fresnel은 노멀 불필요. 옵션 A/B는 노멀 필요.
-
-**노멀 계산 포함 시 리스크**: S1에서 삭제한 D1 분석 노멀 수식 일부를 W3에서 부활 → "해체한 걸 다시 조립" 비판 가능.
-
-**Claude 추천**: 옵션 C 선택으로 노멀 계산 회피. W3에서 노멀 관련 코드 재도입 금지.
-
-### 6.3 renderMask hook 활성 방식
-
-`#ifdef` vs `uniform flag` — Claude 추천 `#ifdef`. 6.1과 함께 W3에서 확정.
-
-### 6.4 sampleReflection 함수 추상화 방식
-
-- **방식 A**: 셰이더 내 `sampleReflection()` 함수 분기 (uniform `uSourceType`으로 스위치). 단일 바이너리.
-- **방식 B**: 셰이더 variant 2~3개 (OFF / env-map / periphery). 런타임 선택 불가, 컴파일 시 결정.
-- **방식 C**: compute shader 전용 pass — 기각 (GLES 3.1 드라이버 이슈).
-
-**Claude 추천**: 방식 A. W4 벤치 중 런타임 토글 가능. 단일 바이너리.
-
-### 6.5 reflectUV 계산 수식
-
-옵션 C Fresnel에서도 반사 방향 → UV 매핑 필요:
+iris 거리 기반 근사. 실제 Fresnel은 grazing angle(시선과 표면이 이루는 각도가 큼)에서 반사 강해짐. 각막 기하에서 **iris 외곽으로 갈수록 grazing**이므로 **중심=0, 외곽=1** 방향.
 
 ```glsl
-// 옵션 A: normal 기반 (spherical env map)
-vec2 reflectUV = normalize(normal).xy * 0.5 + 0.5;
-
-// 옵션 B: viewDir + normal 반사
-vec3 reflectDir = reflect(-viewDir, normal);
-vec2 reflectUV = reflectDir.xy * 0.5 + 0.5;
-
-// 옵션 C: iris local 좌표 그대로
-vec2 reflectUV = (uv - iris_center) / iris_radius * 0.5 + 0.5;
+// calcFresnel — 옵션 C 가짜 Fresnel (노멀 벡터 없음, dist 기반)
+// dist는 이미 /scaledRadius로 정규화 (0=중심, 1=외곽)
+float calcFresnel(float dist) {
+    return smoothstep(0.7, 1.0, dist);
+}
 ```
 
-**Claude 추천**: 옵션 C (iris local). 노멀 계산 회피. env map이든 periphery든 같은 UV 쓸 수 있음.
+- **초기 boundary (0.7, 1.0):** iris 내부 70%는 반사 0, 외곽 30%에서 점증 → 1. 물리 Fresnel(grazing에서 강함) 근사.
+- **W4 B2 실기기 튜닝:** inner boundary [0.6, 0.7, 0.8] 스위프 후보 (외곽 boundary 1.0 고정).
+- **노멀 벡터 불필요** → D1 재도입 없음 (3/3 모델 공통 확인).
+- **W4 B2 재검토 조항:** 실기기 벤치에서 "시점 의존성 부족으로 효과 약함" 피드백 2/3 이상 → 후속 W(W8 또는 별도)에서 옵션 A(Schlick) 전환 검토. W3 scaffold는 옵션 C로 완료.
+- 출처: `P6-W3_brainstorm/synthesis.md` §2.
 
-### 6.6 env_map 에셋 크기 및 포맷
+### 5.9 분석 노멀 — **W3 제외 확정** (W3 R1 다수 2/3)
 
-99 §2 B2에 "256×128 LDR/RGBM 에셋" 명시. W3에서 **파일 위치** 결정:
-- `android/demo-app/src/main/assets/env/` 디렉토리 신규
-- 또는 SDK 내장 (크기 100~500KB 수준)
+- S1 D1 해체 취지 유지. Codex "최소 노멀" 제안은 6.1이 후속 W에서 A/B로 전환될 때 재고.
+- W3 shader 코드에서 normal vector 계산 경로를 새로 만들지 않음.
+- 출처: `P6-W3_brainstorm/synthesis.md` §2.
 
-**W3 브레인스토밍**: 위치, 이름 (`office_ldr.png`, `default_env.png` 등) 확정.
+### 5.10 renderMask hook 활성 — **`#ifdef` (컴파일 타임) 확정** (W3 R1 다수 2/3)
 
-### 6.7 B2 벤치 매트릭스 draft (W3에서 미리 준비)
+- `#ifdef RENDER_MASK_HOOK_ENABLED` 블록으로 감싸고 **기본 빌드에서 0으로 비활성**.
+- 프로덕션 바이너리에서 dead code + 런타임 오버헤드 제거.
+- **W4 벤치 전용 debug 빌드:** CMake 옵션으로 `RENDER_MASK_HOOK_ENABLED=1` 켠 APK를 별도 산출. 벤치 중 on/off 비교.
+- Claude R1 원안 uniform flag는 소수 의견으로 Codex+Gemini 다수에 의해 뒤집힘 (편향 경계 작동).
+- 출처: `P6-W3_brainstorm/synthesis.md` §2.
 
-W3 브레인스토밍 말미에 **W4 벤치 매트릭스 초안** 작성 권장:
-- 환경 4종 (실내 형광/창가 측광/야간 실내/실외 낮)
-- 동작 2종 (정면 미세/head turn)
-- 프로토타입 3종 (OFF/env-map/periphery)
-- SKU 우선순위 (Pupil 체감 관찰용)
+### 5.11 sampleReflection — **방식 A (uniform 스위치) 확정** (W3 R1 합의 3/3)
 
-이렇게 해두면 W4 시작 시 프로토타입 구현 바로 돌입 가능.
+```glsl
+uniform int uSourceType; // 0=OFF, 1=env-map, 2=periphery
+vec3 sampleReflection(vec2 uv) {
+  if (uSourceType == 1) return texture(uEnvMap, uv).rgb;
+  if (uSourceType == 2) return periphery_sample(uv);
+  return vec3(0.0);  // OFF
+}
+```
+
+- 단일 바이너리, 런타임 토글. W3 scaffold는 `uSourceType=0` (OFF) 기본.
+- W4 B2 벤치가 3프로토타입 A/B/C 비교할 때 uniform 스위치로 실시간 전환.
+- 출처: `P6-W3_brainstorm/synthesis.md` §1.
+
+### 5.12 reflectUV — **옵션 C (iris local 좌표) 확정** (W3 R1 다수 2/3)
+
+```glsl
+vec2 reflectUV = (uv - iris_center_uv) / iris_radius_uv * 0.5 + 0.5;
+```
+
+- 6.1/6.2에서 노멀 제외 확정 → 옵션 B(reflect 기반) 자동 배제.
+- env-map/periphery 공통 UV 공간 → 방식 A uniform 스위치와 정합.
+- 출처: `P6-W3_brainstorm/synthesis.md` §2.
+
+### 5.13 env_map 에셋 — **demo assets 위치 + LDR PNG 확정** (W3 R1 다수 2/3 위치 + 3/3 포맷)
+
+- **위치:** `android/demo-app/src/main/assets/env/` (demo 주도).
+- **포맷:** 256×128 LDR PNG RGB (3/3 합의).
+- **초기 에셋 3종:**
+  - `env_default_256x128.png` (기본/스튜디오 라이팅)
+  - `env_office.png` (실내 형광)
+  - `env_outdoor.png` (실외 낮)
+- **SDK 내장 보류:** W8~W9 단계에서 필요성 판단 후 결정. P6 범위 아님.
+- 출처: `P6-W3_brainstorm/synthesis.md` §2.
+
+### 5.14 B2 벤치 매트릭스 초안 — **4×2×3 = 24 클립 확정** (W3 R1 합의 3/3 골격)
+
+| 차원 | 값 |
+|------|-----|
+| **환경 (4)** | 실내 형광, 창가 측광, 야간 실내, 실외 낮 |
+| **동작 (2)** | 정면 미세(블링크 포함), head turn (±15°) |
+| **프로토타입 (3)** | OFF / env-map / periphery |
+| **SKU** | Tint(Linear)V2 + 고발광 iris_mat_B |
+
+- **우선 비교:** env-map vs OFF (Claude 제안). periphery는 2차.
+- **Pupil 체감 Y/N:** 각 클립에서 "중앙 공동 체감" 별도 체크. W8 조건부 트랙 발동 근거 (2/3 이상 Y면 W8 착수).
+- **실시간 체감 (Gemini 강조):** 촬영 직후 앱에서 즉시 A/B 토글 (방식 A uniform 스위치 기반).
+- W4 시작 시 본 매트릭스를 `P6-W4_env_reflection_bench.md`에 복사하고 세부 확정.
+- 출처: `P6-W3_brainstorm/synthesis.md` §3.
+
+---
+
+## 6. 미결 사항 (W3 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | Fresnel 수식 (A/B/C) | ✅ **닫힘** (2/3 다수 C) + W4 재검토 조항 | §5.8 |
+| 6.2 | 분석 노멀 포함 여부 | ✅ **닫힘** (2/3 다수 제외) | §5.9 |
+| 6.3 | renderMask hook (#ifdef vs uniform) | ✅ **닫힘** (2/3 다수 #ifdef) | §5.10 |
+| 6.4 | sampleReflection 추상화 | ✅ **닫힘** (3/3 합의 방식 A) | §5.11 |
+| 6.5 | reflectUV | ✅ **닫힘** (2/3 다수 옵션 C) | §5.12 |
+| 6.6 | env_map 에셋 위치/포맷 | ✅ **닫힘** (위치 2/3, 포맷 3/3) | §5.13 |
+| 6.7 | B2 매트릭스 | ✅ **닫힘** (3/3 합의 4×2×3=24) | §5.14 |
+
+참여 모델: Codex, Gemini, Claude.
+원문: `docs/workPaper/P6-W3_brainstorm/{codex,gemini,claude}_w3.md`.
+종합: `docs/workPaper/P6-W3_brainstorm/synthesis.md`.
+
+**미결 없음.** 7개 쟁점 모두 R1 결론. 6.1은 옵션 C 확정이지만 W4 B2 결과에 따라 후속 W에서 옵션 A 재검토 조항 유지(§5.8).
+
+**편향 경계 작동:** 6.3에서 Claude 원안(uniform flag)이 Codex+Gemini 다수(#ifdef)로 뒤집힘. Claude 자기비판 메모리(`multi-ai-orchestration-bias`) 적용 결과.
 
 ---
 

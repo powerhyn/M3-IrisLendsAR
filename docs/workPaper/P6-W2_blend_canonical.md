@@ -255,14 +255,17 @@ S1 롤백 커밋에서 다음이 이미 적용됨:
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.1 색공간/LUMA 규약 (**`uAvgIrisLum * uAvgIrisLum` squaring 금지**, linear 공간 값 직접 사용), §4.4 GLSL 패스 규약 (블렌드→디테일→반사 순서).
+
 ### 5.1 C2 TintLinearV2 수식 (원 LTL에서 realSpec 제거)
 
 ```glsl
 vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
-    vec3 baseL = toLinearFast(base);                            // base * base
+    vec3 baseL = toLinearFast(base);                            // base * base (감마 2.0 근사)
     float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));       // Rec.709 linear
-    float avgLumLinear = uAvgIrisLum * uAvgIrisLum;
-    float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
+    // uAvgIrisLum은 CPU에서 이미 linear 공간으로 계산된 값 (W1 §5.2.1).
+    // squaring 금지 — 이중 변환 버그.
+    float scale = clamp(0.5 / max(0.01, uAvgIrisLum), 0.8, 5.0);
     vec3 tinted = toLinearFast(blend) * lum * scale;
     vec3 result = mix(baseL, tinted, opacity);
     return toSRGBFast(result);                                  // sqrt(max(result, 0))
@@ -273,6 +276,7 @@ vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
 - S1에서 realSpec 2줄 이미 제거됨
 - 함수명만 `blendLuminanceTintLinear` → `blendTintLinearV2`로 변경
 - uniform `uAvgIrisLum`는 W1에서 복구됨 (0.35 하드코드 제거, self-measure 경로)
+- **색공간 계약 (W1 §5.2.1 + W2 §5.10):** `uAvgIrisLum`는 linear 공간 값. Rec.709 계수 고정.
 
 ### 5.2 C3 ScreenLinear 수식 (신규)
 
@@ -291,9 +295,9 @@ vec3 blendScreenLinear(vec3 base, vec3 blend, float opacity) {
 vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDetail) {
     vec3 baseL = toLinearFast(base);
     vec3 lensL = toLinearFast(blend);
-    float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
-    float avgLumLinear = uAvgIrisLum * uAvgIrisLum;
-    float detail = clamp(pow(lum / max(0.01, avgLumLinear), 0.7), 0.75, maxDetail);
+    float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));  // Rec.709 linear
+    // uAvgIrisLum은 이미 linear 공간 값 (W1 §5.2.1). squaring 금지.
+    float detail = clamp(pow(lum / max(0.01, uAvgIrisLum), 0.7), 0.75, maxDetail);
     vec3 colored = lensL * detail;
     return toSRGBFast(mix(baseL, colored, opacity));
 }
@@ -334,78 +338,79 @@ vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDeta
 
 **W2 브레인스토밍에서 확정**.
 
+### 5.7 CRL 구현 시점 — **옵션 B 확정** (W2 R1 다수 2/3)
+
+- **W2에서 함수 정의 + ID 7 정식 분기 활성**.
+- 주석 명시: `// W2 활성 — W5 B1 벤치 대상, 채택 확정 아님`.
+- W5 B1 결과가 "CRL 제거" 판정 시 함수 + 분기 모두 제거하는 롤백 커밋을 W5 단계에서 수행.
+- 근거: W5 B1 Normal vs CRL 1:1 비교 준비 비용 절감. Codex 절차적 우려("결론 선반영")는 주석 + 롤백 계획으로 완화.
+- 출처: `P6-W2_brainstorm/synthesis.md` §2.
+
+### 5.8 ID 3/4/6 빈 슬롯 — **유지 확정** (W2 R1 합의 3/3)
+
+- 재번호화 금지. ID 3/4/6은 **fallback 분기로 흡수** (§5.9 참조).
+- 근거: 외부 호출자(Android demo/클라이언트) 호환성 유지, 수정 범위 최소화.
+- 출처: `P6-W2_brainstorm/synthesis.md` §1.
+
+### 5.9 Fallback default — **TintLinearV2 확정** (W2 R1 다수 2/3)
+
+- 무효/빈 ID 전송 시 **TintLinearV2(ID=5)로 fallback**.
+- **Debug 빌드 한정** 로그 1회: `[IrisSDK] Unknown blend ID=<n>, falling back to TintLinearV2`.
+- 근거: 기본 모드 = TintLinearV2라는 canonical 일관성. Codex "디버그 명료성" 지적은 로그로 해소.
+- 출처: `P6-W2_brainstorm/synthesis.md` §2.
+
+### 5.10 LUMA_COEFFS — **Rec.709 linear 통일 확정** (W2 R1 합의 3/3)
+
+- 계수: `vec3(0.2126, 0.7152, 0.0722)` (Rec.709 linear).
+- **Shader 전 경로 + CPU 측정(W1 avg_iris_luma) 동일 상수**. 공통 매크로/상수(`LUMA_709`)로 통일.
+- Linear-space 연산 강제. sRGB 평균 금지.
+- **테스트:** shader 계산 결과와 CPU 계산 결과 오차 ≤1% 검증 케이스 추가.
+- 근거: 계수 불일치 시 W5 B1 비교에서 수식 차이와 계수 차이가 섞여 판정 불가.
+- 출처: `P6-W2_brainstorm/synthesis.md` §1.
+
+### 5.11 realSpec 복원 경로 — **완전 삭제 확정** (W2 R1 합의 3/3)
+
+- realSpec 관련 주석 + 코드 **완전 제거**. 주석 코드 냄새 제거.
+- 복원 경로: Git history.
+- **선택적 보존:** `docs/workPaper/P6-W2_brainstorm/realSpec_archive.md`에 수식 블록 + 커밋 SHA 기록(Claude 부가 제안). 강제 조건 아님, 구현 단계 판단.
+- 근거: W4 B2 실패 확률 낮고, Git history로 충분한 복원.
+- 출처: `P6-W2_brainstorm/synthesis.md` §1.
+
+### 5.12 기본값 블렌드 모드 — **TintLinearV2 (ID=5) 확정** (W2 R1 합의 3/3)
+
+- SDK canonical default = TintLinearV2 (99 §1.1 D6 유지).
+- **Android demo 초기 blendMode = ID 5** 설정.
+- **C API 문서화:** `sdk_api.h`에 기본값 명시 주석 추가 (ex: `// Default blend mode: TintLinearV2 (ID=5)`).
+- 출처: `P6-W2_brainstorm/synthesis.md` §1.
+
+### 5.13 Android Demo UI — **W9 이관 확정** (W2 R1 합의 3/3)
+
+- W2 범위에서 demo UI drop-down 정리 **금지**.
+- W9 integration 단계에서 일괄 정리.
+- 근거: W2 = shader/C++ 범위. UI는 별도 리뷰 범위로 분리하여 병합 위험 감소.
+- 출처: `P6-W2_brainstorm/synthesis.md` §1.
+
 ---
 
-## 6. 미결 사항 (W2 브레인스토밍에서 풀 질문)
+## 6. 미결 사항 (W2 브레인스토밍 R1 결과)
 
-### 6.1 ColorReplaceLinear 수식 구현 시점
+### 6.0 R1 결과 요약 (2026-04-24)
 
-**옵션 A**: W2에서 함수 정의만. ID 7 분기는 비워두고 함수 호출 없음.
-**옵션 B**: W2에서 분기도 활성. ID 7 호출 가능. W5 B1에서 "제거" 결정 시 그때 롤백.
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | CRL 구현 시점 (W2 vs W5) | ✅ **닫힘** (2/3 다수 옵션 B) | §5.7 |
+| 6.2 | ID 3/4/6 빈 슬롯 | ✅ **닫힘** (3/3 합의 유지) | §5.8 |
+| 6.3 | fallback default | ✅ **닫힘** (2/3 다수 TintLinearV2) | §5.9 |
+| 6.4 | LUMA_COEFFS 정합성 | ✅ **닫힘** (3/3 합의 Rec.709 linear 통일) | §5.10 |
+| 6.5 | realSpec 주석 vs 삭제 | ✅ **닫힘** (3/3 합의 완전 삭제) | §5.11 |
+| 6.6 | 기본값 블렌드 모드 | ✅ **닫힘** (3/3 합의 TintLinearV2 ID=5) | §5.12 |
+| 6.7 | Android Demo UI | ✅ **닫힘** (3/3 합의 W9 이관) | §5.13 |
 
-**Claude 추천**: 옵션 B. W5에서 A/B 테스트할 때 이미 등록되어 있어야 테스트 가능.
+참여 모델: Codex (gpt-5.4 xhigh), Gemini (gemini-3-flash), Claude (opus-4-7).
+원문: `docs/workPaper/P6-W2_brainstorm/{codex,gemini,claude}_w2.md`.
+종합: `docs/workPaper/P6-W2_brainstorm/synthesis.md`.
 
-**단**: B1 결과가 "Normal 유지 + CRL 제거"면 W5에서 분기 + 함수 모두 제거. 이 경우 W2 작업이 W5에서 롤백되는 구조.
-
-### 6.2 ID 3/4/6 빈 슬롯 유지 vs 재번호화
-
-**옵션 A (유지)**: ID 3/4/6은 빈 상태, default fallback blendNormal. 외부 호환성 유지 (Android demo에서 ID 3 전송해도 안 깨짐).
-**옵션 B (재번호화)**: 0~4로 재매핑. ID 3/4/6이 Overlay/LumTint/SoftLight와 헷갈릴 일 없음.
-
-**Claude 추천**: 옵션 A. ID 재번호화는 모든 호출자 수정 필요. 단순한 fallback이 더 안전.
-
-### 6.3 fallback default를 Normal vs TintLinearV2
-
-```glsl
-// 현재 (S1)
-else {
-    blended = blendNormal(...);  // 빈 ID는 Normal fallback
-}
-```
-
-**옵션 A**: Normal fallback 유지.
-**옵션 B**: TintLinearV2 fallback (기본값이 TintLinearV2이므로 빈 ID도 기본값으로).
-
-**Claude 추천**: 옵션 B. "무효한 ID 전송" 시 더 자연스러운 기본 렌더링 → TintLinearV2. 단 실제로 빈 ID 전송이 생길 일 없다면 Normal도 OK.
-
-**단**: Normal 자체가 B1 대기라 TintLinearV2 fallback이 미래 안전.
-
-### 6.4 LUMA_COEFFS 정합성
-
-TintLinearV2에서 `vec3(0.2126, 0.7152, 0.0722)` 사용 (Rec.709 linear).
-- W1의 avg_iris_luma 측정 시 같은 계수?
-- Beauty 셰이더의 `LUMA_709` 같은 계수?
-- 다른 계수 쓰면 LTL 정규화 왜곡
-
-**확인 필요**: `shader_sources.cpp` 전체에서 LUMA 계수 일관성.
-
-**Claude 예상**: 이미 `LUMA_709` 매크로로 통일됐을 가능성. W2에서 재확인만.
-
-### 6.5 realSpec 복원 경로 (조건부)
-
-W4 B2 결과가 "환경 반사 Phase 6 이월" (차이 미미)이면 realSpec 되살려야 할 수도.
-
-**질문**: W2에서 realSpec 코드를 **주석 처리로 남길지, 완전 삭제할지**?
-
-**Claude 추천**: 주석 처리 유지. 복원 시 1줄 삭제로 재도입 가능. 완전 삭제면 W4 B2 실패 후 수식 재작성 필요.
-
-**반대 의견 (Codex)**: 주석 코드는 냄새. Git history에서 복원 가능하니 완전 삭제가 맞다.
-
-**W2 브레인스토밍에서 결정**.
-
-### 6.6 기본값 블렌드 모드 확정
-
-**현재**: Android demo 기본 blendMode는? (확인 필요)
-
-**99 §1.1 D6 해석**: TintLinearV2가 "기본값". Android demo 초기 ID가 5 (TintLinearV2)로 설정되어야 함.
-
-**확인 필요**: `CameraGLRenderer.kt` 등에서 초기 blendMode 값.
-
-### 6.7 Android Demo UI 변화 (W2 범위 밖이지만 연결)
-
-Android demo가 8종 블렌드 drop-down을 보여주는 경우:
-- W2 변경 후 ID 3/4/6 빈 상태 → drop-down에서 해당 옵션 선택 시 fallback으로 동작 (깨지진 않음)
-- **UI 정리는 W9에서**
+**미결 없음.** 7개 쟁점 모두 R1에서 결론. 다수결 2개(6.1, 6.3)는 Codex 지적을 완화 조건(주석/로그)으로 수용.
 
 ---
 

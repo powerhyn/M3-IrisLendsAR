@@ -287,6 +287,8 @@ W6에서 다룰 것:
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.1 색공간/LUMA 규약 (`uAvgIrisLum` linear 값 직접 사용), §4.2 dist 정규화 규약, §4.3 영역 경계 매핑 (innerMask 0.5~0.7, W7 림발 0.85~1.0과 중간 0.7~0.85 공백 영역 존재), §4.4 GLSL 패스 규약 (블렌드→디테일→반사 순서).
+
 ### 5.1 C7 블링크 ramp 구조
 
 ```cpp
@@ -346,9 +348,80 @@ blended *= vec3(detailMul);
 - 3 조도 × 3 gate = **9 클립**
 - SKU: 오(OH)_베이글 (중간 톤, 디테일 관찰 용이)
 
+### 5.5 EMA 공식 — **`1 - pow(0.05, dt_ms / target_ms)` 확정** (W6 R1 다수 2/3)
+
+- **공식:** `computeEmaAlpha(dt_ms, target_ms) = 1.0 - pow(0.05, dt_ms / target_ms)`.
+- **target_ms 정의:** **95% 도달 시간** (5% 잔존 시점).
+- **실측 dt 사용:** 30fps 고정 가정 금지. 실제 frame delta time을 runtime에서 주입.
+- **검증:** 구현 후 30fps/60fps 실기기 로그로 "80ms 만에 0.95 도달" 확인. Codex R3 계수 불일치 지적 해소.
+- Claude R1 원안 `α = 1 - exp(-dt/τ)` (τ=63% 도달) 공식은 소수 의견으로 정정.
+- 출처: `P6-W6_brainstorm/synthesis.md` §2.
+
+### 5.6 B5 user 수 — **3명 × 5 × 3 = 45 이벤트 확정** (W6 R1 합의 3/3)
+
+- 정성 판정 규모. 3명 중 2명 이상 "팝"/"지연" 불만 Y면 ramp 계수 추가 조정 판정.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.7 B9 gate smoothstep — **±0.03 대칭 폭 확정** (W6 R1 합의 3/3)
+
+- `smoothstep(threshold - 0.03, threshold + 0.03, avg_iris_luma)`.
+- 30fps 기준 2~3프레임 transition 폭 → 계단 현상 방지 + threshold 의미 유지.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.8 blur 커널 — **3×3 확정** (W6 R1 합의 3/3)
+
+- 9 fetch × iris ROI 한정. Single-pass 원칙(99 §1.2 C-F) 준수.
+- 5×5 / separable Gaussian 불채택.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.9 innerMask 경계 — **smoothstep `[0.7, 0.5]` 확정** (W6 R1 합의 3/3)
+
+- `smoothstep(0.7, 0.5, dist/iris_radius)` 형태. inner=1, outer=0.
+- hard cutoff의 "경계 픽셀 번쩍임" 방지.
+- W7 림발 영역(0.85~1.0)과 분리 — 중간 0.7~0.85는 iris 본체 (아무 처리 없음).
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.10 저조도 정의 — **B9 threshold로 자동 정의** (W6 R1 합의 3/3)
+
+- 장면명(실내/실외)이 아닌 **`avg_iris_luma` 기준** 정의.
+- B9 벤치 threshold 후보 {0.10, 0.15, 0.25} 중 채택값이 "저조도 경계".
+- Claude 제안 시작값 0.15는 후보 중 하나로 포함.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.11 B5 × B9 동시 측정 — **동시 캡처, 지표 독립 확정** (W6 R1 합의 3/3)
+
+- 저조도 환경에서 블링크 반복 = 단일 시나리오에서 B5+B9 동시 데이터 수집.
+- 세션 구조: **고정 응시 5초 → 블링크 반복 10초 → 고정 응시 5초** (교차 영향 점검).
+- 판정표 분리: B5 지표(블링크 직후 디테일 복귀) vs B9 지표(저조도 디테일 거북함).
+- **C10 후행:** B5/B9 판정 → C10 튜닝 → 최종 실기기.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W6 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | EMA 공식 정확도 | ✅ **닫힘** (2/3 다수 + Claude 편향 정정) | §5.5 |
+| 6.2 | B5 user 수 | ✅ **닫힘** (3/3) | §5.6 |
+| 6.3 | gate smoothstep | ✅ **닫힘** (3/3) | §5.7 |
+| 6.4 | blur 커널 | ✅ **닫힘** (3/3) | §5.8 |
+| 6.5 | innerMask 경계 | ✅ **닫힘** (3/3) | §5.9 |
+| 6.6 | 저조도 환경 정의 | ✅ **닫힘** (3/3) | §5.10 |
+| 6.7 | B5×B9 동시 측정 | ✅ **닫힘** (3/3) | §5.11 |
+
+**B5/B9/C10 동시 수행 타당성 (3/3 재확인).** B5×B9 동시 캡처 → 판정 → C10 후행 튜닝.
+
+**미결 없음.** 가장 수렴도 높은 W. 후속: C10 튜닝 (B5/B9 결과 후), B9 threshold 확정 (0.10/0.15/0.25 중 실기기 선택).
+
+원문: `docs/workPaper/P6-W6_brainstorm/{codex,gemini,claude}_w6.md`.
+종합: `docs/workPaper/P6-W6_brainstorm/synthesis.md`.
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 EMA α → ms 공식 정확도
 
