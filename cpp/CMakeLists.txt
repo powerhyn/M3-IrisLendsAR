@@ -69,6 +69,7 @@ set(IRIS_SDK_SOURCES
     src/gpu/texture_pool.cpp
     src/gpu/gpu_beauty_backend.cpp
     src/gpu/gpu_lens_renderer.cpp
+    src/gpu/eye_render_packet_adapter.cpp
     src/gpu/shader_sources.cpp
     src/gpu/gpu_profiler.cpp
     # Warp module
@@ -107,6 +108,8 @@ set(IRIS_SDK_HEADERS
     include/iris_sdk/gpu/texture_pool.h
     include/iris_sdk/gpu/gpu_beauty_backend.h
     include/iris_sdk/gpu/gpu_profiler.h
+    include/iris_sdk/gpu/eye_render_packet.h
+    include/iris_sdk/gpu/eye_render_packet_adapter.h
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
     include/iris_sdk/warp/face_warp_controller.h
