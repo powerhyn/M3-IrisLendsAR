@@ -86,28 +86,71 @@ ls docs/workPaper/P6-W{N}_brainstorm/ 2>/dev/null
 - 존재하고 결과가 W 문서에 반영됐으면 진행
 - 결과가 반영 안 됐으면 **먼저 W 문서 §5/§6 업데이트** 후 진행
 
-### Step 3: Implementation
+### Step 3: Implementation (cpp-pro 서브에이전트에 위임)
 
 **Phase 6 프로젝트 규칙** (CLAUDE.md 준수):
+- C++17 표준, RAII, thread-safety, const-correctness
+- **`cpp/` 폴더 하위 C++ 작업은 반드시 `systems-programming:cpp-pro` 서브에이전트에 위임** (CLAUDE.md 명시 규칙)
+- Serena MCP 도구 우선 (아래 세부)
+- 설정 파일/YAML/마크다운만 예외 (Read/Edit)
 
-1. **C++ 작업 (`cpp/` 폴더 하위)**: `systems-programming:cpp-pro` 에이전트와 병용
-   - C++17 표준
-   - RAII, thread-safety, const-correctness, 이동 시맨틱
-   - 헤더 + 구현 분리
-2. **Serena MCP 도구 우선**:
-   - 파일 구조 파악: `get_symbols_overview`
-   - 클래스/메서드 찾기: `find_symbol`
-   - 메서드 수정: `replace_symbol_body`
-   - 심볼 이름 변경: `rename_symbol`
-   - 참조 추적: `find_referencing_symbols`
-3. **기본 도구 예외**: 설정 파일, YAML, 마크다운은 Read/Edit 사용
-4. **주석 최소화**: "왜"가 명확하지 않으면 생략 (메모리 `user_work_style`)
+#### 3.1 C++ 구현 위임 — Agent 도구 호출
 
-**구현 순서** (권장):
+헤더 + 구현 파일 작성은 `cpp-pro` 에이전트에 위임. Agent tool 호출:
+
+```
+Agent(
+  description: "P6-W{N} {모듈명} 구현",
+  subagent_type: "systems-programming:cpp-pro",
+  prompt: """
+  P6-W{N}: {W 제목} 구현.
+  
+  대상 W 문서: docs/workPaper/P6-W{N}_*.md (§5 확정 사항 참조)
+  
+  작성할 파일:
+  - cpp/include/iris_sdk/gpu/{헤더}.h
+  - cpp/src/gpu/{구현}.cpp
+  - (어댑터 필요 시) ...
+  
+  요구사항:
+  - C++17, RAII, const-correctness
+  - §5 스키마/수식 정확히 반영 (예: LUMA_COEFFS = vec3(0.299, 0.587, 0.114))
+  - 공개 C API 변경 금지 (§5.5 원칙)
+  - 주석은 "왜" 필요한 경우만 (user_work_style 원칙)
+  - Serena MCP 도구 우선 사용 (find_symbol, replace_symbol_body 등)
+  
+  완료 후 보고:
+  - 수정/신규 파일 경로
+  - 구현된 public API 시그니처
+  - 빌드 전제 조건 (CMakeLists 갱신 필요 여부)
+  """
+)
+```
+
+에이전트가 파일 작성 → 결과 받아 다음 단계(빌드)로.
+
+#### 3.2 Serena MCP 도구 직접 사용 (에이전트 없이 단순 수정 시)
+
+단순 수정(기존 메서드 본문 교체 등)은 에이전트 위임 없이 직접 Serena 도구 사용:
+
+- 파일 구조 파악: `get_symbols_overview`
+- 심볼 찾기: `find_symbol`
+- 메서드 수정: `replace_symbol_body`
+- 심볼 이름 변경: `rename_symbol` (W2 리네이밍 등)
+- 참조 추적: `find_referencing_symbols`
+
+#### 3.3 구현 순서 (권장)
+
 1. 헤더 파일 정의 (structs, classes, API)
 2. 구현 파일 (.cpp) 작성
-3. 필요 시 새 uniform location / CMakeLists 업데이트
+3. 필요 시 CMakeLists.txt 업데이트 (신규 파일 등록)
 4. 어댑터/연동 레이어 (W1처럼 계약 변경 시)
+
+**판단 기준** — 에이전트 위임 vs 직접 작업:
+- 신규 파일 1개 이상 작성 → **cpp-pro 에이전트 위임** 권장
+- 기존 함수 1~2개만 수정 → 직접 Serena 도구
+- 대규모 리팩터링 (W2 블렌드 3종 재편) → **cpp-pro 에이전트 위임**
+- 단순 주석/변수명 변경 → 직접 Edit
 
 **코드 예시 — P6-W1 EyeRenderPacket**:
 
@@ -205,12 +248,45 @@ cmake --build . --parallel
 - **undefined reference**: CMakeLists의 타깃 소스에 새 파일 추가됐는지 확인
 - **경고만**: 무시 OK (기존 경고 다수). 단 새로 도입된 것만 점검.
 
-### Step 5: Unit Test (Full 모드만)
+### Step 5: Unit Test — `test-automator` 서브에이전트에 위임 (Full 모드)
 
-해당 W의 테스트 대상이면:
+테스트 코드 작성은 **`unit-testing:test-automator` 서브에이전트에 위임**. Agent tool 호출:
+
+```
+Agent(
+  description: "P6-W{N} 단위 테스트 생성",
+  subagent_type: "unit-testing:test-automator",
+  prompt: """
+  P6-W{N}: {W 제목} 단위 테스트 생성.
+  
+  대상 코드:
+  - {구현된 파일 목록}
+  
+  테스트 요구사항:
+  - GoogleTest 사용 (기존 cpp/tests 스타일)
+  - Edge case 포함: 0/경계/범위 초과/null optional
+  - Fallback 체인 테스트 (적용 시)
+  - 테스트 파일 위치: cpp/tests/test_{모듈}.cpp
+  - CMakeLists.txt 갱신 필요 시 지시
+  
+  완료 후 보고:
+  - 생성된 테스트 파일 경로
+  - 커버 범위 (함수/시나리오 목록)
+  - CMakeLists 갱신 지시
+  """
+)
+```
+
+**테스트 항목 예시 (W1)**:
+- EyeRenderPacket 구조체 기본/복사/move 생성
+- Optional 필드 has_value/value_or 동작
+- 어댑터 IrisResult → EyeRenderPacket 변환 정확성
+- avg_iris_luma 측정 edge case (0 픽셀, 경계, 범위 초과)
+- Fallback 체인 (packet → self-measure → hold → default)
+
+#### 5.1 테스트 빌드 + 실행 (직접 수행)
 
 ```bash
-# 테스트 빌드
 cd cpp/cmake-build-debug
 cmake --build . --target iris_sdk_tests
 
@@ -219,14 +295,7 @@ cmake --build . --target iris_sdk_tests
 # 예: ./bin/iris_sdk_tests --gtest_filter="*EyeRenderPacket*"
 ```
 
-테스트 생성 시 `unit-testing:test-automator` 에이전트 활용 가능.
-
-**테스트 항목** (예: W1):
-- EyeRenderPacket 구조체 기본/복사/move 생성
-- Optional 필드 has_value/value_or 동작
-- 어댑터 IrisResult → EyeRenderPacket 변환 정확성
-- avg_iris_luma 측정 edge case (0 픽셀, 경계, 범위 초과)
-- Fallback 체인 (packet → self-measure → hold → default)
+실패 시 §Error Handling > Test Failure 참조.
 
 ### Step 6: Real Device Regression
 
@@ -271,7 +340,8 @@ adb install -r android/demo-app/build/outputs/apk/debug/demo-app-debug.apk
    - 로컬 revert: git checkout HEAD~1 -- <file>
    - 재구현 or 부분 revert
 
-4. debugging-toolkit:debugger 에이전트 호출 고려
+4. 원인 불명확 시 **Debug Mode 재진입** — `implement P6-W{N} debug` 호출.
+   debugger + test-automator 서브에이전트 자동 위임.
 ```
 
 ### Step 7: Commit Strategy
@@ -429,29 +499,85 @@ EOF
   - PR 본문에 tier별 결과 표
 ```
 
-### Debug Mode — 문제 있는 W 재작업
+### Debug Mode — 문제 있는 W 재작업 (서브에이전트 위임 중심)
 
 ```
 [1/5] 🐛 문제 재현
-  - 버그 증상 기록
-  - git bisect로 introducing 커밋 추적
+  - 버그 증상 기록 (사용자 입력에서 추출)
+  - git bisect로 introducing 커밋 추적 (직접 수행)
 
-[2/5] 🔍 Root Cause 추적
-  - sanitizer 빌드: -fsanitize=address, thread
-  - debugging-toolkit:debugger 에이전트 호출
-  - 스택 트레이스 분석
-  - 메모리 누수 / race condition 확인
+[2/5] 🔍 Root Cause — debugging-toolkit:debugger 서브에이전트에 위임
+```
 
-[3/5] 💻 Fix 구현 + 재빌드
+Root cause 추적은 **debugger 에이전트에 위임**:
 
-[4/5] 🧪 Regression Test 추가
-  - unit-testing:test-automator 에이전트
-  - 같은 증상 재발 방지 테스트 작성
+```
+Agent(
+  description: "P6-W{N} {증상} root cause 분석",
+  subagent_type: "debugging-toolkit:debugger",
+  prompt: """
+  P6-W{N} 구현 후 발견된 문제:
+  
+  증상: {사용자 입력 / 로그 / 스크린샷 설명}
+  
+  최근 변경 (이 W의 커밋들):
+  - {커밋 해시 + 제목 목록}
+  
+  환경:
+  - Android {디바이스} / OpenGL ES 3.1
+  - (필요 시) sanitizer 빌드 결과 포함
+  
+  요청:
+  - 근본 원인 분석 (스택 트레이스, 로직 오류, 동기화 문제, 메모리 누수 등)
+  - 가능한 수정안 제시 (여러 개면 트레이드오프 비교)
+  - sanitizer 빌드 필요 여부 판단 (-fsanitize=address, thread)
+  - 재현 최소 케이스 제안
+  """
+)
+```
 
+에이전트 결과를 받아 Step 3으로 (Fix 구현).
+
+```
+[3/5] 💻 Fix 구현
+  - debugger 에이전트가 제안한 수정 방향 채택
+  - cpp-pro 에이전트에 위임 or 직접 수정 (규모에 따라)
+  - 재빌드
+
+[4/5] 🧪 Regression Test — test-automator 서브에이전트에 위임
+```
+
+재발 방지 테스트는 **test-automator 에이전트에 위임**:
+
+```
+Agent(
+  description: "P6-W{N} {증상} regression 테스트",
+  subagent_type: "unit-testing:test-automator",
+  prompt: """
+  P6-W{N}에서 발견된 버그에 대한 regression 테스트 작성.
+  
+  버그 증상: {요약}
+  Root cause: {debugger 에이전트 분석 결과 요약}
+  Fix 내용: {커밋 해시 + 변경 요약}
+  
+  요청:
+  - 같은 증상 재발 방지 테스트 (fix 없으면 실패해야 함)
+  - 파일: cpp/tests/test_{모듈}_regression.cpp 또는 기존 테스트에 추가
+  - edge case 포함
+  """
+)
+```
+
+```
 [5/5] ✅ 검증
-  - 원래 기능 동작 확인
+  - 원래 기능 동작 확인 (실기기 회귀 테스트 재실행)
   - 새 regression test 통과
-  - fix 커밋: "fix(gpu-lens): P6-W{N} {증상 요약}"
+  - fix 커밋:
+    git commit -m "fix(gpu-lens): P6-W{N} {증상 요약}
+                   
+                   Root cause: {요약}
+                   Fix: {변경 요약}
+                   Test: test_{모듈}_regression.cpp"
 ```
 
 ## Error Handling
@@ -647,11 +773,24 @@ develop  (W3-04 포함, 계속 유지)
 - CMake 3.18+ (Ninja)
 - GoogleTest (단위 테스트)
 
-**Key Agents**:
-- `systems-programming:cpp-pro` — C++ 구현 (모던 C++, RAII)
-- `unit-testing:test-automator` — 테스트 생성
-- `debugging-toolkit:debugger` — 문제 재현 + root cause
-- `code-documentation:code-reviewer` — AI 코드 리뷰
+**Subagent Delegation Matrix**:
+
+이 스킬은 아래 서브에이전트에 **명시적으로 위임**. 각 Step에서 Agent tool 호출.
+
+| Step | 서브에이전트 | 용도 | 트리거 조건 |
+|------|------------|------|-----------|
+| Step 3 구현 | `systems-programming:cpp-pro` | C++ 헤더/구현 작성 | 신규 파일 1+ / 대규모 리팩터링 |
+| Step 5 테스트 | `unit-testing:test-automator` | 단위 테스트 생성 | Full 모드 / Debug regression |
+| Debug [2] | `debugging-toolkit:debugger` | Root cause 분석, sanitizer 가이드 | Debug 모드 진입 시 |
+| Debug [4] | `unit-testing:test-automator` | Regression 테스트 | Fix 후 재발 방지 |
+| (선택) | `code-documentation:code-reviewer` | AI 코드 리뷰 | W9 통합 단계 PR 직전 |
+| (선택) | `Explore` | 코드베이스 탐색 | W 시작 시 의존 코드 파악 |
+
+**위임 원칙**:
+- **단순 수정**(1~2줄 change, 기존 함수 본문 교체)은 에이전트 없이 직접 Serena 도구.
+- **신규 파일 + 논리 단위 구현**은 에이전트 위임 (컨텍스트 격리로 메인 세션 보호).
+- **진단/분석**은 debugger 에이전트 (메인 세션에 긴 로그 축적 방지).
+- **이 스킬 자체는 orchestrator**. 실제 작업은 대부분 에이전트가 수행.
 
 **Related Skills**:
 - **`ar-lens-brainstorm`** — W 브레인스토밍 라운드 담당. **이 스킬 호출 전에 돌릴 것**.
