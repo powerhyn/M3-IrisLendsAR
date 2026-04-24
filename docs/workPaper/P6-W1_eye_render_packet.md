@@ -1,6 +1,6 @@
 # P6-W1: EyeRenderPacket 도입 + avg_iris_luma ROI 평균 실측
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: 구현 완료 (2026-04-24). 실기기 §6.2 ROI 반경 스위프만 후속.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W0
 > **후속 의존**: P6-W2, W3, W4~W7 (모두 기반)
@@ -207,13 +207,13 @@ Codex R3 제안:
 
 ### 4.1 Definition of Done (구체 검증)
 
-- [ ] `eye_render_packet.h` 파일 존재, 필수/optional 필드 모두 포함
-- [ ] `gpu_lens_renderer.h` 의 render API가 `EyeRenderPacket&`를 받음
-- [ ] S1 주석 `// glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f); // 제거됨`이 실제 측정 코드로 치환됨
-- [ ] C++ 빌드 통과 (`cmake --build . --target iris_sdk`)
-- [ ] 단위 테스트: EyeRenderPacket 구조체 생성/복사/optional 처리 (최소 1개)
-- [ ] 실기기 1회 렌더링: LTL 모드에서 과도 tint 없음 (육안 확인)
-- [ ] 성능 회귀 없음 (MID tier 기준 FPS 유지)
+- [x] `eye_render_packet.h` 파일 존재, 필수/optional 필드 모두 포함 (a49ce59)
+- [x] `gpu_lens_renderer`의 render 경로가 **내부에서** `EyeRenderPacket` 경유 — adapter 레이어 도입 (2206d4a). 공개 C++ 시그니처는 `feedback_refactor_vs_retune` 원칙에 따라 유지.
+- [x] S1 주석 `// glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f); // 제거됨`이 실제 측정 코드로 치환됨 (1b869c4)
+- [x] C++ 빌드 통과 (`cmake --build . --target iris_sdk`, exit 0)
+- [ ] 단위 테스트: EyeRenderPacket 구조체 생성/복사/optional 처리 — **full 모드 미실행 (default 모드)**. 후속 W 합류 시 `test-automator` 위임.
+- [ ] 실기기 1회 렌더링: LTL 모드 과도 tint 없음 (육안) — **사용자 실기기 검증 필요** (W2 시작 전)
+- [ ] 성능 회귀 없음 (MID tier FPS) — 동상
 
 ### 4.2 Out of scope (W1에서 하지 않는 것)
 
@@ -533,14 +533,16 @@ L_0 = L_fallback (= 0.35)
 - [ ] 단위 테스트 1개 이상
 - [ ] 실기기 1회 확인
 
-### 8.2 커밋 전략
+### 8.2 커밋 전략 (실제 커밋 해시)
 
-**커밋 1**: `docs(P6-W1): 섹션 2~8 본문 작성 — 세부 계획 상세화` (지금 이 수정)
-**커밋 2**: `refactor(gpu-lens): P6-W1 EyeRenderPacket 도입 + 어댑터 레이어`
-**커밋 3**: `feat(gpu-lens): P6-W1 avg_iris_luma masked ROI 평균 self-measure`
-**커밋 4** (선택): `test(gpu-lens): P6-W1 EyeRenderPacket 단위 테스트`
+| # | 해시 | 제목 |
+|---|------|------|
+| 1 | `a49ce59` | `feat(gpu-lens): P6-W1 EyeRenderPacket 내부 계약 구조체 도입` |
+| 2 | `2206d4a` | `feat(gpu-lens): P6-W1 IrisResult → EyeRenderPacket 어댑터 레이어` |
+| 3 | `1b869c4` | `feat(gpu-lens): P6-W1 avg_iris_luma masked ROI self-measure + EMA + fallback` |
+| 4 | (미진행) | `test(gpu-lens): P6-W1 EyeRenderPacket 단위 테스트` — full 모드 한정 |
 
-W별 멀티 커밋 권장 — 벤치 결과 역추적 용이.
+PR base: `feature/P6-Works`. 분할 근거 — 구조체(계약) / 어댑터(변환) / 렌더러 로직(측정+EMA+fallback) 논리 분리로 bisect 용이.
 
 ### 8.3 다음 W 트리거
 
