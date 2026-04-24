@@ -327,22 +327,48 @@ adb install -r android/demo-app/build/outputs/apk/debug/demo-app-debug.apk
 # - 메모리 feedback_qualitative_device_judgment: 정성 체감 기반
 ```
 
-**회귀 발견 시**:
+**회귀 발견 시 — `multi-platform-apps:mobile-developer` 서브에이전트에 Android 특화 진단 위임**:
+
 ```
-⚠️ Visual Regression Detected
+Agent(
+  description: "P6-W{N} Android 실기기 회귀 진단",
+  subagent_type: "multi-platform-apps:mobile-developer",
+  prompt: """
+  P6-W{N} 구현 후 Android 실기기 회귀 발견.
+  
+  증상: {구체 관찰 내용 — 화면 깜빡임, 렌즈 위치 이탈, 프레임 드롭 등}
+  
+  디바이스:
+  - 모델: {예: Pixel 7 / Galaxy S22}
+  - GPU: {Adreno 740 / Mali-G78}
+  - Android: {버전}
+  
+  최근 커밋 (이 W):
+  - {해시 + 제목 목록}
+  
+  관련 코드:
+  - cpp/src/gpu/{수정 파일}
+  - android/iris-sdk/src/main/cpp/iris_jni.cpp (JNI)
+  - android/demo-app/src/main/java/.../CameraGLRenderer.kt
+  
+  요청:
+  - Android 특화 원인 분석 (GL 컨텍스트, Surface 수명주기, OEM별 이슈)
+  - Adreno/Mali GPU 드라이버 특이성 (mipmap + dynamic branch 등)
+  - JNI 경계에서의 메모리/스레드 이슈 가능성
+  - 재현 최소 조건 제안
+  """
+)
+```
 
-관찰: {구체 증상}
-
-💡 진단 순서:
-1. git diff HEAD~1 -- cpp/ 로 최근 변경 확인
+추가 진단 순서:
+1. git diff HEAD~1 -- cpp/ android/ 로 최근 변경 확인
 2. 의도된 변화인지 W 문서 §4 목표와 비교
 3. 의도 밖이면:
    - 로컬 revert: git checkout HEAD~1 -- <file>
    - 재구현 or 부분 revert
 
-4. 원인 불명확 시 **Debug Mode 재진입** — `implement P6-W{N} debug` 호출.
-   debugger + test-automator 서브에이전트 자동 위임.
-```
+4. 원인 복잡 시 **Debug Mode 재진입** — `implement P6-W{N} debug` 호출.
+   debugger + test-automator 서브에이전트 자동 위임 (§Debug Mode 참조).
 
 ### Step 7: Commit Strategy
 
@@ -486,7 +512,7 @@ EOF
 [4/4] 단일 커밋: "wip(gpu-lens): P6-W{N} quick iteration"
 ```
 
-### Full Mode — 프로덕션 후보 검증
+### Full Mode — 프로덕션 후보 검증 (성능 프로파일링 포함)
 
 ```
 [+ Step 5 필수] 단위 테스트 전 범위
@@ -494,10 +520,50 @@ EOF
   - HIGH tier 디바이스: 60fps 유지, 시각 품질 최상
   - MID tier: 30fps 유지, 기본 기능 동작
   - LOW tier: 20fps 최소, 크래시 없음
+  - 성능 프로파일링 → performance-engineer 에이전트 위임 (아래)
 [+ Step 9 상세]
   - W 문서에 성능 프로파일링 결과 첨부
   - PR 본문에 tier별 결과 표
 ```
+
+#### Full 모드 Step 6 확장 — `performance-engineer` 서브에이전트 위임
+
+```
+Agent(
+  description: "P6-W{N} tier별 성능 프로파일링",
+  subagent_type: "application-performance:performance-engineer",
+  prompt: """
+  P6-W{N} 구현 후 3 tier 디바이스 성능 프로파일링.
+  
+  대상:
+  - HIGH tier: {디바이스 / GPU}  목표 FPS 60+
+  - MID tier:  {디바이스 / GPU}  목표 FPS 30+
+  - LOW tier:  {디바이스 / GPU}  목표 FPS 20+
+  
+  관련 Phase 6 목표:
+  - GPU ms 증가 예산: +0.3~0.7ms (Phase 6 전체)
+  - Detection Latency: < 33ms
+  - Memory: < 100MB
+  
+  측정 항목:
+  - 프레임당 GPU 시간 (Android GPU Inspector / RenderDoc)
+  - 메인 스레드 CPU 사용률
+  - 메모리 증가 추이 (10분 이상 연속 실행)
+  - Adreno/Mali 각각의 특이 현상
+  
+  요청:
+  - 병목 분석 (셰이더, 메모리 대역폭, 드로우콜 등)
+  - tier별 성능 리포트 작성 (표 형식)
+  - 최적화 제안 (우선순위 포함)
+  - W 문서에 첨부 가능한 형식으로 결과 요약
+  """
+)
+```
+
+에이전트 결과를 받아:
+- W 문서 §4.1 Definition of Done "성능 목표 달성" 체크
+- PR 본문에 리포트 첨부
+- 병목 발견 시 최적화 커밋 추가
 
 ### Debug Mode — 문제 있는 W 재작업 (서브에이전트 위임 중심)
 
@@ -775,21 +841,26 @@ develop  (W3-04 포함, 계속 유지)
 
 **Subagent Delegation Matrix**:
 
-이 스킬은 아래 서브에이전트에 **명시적으로 위임**. 각 Step에서 Agent tool 호출.
+이 스킬은 아래 서브에이전트에 **명시적으로 위임**. 각 Step에서 Agent tool 호출. 아래 에이전트는 `/Volumes/M3-P31/Projects/MerooMong/claude-agents/agents/plugins/` 하위에 실존 확인됨.
 
 | Step | 서브에이전트 | 용도 | 트리거 조건 |
 |------|------------|------|-----------|
 | Step 3 구현 | `systems-programming:cpp-pro` | C++ 헤더/구현 작성 | 신규 파일 1+ / 대규모 리팩터링 |
 | Step 5 테스트 | `unit-testing:test-automator` | 단위 테스트 생성 | Full 모드 / Debug regression |
+| **Step 6 회귀 분석** | `multi-platform-apps:mobile-developer` | Android 실기기 특화 진단 (GL 컨텍스트, 수명주기, OEM별 이슈) | 실기기 회귀 발견 시 |
+| **Step 6 성능 (Full)** | `application-performance:performance-engineer` | FPS, GPU ms, 메모리 프로파일링 | Full 모드 / W9 통합 |
 | Debug [2] | `debugging-toolkit:debugger` | Root cause 분석, sanitizer 가이드 | Debug 모드 진입 시 |
 | Debug [4] | `unit-testing:test-automator` | Regression 테스트 | Fix 후 재발 방지 |
 | (선택) | `code-documentation:code-reviewer` | AI 코드 리뷰 | W9 통합 단계 PR 직전 |
+| (선택) | `comprehensive-review:architect-review` | 아키텍처 일관성 검토 (W 간 의존성, 결합도) | W9 머지 PR 직전 |
 | (선택) | `Explore` | 코드베이스 탐색 | W 시작 시 의존 코드 파악 |
 
 **위임 원칙**:
 - **단순 수정**(1~2줄 change, 기존 함수 본문 교체)은 에이전트 없이 직접 Serena 도구.
 - **신규 파일 + 논리 단위 구현**은 에이전트 위임 (컨텍스트 격리로 메인 세션 보호).
 - **진단/분석**은 debugger 에이전트 (메인 세션에 긴 로그 축적 방지).
+- **Android 실기기 이슈**는 mobile-developer 에이전트 (Adreno/Mali/OEM 특화).
+- **성능 프로파일링**은 performance-engineer (FPS 측정 + 병목 분석).
 - **이 스킬 자체는 orchestrator**. 실제 작업은 대부분 에이전트가 수행.
 
 **Related Skills**:
