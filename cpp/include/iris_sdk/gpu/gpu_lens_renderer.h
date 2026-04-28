@@ -290,7 +290,7 @@ private:
     static constexpr float kAvgLumaEmaAlpha       = 0.3f;
     static constexpr float kAvgLumaFallback       = 0.35f;
     static constexpr int   kAvgLumaMaxHoldFrames  = 3;
-    static constexpr float kAvgLumaRoiRadiusRatio = 0.55f;
+    static constexpr float kAvgLumaRoiRadiusRatio = 0.60f;
     static constexpr float kAvgLumaClampMin       = 0.1f;
     static constexpr float kAvgLumaClampMax       = 0.9f;
 
