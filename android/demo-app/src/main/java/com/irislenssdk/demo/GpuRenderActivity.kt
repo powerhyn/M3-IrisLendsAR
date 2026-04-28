@@ -352,10 +352,15 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // 블렌드 모드 선택 (Mode 5 비노출: ISS-005 B-2 존치 판정)
+        // 블렌드 모드 선택
+        // P6-W1 검증용으로 Mode 5 (Luminance Tint Linear) 임시 노출.
+        // W1이 S1에서 비운 uAvgIrisLum 주입을 실측으로 복구했고, LTL이 그 값을
+        // 직접 쓰는 유일한 모드라 시각 확인이 여기서만 가능하다. ISS-005 B-2 존치
+        // 판정은 W2 블렌드 3종 확정 단계에서 재검토 예정.
         val blendModeEntries = arrayOf(
             "Normal" to 0, "Multiply" to 1, "Screen" to 2, "Overlay" to 3,
-            "Luminance Tint" to 4, "Soft Light" to 6, "Color Replace" to 7
+            "Luminance Tint" to 4, "Luminance Tint Linear" to 5,
+            "Soft Light" to 6, "Color Replace" to 7
         )
         spinnerBlendMode.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item, blendModeEntries.map { it.first }.toTypedArray()
