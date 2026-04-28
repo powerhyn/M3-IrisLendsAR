@@ -623,6 +623,14 @@ float GPULensRenderer::measureAvgIrisLumaROI(uint32_t input_texture,
                                              int tex_width, int tex_height,
                                              const gpu::EyeRenderPacket& packet) {
 #if IRIS_SDK_GPU_AVAILABLE
+    // P6-W1 회귀 진단: glReadPixels + 임시 FBO attach가 카메라 텍스처
+    // (Android EXTERNAL_OES 가능성)에서 GL state 오염을 일으킨다는 가설.
+    // 임시로 측정 비활성화 → fallback chain만 동작 (current=0.35 hold).
+    // 검은 화면 회복 확인용. 원인 파악 후 비동기 readback or sampling 변경 예정.
+    (void)input_texture; (void)tex_width; (void)tex_height; (void)packet;
+    return -1.0f;
+
+    // 아래 원래 경로 — 진단 후 복구.
     // 빠른 거절: 미검출(visibility=0), 반경 0, 유효하지 않은 텍스처 크기는 측정 불가.
     if (packet.visibility <= 0.0f) return -1.0f;
     if (packet.iris_radius_norm <= 0.0f) return -1.0f;
