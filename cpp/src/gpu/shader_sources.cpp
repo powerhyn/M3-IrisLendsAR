@@ -828,6 +828,13 @@ uniform float uRightEyeEllipseRot;
 in vec2 vTexCoord;
 out vec4 fragColor;
 
+// P6-W2 §5.10: 블렌드 LUMA 계수 Rec.709 linear로 통일.
+// CPU 측 W1 avg_iris_luma 측정과 동일 상수. sRGB 평균 금지.
+const vec3 LUMA_709_LENS = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
+vec3 toSRGBFast(vec3 linear_color) { return sqrt(max(linear_color, vec3(0.0))); }
+
 vec3 blendNormal(vec3 base, vec3 blend, float opacity) {
     return mix(base, blend, opacity);
 }
@@ -836,40 +843,33 @@ vec3 blendMultiply(vec3 base, vec3 blend, float opacity) {
     return mix(base, base * blend, opacity);
 }
 
-vec3 blendScreen(vec3 base, vec3 blend, float opacity) {
-    return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
+// P6-W2 §5.2 C3: ScreenLinear (선형 공간 Screen). sRGB blendScreen 대체.
+vec3 blendScreenLinear(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = toLinearFast(blend);
+    vec3 screened = vec3(1.0) - (vec3(1.0) - baseL) * (vec3(1.0) - lensL);
+    return toSRGBFast(mix(baseL, screened, opacity));
 }
 
-// P5-W3-05 S1 D6: blendOverlay / blendLuminanceTint(non-linear) / blendSoftLight 제거
-// 이유:
-//   - Overlay: 렌즈 도메인에서 대비 과장 → 플라스틱 느낌
-//   - LuminanceTint(non-linear): LuminanceTintLinear의 감마 오차 버전(하위호환)
-//   - SoftLight: Normal과 체감 차이 미미
-// uBlendMode 3/4/6가 들어오면 blendNormal로 자동 fallback (분기 default)
-
-vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
-vec3 toSRGBFast(vec3 linear_color) { return sqrt(max(linear_color, vec3(0.0))); }
-
-// P5-W3-05 S1 D3: realSpec 2줄 제거 (환경 반사 분리 계층에서 담당 예정)
-// 삭제된 원본: float realSpec = smoothstep(0.7, 0.95, lum);
-//              result = mix(result, baseL, realSpec);
-// 근거: "밝은 픽셀 보호"이지 "실반사 보호"가 아닌 개념 오류. C5 참조.
-vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
+// P6-W2 §5.1 C2: TintLinearV2 (canonical default). LTL 리네이밍 + squaring 제거.
+// uAvgIrisLum은 W1 fallback chain에서 이미 linear 공간 값으로 공급됨 (W1 §5.2.1).
+vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
     vec3 baseL = toLinearFast(base);
-    float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
-    float avgLumLinear = uAvgIrisLum * uAvgIrisLum;
-    float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
+    float lum = dot(baseL, LUMA_709_LENS);
+    float scale = clamp(0.5 / max(0.01, uAvgIrisLum), 0.8, 5.0);
     vec3 tinted = toLinearFast(blend) * lum * scale;
     vec3 result = mix(baseL, tinted, opacity);
     return toSRGBFast(result);
 }
 
-vec3 blendColorReplace(vec3 base, vec3 blend, float opacity, float maxDetail) {
-    float lum = dot(base, vec3(0.299, 0.587, 0.114));
-    float detail = lum / max(0.01, uAvgIrisLum);
-    detail = clamp(detail, 0.2, maxDetail);
-    vec3 colored = blend * detail;
-    return mix(base, colored, opacity);
+// P6-W2 §5.3 C4: ColorReplaceLinear. W2 활성 — W5 B1 벤치 대상, 채택 확정 아님.
+vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDetail) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = toLinearFast(blend);
+    float lum = dot(baseL, LUMA_709_LENS);
+    float detail = clamp(pow(lum / max(0.01, uAvgIrisLum), 0.7), 0.75, maxDetail);
+    vec3 colored = lensL * detail;
+    return toSRGBFast(mix(baseL, colored, opacity));
 }
 
 float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
@@ -958,22 +958,25 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
 
     float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
 
-    // P5-W3-05 S1 D6: uBlendMode 3/4/6 (Overlay/LuminanceTint/SoftLight) 분기 제거
-    // 해당 값이 들어오면 default(blendNormal)로 fallback
-    // Normal(0) 유지는 B1 벤치 (Normal vs ColorReplaceLinear) 대기용
+    // P6-W2 §5.4/§5.8/§5.9: 블렌드 분기 5종 등록 (0/1/2/5/7) + 빈 ID(3/4/6) fallback.
+    //   - ID 0 Normal: 유지 (W5 B1 Normal vs CRL 벤치 대기)
+    //   - ID 2 ScreenLinear: 선형 공간 (W2 sRGB Screen 대체)
+    //   - ID 5 TintLinearV2: canonical default
+    //   - ID 7 ColorReplaceLinear: W2 활성 — W5 B1 벤치 대상, 채택 확정 아님
+    //   - ID 3/4/6/기타: TintLinearV2 fallback (디버그 로그는 CPU 측에서 1회)
     vec3 blended;
     if (uBlendMode == 0) {
         blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 1) {
         blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 2) {
-        blended = blendScreen(camera.rgb, lens.rgb, finalAlpha);
+        blended = blendScreenLinear(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 5) {
-        blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
+        blended = blendTintLinearV2(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 7) {
-        blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha, maxDetail);
+        blended = blendColorReplaceLinear(camera.rgb, lens.rgb, finalAlpha, maxDetail);
     } else {
-        blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
+        blended = blendTintLinearV2(camera.rgb, lens.rgb, finalAlpha);
     }
 
     // P5-W3-05 S1 D2: LIMBAL_ENABLED=false 하드코드 블록 제거
