@@ -1,9 +1,10 @@
 # P6-W2: 블렌드 3종 확정 + realSpec 폐기 구조
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: 구현 완료 (2026-04-29). 실기기 시각 회귀 검증은 PR 단계에서 수행.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W1 (EyeRenderPacket, avg_iris_luma 실측)
 > **후속 의존**: P6-W3 (환경 반사 계층)
+> **구현 브랜치**: `feature/P6-W2`
 
 ---
 
@@ -237,13 +238,17 @@ S1 롤백 커밋에서 다음이 이미 적용됨:
 
 ### 4.1 Definition of Done
 
-- [ ] `shader_sources.cpp`의 블렌드 분기 정리 (ID 0/1/2/5/7)
-- [ ] 함수명 `blendLuminanceTintLinear` → `blendTintLinearV2` 전면 반영
-- [ ] `blendScreen` 제거 또는 내부 구현만 `blendScreenLinear`로 교체 (ID 2는 유지)
-- [ ] `blendColorReplaceLinear` 수식 함수 존재 (호출 없이 대기 상태)
-- [ ] C++ 빌드 통과
-- [ ] 실기기 1회 확인 — 기존 LTL SKU 렌더링 결과가 TintLinearV2로 시각적으로 동일
-- [ ] 단위 테스트: 새 수식들의 edge case (baseL=0, lensL=0, lum=0 등) 안전성 (선택)
+- [x] `shader_sources.cpp`의 블렌드 분기 정리 (ID 0/1/2/5/7) — fallback default = TintLinearV2
+- [x] 함수명 `blendLuminanceTintLinear` → `blendTintLinearV2` 전면 반영 + uAvgIrisLum squaring 제거
+- [x] `blendScreen`(sRGB) 제거, 내부 구현 `blendScreenLinear`로 교체 (ID 2는 유지) — 옵션 A 채택
+- [x] `blendColorReplaceLinear` 수식 함수 존재 + ID 7 정식 분기 활성 (§5.7 옵션 B, B1 벤치 대상 — 채택 확정 아님)
+- [x] LUMA_709_LENS 상수로 블렌드 LUMA 계수 Rec.709 linear 통일 (§5.10)
+- [x] invalid blend ID(3/4/6/etc.) debug 빌드 1회 경고 + 셰이더 TintLinearV2 fallback (§5.9)
+- [x] BlendMode enum 주석 갱신 + canonical default 명시 (sdk_api.h, types.h, §5.4/5.12)
+- [x] realSpec_archive.md 보존 (§5.11 Claude 부가 제안)
+- [x] C++ 빌드 통과 (`cmake --build . --target iris_sdk` no work to do)
+- [ ] 실기기 1회 확인 — 기존 LTL SKU 렌더링 결과가 TintLinearV2로 시각적으로 동일 (PR 단계)
+- [ ] 단위 테스트: 새 수식들의 edge case (선택, default 모드 생략)
 
 ### 4.2 Out of scope
 
@@ -488,12 +493,17 @@ vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDeta
 
 §4.1 체크리스트 전체 ✅.
 
-### 8.2 커밋 전략
+### 8.2 커밋 전략 (실제 적용 — feature/P6-W2)
 
-**커밋 1**: `docs(P6-W2): 섹션 2~8 본문 작성`
-**커밋 2**: `refactor(gpu-lens): P6-W2 blendLuminanceTintLinear → blendTintLinearV2 리네이밍`
-**커밋 3**: `feat(gpu-lens): P6-W2 blendScreenLinear 선형 공간 구현`
-**커밋 4**: `feat(gpu-lens): P6-W2 blendColorReplaceLinear 수식 추가 (B1 대기)`
+원안 4분할에서 5분할로 조정 (cpp 변경이 같은 파일/같은 영역에 응집되어 본체는 단일 커밋, 보조 변경을 논리 단위로 분리).
+
+| # | 해시 | 메시지 | 영역 |
+|---|------|-------|------|
+| 1 | `b70490b` | feat(gpu-lens): P6-W2 블렌드 3종 선형 공간 정리 + LUMA_709 Rec.709 통일 | shader_sources.cpp (블렌드 함수 + 분기 + LUMA 상수) |
+| 2 | `25ebf99` | feat(gpu-lens): P6-W2 invalid blend ID 1회 debug 경고 (§5.9) | gpu_lens_renderer.h/cpp |
+| 3 | `a7fcdd7` | docs(api): P6-W2 BlendMode enum canonical default 주석 갱신 (§5.4/5.12) | types.h, sdk_api.h |
+| 4 | `6af6a4f` | docs(P6-W2): realSpec 폐기 아카이브 보존 (§5.11) | realSpec_archive.md |
+| 5 | (이 커밋) | docs(P6-W2): 구현 완료 마킹 + DoD 체크 + 99 §1.1/§1.2 갱신 | P6-W2 문서 + 99_final_decision.md |
 
 ### 8.3 다음 W 트리거
 

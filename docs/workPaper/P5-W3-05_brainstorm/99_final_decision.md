@@ -26,19 +26,19 @@ R3에서 Codex·Gemini·Claude가 모두 동의한 항목만 포함. `99_claude_
 |----|----------|----------|----------|
 | D1 | 분석적 노멀 + 고정 조명 `vec3(0.3, 0.4, 1.0)` 블록 | `shader_sources.cpp:1008-1032` | 세 모델 R2 합의, R3 재확인 |
 | D2 | `LIMBAL_ENABLED = false` 하드코드 전역 비활성 | `shader_sources.cpp:999-1006` | 세 모델 R2 합의 |
-| D3 | `realSpec = smoothstep(0.7, 0.95, lum)` + `mix(result, baseL, realSpec)` | `shader_sources.cpp:865-874` (LTL 내부) | **조건부 폐기**: I1 환경 반사 계층 도입 성공(B2) 확정 후 제거. I1 실패 시 재평가 — Gemini/Claude R3 지적 |
+| D3 | `realSpec = smoothstep(0.7, 0.95, lum)` + `mix(result, baseL, realSpec)` | `shader_sources.cpp:865-874` (LTL 내부) | **조건부 폐기**: I1 환경 반사 계층 도입 성공(B2) 확정 후 제거. I1 실패 시 재평가 — Gemini/Claude R3 지적. ✅ **P6-W2 코드 완전 삭제** (커밋 b70490b, archive: `P6-W2_brainstorm/realSpec_archive.md`). 문서상 "확정 폐기" 마킹은 W4 B2 결과 후. |
 | D4 | `uAvgIrisLum = 0.35` 하드코드 기본값 | `gpu_lens_renderer.cpp:811-813` 근처 | 세 모델 R2 합의 |
 | D5 | "3D Light" 토글 UI + `uHighlightEnabled` uniform | demo + shader | D1 제거 시 자동 무의미 |
-| D6 | 블렌드 중 `Overlay`, `LuminanceTint(nonlinear)`, `SoftLight` 3종 | `shader_sources.cpp:979-997` 분기 | ⚠️ **`Normal` 제거 철회** — Codex R3 "B1 벤치 전 제거는 결론 선반영" 지적. Normal은 B1 벤치 전까지 유지 |
+| D6 | 블렌드 중 `Overlay`, `LuminanceTint(nonlinear)`, `SoftLight` 3종 | `shader_sources.cpp:979-997` 분기 | ⚠️ **`Normal` 제거 철회** — Codex R3 "B1 벤치 전 제거는 결론 선반영" 지적. Normal은 B1 벤치 전까지 유지. ✅ **P6-W2 적용** (S1 9aee86d로 함수+분기 제거, W2 b70490b로 fallback default를 TintLinearV2로 통일, 25ebf99로 invalid ID 1회 경고). |
 
 ### 1.2 추가/변경할 것
 
 | ID | 변경 | 합의 출처 / R3 수정 내역 |
 |----|------|----------------------|
-| C1 | **블렌드 3종 확정**: `TintLinearV2`(기본값), `Multiply`, `ScreenLinear`. 4번째 슬롯은 §2 B1 벤치 결과로 확정 | ⚠️ **R3 수정**: Codex 원래 R2 입장(3종 확정 + 4번째 슬롯 벤치)으로 되돌림. 99_claude_synthesis의 "4종 확정" 왜곡 수정 |
-| C2 | `TintLinearV2` = 기존 LuminanceTintLinear에서 `realSpec` 완전 제거한 형태. 수식: `baseL=base*base; lensL=lens*lens; lum=dot(baseL,w); out=sqrt(mix(baseL, lensL*lum*scale, a))` | 세 모델 R2/R3 합의 |
-| C3 | `ScreenLinear` 신규 — 수식: `out = sqrt(mix(baseL, 1-(1-baseL)*(1-lensL), a))` | 세 모델 R2/R3 합의 |
-| C4 | `ColorReplaceLinear` **벤치 대상(B1)** — 수식: `detail = clamp(pow(lum/avgLum, 0.7), 0.75, 1.25); out = sqrt(mix(baseL, lensL*detail, a))` | Codex R2 제안, B1 결과 후 채택 결정 |
+| C1 | **블렌드 3종 확정**: `TintLinearV2`(기본값), `Multiply`, `ScreenLinear`. 4번째 슬롯은 §2 B1 벤치 결과로 확정 | ⚠️ **R3 수정**: Codex 원래 R2 입장(3종 확정 + 4번째 슬롯 벤치)으로 되돌림. 99_claude_synthesis의 "4종 확정" 왜곡 수정. ✅ **P6-W2 적용** (커밋 b70490b — 셰이더 함수 + 분기 등록 완료). |
+| C2 | `TintLinearV2` = 기존 LuminanceTintLinear에서 `realSpec` 완전 제거한 형태. 수식: `baseL=base*base; lensL=lens*lens; lum=dot(baseL,w); out=sqrt(mix(baseL, lensL*lum*scale, a))` | 세 모델 R2/R3 합의. ✅ **P6-W2 적용** (커밋 b70490b — squaring 버그 함께 수정, uAvgIrisLum 이미 linear 가정). |
+| C3 | `ScreenLinear` 신규 — 수식: `out = sqrt(mix(baseL, 1-(1-baseL)*(1-lensL), a))` | 세 모델 R2/R3 합의. ✅ **P6-W2 적용** (커밋 b70490b — sRGB blendScreen 제거, 옵션 A). |
+| C4 | `ColorReplaceLinear` **벤치 대상(B1)** — 수식: `detail = clamp(pow(lum/avgLum, 0.7), 0.75, 1.25); out = sqrt(mix(baseL, lensL*detail, a))` | Codex R2 제안, B1 결과 후 채택 결정. ✅ **P6-W2 적용** (커밋 b70490b — ID 7 정식 분기 활성, §5.7 옵션 B. W5 B1 결과로 채택/제거). |
 | C5 | 환경 반사 가산 계층 분리. 기본: `float renderMask = finalAlpha; blended += reflection * fresnel * renderMask;`. **반사 소스는 B2 벤치로 결정**. **renderMask hook**: P6-W1 활성화 시 `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 분기로 `renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist))`로 확장 가능. 기본 동작은 기존 finalAlpha와 동일, 추가 런타임 비용 0. ⚠️ 이 smoothstep 수식은 **예시, 최종 구현 확정 아님** (Codex R4 단서) | Codex R1/R3 + R4 Patch 4 |
 | C6 | 림발 기본 ON + SKU 메타데이터 플래그. 플래그는 **내부 material 모델 필드**(공개 `LensConfig`가 아닌 내부 표현) | ⚠️ **R3 수정**: Codex R3 "공개 API 변경 가능성" 지적 반영. 공개 API는 변경하지 않음 |
 | C7 | **블링크 alpha ramp — 시간 범위만 확정, 계수는 실측 튜닝**. down 50~80ms, up은 **B5 벤치로 확정**(아래 §2) | ⚠️ **R3 수정**: Gemini R3 "up 100~120ms 동의한 적 없음" + Codex R3 "α=0.15 계수가 목표 ms와 불일치" 둘 다 반영. up 시간 쟁점 자체를 벤치로 이관 |
