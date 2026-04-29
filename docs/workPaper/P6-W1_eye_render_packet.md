@@ -1,9 +1,10 @@
 # P6-W1: EyeRenderPacket 도입 + avg_iris_luma ROI 평균 실측
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: 계약 도입 + fallback chain 인프라 완료 (2026-04-29). **실측 source는 W6 이관**.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W0
 > **후속 의존**: P6-W2, W3, W4~W7 (모두 기반)
+> **회귀 이력**: glReadPixels + 임시 FBO + Android EXTERNAL_OES 충돌 → 검은 화면 → revert (§6.3 참조)
 
 ---
 
@@ -207,13 +208,14 @@ Codex R3 제안:
 
 ### 4.1 Definition of Done (구체 검증)
 
-- [ ] `eye_render_packet.h` 파일 존재, 필수/optional 필드 모두 포함
-- [ ] `gpu_lens_renderer.h` 의 render API가 `EyeRenderPacket&`를 받음
-- [ ] S1 주석 `// glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f); // 제거됨`이 실제 측정 코드로 치환됨
-- [ ] C++ 빌드 통과 (`cmake --build . --target iris_sdk`)
-- [ ] 단위 테스트: EyeRenderPacket 구조체 생성/복사/optional 처리 (최소 1개)
-- [ ] 실기기 1회 렌더링: LTL 모드에서 과도 tint 없음 (육안 확인)
-- [ ] 성능 회귀 없음 (MID tier 기준 FPS 유지)
+- [x] `eye_render_packet.h` 파일 존재, 필수/optional 필드 모두 포함 (a49ce59)
+- [x] `gpu_lens_renderer`의 render 경로가 **내부에서** `EyeRenderPacket` 경유 — adapter 레이어 (2206d4a). 공개 C++ 시그니처는 `feedback_refactor_vs_retune` 원칙에 따라 유지.
+- [x] S1 주석 위치에 `glUniform1f(uAvgIrisLum, avg_luma)` 주입 — fallback chain 산출값으로 매 프레임 갱신 (c36d883). uniform 미설정 → GL 기본값 0.0 회귀 차단.
+- [~] **avg_iris_luma 실측 — W6 이관**. W1 시도(임시 FBO + glReadPixels)는 Android EXTERNAL_OES 카메라 텍스처와 충돌하여 검은 화면 회귀 → 1b869c4/b16cf05/244ab1f revert. 정식 측정은 W6에서 비동기 PBO readback 또는 detector CPU 버퍼 활용으로 설계.
+- [x] C++ 빌드 통과 (`cmake --build . --target iris_sdk`, exit 0)
+- [ ] 단위 테스트: EyeRenderPacket 구조체 생성/복사/optional 처리 — full 모드 미실행 (default).
+- [x] 실기기 검은 화면 회귀 회복 — revert 후 정상 렌더 확인.
+- [ ] 성능 회귀 없음 (MID tier FPS) — 별도 트랙.
 
 ### 4.2 Out of scope (W1에서 하지 않는 것)
 
@@ -438,6 +440,20 @@ L_0 = L_fallback (= 0.35)
 원문: `docs/workPaper/P6-W1_brainstorm/{codex,gemini,claude}_w1.md`.
 종합: `docs/workPaper/P6-W1_brainstorm/synthesis.md`.
 
+### 6.3 W1 measure 회귀 → W6 이관 (architectural lesson)
+
+**증상** (실기기, 2026-04-29): 블렌드 모드 무관 + 렌즈 텍스처 변경 시 검은 화면.
+
+**원인**: `measureAvgIrisLumaROI`가 매 프레임 임시 FBO 생성 → `glFramebufferTexture2D(GL_TEXTURE_2D, input_texture)` → `glReadPixels`. Android 카메라 텍스처는 `GL_TEXTURE_EXTERNAL_OES` 타입인데 일반 `GL_TEXTURE_2D`로 attach 시도 → INVALID_OPERATION → GL state 오염 → 후속 메인 렌더 깨짐.
+
+**조치**: `1b869c4`/`b16cf05`/`244ab1f` 3개 커밋 revert (`7bf9707`/`d62b314`/`8958500`). measure 코드 통째 제거. fallback chain 인프라만 별도 커밋(`c36d883`)으로 정비 → uniform 매 프레임 0.35 hold 주입.
+
+**W6 이관 — 측정 경로 후보 2개**:
+1. **GLES PBO 비동기 readback** — `glReadBuffer` + PBO mapping. EXTERNAL_OES와 충돌 회피 가능 여부 검증 필요. blit으로 일반 텍스처 복사 후 readPixels이 안전 경로.
+2. **`mediapipe_detector` CPU 버퍼 활용** — detector가 이미 카메라 RGBA를 CPU에서 받고 있다면 그쪽에서 ROI 평균을 계산해 `IrisResult`(or 별도 채널)에 첨부. **GL 우회로 가장 깔끔**, 설계 단순.
+
+W6 브레인스토밍 시 이 두 경로 우선 검토.
+
 ### 6.2 ROI 마스크 반경 — 실기기 벤치로 확정 예정
 
 **현 상태 (R1 결론):** 초기값 r<0.60, [0.55, 0.65] 스위프 (§5.7 참조).
@@ -533,14 +549,23 @@ L_0 = L_fallback (= 0.35)
 - [ ] 단위 테스트 1개 이상
 - [ ] 실기기 1회 확인
 
-### 8.2 커밋 전략
+### 8.2 커밋 전략 (실제 커밋 해시 — revert 포함 history 그대로 보존)
 
-**커밋 1**: `docs(P6-W1): 섹션 2~8 본문 작성 — 세부 계획 상세화` (지금 이 수정)
-**커밋 2**: `refactor(gpu-lens): P6-W1 EyeRenderPacket 도입 + 어댑터 레이어`
-**커밋 3**: `feat(gpu-lens): P6-W1 avg_iris_luma masked ROI 평균 self-measure`
-**커밋 4** (선택): `test(gpu-lens): P6-W1 EyeRenderPacket 단위 테스트`
+| # | 해시 | 종류 | 제목 |
+|---|------|------|------|
+| 1 | `a49ce59` | feat | P6-W1 EyeRenderPacket 내부 계약 구조체 도입 |
+| 2 | `2206d4a` | feat | P6-W1 IrisResult → EyeRenderPacket 어댑터 레이어 |
+| 3 | `1b869c4` | feat | P6-W1 avg_iris_luma masked ROI self-measure + EMA + fallback |
+| 4 | `f7317fc` | docs | P6-W1 구현 완료 상태 반영 (이후 §5.3 갱신으로 재수정) |
+| 5 | `aeb67a9` | chore | P6-W1 검증용 LTL(Mode 5) 스피너 임시 노출 |
+| 6 | `b16cf05` | tune | P6-W1 §6.2 ROI 반경 0.60 → 0.55 (실기기 1차 피드백) |
+| 7 | `244ab1f` | fix | P6-W1 검은 화면 회귀 — measureAvgIrisLumaROI 임시 단락 |
+| 8 | `7bf9707` | revert | #7 단락 |
+| 9 | `d62b314` | revert | #6 ROI 0.55 |
+| 10 | `8958500` | revert | #3 measure 통째 |
+| 11 | `c36d883` | feat | P6-W1 avg_iris_luma fallback chain (실측 source W6 이관) |
 
-W별 멀티 커밋 권장 — 벤치 결과 역추적 용이.
+PR base: `feature/P6-Works`. revert history 보존 — W6 작업 시 같은 함정 재발 방지.
 
 ### 8.3 다음 W 트리거
 
