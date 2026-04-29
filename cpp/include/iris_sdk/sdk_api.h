@@ -118,16 +118,20 @@ typedef enum IrisEyeRefinerPolicy {
  * @brief 렌즈 블렌딩 모드
  *
  * 렌즈 렌더링 시 프레임과 텍스처를 합성하는 방식을 지정합니다.
+ *
+ * P6-W2 §5.4/§5.12: Canonical default = `IRIS_BLEND_LUMINANCE_TINT_LINEAR` (ID=5, TintLinearV2).
+ *   활성 ID = {0, 1, 2, 5, 7}. ID 3/4/6은 deprecated이며 셰이더에서 ID 5 fallback.
+ *   외부 API 호환성 유지를 위해 enum 값은 보존됨.
  */
 typedef enum IrisBlendMode {
     IRIS_BLEND_NORMAL = 0,              /**< 일반 알파 블렌딩 */
     IRIS_BLEND_MULTIPLY = 1,            /**< 곱하기 블렌딩 */
-    IRIS_BLEND_SCREEN = 2,              /**< 스크린 블렌딩 */
-    IRIS_BLEND_OVERLAY = 3,             /**< 오버레이 블렌딩 */
-    IRIS_BLEND_LUMINANCE_TINT = 4,      /**< 휘도 보존 틴트 (sRGB 근사) @experimental */
-    IRIS_BLEND_LUMINANCE_TINT_LINEAR = 5,/**< 휘도 보존 틴트 (선형 색공간) @experimental */
-    IRIS_BLEND_SOFT_LIGHT = 6,          /**< 소프트 라이트 블렌딩 @experimental */
-    IRIS_BLEND_COLOR_REPLACE = 7        /**< 색상 교체 블렌딩 (상대 밝기 정규화) @experimental */
+    IRIS_BLEND_SCREEN = 2,              /**< 스크린 (W2: 선형 공간 ScreenLinear) */
+    IRIS_BLEND_OVERLAY = 3,             /**< @deprecated TintLinearV2 fallback */
+    IRIS_BLEND_LUMINANCE_TINT = 4,      /**< @deprecated TintLinearV2 fallback */
+    IRIS_BLEND_LUMINANCE_TINT_LINEAR = 5,/**< 휘도 보존 틴트 — **canonical default** (W2 TintLinearV2) */
+    IRIS_BLEND_SOFT_LIGHT = 6,          /**< @deprecated TintLinearV2 fallback */
+    IRIS_BLEND_COLOR_REPLACE = 7        /**< 색상 교체 (W2: ColorReplaceLinear, B1 벤치 대기) */
 } IrisBlendMode;
 
 // ============================================================================

@@ -21,15 +21,19 @@ namespace iris_sdk {
  * @brief 블렌드 모드 열거형
  * 렌즈 렌더링 시 사용할 블렌딩 방식
  */
+// P6-W2 §5.4/§5.12: 블렌드 모드 ID 매핑.
+//   - 활성 ID: 0(Normal) / 1(Multiply) / 2(ScreenLinear) / 5(TintLinearV2, default) / 7(ColorReplaceLinear).
+//   - Deprecated ID: 3/4/6 → 셰이더에서 TintLinearV2 fallback. enum 값은 외부 호환성 유지를 위해 보존.
+//   - W2 시점: ID 7 ColorReplaceLinear는 활성이지만 W5 B1 벤치 결과에 따라 채택/제거 결정.
 enum class BlendMode : int {
     Normal = 0,             ///< 일반 알파 블렌딩
     Multiply = 1,           ///< 곱하기 블렌딩
-    Screen = 2,             ///< 스크린 블렌딩
-    Overlay = 3,            ///< 오버레이 블렌딩
-    LuminanceTint = 4,      ///< 휘도 보존 틴트 (sRGB 근사) @experimental
-    LuminanceTintLinear = 5,///< 휘도 보존 틴트 (선형 색공간) @experimental
-    SoftLight = 6,          ///< 소프트 라이트 블렌딩 @experimental
-    ColorReplace = 7        ///< 색상 교체 블렌딩 (상대 밝기 정규화) @experimental
+    Screen = 2,             ///< 스크린 블렌딩 (W2: 선형 공간 ScreenLinear로 내부 구현 교체)
+    Overlay = 3,            ///< @deprecated (P5-W3-05 S1 D6) 셰이더에서 TintLinearV2 fallback
+    LuminanceTint = 4,      ///< @deprecated (P5-W3-05 S1 D6) 셰이더에서 TintLinearV2 fallback
+    LuminanceTintLinear = 5,///< 휘도 보존 틴트 (선형 색공간) — **canonical default** (W2 TintLinearV2)
+    SoftLight = 6,          ///< @deprecated (P5-W3-05 S1 D6) 셰이더에서 TintLinearV2 fallback
+    ColorReplace = 7        ///< 색상 교체 블렌딩 (W2: 선형 공간 ColorReplaceLinear, B1 벤치 대기)
 };
 
 /**
