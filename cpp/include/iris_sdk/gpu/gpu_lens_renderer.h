@@ -18,6 +18,7 @@
 #ifndef IRIS_SDK_GPU_LENS_RENDERER_H
 #define IRIS_SDK_GPU_LENS_RENDERER_H
 
+#include "iris_sdk/gpu/eye_render_packet.h"
 #include "iris_sdk/gpu/shader_manager.h"
 #include "iris_sdk/gpu/texture_pool.h"
 #include "iris_sdk/one_euro_filter.h"
@@ -149,6 +150,13 @@ private:
     void renderFullscreenQuad();
     void updateEyelidCache(const IrisResult& iris_result);
     void updateEllipseCache(const IrisResult& iris_result);
+
+    /// W1 §5.3 fallback chain (실측 source 미연결 버전).
+    /// 1) packet.avg_iris_luma → 2) hold(직전 유효값) < kAvgLumaMaxHoldFrames → 3) fallback 상수.
+    /// 실측은 W6 (비동기 readback + 노출 정규화)에서 packet에 채울 예정.
+    /// 반환은 clamp [kAvgLumaClampMin, kAvgLumaClampMax].
+    float updateAvgIrisLuma(const gpu::EyeRenderPacket& left,
+                            const gpu::EyeRenderPacket& right);
 
     // 렌더 컨텍스트 (외부 소유)
 #if IRIS_SDK_GPU_AVAILABLE
@@ -283,6 +291,22 @@ private:
 
     // 이전 출력 텍스처 추적
     GLuint previous_output_texture_ = 0;
+
+    // ========================================
+    // P6-W1: avg_iris_luma fallback chain (실측 source는 W6 이관)
+    // ========================================
+    // 실측(self-measure)은 Android 카메라 텍스처(EXTERNAL_OES) + 임시 FBO attach +
+    // glReadPixels 조합이 GL state 오염을 일으켜 검은 화면 회귀 발생 → revert.
+    // 정식 측정 경로는 W6에서 비동기 PBO readback or detector CPU 버퍼 활용.
+    // 현 단계는 packet.avg_iris_luma(미연결) → hold → fallback 상수 3단만 동작.
+    static constexpr float kAvgLumaFallback      = 0.35f;
+    static constexpr int   kAvgLumaMaxHoldFrames = 3;
+    static constexpr float kAvgLumaClampMin      = 0.1f;
+    static constexpr float kAvgLumaClampMax      = 0.9f;
+
+    float current_avg_luma_    = kAvgLumaFallback;
+    int   avg_luma_hold_count_ = 0;
+    bool  avg_luma_has_valid_  = false;
 
     bool initialized_ = false;
     mutable std::mutex mutex_;

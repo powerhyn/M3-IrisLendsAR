@@ -7,6 +7,7 @@
  */
 
 #include "iris_sdk/gpu/gpu_lens_renderer.h"
+#include "iris_sdk/gpu/eye_render_packet_adapter.h"
 #include "iris_sdk/gpu/render_context.h"
 #include <algorithm>
 #include <array>
@@ -614,6 +615,47 @@ void GPULensRenderer::updateEllipseCache(const IrisResult& iris_result) {
 }
 
 // ============================================================================
+// P6-W1: avg_iris_luma fallback chain (실측 source 미연결)
+// ============================================================================
+
+float GPULensRenderer::updateAvgIrisLuma(const gpu::EyeRenderPacket& left,
+                                         const gpu::EyeRenderPacket& right) {
+    // 1) packet.avg_iris_luma 우선 (양쪽 중 존재하는 값들의 평균).
+    //    W6에서 비동기 readback or detector CPU 버퍼로 packet에 채울 예정.
+    float raw = 0.0f;
+    bool  raw_ok = false;
+    if (left.avg_iris_luma || right.avg_iris_luma) {
+        float sum = 0.0f;
+        int   n = 0;
+        if (left.avg_iris_luma)  { sum += *left.avg_iris_luma;  ++n; }
+        if (right.avg_iris_luma) { sum += *right.avg_iris_luma; ++n; }
+        raw = sum / static_cast<float>(n);
+        raw_ok = true;
+    }
+
+    if (raw_ok) {
+        // 첫 유효값 진입 — fallback에서 시작해 EMA(α=0.3) 적용. (W1 §5.9)
+        if (!avg_luma_has_valid_) {
+            current_avg_luma_   = kAvgLumaFallback;
+            avg_luma_has_valid_ = true;
+        }
+        current_avg_luma_    = 0.3f * raw + 0.7f * current_avg_luma_;
+        avg_luma_hold_count_ = 0;
+    } else if (avg_luma_has_valid_ && avg_luma_hold_count_ < kAvgLumaMaxHoldFrames) {
+        // 2) hold (직전 유효값 유지)
+        ++avg_luma_hold_count_;
+    } else {
+        // 3) fallback 상수
+        current_avg_luma_    = kAvgLumaFallback;
+        avg_luma_hold_count_ = 0;
+        avg_luma_has_valid_  = false;
+    }
+
+    return std::max(kAvgLumaClampMin,
+                    std::min(kAvgLumaClampMax, current_avg_luma_));
+}
+
+// ============================================================================
 // 렌더링
 // ============================================================================
 
@@ -649,6 +691,14 @@ ErrorCode GPULensRenderer::renderToTexture(
     // 캐시 업데이트
     updateEyelidCache(iris_result);
     updateEllipseCache(iris_result);
+
+    // W1: 내부 EyeRenderPacket 경유. avg_iris_luma 실측은 W6 이관, 현 단계는
+    // packet 경로(미연결) → hold → fallback 0.35 만 동작. uniform은 매 프레임 주입.
+    const auto left_packet  = gpu::adaptIrisResult(iris_result, gpu::EyeSide::Left,
+                                                   iris_result.frame_width, iris_result.frame_height);
+    const auto right_packet = gpu::adaptIrisResult(iris_result, gpu::EyeSide::Right,
+                                                   iris_result.frame_width, iris_result.frame_height);
+    const float avg_luma = updateAvgIrisLuma(left_packet, right_packet);
 
     // 출력 텍스처 획득
     auto* output_info = texture_pool_->acquireRenderTarget(width, height);
@@ -811,13 +861,11 @@ ErrorCode GPULensRenderer::renderToTexture(
         }
     }
 
-    // P5-W3-05 S1 D4: uAvgIrisLum = 0.35f 하드코드 제거
-    // 근거: "priors 덮어씌움" (Codex R2/R3). 사용자 홍채 편차(0.2~0.6) + 조명 노출 편차 커서
-    //       고정값은 정규화를 망친다.
-    // S2에서 C9 (masked ROI 평균 실측) 도입 예정. 그전까지 uniform 미설정 → GL 기본값 0.0
-    //       → 셰이더 clamp 하한(0.01)에 걸려 scale이 최대(2.5 or 5.0)로 고정됨. 이는 임시 동작.
-    //       S2에서 EyeRenderPacket.avg_iris_luma 또는 self-measure로 교체.
-    // glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f);  // 제거됨
+    // W1 §5.3 fallback chain의 산출값. 실측 source(self-measure)는 W6 이관 —
+    // Android 카메라(EXTERNAL_OES) + 임시 FBO + glReadPixels 경로가 GL state 오염을
+    // 일으킨다는 사실이 실기기에서 확인됨. 정식 측정은 비동기 PBO readback or
+    // detector CPU 버퍼 활용으로 W6에서 다룬다. 현 단계는 hold/fallback만 작동.
+    glUniform1f(lens_uniforms_.uAvgIrisLum, avg_luma);
 
     // 검출 높이 (Bug B: 픽셀 높이를 그대로 전달 — Kotlin의 detHf와 동일)
     glUniform1f(lens_uniforms_.uDetH, det_hf);
