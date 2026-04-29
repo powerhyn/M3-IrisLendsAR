@@ -86,7 +86,22 @@
       "WebFetch(domain:o-lens.com)",
       "WebFetch(domain:lensvery.com)",
       "WebFetch(domain:sungyesa.com)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(tmux list-sessions *)",
+      "Bash(tmux list-panes *)",
+      "Bash(tmux list-windows *)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK add android/demo-app/src/main/java/com/irislenssdk/demo/GpuRenderActivity.kt)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK commit -m ' *)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK push)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK add cpp/include/iris_sdk/gpu/gpu_lens_renderer.h)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK add cpp/src/gpu/gpu_lens_renderer.cpp)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK branch backup/P6-W1-before-revert)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK branch --list \"backup/*\")",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK revert --no-edit 244ab1f)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK revert --no-edit b16cf05)",
+      "Bash(git -C /Volumes/M3-P31/Projects/MerooMong/IrisLensSDK revert --no-edit 1b869c4)",
+      "Bash(git *)",
+      "Bash(gh pr *)"
     ]
   },
   "enabledPlugins": {
