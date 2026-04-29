@@ -18,7 +18,6 @@
 #ifndef IRIS_SDK_GPU_LENS_RENDERER_H
 #define IRIS_SDK_GPU_LENS_RENDERER_H
 
-#include "iris_sdk/gpu/eye_render_packet.h"
 #include "iris_sdk/gpu/shader_manager.h"
 #include "iris_sdk/gpu/texture_pool.h"
 #include "iris_sdk/one_euro_filter.h"
@@ -281,36 +280,6 @@ private:
         int valid_frames = 0;
     };
     EllipseCache ellipse_cache_[2];
-
-    // ========================================
-    // P6-W1: avg_iris_luma self-measure + EMA + fallback
-    // §5.3 체인: packet.avg_iris_luma → self-measure ROI → hold<3 → fallback 상수
-    // §5.7 ROI r<0.60 * eyelidMask, §5.8 fallback=0.35, §5.9 EMA α=0.3, clamp [0.1, 0.9]
-    // ========================================
-    static constexpr float kAvgLumaEmaAlpha       = 0.3f;
-    static constexpr float kAvgLumaFallback       = 0.35f;
-    static constexpr int   kAvgLumaMaxHoldFrames  = 3;
-    static constexpr float kAvgLumaRoiRadiusRatio = 0.60f;
-    static constexpr float kAvgLumaClampMin       = 0.1f;
-    static constexpr float kAvgLumaClampMax       = 0.9f;
-
-    float current_avg_luma_    = kAvgLumaFallback;
-    int   avg_luma_hold_count_ = 0;
-    bool  avg_luma_has_valid_  = false;
-
-    /// W1 §5.2~§5.9: 이 프레임에 적용할 avg_iris_luma 값을 계산.
-    /// packet.avg_iris_luma → glReadPixels 기반 self-measure → hold → fallback 순.
-    /// EMA α=0.3 적용 후 clamp [0.1, 0.9].
-    float updateAvgIrisLuma(uint32_t input_texture,
-                            int tex_width, int tex_height,
-                            const gpu::EyeRenderPacket& left,
-                            const gpu::EyeRenderPacket& right);
-
-    /// 한쪽 눈 iris ROI에서 linear Rec.709 평균 luma 측정. 실패 시 -1.
-    /// ROI: (dist_from_iris_center_norm < kAvgLumaRoiRadiusRatio) AND y ∈ [eye_top, eye_bottom].
-    float measureAvgIrisLumaROI(uint32_t input_texture,
-                                int tex_width, int tex_height,
-                                const gpu::EyeRenderPacket& packet);
 
     // 이전 출력 텍스처 추적
     GLuint previous_output_texture_ = 0;

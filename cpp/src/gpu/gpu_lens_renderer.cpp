@@ -7,13 +7,11 @@
  */
 
 #include "iris_sdk/gpu/gpu_lens_renderer.h"
-#include "iris_sdk/gpu/eye_render_packet_adapter.h"
 #include "iris_sdk/gpu/render_context.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
-#include <vector>
 
 #if IRIS_SDK_GPU_AVAILABLE
 #include "iris_sdk/gpu/gles_render_context.h"
@@ -616,174 +614,6 @@ void GPULensRenderer::updateEllipseCache(const IrisResult& iris_result) {
 }
 
 // ============================================================================
-// P6-W1: avg_iris_luma self-measure (§5.2, §5.2.1, §5.7~§5.9)
-// ============================================================================
-
-float GPULensRenderer::measureAvgIrisLumaROI(uint32_t input_texture,
-                                             int tex_width, int tex_height,
-                                             const gpu::EyeRenderPacket& packet) {
-#if IRIS_SDK_GPU_AVAILABLE
-    // 빠른 거절: 미검출(visibility=0), 반경 0, 유효하지 않은 텍스처 크기는 측정 불가.
-    if (packet.visibility <= 0.0f) return -1.0f;
-    if (packet.iris_radius_norm <= 0.0f) return -1.0f;
-    if (tex_width <= 0 || tex_height <= 0) return -1.0f;
-    if (input_texture == 0) return -1.0f;
-
-    // 중심·반경 픽셀 좌표 (정규화 규약: x는 width 기준, y는 height 기준)
-    const float r_px_f  = packet.iris_radius_norm * static_cast<float>(tex_width)
-                        * kAvgLumaRoiRadiusRatio;
-    const float cx_px_f = packet.iris_center_norm.x * static_cast<float>(tex_width);
-    const float cy_px_f = packet.iris_center_norm.y * static_cast<float>(tex_height);
-    if (r_px_f < 1.0f) return -1.0f;
-
-    const int r_px  = static_cast<int>(std::ceil(r_px_f));
-    const int cx_px = static_cast<int>(std::round(cx_px_f));
-    const int cy_px = static_cast<int>(std::round(cy_px_f));
-
-    // ROI bbox 클리핑 (텍스처 내부로)
-    const int roi_x0 = std::max(0, cx_px - r_px);
-    const int roi_y0 = std::max(0, cy_px - r_px);
-    const int roi_x1 = std::min(tex_width,  cx_px + r_px);
-    const int roi_y1 = std::min(tex_height, cy_px + r_px);
-    const int roi_w  = roi_x1 - roi_x0;
-    const int roi_h  = roi_y1 - roi_y0;
-    if (roi_w <= 0 || roi_h <= 0) return -1.0f;
-
-    // eyelidMask 근사: y는 [eye_top, eye_bottom] 범위(정규화) 내에서만 허용.
-    // packet.eye_top/eye_bottom의 상하 규약이 프레임별로 달라질 수 있으므로 min/max로 보정.
-    const float y_min_norm = std::min(packet.eye_top, packet.eye_bottom);
-    const float y_max_norm = std::max(packet.eye_top, packet.eye_bottom);
-
-    // 임시 READ FBO 구성 (현재 바인딩된 FBO 오염 방지: READ 타깃만 덮어씀)
-    GLuint tmp_fbo = 0;
-    glGenFramebuffers(1, &tmp_fbo);
-    if (tmp_fbo == 0) return -1.0f;
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, tmp_fbo);
-    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D, static_cast<GLuint>(input_texture), 0);
-
-    if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-        glDeleteFramebuffers(1, &tmp_fbo);
-        return -1.0f;
-    }
-
-    // RGBA8 read (모바일 GLES에서 보장되는 포맷). vector RAII로 해제.
-    std::vector<uint8_t> buf(static_cast<size_t>(roi_w) * static_cast<size_t>(roi_h) * 4u);
-    glReadPixels(roi_x0, roi_y0, roi_w, roi_h,
-                 GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
-
-    // 정리 (성공/실패 공통)
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glDeleteFramebuffers(1, &tmp_fbo);
-
-    // 원형 마스크 반경(px) 제곱 — 원래 ratio 적용된 r_px_f 기준
-    const float r_px_sq = r_px_f * r_px_f;
-
-    double sum   = 0.0;
-    int    count = 0;
-    const float inv_h_f = 1.0f / static_cast<float>(tex_height);
-
-    for (int y = 0; y < roi_h; ++y) {
-        const int py = roi_y0 + y;
-        const float y_norm = static_cast<float>(py) * inv_h_f;
-        // y 범위 마스크 (eyelid slab 근사)
-        if (y_norm < y_min_norm || y_norm > y_max_norm) continue;
-
-        const float dy = static_cast<float>(py - cy_px);
-        const float dy_sq = dy * dy;
-        const uint8_t* row = buf.data() + static_cast<size_t>(y) * roi_w * 4u;
-
-        for (int x = 0; x < roi_w; ++x) {
-            const int px = roi_x0 + x;
-            const float dx = static_cast<float>(px - cx_px);
-            if (dx * dx + dy_sq > r_px_sq) continue;
-
-            const uint8_t r8 = row[x * 4 + 0];
-            const uint8_t g8 = row[x * 4 + 1];
-            const uint8_t b8 = row[x * 4 + 2];
-
-            // §5.2.1: sRGB → linear (감마 2.0 근사). shader 측 squaring 금지 규약과 정합.
-            const float rn = static_cast<float>(r8) * (1.0f / 255.0f);
-            const float gn = static_cast<float>(g8) * (1.0f / 255.0f);
-            const float bn = static_cast<float>(b8) * (1.0f / 255.0f);
-            const float rL = rn * rn;
-            const float gL = gn * gn;
-            const float bL = bn * bn;
-
-            // Rec.709 luma (linear)
-            const float luma = 0.2126f * rL + 0.7152f * gL + 0.0722f * bL;
-            sum += static_cast<double>(luma);
-            ++count;
-        }
-    }
-
-    if (count == 0) return -1.0f;
-    return static_cast<float>(sum / static_cast<double>(count));
-#else
-    (void)input_texture; (void)tex_width; (void)tex_height; (void)packet;
-    return -1.0f;
-#endif
-}
-
-float GPULensRenderer::updateAvgIrisLuma(uint32_t input_texture,
-                                         int tex_width, int tex_height,
-                                         const gpu::EyeRenderPacket& left,
-                                         const gpu::EyeRenderPacket& right) {
-    // §5.3 fallback chain
-    // 1) packet.avg_iris_luma(외부 제공) 우선. 둘 다 있으면 평균.
-    float raw = 0.0f;
-    bool  raw_ok = false;
-
-    if (left.avg_iris_luma.has_value() || right.avg_iris_luma.has_value()) {
-        float sum = 0.0f;
-        int   n   = 0;
-        if (left.avg_iris_luma.has_value())  { sum += *left.avg_iris_luma;  ++n; }
-        if (right.avg_iris_luma.has_value()) { sum += *right.avg_iris_luma; ++n; }
-        raw = sum / static_cast<float>(n);
-        raw_ok = true;
-    } else {
-        // 2) self-measure: visibility>0 인 눈만 측정. 둘 다 실패면 raw_ok=false.
-        float sum = 0.0f;
-        int   n   = 0;
-        if (left.visibility > 0.0f) {
-            const float l = measureAvgIrisLumaROI(input_texture, tex_width, tex_height, left);
-            if (l >= 0.0f) { sum += l; ++n; }
-        }
-        if (right.visibility > 0.0f) {
-            const float r = measureAvgIrisLumaROI(input_texture, tex_width, tex_height, right);
-            if (r >= 0.0f) { sum += r; ++n; }
-        }
-        if (n > 0) {
-            raw = sum / static_cast<float>(n);
-            raw_ok = true;
-        }
-    }
-
-    if (raw_ok) {
-        // §5.9 EMA. 초기 상태(has_valid=false)에서는 L_0=fallback에서 출발.
-        if (!avg_luma_has_valid_) {
-            current_avg_luma_ = kAvgLumaFallback;
-        }
-        current_avg_luma_ = kAvgLumaEmaAlpha * raw
-                          + (1.0f - kAvgLumaEmaAlpha) * current_avg_luma_;
-        avg_luma_hold_count_ = 0;
-        avg_luma_has_valid_  = true;
-    } else if (avg_luma_has_valid_ && avg_luma_hold_count_ < kAvgLumaMaxHoldFrames) {
-        // 3) raw 실패 + hold 허용: current 유지, hold 증가.
-        ++avg_luma_hold_count_;
-    } else {
-        // 4) raw 실패 + hold 소진 또는 초기: fallback 상수로 복귀.
-        current_avg_luma_    = kAvgLumaFallback;
-        avg_luma_hold_count_ = 0;
-        avg_luma_has_valid_  = false;
-    }
-
-    // §5.8 최종 clamp
-    return std::max(kAvgLumaClampMin, std::min(kAvgLumaClampMax, current_avg_luma_));
-}
-
-// ============================================================================
 // 렌더링
 // ============================================================================
 
@@ -811,15 +641,6 @@ ErrorCode GPULensRenderer::renderToTexture(
         return ErrorCode::Success;
     }
 
-    // W1: IrisResult → EyeRenderPacket (내부 계약 경유). 어댑터는 기존 fitEyeEllipse /
-    // medianLandmarkY를 재활용하며, 공개 C API 및 renderToTexture 시그니처는 불변.
-    const auto left_packet  = gpu::adaptIrisResult(iris_result, gpu::EyeSide::Left,
-                                                   iris_result.frame_width,
-                                                   iris_result.frame_height);
-    const auto right_packet = gpu::adaptIrisResult(iris_result, gpu::EyeSide::Right,
-                                                   iris_result.frame_width,
-                                                   iris_result.frame_height);
-
 #if IRIS_SDK_GPU_AVAILABLE
     if (render_context_) {
         render_context_->makeCurrent();
@@ -828,11 +649,6 @@ ErrorCode GPULensRenderer::renderToTexture(
     // 캐시 업데이트
     updateEyelidCache(iris_result);
     updateEllipseCache(iris_result);
-
-    // W1 §5.2~§5.9: avg_iris_luma 갱신. FBO 바인딩 전에 수행 — 임시 READ FBO를 쓰고
-    // 원상복귀하므로 아래 output FBO 바인딩을 오염시키지 않음.
-    const float avg_luma = updateAvgIrisLuma(input_texture, width, height,
-                                             left_packet, right_packet);
 
     // 출력 텍스처 획득
     auto* output_info = texture_pool_->acquireRenderTarget(width, height);
@@ -995,9 +811,13 @@ ErrorCode GPULensRenderer::renderToTexture(
         }
     }
 
-    // W1: avg_iris_luma = masked ROI 평균(Rec.709 linear) + EMA α=0.3 + fallback(0.35) 체인.
-    // S1에서 비운 자리 복구. shader 측 squaring 금지(W1 §5.2.1) — uniform 값은 이미 linear.
-    glUniform1f(lens_uniforms_.uAvgIrisLum, avg_luma);
+    // P5-W3-05 S1 D4: uAvgIrisLum = 0.35f 하드코드 제거
+    // 근거: "priors 덮어씌움" (Codex R2/R3). 사용자 홍채 편차(0.2~0.6) + 조명 노출 편차 커서
+    //       고정값은 정규화를 망친다.
+    // S2에서 C9 (masked ROI 평균 실측) 도입 예정. 그전까지 uniform 미설정 → GL 기본값 0.0
+    //       → 셰이더 clamp 하한(0.01)에 걸려 scale이 최대(2.5 or 5.0)로 고정됨. 이는 임시 동작.
+    //       S2에서 EyeRenderPacket.avg_iris_luma 또는 self-measure로 교체.
+    // glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f);  // 제거됨
 
     // 검출 높이 (Bug B: 픽셀 높이를 그대로 전달 — Kotlin의 detHf와 동일)
     glUniform1f(lens_uniforms_.uDetH, det_hf);
