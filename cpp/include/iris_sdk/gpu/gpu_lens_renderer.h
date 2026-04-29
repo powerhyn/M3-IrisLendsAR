@@ -308,6 +308,10 @@ private:
     int   avg_luma_hold_count_ = 0;
     bool  avg_luma_has_valid_  = false;
 
+    // P6-W2 §5.9: invalid blend ID(3/4/6/etc.) 1회 경고 (debug 빌드 한정).
+    //   유효 ID = {0, 1, 2, 5, 7}. 그 외는 셰이더에서 TintLinearV2 fallback.
+    bool invalid_blend_warned_ = false;
+
     bool initialized_ = false;
     mutable std::mutex mutex_;
 };
