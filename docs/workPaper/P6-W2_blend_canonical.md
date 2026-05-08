@@ -247,7 +247,7 @@ S1 롤백 커밋에서 다음이 이미 적용됨:
 - [x] BlendMode enum 주석 갱신 + canonical default 명시 (sdk_api.h, types.h, §5.4/5.12)
 - [x] realSpec_archive.md 보존 (§5.11 Claude 부가 제안)
 - [x] C++ 빌드 통과 (`cmake --build . --target iris_sdk` no work to do)
-- [ ] 실기기 1회 확인 — 기존 LTL SKU 렌더링 결과가 TintLinearV2로 시각적으로 동일 (PR 단계)
+- [x] 실기기 1회 확인 — 회귀 발견(시각 강도 약화) → fix 2단(fallback 색공간 정합 + K 튜닝) 적용 → 자연스러운 강도 회복 (b281, K=0.85)
 - [ ] 단위 테스트: 새 수식들의 edge case (선택, default 모드 생략)
 
 ### 4.2 Out of scope
@@ -270,7 +270,8 @@ vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
     float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));       // Rec.709 linear
     // uAvgIrisLum은 CPU에서 이미 linear 공간으로 계산된 값 (W1 §5.2.1).
     // squaring 금지 — 이중 변환 버그.
-    float scale = clamp(0.5 / max(0.01, uAvgIrisLum), 0.8, 5.0);
+    // K=0.85는 실기기 시각 튜닝값(W2 회귀 fix). 99 §1.2 C2 수식 골격 유지, 비례 상수만 조정.
+    float scale = clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0);
     vec3 tinted = toLinearFast(blend) * lum * scale;
     vec3 result = mix(baseL, tinted, opacity);
     return toSRGBFast(result);                                  // sqrt(max(result, 0))
@@ -282,6 +283,10 @@ vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
 - 함수명만 `blendLuminanceTintLinear` → `blendTintLinearV2`로 변경
 - uniform `uAvgIrisLum`는 W1에서 복구됨 (0.35 하드코드 제거, self-measure 경로)
 - **색공간 계약 (W1 §5.2.1 + W2 §5.10):** `uAvgIrisLum`는 linear 공간 값. Rec.709 계수 고정.
+- **W2 회귀 fix (실기기 검증 결과)**: 초기 적용 시 squaring 제거 + W1 fallback 상수 색공간 정합 누락(0.35 sRGB 가정 잔재)이 결합되어 시각 강도 약 1/2.85 회귀 발생. fix 두 단계:
+  1. `kAvgLumaFallback` 0.35 → 0.1225 (sRGB 0.35의 linear 등가, W1 §5.2.1 정합)
+  2. 비례 상수 K 0.5 → 0.85 + scale clamp upper 5.0 → 7.0 (자연스러운 시각 강도 회복)
+- **알고리즘 본질 한계**: TintLinearV2는 base 휘도 패턴을 보존하면서 색을 입히는 구조 → SKU 원본 색 강도 100% 재현 불가. K 더 키우면 채도 손실(탈색). 진한 색감 우선이라면 ID 0(Normal) 또는 ID 7(ColorReplaceLinear) 고려. 5번 자체의 추가 강도 개선은 수식 개조 영역이라 W5 B1 벤치 시점 재검토 대상.
 
 ### 5.2 C3 ScreenLinear 수식 (신규)
 

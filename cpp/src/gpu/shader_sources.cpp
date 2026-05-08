@@ -853,10 +853,12 @@ vec3 blendScreenLinear(vec3 base, vec3 blend, float opacity) {
 
 // P6-W2 §5.1 C2: TintLinearV2 (canonical default). LTL 리네이밍 + squaring 제거.
 // uAvgIrisLum은 W1 fallback chain에서 이미 linear 공간 값으로 공급됨 (W1 §5.2.1).
+// K(=0.7) + clamp upper(7.0)는 실기기 시각 튜닝값. ColorReplaceLinear(ID=7)는 별도
+// 수식이라 K 영향 없음 — 5번 단독 강도 조정 가능.
 vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
     vec3 baseL = toLinearFast(base);
     float lum = dot(baseL, LUMA_709_LENS);
-    float scale = clamp(0.5 / max(0.01, uAvgIrisLum), 0.8, 5.0);
+    float scale = clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0);
     vec3 tinted = toLinearFast(blend) * lum * scale;
     vec3 result = mix(baseL, tinted, opacity);
     return toSRGBFast(result);
