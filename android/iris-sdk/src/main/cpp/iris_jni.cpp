@@ -393,8 +393,10 @@ bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     dest.rotation = env->GetFloatField(src, g_jniCache.lensConfig_rotation);
     int rawBlendMode = env->GetIntField(src, g_jniCache.lensConfig_blendMode);
     if (rawBlendMode < IRIS_BLEND_NORMAL || rawBlendMode > IRIS_BLEND_COLOR_REPLACE) {
-        LOGW("Invalid blend mode from Java: %d, clamping to NORMAL(0)", rawBlendMode);
-        dest.blend_mode = IRIS_BLEND_NORMAL;
+        // P6-W2 §5.9: invalid blend ID는 TintLinearV2(ID=5)로 fallback. 셰이더 측 §5.9 경고와 정합.
+        LOGW("[IrisSDK] Invalid blend mode from Java: %d, falling back to LUMINANCE_TINT_LINEAR(5)",
+             rawBlendMode);
+        dest.blend_mode = IRIS_BLEND_LUMINANCE_TINT_LINEAR;
     } else {
         dest.blend_mode = static_cast<IrisBlendMode>(rawBlendMode);
     }
@@ -2121,7 +2123,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeRenderLensTexture(
         config.edge_feather = 0.1f;
         config.apply_left = true;
         config.apply_right = true;
-        config.blend_mode = IRIS_BLEND_NORMAL;
+        config.blend_mode = IRIS_BLEND_LUMINANCE_TINT_LINEAR;  // P6-W2 §5.12 canonical default
     }
 
     uint32_t output_texture = 0;

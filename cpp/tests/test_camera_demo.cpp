@@ -81,7 +81,7 @@ TEST_F(CameraDemoBasicTest, LensConfigDefaults) {
     EXPECT_FLOAT_EQ(config.scale, 1.0f);
     EXPECT_FLOAT_EQ(config.offset_x, 0.0f);
     EXPECT_FLOAT_EQ(config.offset_y, 0.0f);
-    EXPECT_EQ(config.blend_mode, iris_sdk::BlendMode::Normal);
+    EXPECT_EQ(config.blend_mode, iris_sdk::BlendMode::LuminanceTintLinear);  // P6-W2 §5.12 canonical default
     EXPECT_TRUE(config.apply_left);
     EXPECT_TRUE(config.apply_right);
 }
