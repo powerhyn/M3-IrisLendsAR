@@ -287,7 +287,7 @@ private:
 struct LensConfig {
     float opacity = 0.8f;
     float scale = 1.0f;
-    BlendMode blend_mode = BlendMode::NORMAL;
+    BlendMode blend_mode = BlendMode::LuminanceTintLinear;  // P6-W2 §5.12 canonical default
     bool render_left = true;
     bool render_right = true;
 };

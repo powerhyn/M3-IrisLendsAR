@@ -39,7 +39,7 @@ import com.irislenssdk.LensConfig as JavaLensConfig
  * @property scale 렌즈 크기 배율 (기본값 1.0)
  * @property offsetX X축 오프셋 (-1.0 ~ 1.0, 기본값 0.0)
  * @property offsetY Y축 오프셋 (-1.0 ~ 1.0, 기본값 0.0)
- * @property blendMode 블렌드 모드 (기본값 NORMAL)
+ * @property blendMode 블렌드 모드 (기본값 LUMINANCE_TINT_LINEAR, P6-W2 §5.12 canonical default)
  * @property edgeFeather 가장자리 페더링 (0.0 ~ 1.0, 기본값 0.1)
  * @property applyLeft 왼쪽 눈 적용 여부 (기본값 true)
  * @property applyRight 오른쪽 눈 적용 여부 (기본값 true)
@@ -49,7 +49,7 @@ data class LensConfigKt(
     val scale: Float = DEFAULT_SCALE,
     val offsetX: Float = DEFAULT_OFFSET,
     val offsetY: Float = DEFAULT_OFFSET,
-    val blendMode: BlendMode = BlendMode.NORMAL,
+    val blendMode: BlendMode = BlendMode.LUMINANCE_TINT_LINEAR,
     val edgeFeather: Float = DEFAULT_FEATHER,
     val applyLeft: Boolean = true,
     val applyRight: Boolean = true

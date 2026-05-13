@@ -393,6 +393,16 @@ vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDeta
 - **C API 문서화:** `sdk_api.h`에 기본값 명시 주석 추가 (ex: `// Default blend mode: TintLinearV2 (ID=5)`).
 - 출처: `P6-W2_brainstorm/synthesis.md` §1.
 
+### 5.13.5 CPU Path B fallback 정책 — best-effort (Codex R2 #3 부분 수용)
+
+§5.4 ID 매핑 표 + §5.9 fallback 합의는 **GPU/shader surface 기준**. CPU Path B(`cpp/src/lens_renderer.cpp`)는 LuminanceTint/LuminanceTintLinear/SoftLight/ColorReplace 구현이 없어 모든 GPU 전용 모드를 `alphaBlendNormal`로 best-effort fallback (`lens_renderer.cpp:518-526`).
+
+결과적으로 CPU Path B에서:
+- ID 0(Normal) / 1(Multiply) / 2(Screen) / 3(Overlay)는 자체 구현으로 동작
+- ID 4(LumTint) / 5(LuminanceTintLinear) / 6(SoftLight) / 7(ColorReplace)는 Normal로 fallback
+
+즉 진입점이 GPU 활성 경로면 §5.4/§5.9 합의대로 동작하고, CPU Path B 활성 경로면 best-effort. SDK 외부 사용자가 CPU/GPU 진입점에 따라 다른 시각 결과를 받을 수 있음을 명시. 이 정책은 GPU/CPU 구현 균등화가 별도 W(또는 W9 통합)에서 다룰 사안이라 본 W2 범위 밖.
+
 ### 5.13 Android Demo UI — **W9 이관 확정** (W2 R1 합의 3/3)
 
 - W2 범위에서 demo UI drop-down 정리 **금지**.
