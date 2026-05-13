@@ -784,7 +784,18 @@ ErrorCode GPULensRenderer::renderToTexture(
     glUniform1f(lens_uniforms_.uOpacity, config.opacity);
     glUniform1f(lens_uniforms_.uLensScale, config.scale);
     glUniform1f(lens_uniforms_.uEdgeFeather, config.edge_feather);
-    glUniform1i(lens_uniforms_.uBlendMode, static_cast<int>(config.blend_mode));
+    // P6-W2 §5.9: invalid blend ID 1회 경고 (debug 빌드만). 유효 ID = {0,1,2,5,7}.
+    const int blend_id = static_cast<int>(config.blend_mode);
+#if !defined(NDEBUG)
+    const bool blend_valid = (blend_id == 0 || blend_id == 1 || blend_id == 2 ||
+                              blend_id == 5 || blend_id == 7);
+    if (!blend_valid && !invalid_blend_warned_) {
+        LOGW("[IrisSDK] Unknown blend ID=%d, falling back to TintLinearV2 (ID=5)",
+             blend_id);
+        invalid_blend_warned_ = true;
+    }
+#endif
+    glUniform1i(lens_uniforms_.uBlendMode, blend_id);
     // uFrameAspect: detection 프레임 기준 (Kotlin: detW/detH)
     glUniform1f(lens_uniforms_.uFrameAspect, det_wf / det_hf);
 

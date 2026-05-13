@@ -373,6 +373,10 @@ class GpuRenderActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+        // P6-W2 §5.12: SDK LensConfig 기본값(LuminanceTintLinear=5)과 spinner 초기 위치 동기화.
+        // 기본값 변경 시 demo가 SDK surface와 일관되게 시작.
+        val defaultIdx = blendModeEntries.indexOfFirst { it.second == lensConfig.blendMode }
+        if (defaultIdx >= 0) spinnerBlendMode.setSelection(defaultIdx)
 
         // Sclera Protection 토글 (P4-W2-01, 기본 ON)
         var scleraOn = true

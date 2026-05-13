@@ -299,14 +299,21 @@ private:
     // glReadPixels 조합이 GL state 오염을 일으켜 검은 화면 회귀 발생 → revert.
     // 정식 측정 경로는 W6에서 비동기 PBO readback or detector CPU 버퍼 활용.
     // 현 단계는 packet.avg_iris_luma(미연결) → hold → fallback 상수 3단만 동작.
-    static constexpr float kAvgLumaFallback      = 0.35f;
+    // W1 §5.2.1: uAvgIrisLum은 linear 공간 값 (Rec.709 linear 평균 luma).
+    // 0.1225 = 0.35² — Codex R2의 sRGB 0.35 추정치를 감마 2.0 근사로 linear 변환한 등가값.
+    // (W2 squaring 제거 후 시각 회귀 fix — 이전 squaring 코드의 결과 0.35*0.35와 동등.)
+    static constexpr float kAvgLumaFallback      = 0.1225f;
     static constexpr int   kAvgLumaMaxHoldFrames = 3;
-    static constexpr float kAvgLumaClampMin      = 0.1f;
-    static constexpr float kAvgLumaClampMax      = 0.9f;
+    static constexpr float kAvgLumaClampMin      = 0.01f;  // linear 하한 (sRGB 0.1 등가)
+    static constexpr float kAvgLumaClampMax      = 0.81f;  // linear 상한 (sRGB 0.9 등가)
 
     float current_avg_luma_    = kAvgLumaFallback;
     int   avg_luma_hold_count_ = 0;
     bool  avg_luma_has_valid_  = false;
+
+    // P6-W2 §5.9: invalid blend ID(3/4/6/etc.) 1회 경고 (debug 빌드 한정).
+    //   유효 ID = {0, 1, 2, 5, 7}. 그 외는 셰이더에서 TintLinearV2 fallback.
+    bool invalid_blend_warned_ = false;
 
     bool initialized_ = false;
     mutable std::mutex mutex_;
