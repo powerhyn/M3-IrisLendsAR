@@ -1022,6 +1022,11 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     // P6-W3 §5.1/§5.4: C5 환경 반사 가산 합성 (블렌드 → 디테일 → 반사 → contact shadow 순서).
     // W3 scaffold — sampleReflection이 OFF면 vec3(0)이므로 시각 변화 없음.
     float renderMask = finalAlpha;
+#ifdef RENDER_MASK_HOOK_ENABLED
+    // P6-W3 §5.10: W8 Pupil material 조건부 트랙. CMake 옵션으로만 활성 (프로덕션 비활성).
+    // smoothstep 인자는 Codex R4 Patch 4 단서대로 예시 — W8 구현 시 실기기 튜닝.
+    renderMask = max(finalAlpha, smoothstep(1.2, 0.0, dist));
+#endif
     // P6-W3 §5.12: reflectUV 옵션 C (iris local 좌표). 노멀 없음 → 옵션 B(reflect) 배제.
     vec2 reflectUV = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
     vec3 reflection = sampleReflection(reflectUV);
