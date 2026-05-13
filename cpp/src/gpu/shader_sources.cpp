@@ -817,6 +817,13 @@ uniform float uShadowIntensity;
 uniform float uMaxDetail;
 // P5-W3-05 S1 D5: uHighlightEnabled uniform 제거
 
+// P6-W3 §5.6/§5.11: C5 환경 반사 가산 계층 uniform.
+// W3 scaffold는 uSourceType=0 (OFF) 기본 — 실기기 시각 변화 없음.
+// W4 B2 벤치에서 uSourceType 토글로 OFF/EnvMap/Periphery 비교.
+uniform int uSourceType;            // 0=OFF, 1=EnvMap, 2=Periphery
+uniform float uReflectionIntensity; // 0.0~1.0, W3 기본 0.3
+uniform sampler2D uEnvMap;          // W4 env-map 프로토타입용 (W3 미사용)
+
 uniform int uUseEllipseMask;
 uniform vec2 uLeftEyeEllipseCenter;
 uniform vec3 uLeftEyeEllipseRadii;
@@ -911,6 +918,23 @@ float calcContactShadow(float fragY, float minY, float eyelidFeather, float eyeO
     return shadowFactor * maskAlpha;
 }
 
+// P6-W3 §5.11: sampleReflection — 방식 A (uniform 스위치, 단일 바이너리).
+// W3 scaffold는 OFF 분기만 의미 있음. EnvMap/Periphery는 W4에서 실제 소스 연결.
+vec3 sampleReflection(vec2 reflectUV) {
+    if (uSourceType == 1) {
+        return texture(uEnvMap, reflectUV).rgb;
+    }
+    // uSourceType == 2 (Periphery)는 W4 §5.8 annular ring 샘플링으로 구현 예정.
+    return vec3(0.0);  // OFF (W3 기본)
+}
+
+// P6-W3 §5.8: calcFresnel — 옵션 C 가짜 Fresnel (R1 다수 2/3 채택).
+// dist는 이미 /scaledRadius로 정규화 (0=중심, 1=외곽). 노멀 벡터 없음 (D1 재도입 회피).
+// 초기 boundary (0.7, 1.0): iris 외곽 30%에서만 반사 점증. W4 B2 실기기 튜닝 후보.
+float calcFresnel(float dist) {
+    return smoothstep(0.7, 1.0, dist);
+}
+
 vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
                float eyeTop, float eyeBottom,
                vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot) {
@@ -994,6 +1018,15 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     //     float highlight = smoothstep(0.25, 0.0, highlightDist);
     //     blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
     //   }
+
+    // P6-W3 §5.1/§5.4: C5 환경 반사 가산 합성 (블렌드 → 디테일 → 반사 → contact shadow 순서).
+    // W3 scaffold — sampleReflection이 OFF면 vec3(0)이므로 시각 변화 없음.
+    float renderMask = finalAlpha;
+    // P6-W3 §5.12: reflectUV 옵션 C (iris local 좌표). 노멀 없음 → 옵션 B(reflect) 배제.
+    vec2 reflectUV = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
+    vec3 reflection = sampleReflection(reflectUV);
+    float fresnel = calcFresnel(dist);
+    blended += reflection * fresnel * uReflectionIntensity * renderMask;
 
     if (uContactShadow == 1) {
         float eyeOpening = abs(maxY - minY);
