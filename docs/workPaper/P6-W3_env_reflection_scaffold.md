@@ -1,6 +1,6 @@
 # P6-W3: 환경 반사 가산 계층 분리 + renderMask hook
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: 구현 완료 (2026-05-13).
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W2 (블렌드 3종 확정)
 > **후속 의존**: P6-W4 (B2 벤치), P6-W8 (Pupil material)
@@ -252,13 +252,13 @@ W3는 이 C5의 **구조 부분만** 실현. 반사 소스 확정은 W4, hook �
 
 ### 4.1 Definition of Done
 
-- [ ] shader_sources.cpp `applyLens` 함수에 반사 합성 지점 존재
-- [ ] `sampleReflection()` 함수 정의, no-op 기본 동작
-- [ ] Fresnel 항 구체 수식 문서화 + 구현
-- [ ] renderMask hook `#ifdef` 블록 존재
-- [ ] 새 uniform들 gpu_lens_renderer.cpp에서 location 캐시 + 주입
-- [ ] 빌드 통과
-- [ ] 실기기 회귀 없음 — W2 시각 결과와 동일
+- [x] shader_sources.cpp `applyLens` 함수에 반사 합성 지점 존재 (line 1022~1034)
+- [x] `sampleReflection()` 함수 정의, no-op 기본 동작 (`uSourceType=0` → `vec3(0.0)`)
+- [x] Fresnel 항 구체 수식 문서화 + 구현 (`calcFresnel`, smoothstep(0.7, 1.0, dist))
+- [x] renderMask hook `#ifdef RENDER_MASK_HOOK_ENABLED` 블록 존재 (기본 미정의)
+- [x] 새 uniform들 gpu_lens_renderer.cpp에서 location 캐시 + 주입 (uSourceType=0, uReflectionIntensity=0.3)
+- [x] 빌드 통과 (`iris_sdk` 타깃, 새 경고 없음)
+- [ ] 실기기 회귀 없음 — W2 시각 결과와 동일 *(no-op scaffold이므로 default 모드 skip; W4 벤치 시점에 OFF 분기 회귀 자연 검증)*
 
 ### 4.2 Out of scope
 
@@ -566,12 +566,15 @@ vec2 reflectUV = (uv - iris_center_uv) / iris_radius_uv * 0.5 + 0.5;
 
 §4.1 체크리스트 전체 ✅.
 
-### 8.2 커밋 전략
+### 8.2 커밋 전략 (실제 SHA 기록)
 
-**커밋 1**: `docs(P6-W3): 섹션 2~8 본문 작성`
-**커밋 2**: `feat(gpu-lens): P6-W3 환경 반사 가산 계층 구조 + sampleReflection 추상화 (no-op 기본)`
-**커밋 3**: `feat(gpu-lens): P6-W3 renderMask hook #ifdef 구조 (W8 활성 대기)`
-**커밋 4** (선택): `feat(gpu-lens): P6-W3 Fresnel 수식 구현 (옵션 C)`
+| # | 커밋 | SHA |
+|---|------|-----|
+| 1 | `docs(P6-W3): R1 재검토 노트 + W4 hand-off 인사이트 추가` | `6b4d0e4` |
+| 2 | `feat(gpu-lens): P6-W3 환경 반사 가산 계층 스캐폴드 + Fresnel 옵션 C (no-op 기본)` | `8076925` |
+| 3 | `feat(gpu-lens): P6-W3 renderMask hook #ifdef 블록 (W8 활성 대기)` | `b56478f` |
+
+§8.2 가이드의 원안 4개 커밋 중 "scaffold + sampleReflection" + "Fresnel 옵션 C"를 합쳐 커밋 2로 통합 (각 단독 분리 시 합성 블록이 calcFresnel 호출 의존성 때문에 단독 빌드 불가). #ifdef hook은 독립이라 커밋 3로 분리. 원안 커밋 1은 §1.15 재검토 노트 + W4 hand-off 작업으로 대체.
 
 ### 8.3 다음 W 트리거
 
