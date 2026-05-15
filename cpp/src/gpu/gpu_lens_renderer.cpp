@@ -361,6 +361,11 @@ void GPULensRenderer::cacheLensUniforms() {
 
     lens_uniforms_.uAvgIrisLum = glGetUniformLocation(lens_program_, "uAvgIrisLum");
     lens_uniforms_.uDetH = glGetUniformLocation(lens_program_, "uDetH");
+
+    // P6-W3 §5.6: C5 환경 반사 가산 계층 location 캐시.
+    lens_uniforms_.uSourceType = glGetUniformLocation(lens_program_, "uSourceType");
+    lens_uniforms_.uReflectionIntensity = glGetUniformLocation(lens_program_, "uReflectionIntensity");
+    lens_uniforms_.uEnvMap = glGetUniformLocation(lens_program_, "uEnvMap");
     // P5-W3-05 S1 D5: uHighlightEnabled uniform 제거
 
     // 유효한 uniform location 카운트
@@ -823,6 +828,11 @@ ErrorCode GPULensRenderer::renderToTexture(
     glUniform1f(lens_uniforms_.uShadowIntensity, shadow_intensity_);
     // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한 (Kotlin 기본 1.2)
     glUniform1f(lens_uniforms_.uMaxDetail, 1.2f);
+
+    // P6-W3 §5.7/§5.11: C5 환경 반사 scaffold 기본값 주입. W3는 OFF, 강도 0.3 고정.
+    // W4에서 벤치 토글 + 강도 sweep. uEnvMap은 W4에서 texture unit + bind 추가 (W3 미사용).
+    glUniform1i(lens_uniforms_.uSourceType, 0);
+    glUniform1f(lens_uniforms_.uReflectionIntensity, 0.3f);
 
     // 비대칭 타원 마스크
     glUniform1i(lens_uniforms_.uUseEllipseMask, use_ellipse_mask_ ? 1 : 0);

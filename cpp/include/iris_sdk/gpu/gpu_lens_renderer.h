@@ -236,6 +236,11 @@ private:
         GLint uAvgIrisLum = -1;
         GLint uDetH = -1;
         // P5-W3-05 S1 D5: uHighlightEnabled 멤버 제거
+
+        // P6-W3 §5.6: C5 환경 반사 가산 계층 uniform location (W4 B2 벤치에서 활용).
+        GLint uSourceType = -1;
+        GLint uReflectionIntensity = -1;
+        GLint uEnvMap = -1;
     } lens_uniforms_;
 
     void cacheLensUniforms();

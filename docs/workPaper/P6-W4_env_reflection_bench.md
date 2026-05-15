@@ -177,6 +177,24 @@ Codex도 R1에서 약점 인정:
 - 평가자 응답: `docs/bench/P6-W4/ratings_YYYY-MM-DD.csv`
 - 최종 리포트: `docs/workPaper/P6-W4_bench_report.md` (이 W 완료 시 생성)
 
+### 1.15 W3 R1 재검토 hand-off (2026-05-13 추가)
+
+W3 R1 재검토(2026-05-13)에서 W4로 넘어온 hand-off 3건. 원본 재검토 노트: `P6-W3_env_reflection_scaffold.md` §1.15.
+
+1. **`RENDER_MASK_HOOK_ENABLED=1` debug APK 구성 절차** ⚠️ **W4 액션 필요**
+   - W3 §5.10 `#ifdef` 채택 결과 W4 벤치 동안 실시간 on/off 토글 불가
+   - W3 §5.10: "W4 벤치 전용 debug 빌드: CMake 옵션으로 `RENDER_MASK_HOOK_ENABLED=1` 켠 APK를 별도 산출"
+   - **W4 액션**: 프로토타입 구현 단계에서 production APK + debug APK 2종 빌드 스크립트 준비
+   - 단, W4 1차 벤치 핵심(OFF/env-map/periphery 비교)은 §5.11 방식 A uniform 스위치로 토글 → renderMask hook은 W8 트랙 발동 시 별도 검증 영역
+
+2. **`uReflectionIntensity = 0.3` W3 R1 외부 모델 미토론** (note)
+   - W3 R1 응답에 강도 토론 없음. W3 §1.7에서 §5.7로 직승된 값
+   - W4 벤치 실기기 튜닝 자유. 24클립 1차 촬영은 0.3 고정. 강도 sweep은 후속(W9 통합 시)
+
+3. **env-map SDK 내장 보류 — W8~W9 hand-off** (note)
+   - W4 단계는 demo assets 위치 그대로 사용 (W4 §5.7)
+   - SDK 내장 결정은 W9 통합 단계 SDK surface 정합성 점검 시. W4에서는 변경 없음
+
 ---
 
 ## 2. 배경/맥락
