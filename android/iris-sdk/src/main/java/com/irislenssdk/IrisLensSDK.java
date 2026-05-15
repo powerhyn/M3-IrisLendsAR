@@ -935,6 +935,50 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P6-W4 §5.7: 환경 반사 env_map 텍스처 로드 (RGB 8bit, ACES tone-mapped LDR 권장).
+     *
+     * @param rgbData RGB 픽셀 데이터 (3 bytes/pixel)
+     * @param width 너비 (W3 §5.13: 256 권장)
+     * @param height 높이 (W3 §5.13: 128 권장)
+     * @return 에러 코드 (0=성공)
+     */
+    public static int loadEnvMap(byte[] rgbData, int width, int height) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeLoadEnvMap(rgbData, width, height);
+    }
+
+    /** P6-W4 §5.7: 환경 반사 env_map 해제. */
+    public static void unloadEnvMap() {
+        if (sLibraryLoaded) {
+            nativeUnloadEnvMap();
+        }
+    }
+
+    /**
+     * P6-W4 §5.11: 환경 반사 모드 런타임 토글 (방식 A uniform 스위치, 단일 바이너리).
+     *
+     * @param mode 0=OFF, 1=EnvMap, 2=Periphery (W4 B2 벤치 3 프로토타입)
+     */
+    public static void setReflectionMode(int mode) {
+        if (sLibraryLoaded) {
+            nativeSetReflectionMode(mode);
+        }
+    }
+
+    /**
+     * P6-W4 §5.7 hand-off: 환경 반사 강도 조정 (W3 §5.7 기본 0.3, R1 미토론).
+     *
+     * @param intensity 0.0~1.0 (자동 clamp)
+     */
+    public static void setReflectionIntensity(float intensity) {
+        if (sLibraryLoaded) {
+            nativeSetReflectionIntensity(intensity);
+        }
+    }
+
+    /**
      * GPU 렌즈 렌더링을 수행합니다.
      *
      * @param inputTexture 입력 카메라 프레임 텍스처 ID
@@ -1337,6 +1381,12 @@ public final class IrisLensSDK {
     private static native void nativeSetLensScleraProtect(boolean enabled);
     private static native void nativeSetLensEllipseMask(boolean enabled);
     private static native void nativeSetLensHighlight(boolean enabled);
+
+    // P6-W4 §5.7/§5.11: 환경 반사 (env_map + 모드 토글 + 강도)
+    private static native int nativeLoadEnvMap(byte[] rgbData, int width, int height);
+    private static native void nativeUnloadEnvMap();
+    private static native void nativeSetReflectionMode(int mode);
+    private static native void nativeSetReflectionIntensity(float intensity);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods

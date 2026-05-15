@@ -83,6 +83,25 @@ public:
     bool hasLensTexture() const;
 
     // ========================================
+    // 환경 반사 (P6-W4 §5.7/§5.11)
+    // ========================================
+
+    /// P6-W4 §5.7: env_map 텍스처 로드 (RGB 8bit, demo assets `env/` 경로).
+    /// W3 §5.13 합의 — SDK 내장 보류 (W8~W9). mipmap 자동 생성.
+    bool loadEnvMap(const uint8_t* data, int width, int height);
+
+    /// P6-W4: env_map 텍스처 해제.
+    void unloadEnvMap();
+
+    /// P6-W4 §5.11: 반사 소스 런타임 토글 (방식 A uniform 스위치).
+    /// mode: 0=OFF, 1=EnvMap, 2=Periphery. W4 B2 벤치 24클립에서 토글.
+    void setReflectionMode(int mode);
+
+    /// P6-W4 §5.7 hand-off: 강도 튜닝 (W3 §5.7 기본 0.3 — R1 미토론 항목).
+    /// intensity는 [0.0, 1.0]로 clamp.
+    void setReflectionIntensity(float intensity);
+
+    // ========================================
     // 렌더링
     // ========================================
 
@@ -179,6 +198,13 @@ private:
     GLuint lens_texture_ = 0;
     int lens_texture_width_ = 0;
     int lens_texture_height_ = 0;
+
+    // P6-W4 §5.7/§5.11: 환경 반사 상태 (lens_texture_ 미러).
+    GLuint env_map_texture_ = 0;
+    int env_map_width_ = 0;
+    int env_map_height_ = 0;
+    int reflection_mode_ = 0;             // 0=OFF (W3 scaffold no-op 기본 유지)
+    float reflection_intensity_ = 0.3f;   // W3 §5.7 기본
 
     // 설정
     // 기본값은 Kotlin 데모 참조 구현(CameraGLRenderer.kt 558~562)과 일치

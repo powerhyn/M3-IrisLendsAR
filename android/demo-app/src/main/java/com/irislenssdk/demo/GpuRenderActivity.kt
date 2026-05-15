@@ -14,11 +14,13 @@ package com.irislenssdk.demo
 import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.opengl.GLES31
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
+import android.view.KeyEvent
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -225,6 +227,11 @@ class GpuRenderActivity : AppCompatActivity() {
             runOnUiThread {
                 tvGpuStatus.text = "GPU: Available (init: $success)"
                 Log.d(TAG, "GPU initialized: $success")
+            }
+            // P6-W4 §5.7: GPU lens init 완료 후 env_map 로드 (NOT_INITIALIZED 회피).
+            if (success && !envMapLoaded) {
+                loadEnvMapAsset()
+                envMapLoaded = true
             }
         }
 
@@ -1091,6 +1098,50 @@ class GpuRenderActivity : AppCompatActivity() {
         super.onResume()
         cameraGLView.onResume()
         cameraGLView.resetTemporalState()  // P4-W1-03: resume jump 방지
+        // P6-W4 env_map 로드는 onGpuInitialized 콜백에서 처리 (GPU lens init 완료 보장).
+    }
+
+    //=========================================================================
+    // P6-W4: 환경 반사 벤치 (env_map 로드 + 3 프로토타입 토글)
+    //=========================================================================
+
+    private var envMapLoaded = false
+    private var reflectionMode = 0  // 0=OFF, 1=EnvMap, 2=Periphery
+
+    /** P6-W4 §5.7: assets/env/env_default_256x128.png 로드 + GL 스레드 디스패치. */
+    private fun loadEnvMapAsset() {
+        try {
+            val bitmap = BitmapFactory.decodeStream(assets.open("env/env_default_256x128.png"))
+            val w = bitmap.width
+            val h = bitmap.height
+            val rgb = ByteArray(w * h * 3)
+            var idx = 0
+            for (y in 0 until h) {
+                for (x in 0 until w) {
+                    val pixel = bitmap.getPixel(x, y)
+                    rgb[idx++] = ((pixel shr 16) and 0xFF).toByte()
+                    rgb[idx++] = ((pixel shr 8) and 0xFF).toByte()
+                    rgb[idx++] = (pixel and 0xFF).toByte()
+                }
+            }
+            cameraGLView.setEnvMap(rgb, w, h)
+            Log.i(TAG, "P6-W4 env_map asset loaded: ${w}x${h}")
+        } catch (e: Exception) {
+            Log.e(TAG, "P6-W4 env_map load failed: ${e.message}")
+        }
+    }
+
+    /** P6-W4 §5.11: 볼륨 UP 키로 반사 모드 순환 (OFF → EnvMap → Periphery). */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            reflectionMode = (reflectionMode + 1) % 3
+            cameraGLView.setReflectionMode(reflectionMode)
+            val modeName = arrayOf("OFF", "EnvMap", "Periphery")[reflectionMode]
+            Toast.makeText(this, "Reflection: $modeName", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "P6-W4 reflection mode → $modeName ($reflectionMode)")
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onPause() {

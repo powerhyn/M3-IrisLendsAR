@@ -650,4 +650,58 @@ void iris_sdk_set_lens_highlight(int enabled) {
     (void)enabled;  // no-op
 }
 
+// ============================================================================
+// P6-W4 §5.7/§5.11: 환경 반사 internal C API.
+// 공개 sdk_api.h에는 노출하지 않음 (W4 Phase 벤치 전용 internal 경로).
+// JNI 파일에서 forward declare 후 직접 호출. SDK 외부 surface 변화 없음.
+// W5~W6 정식 활성 시점에 sdk_api.h로 승격 검토.
+// ============================================================================
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_env_map(const uint8_t* data, int width, int height) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+    if (!data || width <= 0 || height <= 0) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+    return g_gpu_lens->loadEnvMap(data, width, height) ? IRIS_SDK_OK : IRIS_SDK_RENDER_FAILED;
+#else
+    (void)data; (void)width; (void)height;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+IRIS_SDK_EXPORT void iris_sdk_unload_env_map(void) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->unloadEnvMap();
+    }
+#endif
+}
+
+IRIS_SDK_EXPORT void iris_sdk_set_reflection_mode(int mode) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setReflectionMode(mode);
+    }
+#else
+    (void)mode;
+#endif
+}
+
+IRIS_SDK_EXPORT void iris_sdk_set_reflection_intensity(float intensity) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setReflectionIntensity(intensity);
+    }
+#else
+    (void)intensity;
+#endif
+}
+
 } // extern "C"

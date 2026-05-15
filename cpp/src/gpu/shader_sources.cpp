@@ -918,13 +918,35 @@ float calcContactShadow(float fragY, float minY, float eyelidFeather, float eyeO
     return shadowFactor * maskAlpha;
 }
 
-// P6-W3 §5.11: sampleReflection — 방식 A (uniform 스위치, 단일 바이너리).
-// W3 scaffold는 OFF 분기만 의미 있음. EnvMap/Periphery는 W4에서 실제 소스 연결.
-vec3 sampleReflection(vec2 reflectUV) {
+// P6-W3 §5.11 / P6-W4 §5.7/§5.8: sampleReflection — 방식 A (uniform 스위치, 단일 바이너리).
+// W4 Phase A: OFF/EnvMap/Periphery 3 프로토타입 활성.
+// reflectUV: env-map sampling UV (옵션 C iris local 좌표).
+// irisCenterAdjusted: Periphery annular ring 중심 (aspectRatio 보정된 좌표).
+// scaledRadius: Periphery ring 반경 단위 (irisRadius * uLensScale).
+vec3 sampleReflection(vec2 reflectUV, vec2 irisCenterAdjusted, float scaledRadius) {
     if (uSourceType == 1) {
+        // EnvMap (Codex 안)
         return texture(uEnvMap, reflectUV).rgb;
     }
-    // uSourceType == 2 (Periphery)는 W4 §5.8 annular ring 샘플링으로 구현 예정.
+    if (uSourceType == 2) {
+        // Periphery (Gemini 안) — annular ring r∈[1.8, 2.5] 8포인트, uCameraTexture에서 샘플.
+        // 얼굴 중앙 영역(70%) 자연 제외 효과: ring이 iris 외곽 1.8r 이상이라 동공/홍채 자체 제외.
+        const int N = 8;
+        const float RING_R = 2.15;  // [1.8, 2.5] 중앙값. W4 벤치 시 미세 조정 가능.
+        vec3 sum = vec3(0.0);
+        for (int i = 0; i < N; ++i) {
+            float angle = float(i) * (6.28318530718 / float(N));
+            // ring 위 한 점을 adjusted-coord 공간에서 계산 후 vTexCoord 공간으로 환원.
+            // adjustedCoord = vTexCoord * vec2(aspectRatio, 1) 이므로 역변환 시 aspect 나눠야.
+            vec2 adjustedRingPoint = irisCenterAdjusted + RING_R * scaledRadius * vec2(cos(angle), sin(angle));
+            // adjusted → vTexCoord 환원 (aspectRatio는 셰이더 전체 const 수준 — uFrameAspect 사용)
+            vec2 ringUV = vec2(adjustedRingPoint.x / uFrameAspect, adjustedRingPoint.y);
+            // 화면 밖 fallback: clamp로 가장자리 색 사용 (검은색 강제 회피)
+            ringUV = clamp(ringUV, vec2(0.0), vec2(1.0));
+            sum += texture(uCameraTexture, ringUV).rgb;
+        }
+        return sum / float(N);
+    }
     return vec3(0.0);  // OFF (W3 기본)
 }
 
@@ -1029,7 +1051,7 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
 #endif
     // P6-W3 §5.12: reflectUV 옵션 C (iris local 좌표). 노멀 없음 → 옵션 B(reflect) 배제.
     vec2 reflectUV = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
-    vec3 reflection = sampleReflection(reflectUV);
+    vec3 reflection = sampleReflection(reflectUV, adjustedCenter, scaledRadius);
     float fresnel = calcFresnel(dist);
     blended += reflection * fresnel * uReflectionIntensity * renderMask;
 
