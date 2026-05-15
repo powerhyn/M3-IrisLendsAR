@@ -171,6 +171,14 @@ void GPULensRenderer::release() {
     }
     lens_texture_width_ = 0;
     lens_texture_height_ = 0;
+
+    // P6-W4 §5.7/§5.11: env_map 텍스처 해제 (lens_texture_ 미러).
+    if (env_map_texture_ != 0) {
+        glDeleteTextures(1, &env_map_texture_);
+        env_map_texture_ = 0;
+    }
+    env_map_width_ = 0;
+    env_map_height_ = 0;
 #endif
 
     // 셰이더/텍스처 풀 해제
@@ -295,6 +303,109 @@ void GPULensRenderer::unloadLensTexture() {
     lens_texture_width_ = 0;
     lens_texture_height_ = 0;
     LOGI("Lens texture unloaded");
+}
+
+// ============================================================================
+// 환경 반사 (P6-W4 §5.7/§5.11)
+// loadLensTexture / unloadLensTexture 1:1 미러 패턴.
+// 차이점: format = RGB8 (W3 §5.13 RGB 8bit PNG), texture unit 2 bind는 render 시점.
+// ============================================================================
+
+bool GPULensRenderer::loadEnvMap(const uint8_t* data, int width, int height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_) {
+        LOGE("loadEnvMap: not initialized");
+        return false;
+    }
+    if (!data || width <= 0 || height <= 0) {
+        LOGE("loadEnvMap: invalid parameters");
+        return false;
+    }
+
+#if IRIS_SDK_GPU_AVAILABLE
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
+
+    // 기존 텍스처가 있으면 해제
+    if (env_map_texture_ != 0) {
+        glDeleteTextures(1, &env_map_texture_);
+        env_map_texture_ = 0;
+    }
+
+    glGenTextures(1, &env_map_texture_);
+    glBindTexture(GL_TEXTURE_2D, env_map_texture_);
+
+    while (glGetError() != GL_NO_ERROR) {} // 이전 누적 에러 클리어
+
+    // P6-W4 §5.13: env_map은 RGB 8bit PNG. alpha 채널 없음.
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, data);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    GLenum mipmap_err = glGetError();
+    if (mipmap_err == GL_NO_ERROR) {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        LOGI("EnvMap mipmap enabled (anti-shimmer)");
+    } else {
+        // mipmap-incomplete 폴백 — lens texture 패턴과 동일.
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        LOGW("EnvMap glGenerateMipmap failed (GL err=0x%x), fallback to GL_LINEAR", mipmap_err);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    env_map_width_ = width;
+    env_map_height_ = height;
+
+    LOGI("EnvMap loaded: %dx%d, id=%u", width, height, env_map_texture_);
+    return true;
+#else
+    env_map_texture_ = 1; // stub
+    env_map_width_ = width;
+    env_map_height_ = height;
+    LOGI("EnvMap loaded (stub): %dx%d", width, height);
+    return true;
+#endif
+}
+
+void GPULensRenderer::unloadEnvMap() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if IRIS_SDK_GPU_AVAILABLE
+    if (env_map_texture_ != 0) {
+        if (render_context_) {
+            render_context_->makeCurrent();
+        }
+        glDeleteTextures(1, &env_map_texture_);
+        env_map_texture_ = 0;
+    }
+#else
+    env_map_texture_ = 0;
+#endif
+    env_map_width_ = 0;
+    env_map_height_ = 0;
+    LOGI("EnvMap unloaded");
+}
+
+void GPULensRenderer::setReflectionMode(int mode) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (mode < 0 || mode > 2) {
+        LOGW("setReflectionMode: invalid mode %d, clamped to 0", mode);
+        reflection_mode_ = 0;
+        return;
+    }
+    reflection_mode_ = mode;
+}
+
+void GPULensRenderer::setReflectionIntensity(float intensity) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    reflection_intensity_ = std::clamp(intensity, 0.0f, 1.0f);
 }
 
 bool GPULensRenderer::hasLensTexture() const {
@@ -829,10 +940,20 @@ ErrorCode GPULensRenderer::renderToTexture(
     // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한 (Kotlin 기본 1.2)
     glUniform1f(lens_uniforms_.uMaxDetail, 1.2f);
 
-    // P6-W3 §5.7/§5.11: C5 환경 반사 scaffold 기본값 주입. W3는 OFF, 강도 0.3 고정.
-    // W4에서 벤치 토글 + 강도 sweep. uEnvMap은 W4에서 texture unit + bind 추가 (W3 미사용).
-    glUniform1i(lens_uniforms_.uSourceType, 0);
-    glUniform1f(lens_uniforms_.uReflectionIntensity, 0.3f);
+    // P6-W3 §5.7/§5.11 / P6-W4 Phase A: C5 환경 반사 가산 계층.
+    // 멤버 변수 reflection_mode_ / reflection_intensity_ 로 런타임 토글.
+    // W4 B2 벤치 24클립에서 OFF/EnvMap/Periphery 비교 + 강도 sweep.
+    glUniform1i(lens_uniforms_.uSourceType, reflection_mode_);
+    glUniform1f(lens_uniforms_.uReflectionIntensity, reflection_intensity_);
+
+    // P6-W4 §5.11: env_map texture unit 2 bind.
+    // 셰이더는 uSourceType==1일 때만 sample하므로 OFF/Periphery에서는 무시.
+    // env_map_texture_==0이어도 uniform location은 항상 unit 2로 설정 — 안전.
+    if (env_map_texture_ != 0) {
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, env_map_texture_);
+    }
+    glUniform1i(lens_uniforms_.uEnvMap, 2);
 
     // 비대칭 타원 마스크
     glUniform1i(lens_uniforms_.uUseEllipseMask, use_ellipse_mask_ ? 1 : 0);

@@ -2175,4 +2175,70 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensHighlight(
     iris_sdk_set_lens_highlight(enabled ? 1 : 0);
 }
 
+// ============================================================================
+// P6-W4 §5.7/§5.11: 환경 반사 internal C API forward declare.
+// sdk_api_v2.cpp에 정의됨. 공개 sdk_api.h 미노출 (W4 Phase 벤치 internal 경로).
+// ============================================================================
+extern IrisSdkError iris_sdk_load_env_map(const uint8_t* data, int width, int height);
+extern void iris_sdk_unload_env_map(void);
+extern void iris_sdk_set_reflection_mode(int mode);
+extern void iris_sdk_set_reflection_intensity(float intensity);
+
+/**
+ * Java: native int nativeLoadEnvMap(byte[] data, int width, int height);
+ * P6-W4 §5.7: env_map 텍스처 로드 (Android assets `env/`에서 byte 받음).
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeLoadEnvMap(
+    JNIEnv* env, jclass /* clazz */,
+    jbyteArray data, jint width, jint height)
+{
+    if (!data) {
+        LOGE("nativeLoadEnvMap: data is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    ScopedByteArray arr(env, data, JNI_ABORT);
+    if (!arr.valid()) {
+        LOGE("nativeLoadEnvMap: failed to get byte array");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    return static_cast<jint>(iris_sdk_load_env_map(arr.data(), width, height));
+}
+
+/**
+ * Java: native void nativeUnloadEnvMap();
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeUnloadEnvMap(
+    JNIEnv* /* env */, jclass /* clazz */)
+{
+    iris_sdk_unload_env_map();
+}
+
+/**
+ * Java: native void nativeSetReflectionMode(int mode);
+ * P6-W4 §5.11: mode 0=OFF, 1=EnvMap, 2=Periphery.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionMode(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jint mode)
+{
+    iris_sdk_set_reflection_mode(static_cast<int>(mode));
+}
+
+/**
+ * Java: native void nativeSetReflectionIntensity(float intensity);
+ * P6-W4 §5.7: intensity [0.0, 1.0] (W3 기본 0.3).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionIntensity(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat intensity)
+{
+    iris_sdk_set_reflection_intensity(static_cast<float>(intensity));
+}
+
 }  // extern "C"
