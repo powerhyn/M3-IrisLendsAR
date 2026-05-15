@@ -565,6 +565,20 @@ generate_export_header(iris_sdk
 )
 
 # =============================================================================
+# P6-W3 §5.10 hand-off / P6-W4 §1.15: W8 Pupil material renderMask hook 옵션.
+# =============================================================================
+# OFF default — 프로덕션 바이너리에서 hook dead code 제거 + 셰이더 #ifdef 비활성.
+# debug 벤치 시: cmake .. -DIRIS_SDK_RENDER_MASK_HOOK_ENABLED=ON
+# TODO(P6-W4): 셰이더 측 #define RENDER_MASK_HOOK_ENABLED prepend 미구현.
+#              현 단계는 C++ 빌드 매크로만 정의 — W8 활성 시 buildLensOverlayFragment()
+#              dynamic prepend 추가 (spec 5번 ⚠️ 안전 경로).
+option(IRIS_SDK_RENDER_MASK_HOOK_ENABLED "Enable W8 Pupil material renderMask hook (debug bench only)" OFF)
+if(IRIS_SDK_RENDER_MASK_HOOK_ENABLED)
+    target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_RENDER_MASK_HOOK_ENABLED=1)
+    message(STATUS "P6-W4: RENDER_MASK_HOOK_ENABLED debug build (shader prepend TODO)")
+endif()
+
+# =============================================================================
 # Tests
 # =============================================================================
 if(BUILD_TESTS)
