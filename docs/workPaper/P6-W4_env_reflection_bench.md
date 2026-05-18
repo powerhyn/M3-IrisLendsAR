@@ -195,6 +195,42 @@ W3 R1 재검토(2026-05-13)에서 W4로 넘어온 hand-off 3건. 원본 재검�
    - W4 단계는 demo assets 위치 그대로 사용 (W4 §5.7)
    - SDK 내장 결정은 W9 통합 단계 SDK surface 정합성 점검 시. W4에서는 변경 없음
 
+### 1.16 Phase A 검증 결과 — Visibility Budget 누락 사후 보완 (2026-05-18)
+
+**증상**: W4 Phase A 코드 구현 완료 후 실기기 검증에서 OFF/EnvMap/Periphery 3 프로토타입 모두 시각 차이 인지 불가. 디버그용 자극적 env_map(4 사분면 빨/노/녹/파, 채도 최대) + intensity 0.3 + LUMINANCE_TINT_LINEAR 블렌드에서도 동일.
+
+**원인 분석 (Codex gpt-5.4 medium 검증 + Claude critical-review)**:
+- 출처: `P6-W4_brainstorm/phase_a_issue.md`, `phase_a_issue_codex.md`
+- 1차 원인: **`renderMask = finalAlpha` (W3 §5.5)와 Fresnel C `smoothstep(0.7, 1.0)` (W3 §5.8)의 외곽 중첩 충돌**. Fresnel이 최강일 때(dist≈1.0) edgeAlpha=0 → 가산 0. 최대 가산 ≈ 0.04 (RGB ~10) → 인지 불가.
+- 2차 원인: **intensity CPU clamp 0.0~1.0** (`gpu_lens_renderer.cpp:408`). 1.5~3.0 sweep 시도 자체 봉쇄.
+- 3차 원인: sRGB 가산 단위 (`blendTintLinearV2` toSRGBFast 반환 위에 가산). 강도 약화.
+- W3 R1 합의 시 visibility budget 검증 누락 → "자연스러움" 철학과 별개로 가시성 0인 설계.
+
+**적용 패치** (W3 §5 R1 합의 부분 보완):
+
+| 항목 | R1 원안 | Phase A 보완 | 변경 사유 |
+|------|---------|------------|-----------|
+| `renderMask` | `finalAlpha` (= lens.a × uOpacity × edgeAlpha × eyelidMask) | **`lens.a × uOpacity × eyelidMask × step(dist, 1.0)`** (edgeAlpha 제거 + silhouette hard cutoff) | Fresnel + edgeAlpha 중첩 해소. edgeAlpha의 silhouette 가드 역할은 `step(dist, 1.0)`로 분리 복원 (lensCoord clamp가 dist>1.0에서도 lens.a를 반환하는 사이드 이펙트 차단) |
+| Fresnel inner | `smoothstep(0.7, 1.0)` | **`smoothstep(0.6, 1.0)`** (outer 1.0 유지) | R1 후보 [0.6, 0.7, 0.8] 중 가장 안쪽 채택. 외곽 40%에 반사 분포 |
+| intensity clamp | `0.0~1.0` (영구) | **`0.0~5.0`** (디버그/벤치 sweep용) | sweep 봉쇄 해제. 자연스러움 권장값 0.3은 유지 |
+| Demo UI | VOLUME_UP 모드 토글 | **+ VOLUME_DOWN intensity sweep** (0.3 → 1.0 → 2.0 → 3.0) | 벤치 중 강도 변경 + Toast 표시 |
+
+**거부된 Codex 권장 사항**:
+- ❌ `reflectionMask` 신규 명명 — W3 §5.5 `renderMask` 명명 보존 정합. 같은 변수 재정의.
+- ❌ `reflectionMask *= smoothstep(1.05, 0.85, dist)` 추가 곱셈 — GLSL ES 3.10 §8.3 명세상 `edge0 >= edge1`은 undefined behavior. magic number 추가 + 검증 없는 가정.
+- ❌ Fresnel `smoothstep(0.4, 0.8)` — R1 후보 [0.6, 0.7, 0.8] 밖. R1 합의 번복 시 brainstorm 재호출 필요.
+
+**Phase B 진입 조건** (Codex 권장 + Claude 수용):
+- ✅ OFF/EnvMap 정지 화면 비교만으로도 구분 가능
+- ✅ 관찰자가 3초 내 차이 인지
+- (Periphery는 약해도 OK — 본질적 소스 한계, 8포인트 평균)
+
+**관련 파일**:
+- `cpp/src/gpu/shader_sources.cpp` (renderMask + calcFresnel 변경)
+- `cpp/src/gpu/gpu_lens_renderer.cpp` (clamp 0~5)
+- `android/demo-app/src/main/java/com/irislenssdk/demo/GpuRenderActivity.kt` (VOLUME_DOWN sweep)
+- `P6-W3_env_reflection_scaffold.md` §5.5/§5.8 (R1 보완 사유 명시)
+
 ---
 
 ## 2. 배경/맥락

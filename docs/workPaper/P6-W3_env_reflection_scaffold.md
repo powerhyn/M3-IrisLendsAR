@@ -356,16 +356,23 @@ float fresnel = pow(dist, 2.0);
 
 ### 5.5 renderMask hook 구조 (Codex R4 Patch 4 단서)
 
+> ⚠️ **W4 Phase A 사후 보완 (2026-05-18)**: 아래 R1 원안 `renderMask = finalAlpha`는 Fresnel 외곽 강조와 edgeAlpha 외곽 페이드 중첩으로 가시성 ≈ 0 발견. **`renderMask = lens.a * uOpacity * eyelidMask`로 재정의** (edgeAlpha 제거). lens silhouette 외곽은 §5.8 Fresnel outer 1.0이 자연 감쇠 담당. 자세한 사유 + Codex 검증 + Claude critical-review는 `P6-W4 §1.15` 참조.
+
 ```glsl
 // 참고: 기존 shader의 dist는 이미 iris_radius 기준 정규화 (0~1 범위)
 //       → float dist = distance(adjustedCoord, adjustedCenter) / scaledRadius;
-float renderMask = finalAlpha;
+//
+// R1 원안 (Phase A 가시성 ≈ 0):
+//   float renderMask = finalAlpha;  // = lens.a * uOpacity * edgeAlpha * eyelidMask
+//
+// W4 Phase A 보완:
+float renderMask = lens.a * uOpacity * eyelidMask;  // edgeAlpha 제거
 
 #ifdef ENABLE_PUPIL_MATERIAL_RESTORE
     // W8에서 활성 — 동공 영역까지 반사 확장
     // 아래 smoothstep 수식은 예시. W8 구현 시 실제 수식 재확정.
     // dist는 이미 정규화됐으므로 iris_radius 곱하기 금지 (이중 정규화 오류)
-    renderMask = max(finalAlpha, smoothstep(1.2, 0.0, dist));
+    renderMask = max(renderMask, smoothstep(1.2, 0.0, dist));
 #endif
 ```
 
@@ -393,21 +400,25 @@ S1에서 삭제된 D1의 specular 강도는 0.7. Claude가 자기비판에서 "�
 
 ### 5.8 Fresnel 수식 — **옵션 C (가짜 Fresnel) 확정** (W3 R1 다수 2/3)
 
+> ⚠️ **W4 Phase A 사후 보완 (2026-05-18)**: R1 inner boundary 0.7 → **0.6 채택** (R1 후보 [0.6, 0.7, 0.8] 중 가장 안쪽). 외곽 boundary 1.0은 R1 합의 그대로 유지. 사유: §5.5 renderMask 재정의와 함께 가시성 확보. `P6-W4 §1.15` 참조.
+
 iris 거리 기반 근사. 실제 Fresnel은 grazing angle(시선과 표면이 이루는 각도가 큼)에서 반사 강해짐. 각막 기하에서 **iris 외곽으로 갈수록 grazing**이므로 **중심=0, 외곽=1** 방향.
 
 ```glsl
 // calcFresnel — 옵션 C 가짜 Fresnel (노멀 벡터 없음, dist 기반)
 // dist는 이미 /scaledRadius로 정규화 (0=중심, 1=외곽)
+// W4 Phase A 보완: inner 0.7 → 0.6 (R1 후보 내), outer 1.0 유지.
 float calcFresnel(float dist) {
-    return smoothstep(0.7, 1.0, dist);
+    return smoothstep(0.6, 1.0, dist);
 }
 ```
 
-- **초기 boundary (0.7, 1.0):** iris 내부 70%는 반사 0, 외곽 30%에서 점증 → 1. 물리 Fresnel(grazing에서 강함) 근사.
+- **현재 boundary (0.6, 1.0):** iris 내부 60%는 반사 0, 외곽 40%에서 점증 → 1.
+- **R1 원안 (0.7, 1.0):** §5.5 renderMask=finalAlpha와 중첩 시 가시성 ≈ 0이라 inner 안쪽 이동.
 - **W4 B2 실기기 튜닝:** inner boundary [0.6, 0.7, 0.8] 스위프 후보 (외곽 boundary 1.0 고정).
 - **노멀 벡터 불필요** → D1 재도입 없음 (3/3 모델 공통 확인).
 - **W4 B2 재검토 조항:** 실기기 벤치에서 "시점 의존성 부족으로 효과 약함" 피드백 2/3 이상 → 후속 W(W8 또는 별도)에서 옵션 A(Schlick) 전환 검토. W3 scaffold는 옵션 C로 완료.
-- 출처: `P6-W3_brainstorm/synthesis.md` §2.
+- 출처: `P6-W3_brainstorm/synthesis.md` §2 + W4 Phase A 보완.
 
 ### 5.9 분석 노멀 — **W3 제외 확정** (W3 R1 다수 2/3)
 
