@@ -1108,6 +1108,10 @@ class GpuRenderActivity : AppCompatActivity() {
     private var envMapLoaded = false
     private var reflectionMode = 0  // 0=OFF, 1=EnvMap, 2=Periphery
 
+    // P6-W4 Phase A 보완: intensity sweep (W3 §5.7 기본 0.3, clamp 0~5 확장).
+    private val intensitySweep = floatArrayOf(0.3f, 1.0f, 2.0f, 3.0f)
+    private var intensitySweepIdx = 0
+
     /** P6-W4 §5.7: assets/env/env_default_256x128.png 로드 + GL 스레드 디스패치. */
     private fun loadEnvMapAsset() {
         try {
@@ -1131,15 +1135,28 @@ class GpuRenderActivity : AppCompatActivity() {
         }
     }
 
-    /** P6-W4 §5.11: 볼륨 UP 키로 반사 모드 순환 (OFF → EnvMap → Periphery). */
+    /**
+     * P6-W4 §5.11: VOLUME_UP 키로 반사 모드 순환 (OFF → EnvMap → Periphery).
+     * P6-W4 Phase A 보완: VOLUME_DOWN 키로 intensity sweep (0.3 → 1.0 → 2.0 → 3.0).
+     */
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            reflectionMode = (reflectionMode + 1) % 3
-            cameraGLView.setReflectionMode(reflectionMode)
-            val modeName = arrayOf("OFF", "EnvMap", "Periphery")[reflectionMode]
-            Toast.makeText(this, "Reflection: $modeName", Toast.LENGTH_SHORT).show()
-            Log.i(TAG, "P6-W4 reflection mode → $modeName ($reflectionMode)")
-            return true
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                reflectionMode = (reflectionMode + 1) % 3
+                cameraGLView.setReflectionMode(reflectionMode)
+                val modeName = arrayOf("OFF", "EnvMap", "Periphery")[reflectionMode]
+                Toast.makeText(this, "Reflection: $modeName", Toast.LENGTH_SHORT).show()
+                Log.i(TAG, "P6-W4 reflection mode → $modeName ($reflectionMode)")
+                return true
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                intensitySweepIdx = (intensitySweepIdx + 1) % intensitySweep.size
+                val newIntensity = intensitySweep[intensitySweepIdx]
+                cameraGLView.setReflectionIntensity(newIntensity)
+                Toast.makeText(this, "Intensity: $newIntensity", Toast.LENGTH_SHORT).show()
+                Log.i(TAG, "P6-W4 reflection intensity → $newIntensity")
+                return true
+            }
         }
         return super.onKeyDown(keyCode, event)
     }
