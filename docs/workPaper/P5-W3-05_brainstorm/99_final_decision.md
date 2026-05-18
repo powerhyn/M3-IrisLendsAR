@@ -26,7 +26,7 @@ R3에서 Codex·Gemini·Claude가 모두 동의한 항목만 포함. `99_claude_
 |----|----------|----------|----------|
 | D1 | 분석적 노멀 + 고정 조명 `vec3(0.3, 0.4, 1.0)` 블록 | `shader_sources.cpp:1008-1032` | 세 모델 R2 합의, R3 재확인 |
 | D2 | `LIMBAL_ENABLED = false` 하드코드 전역 비활성 | `shader_sources.cpp:999-1006` | 세 모델 R2 합의 |
-| D3 | `realSpec = smoothstep(0.7, 0.95, lum)` + `mix(result, baseL, realSpec)` | `shader_sources.cpp:865-874` (LTL 내부) | **조건부 폐기**: I1 환경 반사 계층 도입 성공(B2) 확정 후 제거. I1 실패 시 재평가 — Gemini/Claude R3 지적. ✅ **P6-W2 코드 완전 삭제** (커밋 b70490b, archive: `P6-W2_brainstorm/realSpec_archive.md`). 문서상 "확정 폐기" 마킹은 W4 B2 결과 후. |
+| D3 | `realSpec = smoothstep(0.7, 0.95, lum)` + `mix(result, baseL, realSpec)` | `shader_sources.cpp:865-874` (LTL 내부) | **조건부 폐기**: I1 환경 반사 계층 도입 성공(B2) 확정 후 제거. I1 실패 시 재평가 — Gemini/Claude R3 지적. ✅ **P6-W2 코드 완전 삭제** (커밋 b70490b, archive: `P6-W2_brainstorm/realSpec_archive.md`). ⚠️ **2026-05-18 확정 (Phase 6 이월)**: B2 환경 반사 Phase 6 이월 결정으로 D3는 **"조건부 유지" 확정** (완전 폐기 아님). 코드는 W2에서 삭제됐지만 Phase 7+ 환경 반사 재개 검토 시 함께 재고. 출처: `P6-W4 §1.17`. |
 | D4 | `uAvgIrisLum = 0.35` 하드코드 기본값 | `gpu_lens_renderer.cpp:811-813` 근처 | 세 모델 R2 합의 |
 | D5 | "3D Light" 토글 UI + `uHighlightEnabled` uniform | demo + shader | D1 제거 시 자동 무의미 |
 | D6 | 블렌드 중 `Overlay`, `LuminanceTint(nonlinear)`, `SoftLight` 3종 | `shader_sources.cpp:979-997` 분기 | ⚠️ **`Normal` 제거 철회** — Codex R3 "B1 벤치 전 제거는 결론 선반영" 지적. Normal은 B1 벤치 전까지 유지. ✅ **P6-W2 적용** (S1 9aee86d로 함수+분기 제거, W2 b70490b로 fallback default를 TintLinearV2로 통일, 25ebf99로 invalid ID 1회 경고). |
@@ -39,7 +39,7 @@ R3에서 Codex·Gemini·Claude가 모두 동의한 항목만 포함. `99_claude_
 | C2 | `TintLinearV2` = 기존 LuminanceTintLinear에서 `realSpec` 완전 제거한 형태. 수식: `baseL=base*base; lensL=lens*lens; lum=dot(baseL,w); out=sqrt(mix(baseL, lensL*lum*scale, a))`. `scale = clamp(K / uAvgIrisLum, 0.8, ub)`에서 **K(비례 상수)와 ub(scale clamp upper)는 실기기 시각 튜닝값**. W2 적용 시 K=0.85, ub=7.0. | 세 모델 R2/R3 합의. ✅ **P6-W2 적용** (커밋 b70490b — squaring 버그 함께 수정, uAvgIrisLum 이미 linear 가정). 실기기 회귀 fix(K=0.5→0.85, ub=5.0→7.0)는 별도 fix 커밋. **추가 강도는 알고리즘 본질 한계(휘도 보존 구조)로 W5 B1 벤치 재검토 대상**. |
 | C3 | `ScreenLinear` 신규 — 수식: `out = sqrt(mix(baseL, 1-(1-baseL)*(1-lensL), a))` | 세 모델 R2/R3 합의. ✅ **P6-W2 적용** (커밋 b70490b — sRGB blendScreen 제거, 옵션 A). |
 | C4 | `ColorReplaceLinear` **벤치 대상(B1)** — 수식: `detail = clamp(pow(lum/avgLum, 0.7), 0.75, 1.25); out = sqrt(mix(baseL, lensL*detail, a))` | Codex R2 제안, B1 결과 후 채택 결정. ✅ **P6-W2 적용** (커밋 b70490b — ID 7 정식 분기 활성, §5.7 옵션 B. W5 B1 결과로 채택/제거). |
-| C5 | 환경 반사 가산 계층 분리. 기본: `float renderMask = finalAlpha; blended += reflection * fresnel * renderMask;`. **반사 소스는 B2 벤치로 결정**. **renderMask hook**: P6-W1 활성화 시 `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 분기로 `renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist))`로 확장 가능. 기본 동작은 기존 finalAlpha와 동일, 추가 런타임 비용 0. ⚠️ 이 smoothstep 수식은 **예시, 최종 구현 확정 아님** (Codex R4 단서) | Codex R1/R3 + R4 Patch 4 |
+| C5 | 환경 반사 가산 계층 분리. 기본: `float renderMask = finalAlpha; blended += reflection * fresnel * renderMask;`. **반사 소스는 B2 벤치로 결정**. **renderMask hook**: P6-W1 활성화 시 `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 분기로 `renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist))`로 확장 가능. 기본 동작은 기존 finalAlpha와 동일, 추가 런타임 비용 0. ⚠️ 이 smoothstep 수식은 **예시, 최종 구현 확정 아님** (Codex R4 단서) | Codex R1/R3 + R4 Patch 4. ✅ **P6-W3 scaffold 구현 완료** (PR #3). ✅ **P6-W4 Phase A 3 프로토타입 활성** (커밋 121a262). ⚠️ **2026-05-18 확정 (Phase 6 이월)**: B2 24클립 벤치 미실행. Phase A 시각 검증에서 R1 §5.8 옵션 C "외곽 강조 Fresnel" 물리 가정 오류 발견 — 사용자 직관 "현실 발생 불가능 케이스" 지적으로 §B2 시나리오 "셋 다 차이 미미"(line 137) 채택. 코드는 OFF 기본 + 토글로 보존, Phase 7+ 재개 시 옵션 A/B 재검토. 출처: `P6-W4 §1.17`. |
 | C6 | 림발 기본 ON + SKU 메타데이터 플래그. 플래그는 **내부 material 모델 필드**(공개 `LensConfig`가 아닌 내부 표현) | ⚠️ **R3 수정**: Codex R3 "공개 API 변경 가능성" 지적 반영. 공개 API는 변경하지 않음 |
 | C7 | **블링크 alpha ramp — 시간 범위만 확정, 계수는 실측 튜닝**. down 50~80ms, up은 **B5 벤치로 확정**(아래 §2) | ⚠️ **R3 수정**: Gemini R3 "up 100~120ms 동의한 적 없음" + Codex R3 "α=0.15 계수가 목표 ms와 불일치" 둘 다 반영. up 시간 쟁점 자체를 벤치로 이관 |
 | C8 | `EyeRenderPacket` 구조체 도입 (내부 어댑터 레이어) | 세 모델 R2/R3 합의 |
@@ -116,6 +116,8 @@ struct EyeRenderPacket {
 - **소요**: 3~4시간 (SKU 1개 추가 반영)
 
 ### B2 — 환경 반사 소스: env map only vs Periphery camera vs OFF
+
+> ✅ **2026-05-18 종결 (Phase 6 이월 채택)**: 24클립 벤치 미실행. P6-W4 Phase A 시각 검증 단계에서 R1 §5.8 옵션 C "외곽 강조 Fresnel" 물리 가정 오류 발견 — 사용자 직관 "외곽 광택 자체가 현실 발생 불가능 케이스" 지적으로 아래 시나리오 **마지막 행(Phase 6 이월)** 채택. Phase A 코드(scaffold + 3 프로토타입 토글)는 OFF 기본으로 보존. Phase 7+ 재개 시 옵션 A(Schlick) 또는 옵션 B(reflect 기반) brainstorm 재호출. 출처: `P6-W4 §1.17`, `P6-W4_brainstorm/phase_a_issue{,_codex}.md`.
 
 - **프로토타입 3종**:
   1. **OFF** (baseline)

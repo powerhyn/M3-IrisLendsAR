@@ -1,9 +1,9 @@
 # P6-W3: 환경 반사 가산 계층 분리 + renderMask hook
 
-> **상태**: 구현 완료 (2026-05-13).
+> **상태**: 구현 완료 (2026-05-13). **Phase 6 이월 결정 (2026-05-18)** — W4 §1.17 참조. Scaffold 코드는 OFF 기본으로 그대로 유지, Phase 7+ 환경 반사 재개 시 base.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W2 (블렌드 3종 확정)
-> **후속 의존**: P6-W4 (B2 벤치), P6-W8 (Pupil material)
+> **후속 의존**: Phase 7+ (환경 반사 재개 시점)
 
 ---
 
@@ -179,6 +179,23 @@ R1 완료(2026-04-24) 후 외부 모델 송신 없이 3개 응답(`claude_w3.md`
    - 1차 24클립 = 1 SKU × 4환경 × 2동작 × 3프로토타입. 모호함 없음.
 
 **편향 경계 작동**(6.3 Claude 원안 → 다수결 #ifdef)과 **Codex 소수 의견 W4 재검토 경로**(6.1/6.2/6.5)는 R1 결론 그대로 유효. R2 불필요.
+
+### 1.16 Phase 6 이월 결정 사후 노트 (2026-05-18)
+
+W4 Phase A 시각 검증에서 §5.8 옵션 C "외곽 강조 Fresnel" 물리 가정 오류 발견 → W4 §1.17에서 Phase 6 이월 결정.
+
+**W3 코드/문서 보존 방침**:
+- §5 R1 합의 + Phase A 보완(§5.5 silhouette guard, §5.8 inner 0.6) **그대로 유지** — 미래 재개 시 base
+- 셰이더 sampleReflection / calcFresnel / renderMask 정의 변경 없음
+- `uSourceType=0` (OFF) 기본 → 실기기 시각 영향 0
+- W3 scaffold가 W4 Phase A 코드(env-map + periphery 활성)를 받아들이는 인프라 역할도 유지
+
+**Phase 7+ 재개 시 검토 사항**:
+- §5.8 옵션 C 폐기 → 옵션 A(Schlick) 또는 B(reflect) 재선택 (brainstorm 재호출)
+- D1 분석 노멀 부분 복귀 (고정 광원 X, `reflect(-V, N)`/`dot(N, V)` 입력만)
+- §5.12 reflectUV 옵션 C(iris local)도 노멀 기반 옵션으로 전환 검토
+
+출처: `P6-W4_env_reflection_bench.md §1.17`, `P6-W4_brainstorm/phase_a_issue{,_codex}.md`.
 
 ---
 

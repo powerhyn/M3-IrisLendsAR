@@ -1,5 +1,7 @@
 # P6-W4 B2 벤치 — 24클립 촬영 체크리스트
 
+> ⚠️ **2026-05-18 Phase 6 이월 결정으로 현재 미사용**. Phase 7+ 재개 시 활용. 자세한 사유: `README.md` 참조.
+
 > **목적**: env-map / periphery / OFF 3 프로토타입 비교 + Pupil cavity 체감 수집.
 > **명세**: `docs/workPaper/P6-W4_env_reflection_bench.md` §5.3 / §5.11 / §5.12
 > **시작일**: ____
