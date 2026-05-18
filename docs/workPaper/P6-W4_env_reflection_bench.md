@@ -1,9 +1,10 @@
 # P6-W4: B2 환경 반사 소스 벤치 + Pupil 체감 지표 수집
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: **Phase 6 이월 결정 (2026-05-18)**. Phase A 코드는 scaffold + 3 프로토타입 토글 형태로 보존, 24클립 벤치(Phase B)는 미실행.
+> **이월 사유**: §1.17 참조.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W3 (환경 반사 계층 스캐폴드 완료)
-> **후속 의존**: P6-W8 (조건부 — B2 체감 지표 기반 발동)
+> **후속 의존**: Phase 7+ (환경 반사 재개 시점)
 
 ---
 
@@ -231,6 +232,43 @@ W3 R1 재검토(2026-05-13)에서 W4로 넘어온 hand-off 3건. 원본 재검�
 - `android/demo-app/src/main/java/com/irislenssdk/demo/GpuRenderActivity.kt` (VOLUME_DOWN sweep)
 - `P6-W3_env_reflection_scaffold.md` §5.5/§5.8 (R1 보완 사유 명시)
 
+### 1.17 Phase 6 이월 결정 (2026-05-18)
+
+**결정**: 환경 반사 트랙 **Phase 6 이월** + 99 §B2 시나리오 "셋 다 차이 미미"(line 137) 채택.
+24클립 Phase B 벤치는 **미실행** — 사유: R1 설계 가정 자체의 물리 부정확성이 Phase A 시각 검증에서 직관적으로 발견됨.
+
+**핵심 발견 (사용자 직관 지적, 2026-05-18)**:
+> "렌즈 외곽에 광택이 생기는 거 자체가 부자연스러움. 현실 세계에서 발생 불가능한 케이스"
+
+R1 §5.8 옵션 C "iris 외곽 강조 Fresnel"의 물리 근거 재검토 결과:
+- "각막 외곽이 grazing angle" → **각막을 단순 구체로 가정한 오류** (실제 각막은 곡률 가진 표면)
+- "limbal 근처 hairtlight" → **물리 근거 약함**, R1 합의 위한 사후 정당화
+- 진짜 R1 동기는 **"D1 분석 노멀 회피"** (재도입 금지 제약) — Codex가 R1에서 옵션 A(Schlick) 주장한 게 시점 의존성 catchlight에 가까웠으나 다수결로 묻힘
+- **현실 각막 반사 실제 모습**: catchlight(작은 점광)이 iris 안쪽에 시점/광원 따라 이동. 외곽 limbal은 어둡거나 자연 융합.
+
+**24클립 벤치 미실행 사유**:
+- 옵션 C 외곽 광택 자체가 부자연 → OFF가 가장 자연스러움이 vegan 결론 가능성 매우 높음
+- 24클립 시간/리소스 투자가 "결과 예측 가능한 벤치"에 들어가는 셈
+- Phase B 산출물(`docs/bench/P6-W4/`)은 미래 재개 시 즉시 활용 가능하게 보존
+
+**연쇄 후속 결정**:
+- §1.2 C5 환경 반사 소스: **Phase 6 이월** (99 시나리오 line 137 채택)
+- §1.1 D3 realSpec: **조건부 유지** (완전 폐기 아님 — Phase 7 재검토 시 환경 반사와 함께 재고)
+- W8 Pupil cutout: **별도 판정 불가** (벤치 미실행으로 체감 지표 미수집). Phase 7+ 환경 반사 재개 시 함께 평가 또는 단독 트랙으로 분리
+
+**코드/문서 보존 방침**:
+- W3 scaffold + W4 Phase A 코드 (셰이더 sampleReflection + GPULensRenderer API + JNI + Demo UI 토글) **전체 보존**
+- 기본 동작은 `uSourceType=0` (OFF) — 실기기 시각 변화 없음 (현재 default)
+- VOLUME_UP/DOWN 토글 = 미래 재개 시 즉시 시각 확인 가능
+- `docs/bench/P6-W4/` 산출물 보존 + README에 이월 안내
+
+**재개 진입점 (Phase 7+)**:
+1. W3 §5.8 Fresnel 옵션 C 폐기 → 옵션 A(Schlick) 또는 B(reflect 기반) 재검토 (brainstorm 재호출 필수)
+2. D1 분석 노멀 부분 복귀 검토 (고정 광원 X, `reflect(-V, N)` + `dot(N, V)`만)
+3. `docs/bench/P6-W4/checklist.md` + `scripts/p6w4_bench_helper.sh` 그대로 사용 가능
+
+**참조**: `docs/workPaper/P6-W4_brainstorm/phase_a_issue{,_codex}.md` (Phase A 진단 + Codex 검증).
+
 ---
 
 ## 2. 배경/맥락
@@ -292,24 +330,28 @@ W1~W3는 브레인스토밍 + 구현. W4는 브레인스토밍 + **실기기 촬
 4. **env_map 에셋 완성** (채택 시) — 실제 사용 가능 상태
 5. **채택 소스의 sampleReflection 실제 구현 완료** — W3 no-op 교체
 
-### 4.1 Definition of Done
+### 4.1 Definition of Done — Phase 6 이월 재정의 (2026-05-18)
 
-- [ ] 3 프로토타입 구현 (env-map, periphery, OFF baseline)
-- [ ] 4 환경 × 2 동작 × 3 프로토타입 = **24 클립** 촬영 완료
-- [ ] 평가자 3명 블라인드 평가 완료
-- [ ] 판정 결과 문서화 (`docs/bench/P6-W4/report.md` or 유사)
-- [ ] 채택 소스의 sampleReflection 실제 구현 머지 완료
-- [ ] "중앙 공동 체감" Y/N 3명×24클립 = 72 응답 수집
-- [ ] W8 착수/폐기 판정 (2/3 룰)
-- [ ] 99_final_decision.md §1.2 C5 "반사 소스 확정" 업데이트
-- [ ] 99 §1.1 D3 "realSpec 상태 확정" 업데이트
-- [ ] 실기기 회귀 확인 (채택 소스 적용 후 성능 유지)
+원안(24클립 벤치 종결)에서 §1.17 이월 결정 후 다음으로 재정의:
+
+- [x] **3 프로토타입 코드 구현** (Phase A 완료, scaffold + 토글 형태 보존)
+- [x] **Phase A 시각 검증** (외곽 광택 부자연 발견 → 24클립 벤치 불필요 결론)
+- [x] **이월 결정 문서화** (W4 §1.17 + 99 §B2 line 137 시나리오)
+- [x] **D3 realSpec 상태 확정**: **조건부 유지** (완전 폐기 아님)
+- [x] **C5 환경 반사 소스**: **Phase 6 이월** (Phase 7+ 재검토)
+- [x] **Phase B 산출물 보존** (`docs/bench/P6-W4/` + `scripts/p6w4_bench_helper.sh`) — 미래 재개 진입점
+- [x] **재개 가이드 문서화** (W3 §5.5/§5.8 보존 사유 + W4 §1.17 재개 진입점)
+- [N/A] 24클립 촬영 — 미실행 (이월)
+- [N/A] 평가자 3명 블라인드 — 미실행 (이월)
+- [N/A] W8 Pupil 2/3 판정 — 별도 트랙으로 분리 (체감 지표 미수집)
+- [x] 실기기 회귀 확인 — Phase A 패치(silhouette guard 포함) 적용 후 OFF 기본 동작 W2와 동일 (이미 검증)
 
 ### 4.2 Out of scope
 
 - Hybrid 프로토타입 — 1차 결과가 "둘 다 유의미 개선"일 때만 2차
 - Head-pose 기반 env 회전 — W4 범위에선 static env map 우선, 회전은 선택
 - W8 실제 구현 — 조건 발동 시 별도 W
+- **24클립 Phase B 벤치 + 평가자 3명** — Phase 6 이월로 미실행 (§1.17). Phase 7+ 재개 시 `docs/bench/P6-W4/` 산출물 활용
 
 ---
 
@@ -389,14 +431,16 @@ vec3 sampleReflection(vec2 reflectUV, vec3 normal, vec3 viewDir) {
 
 **테스터 조건**: 아시아 짙은 홍채 주류.
 
-### 5.5 결론 시나리오 (99 §2 B2)
+### 5.5 결론 시나리오 (99 §2 B2) — **마지막 행 채택 (2026-05-18)**
 
 | 결과 | C5 소스 확정 | D3 realSpec | W8 착수 |
 |------|------------|-------------|---------|
 | env-map 명확 우세 | env-map | 완전 폐기 | 체감 지표 별도 판정 |
 | periphery 명확 우세 | periphery | 완전 폐기 | 체감 지표 별도 판정 |
 | 둘 다 OFF 대비 개선 | 2차 hybrid 검토 | 완전 폐기 | 체감 지표 별도 판정 |
-| 둘 다 차이 미미 | **Phase 6 이월** | **조건부 유지** (재도입 검토) | 보통 체감 높음 → 착수 |
+| **둘 다 차이 미미** ← **채택** | ✅ **Phase 6 이월** | ✅ **조건부 유지** (Phase 7+ 재도입 검토) | ⚠️ **별도 트랙 분리** (벤치 미실행으로 체감 지표 미수집) |
+
+**채택 근거** (§1.17): 24클립 벤치 미실행. Phase A 시각 검증에서 사용자 직관 — "외곽 광택 자체가 부자연" — 으로 R1 §5.8 옵션 C 물리 가정 오류 인정. 벤치 진행해도 "OFF가 가장 자연스러움" 결과 예측 가능성 매우 높아 시간/리소스 절약.
 
 ### 5.6 Pupil 체감 W8 착수 판정 (Hard)
 
@@ -604,29 +648,37 @@ W4 완료 후:
 
 ## 8. 완료 정의 + 다음 W 트리거
 
-### 8.1 완료 정의
+### 8.1 완료 정의 — Phase 6 이월 재정의 (2026-05-18)
 
-§4.1 체크리스트 + `docs/bench/P6-W4/report.md` 존재.
+§4.1 재정의 체크리스트 충족 + 이월 결정 99 반영 + Phase B 산출물 보존 + 재개 가이드 문서화.
 
-### 8.2 커밋 전략
+### 8.2 커밋 전략 (실제 SHA 기록)
 
-**커밋 1**: `docs(P6-W4): 섹션 2~8 본문 작성`
-**커밋 2**: `feat(gpu-lens): P6-W4 env-map 프로토타입 추가 (B2 벤치용)`
-**커밋 3**: `feat(gpu-lens): P6-W4 periphery 프로토타입 추가`
-**커밋 4**: `feat(android): P6-W4 벤치용 프로토타입 토글 UI`
-**커밋 5** (벤치 후): `chore(bench): P6-W4 B2 결과 report 및 산출물`
-**커밋 6** (반영): `feat(gpu-lens): P6-W4 채택 소스 정식 적용 + realSpec 폐기 확정`
+| # | 커밋 | SHA | 비고 |
+|---|------|-----|------|
+| 1 | `chore(demo): P6-W4 env_map placeholder + CMake RENDER_MASK_HOOK_ENABLED` | `468fe9b` | Phase A 진입 |
+| 2 | `feat(gpu-lens): P6-W4 환경 반사 3 프로토타입 + JNI API` | `e7cd82b` | Phase A 코드 |
+| 3 | `feat(demo): P6-W4 벤치 UI — env_map 로드 + VOLUME_UP 토글` | `13aa6b3` | Phase A 데모 |
+| 4 | `Merge feature/P6-W4` | `121a262` | Phase A 머지 |
+| 5 | `fix(gpu-lens): Phase A 가시성 보완 — renderMask + Fresnel + silhouette guard` | `35ae668` | Phase A 검증 후 |
+| 6 | `feat(demo): VOLUME_DOWN intensity sweep` | `2d17333` | sweep 키 |
+| 7 | `docs(P6-W3/W4): Phase A visibility budget 보완 사유` | `7970504` | §1.16 |
+| 8 | `Merge feature/P6-W4-phase-a-visibility` | `f95d262` | Phase A 보완 머지 |
+| 9 | `docs(bench): P6-W4 Phase B 벤치 산출물` | `1acd35d` → `a53b0f9` | Phase B 준비 (미사용, 미래 진입점) |
+| 10 | `docs(P6-W4/W3/99): Phase 6 이월 결정` | (이 PR) | 본 결정 |
+
+원안 커밋 5/6(`chore(bench)` / `feat(gpu-lens) 채택 소스`)은 **이월로 미실행** — Phase 7+ 재개 시 활용.
 
 ### 8.3 다음 W 트리거
 
-**P6-W8 (조건부) 시작**:
-- Pupil 체감 지표 2/3 이상 Y → W8 브레인스토밍 + 구현
-- 1/3 Y → 사용자 판단 대기
-- 0/3 Y → W8 폐기 + 관련 hook 정리
+**Phase 6 잔여 W (W5/W6/W7/W9)**: 환경 반사 결과와 **완전히 독립**. W3 머지 후 즉시 진행 가능. 이월 결정이 잔여 트랙 영향 0.
 
-**W5/W6/W7**: W4와 **독립적** (반사 결과와 무관). W3 완료 후부터 병렬 진행 가능.
+**W8 Pupil cutout**: 체감 지표 미수집으로 발동 판정 불가. **별도 트랙으로 분리** — 환경 반사 재개와 함께 묶거나 단독 검증.
 
-**W9**: 모든 W 완료 후.
+**Phase 7+ 환경 반사 재개 진입점**:
+- W3 §5.8 Fresnel 옵션 C 폐기 → 옵션 A(Schlick) 또는 B(reflect 기반) brainstorm 재호출
+- D1 분석 노멀 부분 복귀 검토 (고정 광원 X, `reflect(-V, N)`/`dot(N, V)`만)
+- `docs/bench/P6-W4/` 산출물 + `scripts/p6w4_bench_helper.sh` 그대로 재사용
 
 ### 8.4 W4 실패 시 전략
 
