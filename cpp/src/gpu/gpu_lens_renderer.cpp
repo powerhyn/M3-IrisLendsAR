@@ -405,7 +405,10 @@ void GPULensRenderer::setReflectionMode(int mode) {
 
 void GPULensRenderer::setReflectionIntensity(float intensity) {
     std::lock_guard<std::mutex> lock(mutex_);
-    reflection_intensity_ = std::clamp(intensity, 0.0f, 1.0f);
+    // P6-W4 Phase A 보완: clamp 상한 1.0 → 5.0 확장 (디버그/벤치 sweep용).
+    // 자연스러움 우선값은 0.3 (W3 §5.7)이지만 Phase A 검증/튜닝/디버그 시
+    // 1.0~3.0 범위 실험 필요. 영구 사용은 권장 안 함.
+    reflection_intensity_ = std::clamp(intensity, 0.0f, 5.0f);
 }
 
 bool GPULensRenderer::hasLensTexture() const {
