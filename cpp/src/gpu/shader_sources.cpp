@@ -950,11 +950,14 @@ vec3 sampleReflection(vec2 reflectUV, vec2 irisCenterAdjusted, float scaledRadiu
     return vec3(0.0);  // OFF (W3 기본)
 }
 
-// P6-W3 §5.8: calcFresnel — 옵션 C 가짜 Fresnel (R1 다수 2/3 채택).
+// P6-W3 §5.8 + W4 Phase A 보완: calcFresnel — 옵션 C 가짜 Fresnel.
 // dist는 이미 /scaledRadius로 정규화 (0=중심, 1=외곽). 노멀 벡터 없음 (D1 재도입 회피).
-// 초기 boundary (0.7, 1.0): iris 외곽 30%에서만 반사 점증. W4 B2 실기기 튜닝 후보.
+// boundary (0.6, 1.0): R1 inner 후보 [0.6, 0.7, 0.8] 중 가장 안쪽 채택.
+// 사유: Phase A 시각 검증에서 inner 0.7 + outer 1.0이 edgeAlpha 페이드와 정확히 중첩 →
+//       가시성 거의 0. inner 0.6으로 안쪽 이동해 외곽 40%에 반사 분포.
+//       outer 1.0은 R1 합의 그대로 유지 (W3 §5.8). W4 §1.15 참조.
 float calcFresnel(float dist) {
-    return smoothstep(0.7, 1.0, dist);
+    return smoothstep(0.6, 1.0, dist);
 }
 
 vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
@@ -1041,9 +1044,14 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     //     blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
     //   }
 
-    // P6-W3 §5.1/§5.4: C5 환경 반사 가산 합성 (블렌드 → 디테일 → 반사 → contact shadow 순서).
-    // W3 scaffold — sampleReflection이 OFF면 vec3(0)이므로 시각 변화 없음.
-    float renderMask = finalAlpha;
+    // P6-W3 §5.1/§5.4 + W4 Phase A 보완: C5 환경 반사 가산 합성.
+    // W3 §5.5 원안: renderMask = finalAlpha (= lens.a * uOpacity * edgeAlpha * eyelidMask).
+    // W4 Phase A 1차 보완: edgeAlpha 제거 → 외곽 가산 살아남 + 가시성 확보.
+    // W4 Phase A 2차 보완: lens silhouette 가드 누락 발견 (lensCoord clamp가 dist>1.0에서도
+    //   외곽 lens.a 반환 → 얼굴/안경 영역까지 반사 누수 → 노란 가로 띠 발생).
+    //   `step(dist, 1.0)`로 hard cutoff. edgeAlpha의 soft fade 역할은 포기하고
+    //   가드 역할만 복원. W3 §5.5/§5.8 + W4 §1.16 참조.
+    float renderMask = lens.a * uOpacity * eyelidMask * step(dist, 1.0);
 #ifdef RENDER_MASK_HOOK_ENABLED
     // P6-W3 §5.10: W8 Pupil material 조건부 트랙. CMake 옵션으로만 활성 (프로덕션 비활성).
     // smoothstep 인자는 Codex R4 Patch 4 단서대로 예시 — W8 구현 시 실기기 튜닝.
