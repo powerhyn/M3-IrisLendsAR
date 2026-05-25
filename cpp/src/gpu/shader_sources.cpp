@@ -812,6 +812,7 @@ uniform float uAvgIrisLum;
 uniform float uDetH;
 
 uniform int uScleraProtect;
+uniform int uScleraVetoMode;  // P6-W5: 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini)
 uniform int uContactShadow;
 uniform float uShadowIntensity;
 uniform float uMaxDetail;
@@ -1001,9 +1002,26 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
 
     float irisEdgeDist = dist * uLensScale;
     if (uScleraProtect == 1) {
-        float geomFactor = smoothstep(0.75, 1.0, irisEdgeDist);
-        float colorFactor = calcScleraFactor(camera.rgb);
-        float scleraFade = 1.0 - geomFactor * (0.5 + 0.5 * colorFactor);
+        float geom = smoothstep(0.75, 1.0, irisEdgeDist);
+        float scleraFade;
+        if (uScleraVetoMode == 1) {
+            // P6-W5 §5.4 / §5.14: Codex color-veto (sat + luma). 0.6 강도 W5 1차 고정.
+            float maxC = max(camera.r, max(camera.g, camera.b));
+            float minC = min(camera.r, min(camera.g, camera.b));
+            float sat = (maxC - minC) / max(maxC, 1e-4);
+            float lum = dot(camera.rgb, vec3(0.299, 0.587, 0.114));
+            float veto = smoothstep(0.18, 0.32, sat) * (1.0 - smoothstep(0.45, 0.65, lum));
+            scleraFade = 1.0 - geom * (1.0 - 0.6 * veto);
+        } else if (uScleraVetoMode == 2) {
+            // P6-W5 §5.4 / §5.12: Gemini luma-only (sat 항 제거). 임계값 (0.45, 0.65) 유지.
+            float lum = dot(camera.rgb, vec3(0.299, 0.587, 0.114));
+            float veto = 1.0 - smoothstep(0.45, 0.65, lum);
+            scleraFade = 1.0 - geom * (1.0 - 0.6 * veto);
+        } else {
+            // Legacy (W5 이전 수식). W5 결과 반영 시점에 §5.13 따라 단일 수식으로 정리.
+            float colorFactor = calcScleraFactor(camera.rgb);
+            scleraFade = 1.0 - geom * (0.5 + 0.5 * colorFactor);
+        }
         finalAlpha *= scleraFade;
     }
 
