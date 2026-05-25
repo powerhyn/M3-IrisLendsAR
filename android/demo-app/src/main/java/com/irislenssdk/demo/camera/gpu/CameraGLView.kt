@@ -286,6 +286,16 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * P6-W5 §5.9: sclera veto 수식 토글 (B1/B8 4조합 벤치용).
+     * @param mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini)
+     */
+    fun setScleraVetoMode(mode: Int) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setScleraVetoMode(mode)
+        }
+    }
+
+    /**
      * LUT 3D 텍스처 설정 (임의 스레드에서 호출 가능 — 내부에서 GL 스레드로 큐잉)
      *
      * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)
