@@ -632,6 +632,19 @@ void iris_sdk_set_lens_sclera_protect(int enabled) {
 #endif
 }
 
+// P6-W5 §5.9: B1/B8 4조합 벤치용 sclera veto 수식 토글 internal C API.
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출.
+void iris_sdk_set_lens_sclera_veto_mode(int mode) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setScleraVetoMode(mode);
+    }
+#else
+    (void)mode;
+#endif
+}
+
 void iris_sdk_set_lens_ellipse_mask(int enabled) {
 #ifdef IRIS_SDK_HAS_GLES
     std::lock_guard<std::mutex> lock(g_gpu_mutex);

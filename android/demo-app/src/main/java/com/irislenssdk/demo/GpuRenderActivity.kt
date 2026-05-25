@@ -102,6 +102,12 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnToggleShadow: Button
     private lateinit var btnToggleEllipse: Button
     private lateinit var btnToggleHighlight: Button
+
+    // P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 토글 (A/B/C/D)
+    private lateinit var btnBenchA: Button
+    private lateinit var btnBenchB: Button
+    private lateinit var btnBenchC: Button
+    private lateinit var btnBenchD: Button
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -200,6 +206,12 @@ class GpuRenderActivity : AppCompatActivity() {
         btnToggleShadow = findViewById(R.id.btnToggleShadow)
         btnToggleEllipse = findViewById(R.id.btnToggleEllipse)
         btnToggleHighlight = findViewById(R.id.btnToggleHighlight)
+
+        // P6-W5 §5.9: 4조합 블라인드 벤치 버튼 (A/B/C/D)
+        btnBenchA = findViewById(R.id.btnBenchA)
+        btnBenchB = findViewById(R.id.btnBenchB)
+        btnBenchC = findViewById(R.id.btnBenchC)
+        btnBenchD = findViewById(R.id.btnBenchD)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -431,6 +443,46 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+
+        // P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 토글 (A/B/C/D)
+        listOf(btnBenchA, btnBenchB, btnBenchC, btnBenchD).forEachIndexed { idx, btn ->
+            btn.setOnClickListener { applyBenchCombo(idx) }
+        }
+    }
+
+    //=========================================================================
+    // P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 (A/B/C/D)
+    // 정답표는 코드/로그에만 존재. 평가자에게는 라벨만 노출.
+    //=========================================================================
+
+    private data class BenchCombo(val label: String, val blendMode: Int, val vetoMode: Int, val desc: String)
+
+    private val benchCombos = listOf(
+        BenchCombo("A", 0, 1, "Normal + color-veto(Codex)"),
+        BenchCombo("B", 0, 2, "Normal + luma-only(Gemini)"),
+        BenchCombo("C", 7, 1, "CRL + color-veto(Codex)"),
+        BenchCombo("D", 7, 2, "CRL + luma-only(Gemini)"),
+    )
+    private var currentBenchIdx = -1
+
+    private fun applyBenchCombo(idx: Int) {
+        val combo = benchCombos[idx]
+        lensConfig.blendMode = combo.blendMode
+        cameraGLView.setLensConfig(lensConfig)
+        cameraGLView.setScleraVetoMode(combo.vetoMode)
+        // blendMode 0/7은 spinner index와 1:1 매핑 (Normal=0, ColorReplace=7)
+        spinnerBlendMode.setSelection(combo.blendMode)
+        currentBenchIdx = idx
+        updateBenchButtonHighlight()
+        Toast.makeText(this, "Bench ${combo.label}", Toast.LENGTH_SHORT).show()
+        Log.i(TAG, "P6-W5 bench → ${combo.label} (${combo.desc})")
+    }
+
+    private fun updateBenchButtonHighlight() {
+        val buttons = listOf(btnBenchA, btnBenchB, btnBenchC, btnBenchD)
+        buttons.forEachIndexed { idx, btn ->
+            btn.setBackgroundColor(if (idx == currentBenchIdx) 0xCC2196F3.toInt() else 0x66555555.toInt())
+        }
     }
 
     private fun setupBeautyControls() {

@@ -461,6 +461,7 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uEyelidFeather = glGetUniformLocation(lens_program_, "uEyelidFeather");
 
     lens_uniforms_.uScleraProtect = glGetUniformLocation(lens_program_, "uScleraProtect");
+    lens_uniforms_.uScleraVetoMode = glGetUniformLocation(lens_program_, "uScleraVetoMode");
     lens_uniforms_.uContactShadow = glGetUniformLocation(lens_program_, "uContactShadow");
     lens_uniforms_.uShadowIntensity = glGetUniformLocation(lens_program_, "uShadowIntensity");
     lens_uniforms_.uMaxDetail = glGetUniformLocation(lens_program_, "uMaxDetail");
@@ -552,6 +553,16 @@ void GPULensRenderer::renderFullscreenQuad() {
 void GPULensRenderer::setScleraProtectEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     sclera_protect_ = enabled;
+}
+
+void GPULensRenderer::setScleraVetoMode(int mode) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (mode < 0 || mode > 2) {
+        LOGW("setScleraVetoMode: invalid mode %d, clamped to 0", mode);
+        sclera_veto_mode_ = 0;
+        return;
+    }
+    sclera_veto_mode_ = mode;
 }
 
 void GPULensRenderer::setContactShadowEnabled(bool enabled) {
@@ -937,6 +948,7 @@ ErrorCode GPULensRenderer::renderToTexture(
 
     // 기능 플래그
     glUniform1i(lens_uniforms_.uScleraProtect, sclera_protect_ ? 1 : 0);
+    glUniform1i(lens_uniforms_.uScleraVetoMode, sclera_veto_mode_);
     // P5-W3-05 S1 D5: uHighlightEnabled uniform 설정 제거
     glUniform1i(lens_uniforms_.uContactShadow, contact_shadow_ ? 1 : 0);
     glUniform1f(lens_uniforms_.uShadowIntensity, shadow_intensity_);

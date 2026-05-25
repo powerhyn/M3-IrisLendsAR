@@ -1,6 +1,6 @@
 # P6-W5: B1 블렌드 4번째 슬롯 + B8 sclera veto 벤치
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: Phase A/B 구현 완료 (2026-05-25) — 실기기 벤치 촬영/평가 대기 → Phase C에서 결과 반영.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W3 (환경 반사 계층 스캐폴드). P6-W2 (블렌드 3종)도 당연
 > **병렬 가능**: P6-W4, W6, W7와 병렬 진행 가능 (W3 완료 후)
@@ -243,13 +243,15 @@ W5는 여기서 **B1 A/B 테스트**로 Normal(0) 대 ColorReplaceLinear(7) 비�
 
 ### 4.1 Definition of Done
 
-- [ ] B1 조합 4종 동시 프로토타입 (Normal+color, Normal+luma, CRL+color, CRL+luma) 구현
-- [ ] 5 SKU × 매트릭스 = ~24 클립 촬영
-- [ ] 3명 블라인드 평가 완료
-- [ ] B1/B8 결과 문서화
-- [ ] 셰이더 반영 (ID 0/7 처리, calcScleraFactor 수정)
-- [ ] 99_final_decision.md §1.1 D6 / §1.2 C4 업데이트
-- [ ] 회귀 확인
+- [x] **B1 조합 4종 동시 프로토타입** (Normal+color, Normal+luma, CRL+color, CRL+luma) 구현 — Phase A
+- [x] **4조합 토글 인프라** — `uScleraVetoMode` 셰이더 3-way + JNI/Java API + demo A/B/C/D 버튼 — Phase A
+- [x] **벤치 산출물 준비** — `docs/bench/P6-W5/` (체크리스트/응답시트/촬영가이드/스크립트) — Phase B
+- [ ] 8 take × 4조합 = 32 클립 촬영 — **실기기 벤치 대기**
+- [ ] 3명 블라인드 평가 완료 — 실기기 벤치 대기
+- [ ] B1/B8 결과 문서화 (`report.md`) — Phase C
+- [ ] 셰이더 반영 (ID 0/7 처리, calcScleraFactor 수정, uScleraVetoMode 제거) — Phase C
+- [ ] 99_final_decision.md §1.1 D6 / §1.2 C4 업데이트 — Phase C
+- [ ] 회귀 확인 — Phase C
 
 ### 4.2 Out of scope
 
@@ -529,10 +531,15 @@ Codex R3 §8 원문:
 
 ### 8.2 커밋 전략
 
-**커밋 1**: `docs(P6-W5): 섹션 2~8 본문 작성`
-**커밋 2**: `feat(gpu-lens): P6-W5 블렌드/sclera 조합 토글 (B1/B8 벤치용)`
-**커밋 3** (벤치 후): `chore(bench): P6-W5 B1/B8 결과 report`
-**커밋 4** (반영): `feat(gpu-lens): P6-W5 B1/B8 결과 반영 — {Normal 유지|CRL 채택} / {color-veto|luma-only}`
+**Phase A/B (2026-05-25 완료, 브랜치 `feature/P6-W5`)**:
+- `2d594e0` feat(gpu-lens): P6-W5 sclera veto 3-way 분기 + JNI/Java API (B1/B8 벤치)
+- `e2f6b6a` feat(demo): P6-W5 4조합 A/B/C/D 블라인드 벤치 토글 UI
+- `12f15a3` docs(bench): P6-W5 B1/B8 벤치 산출물 — 체크리스트/응답시트/촬영가이드/자동화 스크립트
+
+**Phase C (벤치 후 — 미실행)**:
+- `chore(bench): P6-W5 B1/B8 결과 report` (촬영/평가 집계)
+- `feat(gpu-lens): P6-W5 B1/B8 결과 반영 — {Normal 유지|CRL 채택} / {color-veto|luma-only}`
+  (calcScleraFactor 단일 수식 교체 + uScleraVetoMode 제거 + demo 토글 정리)
 
 ### 8.3 다음 W 트리거
 

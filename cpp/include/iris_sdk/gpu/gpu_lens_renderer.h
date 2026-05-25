@@ -128,6 +128,9 @@ public:
     // ========================================
 
     void setScleraProtectEnabled(bool enabled);
+    /// P6-W5 §5.9: B1/B8 4조합 벤치용 sclera veto 수식 토글.
+    /// mode: 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini). 범위 외 값은 0으로 clamp.
+    void setScleraVetoMode(int mode);
     void setContactShadowEnabled(bool enabled);
     void setContactShadowIntensity(float intensity);
     void setEllipseMaskEnabled(bool enabled);
@@ -209,6 +212,7 @@ private:
     // 설정
     // 기본값은 Kotlin 데모 참조 구현(CameraGLRenderer.kt 558~562)과 일치
     bool sclera_protect_ = true;
+    int sclera_veto_mode_ = 0;  // P6-W5: 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini)
     bool contact_shadow_ = false;
     float shadow_intensity_ = 0.15f;
     bool use_ellipse_mask_ = false;
@@ -245,6 +249,7 @@ private:
 
         // 기능 플래그
         GLint uScleraProtect = -1;
+        GLint uScleraVetoMode = -1;  // P6-W5 §5.9: B1/B8 4조합 벤치용 veto 수식 토글
         GLint uContactShadow = -1;
         GLint uShadowIntensity = -1;
         GLint uMaxDetail = -1;

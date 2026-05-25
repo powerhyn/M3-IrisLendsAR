@@ -1008,6 +1008,16 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P6-W5 §5.9: sclera veto 수식 토글 (B1/B8 4조합 벤치용).
+     * @param mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini). 범위 외 값은 0으로 clamp.
+     */
+    public static void setScleraVetoMode(int mode) {
+        if (sLibraryLoaded) {
+            nativeSetScleraVetoMode(mode);
+        }
+    }
+
+    /**
      * GPU 렌즈 타원 마스크 설정.
      * GL 스레드에서 호출.
      * @param enabled true=on, false=off
@@ -1379,6 +1389,7 @@ public final class IrisLensSDK {
             int inputTexture, int width, int height,
             long detectionPtr, LensConfig config);
     private static native void nativeSetLensScleraProtect(boolean enabled);
+    private static native void nativeSetScleraVetoMode(int mode);  // P6-W5 §5.9
     private static native void nativeSetLensEllipseMask(boolean enabled);
     private static native void nativeSetLensHighlight(boolean enabled);
 

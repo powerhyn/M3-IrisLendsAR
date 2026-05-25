@@ -2153,6 +2153,22 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensScleraProtect(
     iris_sdk_set_lens_sclera_protect(enabled ? 1 : 0);
 }
 
+// P6-W5 §5.9: B1/B8 4조합 벤치용 sclera veto 수식 토글.
+// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
+extern void iris_sdk_set_lens_sclera_veto_mode(int mode);
+
+/**
+ * Java: native void nativeSetScleraVetoMode(int mode);
+ * P6-W5 §5.9: mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetScleraVetoMode(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jint mode)
+{
+    iris_sdk_set_lens_sclera_veto_mode(static_cast<int>(mode));
+}
+
 /**
  * Java: native void nativeSetLensEllipseMask(boolean enabled);
  */
