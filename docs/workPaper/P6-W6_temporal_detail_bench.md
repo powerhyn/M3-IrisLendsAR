@@ -293,22 +293,23 @@ W6에서 다룰 것:
 
 ```cpp
 // gpu_lens_renderer.cpp
-float computeEmaAlpha(float target_ms, float fps) {
-    float dt = 1000.0f / fps;
-    return 1.0f - std::pow(0.05f, dt / target_ms);
+// R2 C-1: 실측 dt_ms를 매 프레임 직접 입력 (fps 인자 금지). §5.5와 시그니처 통일.
+float computeEmaAlpha(float dt_ms, float target_ms) {
+    return 1.0f - std::pow(0.05f, dt_ms / target_ms);
 }
 
-// 프레임 단위 업데이트
+// 프레임 단위 업데이트 (dt_ms = 직전 프레임 delta time, runtime 실측)
 if (eye_closing) {
-    float alpha_close = computeEmaAlpha(60.0f, fps);  // down 60ms
+    float alpha_close = computeEmaAlpha(dt_ms, 60.0f);  // down 60ms
     render_alpha_ = alpha_close * 0.0f + (1.0f - alpha_close) * render_alpha_;
 } else {
-    float alpha_open = computeEmaAlpha(target_up_ms, fps);  // B5 결과
+    float alpha_open = computeEmaAlpha(dt_ms, target_up_ms);  // B5 결과
     render_alpha_ = alpha_open * target_alpha + (1.0f - alpha_open) * render_alpha_;
 }
 ```
 
 **`target_up_ms`**: B5 결과 (60/80/120).
+**`dt_ms`**: 직전 프레임 delta time 실측값 (30fps 고정 가정 금지 — §5.5 / R2 C-1).
 
 ### 5.2 C10 디테일 재주입 수식
 
@@ -355,7 +356,8 @@ blended *= vec3(detailMul);
 - **실측 dt 사용:** 30fps 고정 가정 금지. 실제 frame delta time을 runtime에서 주입.
 - **검증:** 구현 후 30fps/60fps 실기기 로그로 "80ms 만에 0.95 도달" 확인. Codex R3 계수 불일치 지적 해소.
 - Claude R1 원안 `α = 1 - exp(-dt/τ)` (τ=63% 도달) 공식은 소수 의견으로 정정.
-- 출처: `P6-W6_brainstorm/synthesis.md` §2.
+- **R2 C-1 정합성:** 시그니처를 `computeEmaAlpha(dt_ms, target_ms)` 단일형으로 확정. §5.1의 `(target_ms, fps)` 예시는 이 형태로 통일됨 (구버전 폐기).
+- 출처: `P6-W6_brainstorm/synthesis.md` §2 + `codex_w6_r2.md` §4.
 
 ### 5.6 B5 user 수 — **3명 × 5 × 3 = 45 이벤트 확정** (W6 R1 합의 3/3)
 
@@ -365,8 +367,9 @@ blended *= vec3(detailMul);
 ### 5.7 B9 gate smoothstep — **±0.03 대칭 폭 확정** (W6 R1 합의 3/3)
 
 - `smoothstep(threshold - 0.03, threshold + 0.03, avg_iris_luma)`.
-- 30fps 기준 2~3프레임 transition 폭 → 계단 현상 방지 + threshold 의미 유지.
-- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+- **0.06 폭 linear-luma 연속 전이** → 루마 축 계단(밴딩) 방지 + threshold 의미 유지.
+- ⚠️ **R2 C-2 정정:** smoothstep은 **루마 값 매핑**이라 시간/프레임 평활화가 아님. "30fps 2~3프레임 transition"이라는 시간 해석은 부정확하므로 폐기. 입력 루마의 프레임 간 flicker 억제는 이 식이 보장하지 않음 (필요 시 별도 temporal filter).
+- 출처: `P6-W6_brainstorm/synthesis.md` §1 + `codex_w6_r2.md` §4.
 
 ### 5.8 blur 커널 — **3×3 확정** (W6 R1 합의 3/3)
 
@@ -376,10 +379,12 @@ blended *= vec3(detailMul);
 
 ### 5.9 innerMask 경계 — **smoothstep `[0.7, 0.5]` 확정** (W6 R1 합의 3/3)
 
-- `smoothstep(0.7, 0.5, dist/iris_radius)` 형태. inner=1, outer=0.
+- `smoothstep(0.7, 0.5, dist)` 형태. inner=1, outer=0.
+- ⚠️ **R2 C-3 정정:** `dist`는 셰이더에서 이미 `/scaledRadius`로 정규화됨(§5.2). `dist/iris_radius`는 **중복 정규화이므로 금지** — `dist` 그대로 사용.
 - hard cutoff의 "경계 픽셀 번쩍임" 방지.
+- 이 마스크는 중심에서 1이므로 **동공 제외를 단독 수행하지 않음** — 기존 iris/pupil 적용 마스크와 교차된 영역 안에서 사용 (C10 "동공 제외 iris 영역" 조건 유지).
 - W7 림발 영역(0.85~1.0)과 분리 — 중간 0.7~0.85는 iris 본체 (아무 처리 없음).
-- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1 + `codex_w6_r2.md` §4.
 
 ### 5.10 저조도 정의 — **B9 threshold로 자동 정의** (W6 R1 합의 3/3)
 
@@ -393,8 +398,8 @@ blended *= vec3(detailMul);
 - 저조도 환경에서 블링크 반복 = 단일 시나리오에서 B5+B9 동시 데이터 수집.
 - 세션 구조: **고정 응시 5초 → 블링크 반복 10초 → 고정 응시 5초** (교차 영향 점검).
 - 판정표 분리: B5 지표(블링크 직후 디테일 복귀) vs B9 지표(저조도 디테일 거북함).
-- **C10 후행:** B5/B9 판정 → C10 튜닝 → 최종 실기기.
-- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+- **R2 C-4 — C10 프로토타입 선행, 최종 튜닝만 후행:** B9 자체가 gate 3안(0.10/0.15/0.25) 비교라 **C10 gate 토글 프로토타입은 캡처 *전* 필수**. "C10 후행"은 *최종 튜닝*만을 의미. 순서: **C10 프로토타입 구현(gate 토글 포함) → B5/B9 동시 캡처 → 판정 → C10 최종 튜닝(gate threshold 확정 + 재주입 강도) → 최종 실기기**.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1 + `codex_w6_r2.md` §1/§5.
 
 ---
 
@@ -418,6 +423,21 @@ blended *= vec3(detailMul);
 
 원문: `docs/workPaper/P6-W6_brainstorm/{codex,gemini,claude}_w6.md`.
 종합: `docs/workPaper/P6-W6_brainstorm/synthesis.md`.
+
+### 6.0.1 R2 교차검증 결과 (2026-05-27)
+
+R1 결정값(EMA 95%·gate ±0.03·3x3·innerMask smoothstep·luma 저조도 정의·동시측정) **전부 유지 — 재논의 불필요**. 단 Codex R2가 **문서 내부 정합성 4건**을 지적, 구현 전 정정 완료:
+
+| 코드 | 정정 | 반영 |
+|------|------|------|
+| C-1 | EMA 시그니처 `(target_ms, fps)` → `(dt_ms, target_ms)` 단일화 (실측 dt) | §5.1 / §5.5 |
+| C-2 | gate "30fps 2~3프레임 transition" 시간 주장 폐기 → 0.06 루마폭 연속전이 | §5.7 |
+| C-3 | innerMask `dist/iris_radius` 중복 정규화 제거 → `dist` 그대로 | §5.9 |
+| C-4 | "C10 후행" → 프로토타입 선행 / 최종 튜닝만 후행 명료화 | §5.11 |
+
+- Gemini R2: 전면 동의(R1 재확인 가치 O). 단 위 4건 미발견 + ±0.03 "인간 눈 대비" 근거는 검증 안 됨 → 미채택.
+- **R3 불필요.** 검토: `docs/workPaper/P6-W5_brainstorm/codex_phase_ab_review.md` 패턴의 critical-review 적용.
+- 원문: `docs/workPaper/P6-W6_brainstorm/{codex,gemini}_w6_r2.md`.
 
 ---
 
