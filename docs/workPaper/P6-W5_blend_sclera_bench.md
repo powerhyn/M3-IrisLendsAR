@@ -246,7 +246,7 @@ W5는 여기서 **B1 A/B 테스트**로 Normal(0) 대 ColorReplaceLinear(7) 비�
 - [x] **B1 조합 4종 동시 프로토타입** (Normal+color, Normal+luma, CRL+color, CRL+luma) 구현 — Phase A
 - [x] **4조합 토글 인프라** — `uScleraVetoMode` 셰이더 3-way + JNI/Java API + demo A/B/C/D 버튼 — Phase A
 - [x] **벤치 산출물 준비** — `docs/bench/P6-W5/` (체크리스트/응답시트/촬영가이드/스크립트) — Phase B
-- [ ] 8 take × 4조합 = 32 클립 촬영 — **실기기 벤치 대기**
+- [ ] 9 take × 4조합 = 36 클립 촬영 — **실기기 벤치 대기** (Codex 리뷰 F-03 반영: B8 2×3 조명 대칭)
 - [ ] 3명 블라인드 평가 완료 — 실기기 벤치 대기
 - [ ] B1/B8 결과 문서화 (`report.md`) — Phase C
 - [ ] 셰이더 반영 (ID 0/7 처리, calcScleraFactor 수정, uScleraVetoMode 제거) — Phase C
