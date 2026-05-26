@@ -22,9 +22,9 @@
 
 ### B1/B8 독립 집계 방법
 
-같은 take의 4 클립을 한 세트로 비교:
-- **B1 (블렌드)**: A·B(Normal) vs C·D(CRL) — `blend_natural` + `iris_detail` 평균 비교
-- **B8 (sclera)**: A·C(color-veto) vs B·D(luma-only) — `sclera_bleed` + `iris_edge_cut` 다수결 비교
+같은 take에서 4조합을 토글하며 두 축을 독립 비교:
+- **B1 (블렌드)**: A↔C / B↔D 토글 (Normal vs CRL) — 홍채 중앙부 색·디테일 체감
+- **B8 (sclera)**: A↔B / C↔D 토글 (color-veto vs luma-only) — 흰자 번짐·외곽 깎임 체감
 
 ---
 
@@ -32,22 +32,22 @@
 
 | 파일 | 용도 |
 |------|------|
-| `checklist.md` | 36클립 트래킹 (9 take × 4조합) |
-| `ratings_template.csv` | 평가자 3명 블라인드 응답 시트 (108행) |
-| `ratings_legend.md` | B1/B8 분리 메트릭 의미 + 판정 룰 |
-| `recording_guide.md` | §5.6 촬영 절차 (4조합 토글) + adb 명령 |
+| `checklist.md` | 9 take 트래킹 + 평가 방식 (1인 토글 체감) |
+| `ratings_template.csv` | take 단위 판정 시트 (9행, B1/B8 winner) |
+| `ratings_legend.md` | 토글 비교 방법 + B1/B8 정성 판정 룰 |
+| `recording_guide.md` | §5.6 토글 절차 + (선택) self-blind 후편집 + adb 명령 |
 | `report.md` | Phase C 결과 작성용 placeholder |
-| `../../../scripts/p6w5_bench_helper.sh` | adb 자동화 (launch/record/pull/trim/randomize) |
+| `../../../scripts/p6w5_bench_helper.sh` | adb 자동화 (launch/record/pull + 선택 trim/randomize) |
 
 ---
 
 ## 진행 절차
 
 1. **Phase A 완료** (이 커밋): 셰이더 4조합 토글 + demo A/B/C/D 버튼.
-2. **촬영** — 9 take (SKU × 조명), 각 take에서 A→B→C→D 토글 (`recording_guide.md`). **native active 로그 확인 필수 (F-01)**.
-3. **후편집** — 36 클립 분리 + 무작위 ID + 정답표 봉인.
-4. **평가** — 3명 블라인드, 108 응답 (`ratings_template.csv`).
-5. **집계** — B1/B8 독립 판정 (`ratings_legend.md` 판정 룰).
+2. **준비** — APK 설치, SKU 6종, **native active 로그 확인 필수 (F-01)**.
+3. **토글 평가** — 9 take 각각 실기기에서 A/B/C/D 토글 비교 → `ratings_template.csv` 9행 (1인 체감).
+4. **(선택) self-blind** — 애매한 take만 녹화→trim→randomize로 익명 재평가.
+5. **집계** — B1/B8 경향 정성 판정 (`ratings_legend.md`).
 6. **Phase C 진입** — `report.md` 작성 + 셰이더 최종 수식 정리 (§5.13) + 99 §1.1 D6 / §1.2 C4 갱신.
 
 ---

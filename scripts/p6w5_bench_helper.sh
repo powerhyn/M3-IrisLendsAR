@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # P6-W5 B1+B8 벤치 자동화 헬퍼
+# ⚠️ 1인 토글 평가가 기본 (녹화 불필요). 이 스크립트의 record/trim/randomize는
+#    비교용 영상 기록 또는 self-blind 보조용(선택). 상세: docs/bench/P6-W5/recording_guide.md
 # 사용법: bash scripts/p6w5_bench_helper.sh <command> [args]
 #
 # 명령:

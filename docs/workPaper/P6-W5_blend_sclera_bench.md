@@ -246,8 +246,8 @@ W5는 여기서 **B1 A/B 테스트**로 Normal(0) 대 ColorReplaceLinear(7) 비�
 - [x] **B1 조합 4종 동시 프로토타입** (Normal+color, Normal+luma, CRL+color, CRL+luma) 구현 — Phase A
 - [x] **4조합 토글 인프라** — `uScleraVetoMode` 셰이더 3-way + JNI/Java API + demo A/B/C/D 버튼 — Phase A
 - [x] **벤치 산출물 준비** — `docs/bench/P6-W5/` (체크리스트/응답시트/촬영가이드/스크립트) — Phase B
-- [ ] 9 take × 4조합 = 36 클립 촬영 — **실기기 벤치 대기** (Codex 리뷰 F-03 반영: B8 2×3 조명 대칭)
-- [ ] 3명 블라인드 평가 완료 — 실기기 벤치 대기
+- [ ] 9 take × 4조합 토글 비교 — **실기기 벤치 대기** (Codex 리뷰 F-03 반영: B8 2×3 조명 대칭)
+- [ ] **1인 실시간 토글 체감 평가** 완료 — 실기기 벤치 대기 (1인 개발 체제 반영: 평가자 3명 블라인드 다수결 → 본인 토글 체감으로 변경, 메모리 `feedback_qualitative_device_judgment`)
 - [ ] B1/B8 결과 문서화 (`report.md`) — Phase C
 - [ ] 셰이더 반영 (ID 0/7 처리, calcScleraFactor 수정, uScleraVetoMode 제거) — Phase C
 - [ ] 99_final_decision.md §1.1 D6 / §1.2 C4 업데이트 — Phase C
@@ -355,6 +355,7 @@ S1 이전부터 존재하는 `calcScleraFactor` 함수는 **현재 기하학적 
 - **런타임 UI 버튼 4개** (디버그 커맨드 대신 — 평가 흐름 끊김 방지).
 - **판정표에서 B1 점수(Normal vs CRL)와 B8 점수(color-veto vs luma-only) 분리 기록** → 독립 판정 보장.
 - 출처: `P6-W5_brainstorm/synthesis.md` §1.
+- ⚠️ **구현 단계 변경 (2026-05-25, 1인 개발 체제)**: R1의 "평가자 3명 블라인드 다수결"은 1인 개발 현실과 안 맞아 **본인 실시간 토글 체감**으로 대체. 4조합 토글 UI(A/B/C/D)는 그대로 활용하되, 평가자가 토글하며 즉석 비교(A↔C/B↔D=B1, A↔B/C↔D=B8) → take당 winner 1행 기록. 블라인드 정답표/randomize는 애매한 take의 self-blind 보조로 격하 (선택). 근거: 메모리 `feedback_qualitative_device_judgment`. 산출물: `docs/bench/P6-W5/ratings_legend.md`.
 
 ### 5.10 CRL clamp 범위 — **`[0.75, 1.25]` 유지 확정** (W5 R1 합의 3/3)
 
