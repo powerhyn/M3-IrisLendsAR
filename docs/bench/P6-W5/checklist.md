@@ -27,15 +27,18 @@
 
 ## SKU 6종 (§5.1 + §5.8 별도 확보)
 
-| 코드 | 분류 | SKU |
-|------|------|-----|
-| S1 | 다크브라운 자연 | 클라셋_돌 초코 |
-| S2 | 헤이즐 자연 | 오(OH)_베이글 |
-| S3 | 밝은 그레이/블루 | 엔비_퍼퓸 글로우 (또는 클라셋_런웨이 그레이) |
-| S4 | 불투명 서클 | 로뮤_디어 멜로우 |
-| S5 | 화이트/그래픽 | 엔비_샤모 브라운 (CRL 존재 이유의 핵심 셀) |
+> demo 렌즈는 실제 타겟 라인업 42종(`docs/lens-ar/`, 1000px)으로 교체됨. 아래는 demo 표시명 ↔ 파일명.
 
-> §5.8: S1(클라셋_돌 초코)과 S4(로뮤_디어 멜로우)는 **별도 확보** (랜덤 도트 vs 균일 채움 디자인 차이가 CRL 감수성에 영향).
+| 코드 | 분류 | demo 표시명 | 파일명 |
+|------|------|-------------|--------|
+| S1 | 다크브라운 자연 | claset doll choco | `claset_doll-choco.png` |
+| S2 | 헤이즐 자연 | oh bagel | `oh_bagel.png` |
+| S3 | 밝은 그레이/블루 | envie parfum glow | `envie_parfum-glow.png` (대안 `claset_runway-gray.png`) |
+| S4 | 불투명 서클 | romu dear mellow | `romu_dear-mellow.png` |
+| S5 | 화이트/그래픽 | envie chameau brown | `envie_chameau-brown.png` (CRL 존재 이유 핵심 셀) |
+
+> §5.8: S1(claset doll choco)과 S4(romu dear mellow)는 **별도 확보** (랜덤 도트 vs 균일 채움 디자인 차이가 CRL 감수성에 영향).
+> ⚠️ S4 불투명서클/S5 화이트그래픽 분류는 15_asset_analysis 실측 기준 — 실기기에서 육안 재확인 권장.
 
 ---
 
