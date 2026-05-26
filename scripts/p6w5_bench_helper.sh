@@ -6,8 +6,8 @@
 #   launch          디바이스 wake + 앱 강제 재시작
 #   record <take>   14초 스크린 녹화 (예: record T1) — 녹화 중 A/B/C/D 버튼 수동 토글
 #   pull <take>     녹화 파일 디바이스에서 호스트로 가져옴
-#   trim            raw 디렉토리 전체 → A/B/C/D 클립 32개 생성 (ffmpeg 필요)
-#   randomize       32 클립 → 무작위 ID 부여 + 정답표 _truth.csv 생성
+#   trim            raw 디렉토리 전체 → A/B/C/D 클립 36개 생성 (ffmpeg 필요)
+#   randomize       36 클립 → 무작위 ID 부여 + 정답표 _truth.csv 생성
 #
 # 주의: 4조합 토글은 화면 버튼(A/B/C/D)이라 좌표가 디바이스마다 달라 자동화하지 않음.
 #       녹화 중 3/6/9초 시점에 버튼을 직접 누른다 (recording_guide.md §촬영 절차).
@@ -27,7 +27,7 @@ APP_ACT=".GpuRenderActivity"
 # macOS 기본 bash 3.2는 associative array 미지원이라 case 함수로 구현.
 take_sku() {
     case "$1" in
-        T1|T8) echo "S1_darkbrown" ;;
+        T1|T8|T9) echo "S1_darkbrown" ;;
         T2)    echo "S2_hazel" ;;
         T3|T6|T7) echo "S3_graygray" ;;
         T4)    echo "S4_opaque" ;;
@@ -39,7 +39,7 @@ take_light() {
     case "$1" in
         T1|T2|T3|T4|T5) echo "E1_fluor" ;;
         T6|T8) echo "E3_lowlight" ;;
-        T7)    echo "E2_sidelight" ;;
+        T7|T9) echo "E2_sidelight" ;;
         *)     echo "" ;;
     esac
 }
@@ -112,7 +112,7 @@ cmd_trim() {
     fi
     mkdir -p "$CLIPS_DIR"
     local count=0
-    for take in T1 T2 T3 T4 T5 T6 T7 T8; do
+    for take in T1 T2 T3 T4 T5 T6 T7 T8 T9; do
         local raw="$RAW_DIR/raw_${take}.mp4"
         if [[ ! -f "$raw" ]]; then
             echo "⚠️  Skip (not found): $raw"
@@ -126,7 +126,7 @@ cmd_trim() {
         count=$((count + 4))
         echo "✅ Trimmed $take → A/B/C/D"
     done
-    echo "Total clips: $count (target 32)"
+    echo "Total clips: $count (target 36)"
 }
 
 cmd_randomize() {
@@ -140,8 +140,8 @@ cmd_randomize() {
     for f in "$CLIPS_DIR"/_T?_[ABCD].mp4; do
         [[ -f "$f" ]] && sources+=("$f")
     done
-    if [[ ${#sources[@]} -ne 32 ]]; then
-        echo "⚠️  Expected 32 clips, found ${#sources[@]}"
+    if [[ ${#sources[@]} -ne 36 ]]; then
+        echo "⚠️  Expected 36 clips, found ${#sources[@]}"
     fi
     local shuffled
     shuffled=$(printf "%s\n" "${sources[@]}" | sort -R)

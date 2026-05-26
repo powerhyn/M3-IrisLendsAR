@@ -32,8 +32,8 @@
 
 | 파일 | 용도 |
 |------|------|
-| `checklist.md` | 32클립 트래킹 (8 take × 4조합) |
-| `ratings_template.csv` | 평가자 3명 블라인드 응답 시트 (96행) |
+| `checklist.md` | 36클립 트래킹 (9 take × 4조합) |
+| `ratings_template.csv` | 평가자 3명 블라인드 응답 시트 (108행) |
 | `ratings_legend.md` | B1/B8 분리 메트릭 의미 + 판정 룰 |
 | `recording_guide.md` | §5.6 촬영 절차 (4조합 토글) + adb 명령 |
 | `report.md` | Phase C 결과 작성용 placeholder |
@@ -44,9 +44,9 @@
 ## 진행 절차
 
 1. **Phase A 완료** (이 커밋): 셰이더 4조합 토글 + demo A/B/C/D 버튼.
-2. **촬영** — 8 take (SKU × 조명), 각 take에서 A→B→C→D 토글 (`recording_guide.md`).
-3. **후편집** — 32 클립 분리 + 무작위 ID + 정답표 봉인.
-4. **평가** — 3명 블라인드, 96 응답 (`ratings_template.csv`).
+2. **촬영** — 9 take (SKU × 조명), 각 take에서 A→B→C→D 토글 (`recording_guide.md`). **native active 로그 확인 필수 (F-01)**.
+3. **후편집** — 36 클립 분리 + 무작위 ID + 정답표 봉인.
+4. **평가** — 3명 블라인드, 108 응답 (`ratings_template.csv`).
 5. **집계** — B1/B8 독립 판정 (`ratings_legend.md` 판정 룰).
 6. **Phase C 진입** — `report.md` 작성 + 셰이더 최종 수식 정리 (§5.13) + 99 §1.1 D6 / §1.2 C4 갱신.
 

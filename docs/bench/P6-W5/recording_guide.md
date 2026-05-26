@@ -17,9 +17,16 @@
 3. **공통 설정 (변수 통제)**:
    - **Sclera Protect: ON** (화면 하단 렌즈 탭 'Sclera' 버튼이 초록 ON)
    - 투명도/크기/경계: 기본값 유지 (slider 조정 금지)
-   - 밝기(maxDetail) slider: 기본 1.2 유지 (§5.10)
+   - 밝기(maxDetail): native 경로는 §5.10 확정값 **1.25 하드코딩**. 화면 밝기 slider는 Kotlin 폴백 셰이더 전용이라 native 벤치에 영향 없음 — 조정 불필요.
 
-4. **디바이스 잠금 해제 + 화면 자동 잠금 비활성**.
+4. **native lens 활성 확인 (F-01 가드, 필수)**:
+   ```bash
+   adb logcat -c && adb logcat | grep -E "GPULensRenderer active|fallback to Kotlin"
+   ```
+   - `SDK C++ GPULensRenderer active` → 정상 (촬영 진행).
+   - `fallback to Kotlin shader` → native 비활성. 폴백 셰이더는 `uScleraVetoMode`/`blendColorReplaceLinear`가 없어 **4조합이 동일 렌더되어 B1/B8 무효**. 앱 재시작/재초기화로 native 활성 후 촬영. 폴백 상태로 찍은 take는 폐기.
+
+5. **디바이스 잠금 해제 + 화면 자동 잠금 비활성**.
 
 ---
 
@@ -57,15 +64,18 @@
 9. 녹화 자동 종료.
 10. `adb pull /sdcard/raw_T1.mp4 ./docs/bench/P6-W5/raw/`
 
-### 8 take 반복
+### 9 take 반복
 
-`checklist.md` Take 표의 T1~T8 (SKU × 조명) 각각 위 절차 반복.
+`checklist.md` Take 표의 T1~T9 (SKU × 조명) 각각 위 절차 반복.
 - T1~T5: E1 형광 (SKU만 교체)
 - T6: S3 밝은그레이 + E3 저조도 (조명 끄고 야간등)
 - T7: S3 밝은그레이 + E2 측광 (창가 이동)
 - T8: S1 다크브라운 + E3 저조도
+- T9: S1 다크브라운 + E2 측광 (B8 2×3 대칭 — 측광 대조군)
 
-**총 8회 녹화 → `docs/bench/P6-W5/raw/raw_T*.mp4` 8개 파일**
+> 홍채 톤(§5.1 짙음/중간/밝음)은 가능하면 **촬영 대상자를 톤별로 다양화** (한 명만 찍지 말 것). SKU 매트릭스 축이 아니라 모델 다양성으로 커버.
+
+**총 9회 녹화 → `docs/bench/P6-W5/raw/raw_T*.mp4` 9개 파일**
 
 ---
 
@@ -87,7 +97,7 @@ ffmpeg -ss 6.5 -i "$RAW" -t 2.5 -c copy docs/bench/P6-W5/clips/_T1_C.mp4
 ffmpeg -ss 9.5 -i "$RAW" -t 2.5 -c copy docs/bench/P6-W5/clips/_T1_D.mp4
 ```
 
-→ 32개 클립 (`_T*_[ABCD].mp4`).
+→ 36개 클립 (`_T*_[ABCD].mp4`).
 
 자동화: `scripts/p6w5_bench_helper.sh trim` 사용.
 
@@ -101,7 +111,7 @@ ffmpeg -ss 9.5 -i "$RAW" -t 2.5 -c copy docs/bench/P6-W5/clips/_T1_D.mp4
 bash scripts/p6w5_bench_helper.sh randomize
 ```
 
-→ `clips/clip_01.mp4` ~ `clips/clip_32.mp4` + `docs/bench/P6-W5/_truth.csv` (gitignore/봉인).
+→ `clips/clip_01.mp4` ~ `clips/clip_36.mp4` + `docs/bench/P6-W5/_truth.csv` (gitignore/봉인).
 
 `checklist.md`의 "클립 ID ↔ 진실 정답표"를 `_truth.csv`로 채움 (평가 끝나기 전 비공개).
 
@@ -122,6 +132,6 @@ bash scripts/p6w5_bench_helper.sh randomize
 bash scripts/p6w5_bench_helper.sh launch        # 디바이스 wake + 앱 시작
 bash scripts/p6w5_bench_helper.sh record T1     # 14초 녹화
 bash scripts/p6w5_bench_helper.sh pull T1       # 녹화 종료 후 pull
-bash scripts/p6w5_bench_helper.sh trim          # 32 클립 후편집 (raw → A/B/C/D)
+bash scripts/p6w5_bench_helper.sh trim          # 36 클립 후편집 (raw → A/B/C/D)
 bash scripts/p6w5_bench_helper.sh randomize     # 블라인드 ID + 정답표 생성
 ```

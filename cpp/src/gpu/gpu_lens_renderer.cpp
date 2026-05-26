@@ -952,8 +952,9 @@ ErrorCode GPULensRenderer::renderToTexture(
     // P5-W3-05 S1 D5: uHighlightEnabled uniform 설정 제거
     glUniform1i(lens_uniforms_.uContactShadow, contact_shadow_ ? 1 : 0);
     glUniform1f(lens_uniforms_.uShadowIntensity, shadow_intensity_);
-    // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한 (Kotlin 기본 1.2)
-    glUniform1f(lens_uniforms_.uMaxDetail, 1.2f);
+    // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한.
+    // P6-W5 §5.10: CRL clamp [0.75, 1.25] 확정 — W5 B1 벤치는 1.25 상한에서 비교.
+    glUniform1f(lens_uniforms_.uMaxDetail, 1.25f);
 
     // P6-W3 §5.7/§5.11 / P6-W4 Phase A: C5 환경 반사 가산 계층.
     // 멤버 변수 reflection_mode_ / reflection_intensity_ 로 런타임 토글.
