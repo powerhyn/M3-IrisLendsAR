@@ -14,6 +14,7 @@
 | 디바이스 | (예: Galaxy S23, OS 14) |
 | 디바이스 시리얼 | (예: R3CW20BBFCM) |
 | 투명도/크기/경계 | 기본값 유지 (slider 조정 금지 — 변수 통제) |
+| 투명도 (opacity) | **80% 고정** (블렌드 차이 가시성 최적 — 앱 기본 40%는 너무 옅어 차이 안 보임, 100%는 차이 압축) |
 | maxDetail (CRL clamp) | **1.25 고정** (§5.10 — W5 1차 튜닝 금지). native 하드코딩값, demo 밝기 슬라이더는 Kotlin 폴백 전용이라 무관 |
 | color-veto 강도 | 0.6 고정 (§5.14 — W5 1차 고정) |
 | Sclera Protect | **ON** (4조합 모두 veto 분기 활성 전제) |
@@ -29,16 +30,18 @@
 
 > demo 렌즈는 실제 타겟 라인업 42종(`docs/lens-ar/`, 1000px)으로 교체됨. 아래는 demo 표시명 ↔ 파일명.
 
-| 코드 | 분류 | demo 표시명 | 파일명 |
+| 코드 | 분류 (실측 재분류 2026-05-27) | demo 표시명 | 파일명 |
 |------|------|-------------|--------|
-| S1 | 다크브라운 자연 | claset doll choco | `claset_doll-choco.png` |
-| S2 | 헤이즐 자연 | oh bagel | `oh_bagel.png` |
-| S3 | 밝은 그레이/블루 | envie parfum glow | `envie_parfum-glow.png` (대안 `claset_runway-gray.png`) |
-| S4 | 불투명 서클 | romu dear mellow | `romu_dear-mellow.png` |
-| S5 | 화이트/그래픽 | envie chameau brown | `envie_chameau-brown.png` (CRL 존재 이유 핵심 셀) |
+| S1 | 짙은 갈색 + 패턴 (대조군) | claset doll choco | `claset_doll-choco.png` |
+| S2 | 헤이즐/베이지 (자연 톤) | oh bagel | `oh_bagel.png` |
+| S3 | 밝은 그레이/블루 (채도↓, B8 위험) | envie parfum glow | `envie_parfum-glow.png` |
+| S4 | 강한 방사 그래픽 | claset never olive | `claset_never-olive.png` |
+| S5 | 도트 그래픽 (CRL 검증 핵심) | envie chameau brown | `envie_chameau-brown.png` |
 
-> §5.8: S1(claset doll choco)과 S4(romu dear mellow)는 **별도 확보** (랜덤 도트 vs 균일 채움 디자인 차이가 CRL 감수성에 영향).
-> ⚠️ S4 불투명서클/S5 화이트그래픽 분류는 15_asset_analysis 실측 기준 — 실기기에서 육안 재확인 권장.
+> ⚠️ **실측 정정 (2026-05-27, 실기기+contact sheet)**: lens-ar 42종 전부 *도트/방사 패턴 + 중심 투명* 구조 — **완전 "불투명 서클" 없음**. 기존 분류 정정:
+> - S4 "불투명 서클"(romu dear-mellow)은 실물상 옅은 회색 도트라 부적합 → **강한 방사 그래픽(claset never-olive)** 으로 교체.
+> - S5 "화이트/그래픽"은 화이트 아님(chameau-brown=연갈+주황 도트) → **그래픽(도트 외곽)** 으로 정정.
+> - 1차 형광 체감 결과: `report.md` §2 (B1: TintLinearV2 충분, CRL 4번째 슬롯 약함).
 
 ---
 
