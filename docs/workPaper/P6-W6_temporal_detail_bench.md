@@ -1,7 +1,7 @@
 # P6-W6: B5 블링크 up ramp + B9 저조도 디테일 gate + C10 튜닝
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
-> **작성**: 2026-04-23
+> **상태**: 구현 완료 (Phase A — 코드/토글 인프라). Phase B 실기기 벤치 대기 → Phase C 최종 튜닝.
+> **작성**: 2026-04-23 / **구현**: 2026-05-28 (feature/P6-W6)
 > **선행 의존**: P6-W1 (avg_iris_luma — B9 gate 입력), P6-W3 (환경 반사 계층 스캐폴드 — detail 합성 순서)
 > **병렬 가능**: P6-W4, W5, W7와 병렬
 
@@ -270,13 +270,20 @@ W6에서 다룰 것:
 
 ### 4.1 Definition of Done
 
-- [ ] `computeEmaAlpha(target_ms, fps)` 유틸 함수 구현
-- [ ] B5 3 프로토타입 (60/80/120ms up) 토글 구현
-- [ ] B9 3 프로토타입 (0.10/0.15/0.25 gate) 토글 구현
-- [ ] C10 수식 (iris inner 마스크 + spec/reflection 제외) 셰이더 반영
-- [ ] 벤치 촬영 + 평가 완료
-- [ ] 결과 반영 커밋
-- [ ] 99 §1.2 C7/C10 + §2 B5/B9 업데이트
+**Phase A (구현/토글 인프라) — 완료 (2026-05-28):**
+- [x] `computeEmaAlpha(dt_ms, target_ms)` 유틸 함수 구현 (§5.5 실측 dt 시그니처)
+- [x] B5 3 프로토타입 (60/80/120ms up) 토글 구현 (`setBlinkUpMs`, 기본 80)
+- [x] B9 3 프로토타입 (0.10/0.15/0.25 gate) 토글 구현 (`setGateThreshold`, 기본 0.15)
+- [x] C10 수식 (iris inner 마스크 + spec/reflection 제외 순서) 셰이더 반영
+- [x] 벤치 토글 노출 (internal C API → JNI → Kotlin → demo UI 패널)
+- [x] C++ 코어 + Android APK 빌드 통과
+
+**Phase B/C (벤치 + 반영) — 대기:**
+- [ ] 벤치 촬영 + 평가 완료 (실기기 저조도 블링크 세션 — §5.11)
+- [ ] 결과 반영 커밋 (up ramp 확정 / gate threshold 확정)
+- [ ] 99 §1.2 C7/C10 + §2 B5/B9 "확정" 업데이트 (현재는 "구현 완료" 마킹)
+
+> **avg_iris_luma 실측 미연결 주의**: B9 gate는 `uAvgIrisLum`을 입력으로 쓰나 현재 fallback 상수(0.1225)만 공급됨(실측 source는 W1에서 GL state 오염으로 revert, 별도 작업으로 분리). B9 벤치(조도별 gate 비교)는 실측 연결 후 유의미. Phase A는 토글 인프라까지만.
 
 ### 4.2 Out of scope
 
