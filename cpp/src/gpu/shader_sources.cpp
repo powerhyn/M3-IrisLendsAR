@@ -833,6 +833,14 @@ uniform vec2 uRightEyeEllipseCenter;
 uniform vec3 uRightEyeEllipseRadii;
 uniform float uRightEyeEllipseRot;
 
+// P6-W6 §5.2/§5.7: C10 홍채 디테일 재주입 + B9 저조도 gate.
+uniform vec2  uTexelSize;        // C10 3x3 blur 샘플 간격 (1/width, 1/height)
+uniform float uGateThreshold;    // B9 gate 임계값 (토글 0.10/0.15/0.25, 기본 0.15)
+uniform int   uDetailReinject;   // C10 on/off (기본 1)
+// P6-W6 §1.3 C7: 블링크 시간적 envelope (좌/우 EMA ramp). main()에서 좌→Left, 우→Right.
+uniform float uLeftRenderAlpha;
+uniform float uRightRenderAlpha;
+
 in vec2 vTexCoord;
 out vec4 fragColor;
 
@@ -963,7 +971,8 @@ float calcFresnel(float dist) {
 
 vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
                float eyeTop, float eyeBottom,
-               vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot) {
+               vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot,
+               float renderAlpha) {
     if (irisRadius <= 0.0) return camera;
 
     vec2 adjustedCoord = vec2(vTexCoord.x * aspectRatio, vTexCoord.y);
@@ -1025,6 +1034,10 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         finalAlpha *= scleraFade;
     }
 
+    // P6-W6 §1.3 C7: 블링크 시간적 envelope. 눈 감김/뜸 EMA ramp(CPU 측 계산)를
+    // 최종 가시성에 곱해 깜빡임 hard pop 제거. blended 합성 전에 적용.
+    finalAlpha *= renderAlpha;
+
     float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
 
     // P6-W2 §5.4/§5.8/§5.9: 블렌드 분기 5종 등록 (0/1/2/5/7) + 빈 ID(3/4/6) fallback.
@@ -1046,6 +1059,28 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended = blendColorReplaceLinear(camera.rgb, lens.rgb, finalAlpha, maxDetail);
     } else {
         blended = blendTintLinearV2(camera.rgb, lens.rgb, finalAlpha);
+    }
+
+    // P6-W6 §5.2 C10: iris inner 디테일 재주입. 블렌드 직후 / 반사 이전 (handoff §4 패스 순서).
+    // 입력은 원본 카메라(uCameraTexture, 렌즈 적용 전)의 고주파 디테일 — linear Rec.709 luma.
+    if (uDetailReinject == 1) {
+        vec2 t = uTexelSize;
+        float lC  = dot(toLinearFast(texture(uCameraTexture, vTexCoord).rgb), LUMA_709_LENS);
+        float lN  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(0.0, -t.y)).rgb), LUMA_709_LENS);
+        float lS  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(0.0,  t.y)).rgb), LUMA_709_LENS);
+        float lE  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x, 0.0)).rgb), LUMA_709_LENS);
+        float lW  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x, 0.0)).rgb), LUMA_709_LENS);
+        float lNE = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x, -t.y)).rgb), LUMA_709_LENS);
+        float lNW = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x, -t.y)).rgb), LUMA_709_LENS);
+        float lSE = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x,  t.y)).rgb), LUMA_709_LENS);
+        float lSW = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x,  t.y)).rgb), LUMA_709_LENS);
+        float blurLum = (lC * 2.0 + lN + lS + lE + lW + lNE + lNW + lSE + lSW) / 10.0;  // W6 §5.8 3x3 single-pass
+        float baseLum = lC;
+        float detail = clamp(baseLum / max(blurLum, 0.001), 0.85, 1.15);                 // W6 §5.2
+        float innerMask = smoothstep(0.7, 0.5, dist);                                    // W6 §5.9 중심=1, 외곽=0
+        float gateStrength = smoothstep(uGateThreshold - 0.03, uGateThreshold + 0.03, uAvgIrisLum); // W6 §5.7 ±0.03
+        float detailMul = mix(1.0, detail, gateStrength * innerMask);
+        blended *= vec3(detailMul);
     }
 
     // P5-W3-05 S1 D2: LIMBAL_ENABLED=false 하드코드 블록 제거
@@ -1099,13 +1134,15 @@ void main() {
     if (uApplyLeft == 1 && uLeftIrisRadius > 0.0) {
         result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio,
                            uLeftEyeTop, uLeftEyeBottom,
-                           uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot);
+                           uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot,
+                           uLeftRenderAlpha);
     }
 
     if (uApplyRight == 1 && uRightIrisRadius > 0.0) {
         result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio,
                            uRightEyeTop, uRightEyeBottom,
-                           uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot);
+                           uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot,
+                           uRightRenderAlpha);
     }
 
     fragColor = result;
