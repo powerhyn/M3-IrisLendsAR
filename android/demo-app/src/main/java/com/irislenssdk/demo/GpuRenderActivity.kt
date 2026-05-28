@@ -108,6 +108,10 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnBenchB: Button
     private lateinit var btnBenchC: Button
     private lateinit var btnBenchD: Button
+    // P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글
+    private lateinit var btnW6Blink: Button
+    private lateinit var btnW6Gate: Button
+    private lateinit var btnW6Detail: Button
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -212,6 +216,9 @@ class GpuRenderActivity : AppCompatActivity() {
         btnBenchB = findViewById(R.id.btnBenchB)
         btnBenchC = findViewById(R.id.btnBenchC)
         btnBenchD = findViewById(R.id.btnBenchD)
+        btnW6Blink = findViewById(R.id.btnW6Blink)
+        btnW6Gate = findViewById(R.id.btnW6Gate)
+        btnW6Detail = findViewById(R.id.btnW6Detail)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -448,6 +455,28 @@ class GpuRenderActivity : AppCompatActivity() {
         listOf(btnBenchA, btnBenchB, btnBenchC, btnBenchD).forEachIndexed { idx, btn ->
             btn.setOnClickListener { applyBenchCombo(idx) }
         }
+
+        // P6-W6: B5 블링크 up ramp / B9 저조도 gate / C10 디테일 재주입 벤치 토글
+        btnW6Blink.setOnClickListener {
+            w6BlinkIdx = (w6BlinkIdx + 1) % w6BlinkUpSweep.size
+            val ms = w6BlinkUpSweep[w6BlinkIdx]
+            cameraGLView.setBlinkUpMs(ms)
+            btnW6Blink.text = "up${ms.toInt()}"
+            Log.i(TAG, "P6-W6 B5 blink up → ${ms.toInt()}ms")
+        }
+        btnW6Gate.setOnClickListener {
+            w6GateIdx = (w6GateIdx + 1) % w6GateSweep.size
+            val t = w6GateSweep[w6GateIdx]
+            cameraGLView.setGateThreshold(t)
+            btnW6Gate.text = String.format("g%.2f", t)
+            Log.i(TAG, "P6-W6 B9 gate → $t")
+        }
+        btnW6Detail.setOnClickListener {
+            w6DetailOn = !w6DetailOn
+            cameraGLView.setDetailReinject(w6DetailOn)
+            btnW6Detail.text = if (w6DetailOn) "C10:on" else "C10:off"
+            Log.i(TAG, "P6-W6 C10 detail → ${if (w6DetailOn) "on" else "off"}")
+        }
     }
 
     //=========================================================================
@@ -464,6 +493,13 @@ class GpuRenderActivity : AppCompatActivity() {
         BenchCombo("D", 7, 2, "CRL + luma-only(Gemini)"),
     )
     private var currentBenchIdx = -1
+
+    // P6-W6 §5.3/§5.7: 벤치 토글 sweep 상태 (기본값=중간값, 코어 기본과 일치).
+    private val w6BlinkUpSweep = floatArrayOf(60f, 80f, 120f)
+    private var w6BlinkIdx = 1   // 기본 80ms
+    private val w6GateSweep = floatArrayOf(0.10f, 0.15f, 0.25f)
+    private var w6GateIdx = 1    // 기본 0.15
+    private var w6DetailOn = true
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]
