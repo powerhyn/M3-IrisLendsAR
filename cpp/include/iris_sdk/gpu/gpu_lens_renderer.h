@@ -380,7 +380,10 @@ private:
 
     // B5/B9/C10 런타임 토글. 기본은 W6 §5.5/§5.7 중간값 (실기기 벤치로 확정).
     float blink_up_ms_   = 80.0f;   // B5 up ramp 95% 도달 시간 (60/80/120)
-    float gate_threshold_ = 0.15f;  // B9 저조도 gate 임계값 (0.10/0.15/0.25)
+    // B9 저조도 gate 임계값. 기본 0.10 — 저조도 사용 시나리오가 드문 뷰티 시뮬레이션
+    // 특성상 C10 디테일을 일반 환경에서 항상 살리는 쪽 채택(도메인 판단). gate 로직은
+    // 보존되어 실측 연결 시 극단 저조도(luma<0.07)만 자동 감쇄.
+    float gate_threshold_ = 0.10f;  // B9 토글 후보 0.10/0.15/0.25
     bool  detail_reinject_ = true;  // C10 on/off
 
     // W6 §1.3: down ramp는 고정(생리적 눈 감김이 뜸보다 빠름).

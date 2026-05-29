@@ -498,7 +498,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private val w6BlinkUpSweep = floatArrayOf(60f, 80f, 120f)
     private var w6BlinkIdx = 1   // 기본 80ms
     private val w6GateSweep = floatArrayOf(0.10f, 0.15f, 0.25f)
-    private var w6GateIdx = 1    // 기본 0.15
+    private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
 
     private fun applyBenchCombo(idx: Int) {
