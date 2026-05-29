@@ -843,6 +843,34 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_lens_texture(
     const uint8_t* data, int width, int height);
 
 /**
+ * @brief 렌즈 SKU 메타데이터 등록 (P6-W7)
+ *
+ * lens_meta.json 문자열을 파싱하여 SKU 레지스트리를 구성합니다.
+ * 등록된 메타는 GPU 렌즈 렌더러의 림발(limbal) on/off 판정 권위로 사용됩니다.
+ * GPU 렌즈 초기화 전/후 어느 시점에 호출해도 무방하며, 가장 최근 등록이 우선합니다.
+ *
+ * @param lens_meta_json SKU 메타데이터 JSON 문자열 (NULL 불가)
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_NULL_POINTER 입력 NULL,
+ *         IRIS_SDK_INVALID_FORMAT JSON 파싱 실패
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_lens_metadata(const char* lens_meta_json);
+
+/**
+ * @brief 렌즈 텍스처 로드 (RGBA 데이터 + SKU ID) (P6-W7)
+ *
+ * iris_sdk_load_lens_texture와 동일하나 sku_id를 함께 전달하여
+ * 등록된 SKU 메타(iris_sdk_set_lens_metadata)로 림발 판정을 수행합니다.
+ *
+ * @param data RGBA 픽셀 데이터
+ * @param width 너비
+ * @param height 높이
+ * @param sku_id SKU 식별자 (NULL이면 빈 문자열로 처리, 메타 미적용)
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_lens_texture_with_sku(
+    const uint8_t* data, int width, int height, const char* sku_id);
+
+/**
  * @brief 렌즈 텍스처 해제
  */
 IRIS_SDK_EXPORT void iris_sdk_unload_lens_texture(void);

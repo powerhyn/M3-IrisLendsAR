@@ -13,6 +13,7 @@
 #include "iris_sdk/beauty_filter.h"
 #include "iris_sdk/cpu_beauty_backend.h"
 #include "iris_sdk/beauty_roi_manager.h"
+#include "iris_sdk/lens_sku_metadata.h"
 
 #ifdef IRIS_SDK_HAS_GLES
 #include "iris_sdk/gpu/gpu_beauty_backend.h"
@@ -37,6 +38,10 @@ std::mutex g_gpu_mutex;
 #ifdef IRIS_SDK_HAS_GLES
 std::unique_ptr<iris_sdk::GPUBeautyBackend> g_gpu_beauty;
 std::unique_ptr<iris_sdk::GPULensRenderer> g_gpu_lens;
+// P6-W7: SKU 메타 레지스트리. g_gpu_lens->setSkuRegistry()에 raw 포인터를 넘기므로
+// 수명이 g_gpu_lens와 동일한 파일 스코프 전역으로 보관해야 dangling을 방지한다.
+// (로컬 unique_ptr 금지 — g_gpu_mutex로 보호.)
+std::unique_ptr<iris_sdk::LensSkuRegistry> g_sku_registry;
 std::set<uint32_t> g_managed_textures;
 #endif
 
@@ -519,6 +524,11 @@ IrisSdkError iris_sdk_init_gpu_lens(void) {
         return IRIS_SDK_ERROR_NOT_INITIALIZED;
     }
 
+    // P6-W7: 메타가 init 이전에 등록된 경우 새 렌더러에 다시 연결.
+    if (g_sku_registry) {
+        g_gpu_lens->setSkuRegistry(g_sku_registry.get());
+    }
+
     return IRIS_SDK_OK;
 #else
     return IRIS_SDK_ERROR_NOT_SUPPORTED;
@@ -555,6 +565,55 @@ IrisSdkError iris_sdk_load_lens_texture(const uint8_t* data, int width, int heig
     }
     return g_gpu_lens->loadLensTexture(data, width, height) ? IRIS_SDK_OK : IRIS_SDK_RENDER_FAILED;
 #else
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+IrisSdkError iris_sdk_set_lens_metadata(const char* lens_meta_json) {
+#ifdef IRIS_SDK_HAS_GLES
+    if (!lens_meta_json) {
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+
+    auto reg = std::make_unique<iris_sdk::LensSkuRegistry>();
+    if (!reg->loadFromJson(lens_meta_json)) {
+        return IRIS_SDK_INVALID_FORMAT;
+    }
+
+    g_sku_registry = std::move(reg);
+
+    // 이미 GPU 렌즈가 초기화돼 있으면 즉시 연결. 미초기화 시에는
+    // iris_sdk_init_gpu_lens()에서 g_sku_registry를 연결한다.
+    if (g_gpu_lens) {
+        g_gpu_lens->setSkuRegistry(g_sku_registry.get());
+    }
+
+    return IRIS_SDK_OK;
+#else
+    (void)lens_meta_json;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+IrisSdkError iris_sdk_load_lens_texture_with_sku(
+    const uint8_t* data, int width, int height, const char* sku_id) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+    if (!data || width <= 0 || height <= 0) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+    const std::string sku = sku_id ? std::string(sku_id) : std::string();
+    return g_gpu_lens->loadLensTexture(data, width, height, sku) ? IRIS_SDK_OK : IRIS_SDK_RENDER_FAILED;
+#else
+    (void)data;
+    (void)width;
+    (void)height;
+    (void)sku_id;
     return IRIS_SDK_ERROR_NOT_SUPPORTED;
 #endif
 }

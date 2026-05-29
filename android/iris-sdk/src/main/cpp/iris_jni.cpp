@@ -2076,6 +2076,59 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadLensTexture(
 }
 
 /**
+ * @brief 렌즈 SKU 메타데이터 등록 (P6-W7)
+ *
+ * Java: native int nativeSetLensMetadata(String json);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensMetadata(
+    JNIEnv* env, jclass /* clazz */,
+    jstring json)
+{
+    if (!json) {
+        LOGE("nativeSetLensMetadata: json is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    ScopedString jsonStr(env, json);
+    if (!jsonStr.valid()) {
+        LOGE("nativeSetLensMetadata: failed to get json string");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    return static_cast<jint>(iris_sdk_set_lens_metadata(jsonStr.get()));
+}
+
+/**
+ * @brief 렌즈 텍스처 로드 (RGBA + SKU ID) (P6-W7)
+ *
+ * Java: native int nativeLoadLensTextureWithSku(byte[] data, int width, int height, String skuId);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeLoadLensTextureWithSku(
+    JNIEnv* env, jclass /* clazz */,
+    jbyteArray data, jint width, jint height, jstring skuId)
+{
+    if (!data) {
+        LOGE("nativeLoadLensTextureWithSku: data is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    ScopedByteArray arr(env, data, JNI_ABORT);
+    if (!arr.valid()) {
+        LOGE("nativeLoadLensTextureWithSku: failed to get byte array");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    // skuId는 NULL 허용 (메타 미적용). NULL이면 C API에 nullptr 전달.
+    ScopedString skuStr(env, skuId);
+    const char* sku = skuId ? skuStr.get() : nullptr;
+
+    return static_cast<jint>(
+        iris_sdk_load_lens_texture_with_sku(arr.data(), width, height, sku));
+}
+
+/**
  * Java: native void nativeUnloadLensTexture();
  */
 JNIEXPORT void JNICALL
