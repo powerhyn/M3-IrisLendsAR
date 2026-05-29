@@ -841,6 +841,10 @@ uniform int   uDetailReinject;   // C10 on/off (기본 1)
 uniform float uLeftRenderAlpha;
 uniform float uRightRenderAlpha;
 
+// P6-W7 §5.3/§5.11: 림발 셰이더 수식 스위치. baked 림발/그래픽 아웃라인 SKU는
+// CPU 측에서 0으로 주입돼 셰이더 림발 스킵(이중 림발 방지).
+uniform int uApplyLimbal;        // 1=셰이더 림발 적용, 0=스킵
+
 in vec2 vTexCoord;
 out vec4 fragColor;
 
