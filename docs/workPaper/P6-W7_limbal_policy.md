@@ -427,6 +427,17 @@ if (uHasBakedLimbal == 0) {
 
 상세: `docs/bench/P6-W7/B4_limbal_detection_report.md`.
 
+### 6.0.3 GPU 경로 와이어링 (W9 선반영, 2026-05-29)
+
+§1.14 원 범위는 C++ 코어만(JNI/Kotlin은 W9)이었으나, **실기기에서 메타 플래그까지 끝까지 검증**하기 위해 GPU 데모 경로 와이어링을 W7에 선반영(사용자 요청).
+
+- **공개 C API 동결 준수**: 기존 `iris_sdk_load_lens_texture(data,w,h)` 불변. 새 함수만 추가 — `iris_sdk_set_lens_metadata(json)`, `iris_sdk_load_lens_texture_with_sku(data,w,h,sku_id)` (sdk_api.h 선언, sdk_api_v2.cpp 구현, v2 격리). 레지스트리는 파일 스코프 전역(`g_sku_registry`)으로 수명 보장 + `init_gpu_lens` 양방향 지연주입.
+- **JNI**: `nativeSetLensMetadata(String)`, `nativeLoadLensTextureWithSku(byte[],int,int,String)`.
+- **Java/Kotlin (GPU 데모 경로만)**: `GpuRenderActivity`가 GPU init 후 `assets/lens_meta.json` → `setLensMetadata`, 렌즈 선택 시 `lens.id`(=createId, 예: `claset_doll_choco_png`)를 `loadLensTexture`까지 전달. 메인 데모(MainActivity)는 CPU Canvas 경로라 무관.
+- **검증**: macOS 코어 빌드 + Android Gradle `:demo-app:assembleDebug` 성공(APK 생성). 적대적 리뷰(architect-review)로 API 동결·시그니처 정합·레지스트리 수명·메타 로드 순서 통과.
+
+**실기기 확인 대상**: GpuRenderActivity에서 (1) 무림발 렌즈 셰이더 림발 ON, (2) baked 5종(romu_gray/dear/love, envie_plum-black, oh_bagel)·그래픽(envie_chameau-brown) 셰이더 림발 OFF(이중 림발 없음), (3) 메타 플래그 정확성. **GPU 셰이더는 런타임 컴파일**이라 이 빌드는 GLSL 유효성을 보장하지 않음 → 실기기 첫 실행 시 크래시/검은화면 없는지 확인 필수.
+
 ---
 
 ## (원 미결 사항 세부 — 참고용)
