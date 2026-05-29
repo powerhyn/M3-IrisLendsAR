@@ -249,10 +249,12 @@ class CameraGLView @JvmOverloads constructor(
 
     /**
      * 렌즈 텍스처 설정 (비트맵)
+     *
+     * @param skuId P6-W7: 렌즈 SKU id (메타 연동, 빈 문자열이면 미적용)
      */
-    fun setLensTexture(bitmap: Bitmap?) {
+    fun setLensTexture(bitmap: Bitmap?, skuId: String = "") {
         queueEvent {
-            glRenderer.setLensTexture(bitmap)
+            glRenderer.setLensTexture(bitmap, skuId)
         }
     }
 
