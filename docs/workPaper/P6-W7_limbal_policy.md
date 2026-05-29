@@ -1,6 +1,6 @@
 # P6-W7: B4 림발 자동감지 fallback + 림발 정책 확정
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: ✅ 구현 완료 (2026-05-29). 메타데이터 전용 채택 (B4 자동감지 실측 9/10 → 런타임 권위 드롭).
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W3 (환경 반사 계층 스캐폴드)
 > **병렬 가능**: P6-W4, W5, W6과 병렬. 가장 작은 W.
@@ -252,12 +252,12 @@ bool has_baked_limbal = sku_meta.has_baked_limbal.value_or(auto_detected_limbal)
 
 ### 4.1 Definition of Done
 
-- [ ] B4 프로토타입 + 10 SKU 정확도 측정 완료
-- [ ] SKU 메타 구조 구현 (header + 로딩 로직)
-- [ ] 셰이더 림발 수식 부활 (uniform 스위치)
-- [ ] 20 SKU 메타 플래그 초기 설정
-- [ ] B4 결과에 따른 자동감지 채택/드롭 반영
-- [ ] 99 §1.2 C6 + §2 B4 업데이트
+- [x] B4 프로토타입 + 10 SKU 정확도 측정 완료 — **9/10** (`docs/bench/P6-W7/B4_limbal_detection_report.md`)
+- [x] SKU 메타 구조 구현 (header + 로딩 로직) — `cpp/include/iris_sdk/lens_sku_metadata.h` + `.cpp` (LensSkuRegistry + 경량 JSON 파서)
+- [x] 셰이더 림발 수식 부활 (uniform 스위치) — `shader_sources.cpp` `uApplyLimbal` + `gpu_lens_renderer` 주입
+- [x] 메타 플래그 초기 설정 — `android/demo-app/src/main/assets/lens_meta.json` (**실제 42 SKU**, 20 아님)
+- [x] B4 결과에 따른 자동감지 채택/드롭 반영 — **드롭** (9/10 < 10/10), `auto_detect_fallback_=false` 기본, 메타 전용
+- [x] 99 §1.2 C6 + §2 B4 업데이트 — 본 문서 §6.0.2 반영
 
 ---
 
@@ -351,7 +351,8 @@ if (uHasBakedLimbal == 0) {
 - 자동감지 완화 아님. "일관 rule + 예외 명시" 구조.
 - **배포 후 1개월 모니터링** 필수.
 - Gemini R1 원안 9/10 완화안은 소수 의견이며 "개별 메타 fallback"으로 우려 흡수.
-- 출처: `P6-W7_brainstorm/synthesis.md` §2.
+- **R2 (2026-05-29): Gemini가 9/10 철회 → 10/10 엄수 선회. 2/3 다수 → 3/3 만장일치로 강화.** R4 실측 팩트 수용.
+- 출처: `P6-W7_brainstorm/synthesis.md` §2, §R2.2.
 
 ### 5.11 엔비_샤모 브라운 특별 처리 — **`prefers_graphic_outline: true` 확정** (W7 R1 합의 3/3)
 
@@ -392,6 +393,39 @@ if (uHasBakedLimbal == 0) {
 
 원문: `docs/workPaper/P6-W7_brainstorm/{codex,gemini,claude}_w7.md`.
 종합: `docs/workPaper/P6-W7_brainstorm/synthesis.md`.
+
+### 6.0.1 R2 교차 비판 결과 (2026-05-29, 구현 직전 검증)
+
+구현 착수 전 추가 확신을 위해 사용자 요청으로 R2 실행 (R1 synthesis는 R2 불필요 판정이었음).
+
+| 쟁점 | R1 | R2 | 변화 |
+|------|-----|-----|------|
+| 6.5 정확도 기준 | 2/3 10/10 (Gemini 9/10) | **3/3 10/10** (Gemini 철회) | **만장일치 강화** |
+| 6.3 메타 저장 | 2/3 JSON (Codex 하드코드) | 2/3 JSON 유지 (Codex 고수) | 없음 — §5.8 JSON 유지 |
+| 나머지 5개 | 3/3 | 3/3 | 없음 |
+
+- **6.5:** Gemini가 R4 실측 팩트 수용해 9/10 철회 → **닫힌 쟁점 6개로 증가**. R1 최대 논쟁점이 R2에서 가장 견고.
+- **6.3:** Codex 하드코드 레지스트리 권고 유지(렌더링 정책 필드를 외부 JSON으로 여는 blast radius 우려). 단 Hard veto 아님. W5 공유 `lens_meta.json` 규약(handoff §4.5) + Claude R2 "파서>200줄이면 하드코드 폴백" 트리거로 JSON 유지 타당. **구현 중 SDK 공용 파서 부재로 경량 파서 비용 과하면 하드코드 폴백 재검토 — 유일한 구현 판단 포인트.**
+
+원문: `docs/workPaper/P6-W7_brainstorm/{codex,gemini,claude}_w7_r2.md`.
+종합: `synthesis.md` §R2.
+
+### 6.0.2 B4 구현 실측 결과 — 자동감지 드롭, 메타 전용 채택 (2026-05-29)
+
+구현 단계에서 실제 42종 에셋에 `detectBakedLimbal`을 돌린 결과 브레인스토밍 전제가 뒤집혔다.
+
+1. **§5.2 원래 공식 작동 불능:** 렌즈 텍스처는 중심부(r<0.3)가 투명 동공이라 `center_lum = mean(r<0.3)`가 측정 불가 → 42/42 실패. §5.2는 카메라 프레임 홍채를 가정했으나 실제 대상은 렌즈 텍스처. → `center_inner` 환형 밴드 파라미터 추가로 보정.
+2. **보정 후에도 최고 9/10:** baked/non-baked가 edge/body ratio에서 본질적으로 겹침(약-베이크 oh_bagel 0.65 vs 강한-페이드 무림발 cloud-gray 0.50). 단일 임계값 10/10 분리 불가.
+3. **"R4 실기기 10/10" 미재현:** R1·R2가 합의 전제로 삼은 팩트가 실제 측정에서 재현 안 됨 (DoD의 B4 측정이 미체크였던 점이 방증).
+
+**결정 (사용자 승인):** §1.16/§5.10 사전 합의 분기 **"10/10 미달 → 자동감지 드롭, 메타데이터 only"** 적용.
+- 런타임: `lens_meta.json` 메타가 유일 권위. `auto_detect_fallback_ = false` 기본.
+- 메타 누락 SKU: `has_baked_limbal=false`(셰이더 림발 ON) + WARN.
+- 자동감지 코드: 진단/재활성용 보존(9/10 hint).
+
+실측이 보수적 경로(인간 판단 메타)를 정당화. R2 "10/10 엄수"의 취지(불안정 자동감지 출시 방지)가 실측으로 확인됨.
+
+상세: `docs/bench/P6-W7/B4_limbal_detection_report.md`.
 
 ---
 
