@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <array>
+#include <chrono>
 
 namespace iris_sdk {
 
@@ -134,6 +135,17 @@ public:
     void setContactShadowEnabled(bool enabled);
     void setContactShadowIntensity(float intensity);
     void setEllipseMaskEnabled(bool enabled);
+
+    // ========================================
+    // P6-W6: 블링크 ramp(B5) / 저조도 디테일 gate(B9) / C10 디테일 재주입 토글
+    // ========================================
+    /// P6-W6 §1.3 B5: 블링크 up ramp 95% 도달 시간(ms). 토글 60/80/120, 기본 80. clamp[30,200].
+    void setBlinkUpMs(float ms);
+    /// P6-W6 §5.7 B9: 저조도 디테일 gate 임계값(linear avg luma). 토글 0.10/0.15/0.25, 기본 0.15. clamp[0,1].
+    void setGateThreshold(float t);
+    /// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off (기본 on).
+    void setDetailReinject(bool enabled);
+
     /**
      * @deprecated P5-W3-05 S1에서 고정 조명 하이라이트 폐기. C5 환경 반사 계층이 대체.
      * 호환성 위해 선언은 유지하지만 no-op. 호출부는 제거 권장.
@@ -272,6 +284,13 @@ private:
         GLint uSourceType = -1;
         GLint uReflectionIntensity = -1;
         GLint uEnvMap = -1;
+
+        // P6-W6 §5.2/§5.7: C10 디테일 재주입 + B9 gate + C7 블링크 ramp.
+        GLint uTexelSize = -1;
+        GLint uGateThreshold = -1;
+        GLint uDetailReinject = -1;
+        GLint uLeftRenderAlpha = -1;
+        GLint uRightRenderAlpha = -1;
     } lens_uniforms_;
 
     void cacheLensUniforms();
@@ -350,6 +369,29 @@ private:
     // P6-W2 §5.9: invalid blend ID(3/4/6/etc.) 1회 경고 (debug 빌드 한정).
     //   유효 ID = {0, 1, 2, 5, 7}. 그 외는 셰이더에서 TintLinearV2 fallback.
     bool invalid_blend_warned_ = false;
+
+    // ========================================
+    // P6-W6: 블링크 ramp(C7) + 저조도 gate(B9) + 디테일 재주입(C10) 토글 상태
+    // ========================================
+    // C7 블링크 시간적 envelope (실측 dt 기반 EMA). [0]=left, [1]=right.
+    float render_alpha_[2] = {1.0f, 1.0f};
+    std::chrono::steady_clock::time_point last_render_ts_;
+    bool has_last_ts_ = false;
+
+    // B5/B9/C10 런타임 토글. 기본은 W6 §5.5/§5.7 중간값 (실기기 벤치로 확정).
+    float blink_up_ms_   = 80.0f;   // B5 up ramp 95% 도달 시간 (60/80/120)
+    // B9 저조도 gate 임계값. 기본 0.10 — 저조도 사용 시나리오가 드문 뷰티 시뮬레이션
+    // 특성상 C10 디테일을 일반 환경에서 항상 살리는 쪽 채택(도메인 판단). gate 로직은
+    // 보존되어 실측 연결 시 극단 저조도(luma<0.07)만 자동 감쇄.
+    float gate_threshold_ = 0.10f;  // B9 토글 후보 0.10/0.15/0.25
+    bool  detail_reinject_ = true;  // C10 on/off
+
+    // W6 §1.3: down ramp는 고정(생리적 눈 감김이 뜸보다 빠름).
+    static constexpr float kBlinkDownMs        = 60.0f;
+    static constexpr float kBlinkCloseThreshold = 0.02f;  // eyeOpening 이하면 눈 감김 판정
+    static constexpr float kDtClampMinMs       = 1.0f;
+    static constexpr float kDtClampMaxMs       = 100.0f;  // 앱 복귀 등 큰 dt 튐 방지
+    static constexpr float kDefaultDtMs        = 16.67f;  // 첫 프레임 dt
 
     bool initialized_ = false;
     mutable std::mutex mutex_;

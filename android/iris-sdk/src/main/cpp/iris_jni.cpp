@@ -2257,4 +2257,48 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionIntensity(
     iris_sdk_set_reflection_intensity(static_cast<float>(intensity));
 }
 
+// ============================================================================
+// P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글.
+// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
+// ============================================================================
+extern void iris_sdk_set_lens_blink_up_ms(float ms);
+extern void iris_sdk_set_lens_gate_threshold(float threshold);
+extern void iris_sdk_set_lens_detail_reinject(int enabled);
+
+/**
+ * Java: native void nativeSetBlinkUpMs(float ms);
+ * P6-W6 B5: 블링크 up ramp 시간 (토글 60/80/120ms).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetBlinkUpMs(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat ms)
+{
+    iris_sdk_set_lens_blink_up_ms(static_cast<float>(ms));
+}
+
+/**
+ * Java: native void nativeSetGateThreshold(float threshold);
+ * P6-W6 B9: 저조도 디테일 gate 임계값 (토글 0.10/0.15/0.25).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetGateThreshold(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat threshold)
+{
+    iris_sdk_set_lens_gate_threshold(static_cast<float>(threshold));
+}
+
+/**
+ * Java: native void nativeSetDetailReinject(boolean enabled);
+ * P6-W6 C10: 홍채 디테일 재주입 on/off.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetDetailReinject(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jboolean enabled)
+{
+    iris_sdk_set_lens_detail_reinject(enabled ? 1 : 0);
+}
+
 }  // extern "C"

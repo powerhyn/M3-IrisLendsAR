@@ -296,6 +296,33 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * P6-W6 B5: 블링크 up ramp 시간 토글 (60/80/120ms).
+     */
+    fun setBlinkUpMs(ms: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setBlinkUpMs(ms)
+        }
+    }
+
+    /**
+     * P6-W6 B9: 저조도 디테일 gate 임계값 토글 (0.10/0.15/0.25).
+     */
+    fun setGateThreshold(threshold: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setGateThreshold(threshold)
+        }
+    }
+
+    /**
+     * P6-W6 C10: 홍채 디테일 재주입 on/off.
+     */
+    fun setDetailReinject(enabled: Boolean) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setDetailReinject(enabled)
+        }
+    }
+
+    /**
      * LUT 3D 텍스처 설정 (임의 스레드에서 호출 가능 — 내부에서 GL 스레드로 큐잉)
      *
      * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)

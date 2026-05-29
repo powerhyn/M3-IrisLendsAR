@@ -717,4 +717,42 @@ IRIS_SDK_EXPORT void iris_sdk_set_reflection_intensity(float intensity) {
 #endif
 }
 
+// ============================================================================
+// P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글 internal C API.
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출 (벤치 전용 internal 경로).
+// ============================================================================
+
+void iris_sdk_set_lens_blink_up_ms(float ms) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setBlinkUpMs(ms);
+    }
+#else
+    (void)ms;
+#endif
+}
+
+void iris_sdk_set_lens_gate_threshold(float threshold) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setGateThreshold(threshold);
+    }
+#else
+    (void)threshold;
+#endif
+}
+
+void iris_sdk_set_lens_detail_reinject(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setDetailReinject(enabled != 0);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
 } // extern "C"

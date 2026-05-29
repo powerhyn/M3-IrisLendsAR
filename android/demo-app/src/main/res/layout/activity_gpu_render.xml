@@ -214,6 +214,59 @@
 
     </LinearLayout>
 
+    <!-- P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글 패널 -->
+    <LinearLayout
+        android:id="@+id/w6BenchPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="16dp"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:background="#80000000"
+        app:layout_constraintTop_toBottomOf="@id/lensBenchPanel"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <Button
+            android:id="@+id/btnW6Blink"
+            android:layout_width="64dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="2dp"
+            android:text="up80"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:minWidth="0dp"
+            android:backgroundTint="#66555555"
+            style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+        <Button
+            android:id="@+id/btnW6Gate"
+            android:layout_width="64dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="2dp"
+            android:text="g.10"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:minWidth="0dp"
+            android:backgroundTint="#66555555"
+            style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+        <Button
+            android:id="@+id/btnW6Detail"
+            android:layout_width="64dp"
+            android:layout_height="36dp"
+            android:text="C10:on"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:minWidth="0dp"
+            android:backgroundTint="#66555555"
+            style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+    </LinearLayout>
+
     <!-- 컨트롤 패널 -->
     <LinearLayout
         android:id="@+id/controlPanel"

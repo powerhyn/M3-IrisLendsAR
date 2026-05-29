@@ -1018,6 +1018,36 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P6-W6 B5: 블링크 up ramp 시간 토글 (벤치용).
+     * @param ms 60/80/120ms (자동 clamp [30,200]). 기본 80.
+     */
+    public static void setBlinkUpMs(float ms) {
+        if (sLibraryLoaded) {
+            nativeSetBlinkUpMs(ms);
+        }
+    }
+
+    /**
+     * P6-W6 B9: 저조도 디테일 gate 임계값 토글 (벤치용).
+     * @param threshold 0.10/0.15/0.25 (자동 clamp [0,1]). 기본 0.15.
+     */
+    public static void setGateThreshold(float threshold) {
+        if (sLibraryLoaded) {
+            nativeSetGateThreshold(threshold);
+        }
+    }
+
+    /**
+     * P6-W6 C10: 홍채 디테일 재주입 on/off 토글 (벤치용).
+     * @param enabled true=on(기본), false=off.
+     */
+    public static void setDetailReinject(boolean enabled) {
+        if (sLibraryLoaded) {
+            nativeSetDetailReinject(enabled);
+        }
+    }
+
+    /**
      * GPU 렌즈 타원 마스크 설정.
      * GL 스레드에서 호출.
      * @param enabled true=on, false=off
@@ -1398,6 +1428,11 @@ public final class IrisLensSDK {
     private static native void nativeUnloadEnvMap();
     private static native void nativeSetReflectionMode(int mode);
     private static native void nativeSetReflectionIntensity(float intensity);
+
+    // P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글
+    private static native void nativeSetBlinkUpMs(float ms);
+    private static native void nativeSetGateThreshold(float threshold);
+    private static native void nativeSetDetailReinject(boolean enabled);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods

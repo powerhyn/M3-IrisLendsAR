@@ -1,7 +1,7 @@
 # P6-W6: B5 블링크 up ramp + B9 저조도 디테일 gate + C10 튜닝
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
-> **작성**: 2026-04-23
+> **상태**: 구현 완료 (Phase A — 코드/토글 인프라). Phase B 실기기 벤치 대기 → Phase C 최종 튜닝.
+> **작성**: 2026-04-23 / **구현**: 2026-05-28 (feature/P6-W6)
 > **선행 의존**: P6-W1 (avg_iris_luma — B9 gate 입력), P6-W3 (환경 반사 계층 스캐폴드 — detail 합성 순서)
 > **병렬 가능**: P6-W4, W5, W7와 병렬
 
@@ -270,13 +270,21 @@ W6에서 다룰 것:
 
 ### 4.1 Definition of Done
 
-- [ ] `computeEmaAlpha(target_ms, fps)` 유틸 함수 구현
-- [ ] B5 3 프로토타입 (60/80/120ms up) 토글 구현
-- [ ] B9 3 프로토타입 (0.10/0.15/0.25 gate) 토글 구현
-- [ ] C10 수식 (iris inner 마스크 + spec/reflection 제외) 셰이더 반영
-- [ ] 벤치 촬영 + 평가 완료
-- [ ] 결과 반영 커밋
-- [ ] 99 §1.2 C7/C10 + §2 B5/B9 업데이트
+**Phase A (구현/토글 인프라) — 완료 (2026-05-28):**
+- [x] `computeEmaAlpha(dt_ms, target_ms)` 유틸 함수 구현 (§5.5 실측 dt 시그니처)
+- [x] B5 3 프로토타입 (60/80/120ms up) 토글 구현 (`setBlinkUpMs`, 기본 80)
+- [x] B9 3 프로토타입 (0.10/0.15/0.25 gate) 토글 구현 (`setGateThreshold`, **기본 0.10** — 아래 도메인 판단)
+- [x] C10 수식 (iris inner 마스크 + spec/reflection 제외 순서) 셰이더 반영
+- [x] 벤치 토글 노출 (internal C API → JNI → Kotlin → demo UI 패널)
+- [x] C++ 코어 + Android APK 빌드 통과 + 실기기 C10 디테일 시각 긍정 확인
+
+**Phase B/C (벤치 + 반영) — B9는 도메인 판단으로 단축:**
+- [x] **B9 gate threshold = 0.10 채택** (벤치 없이 도메인 판단, 2026-05-28): 저조도 사용 시나리오가 드문 뷰티 시뮬레이션 특성(어두운 곳에선 효과 자체가 안 보여 사용자가 안 씀) → 저조도 노이즈 방지(B9 본래 목적)의 실익이 낮음. C10 디테일을 일반 환경에서 항상 살리는 쪽(gate 0.10) 채택. gate 로직은 보존 → 실측 연결 시 극단 저조도(luma<0.07) 자동 감쇄.
+- [ ] B5 up ramp 확정 — 60/80/120 미묘, 퀄리티 영향 작음(실기기 1차 관찰). 80ms 기본 유지 잠정.
+- [ ] (선택) avg_iris_luma 실측 연결 — 우선순위 강등(저조도 드묾). 연결 시 TintLinearV2 환경 색 정규화 + 저조도 gate 동시 활성.
+- [ ] 99 §1.2 C7/C10 + §2 B5/B9 최종 업데이트
+
+> **avg_iris_luma 실측 미연결 주의**: B9 gate는 `uAvgIrisLum`을 입력으로 쓰나 현재 fallback 상수(0.1225)만 공급됨(실측 source는 W1에서 GL state 오염으로 revert, 별도 작업으로 분리). 기본 gate 0.10에서 fallback luma 0.1225 → gate≈0.96이라 C10 디테일 일반 적용. 저조도 자동 적응은 실측 연결 후.
 
 ### 4.2 Out of scope
 

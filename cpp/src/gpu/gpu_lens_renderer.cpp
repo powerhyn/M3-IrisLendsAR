@@ -70,6 +70,16 @@ static constexpr int RIGHT_UPPER_EYELID[] = {386, 385, 384};
 static constexpr int RIGHT_LOWER_EYELID[] = {374, 373, 380};
 static constexpr int EYELID_INDEX_COUNT = 3;
 
+#if IRIS_SDK_GPU_AVAILABLE
+namespace {
+// P6-W6 §5.5: 95% 도달 시간(target_ms) 기준 EMA 계수. dt_ms=직전 프레임 실측 delta.
+// 30fps 고정 가정 금지 — 프레임레이트가 흔들려도 동일한 시간 envelope을 보장.
+float computeEmaAlpha(float dt_ms, float target_ms) {
+    return 1.0f - std::pow(0.05f, dt_ms / std::max(target_ms, 1e-3f));
+}
+}  // namespace
+#endif
+
 // ============================================================================
 // 생성자/소멸자
 // ============================================================================
@@ -483,6 +493,13 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uEnvMap = glGetUniformLocation(lens_program_, "uEnvMap");
     // P5-W3-05 S1 D5: uHighlightEnabled uniform 제거
 
+    // P6-W6 §5.2/§5.7: C10 디테일 재주입 + B9 gate + C7 블링크 ramp location 캐시.
+    lens_uniforms_.uTexelSize = glGetUniformLocation(lens_program_, "uTexelSize");
+    lens_uniforms_.uGateThreshold = glGetUniformLocation(lens_program_, "uGateThreshold");
+    lens_uniforms_.uDetailReinject = glGetUniformLocation(lens_program_, "uDetailReinject");
+    lens_uniforms_.uLeftRenderAlpha = glGetUniformLocation(lens_program_, "uLeftRenderAlpha");
+    lens_uniforms_.uRightRenderAlpha = glGetUniformLocation(lens_program_, "uRightRenderAlpha");
+
     // 유효한 uniform location 카운트
     int valid_count = 0;
     const GLint* locs = reinterpret_cast<const GLint*>(&lens_uniforms_);
@@ -578,6 +595,24 @@ void GPULensRenderer::setContactShadowIntensity(float intensity) {
 void GPULensRenderer::setEllipseMaskEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     use_ellipse_mask_ = enabled;
+}
+
+// P6-W6 §5.5 B5: 블링크 up ramp 토글 (60/80/120ms). 실기기 벤치로 확정.
+void GPULensRenderer::setBlinkUpMs(float ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    blink_up_ms_ = std::clamp(ms, 30.0f, 200.0f);
+}
+
+// P6-W6 §5.7 B9: 저조도 디테일 gate 임계값 토글 (0.10/0.15/0.25).
+void GPULensRenderer::setGateThreshold(float t) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    gate_threshold_ = std::clamp(t, 0.0f, 1.0f);
+}
+
+// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off.
+void GPULensRenderer::setDetailReinject(bool enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    detail_reinject_ = enabled;
 }
 
 // P5-W3-05 S1 D5: setHighlightEnabled API 제거
@@ -830,6 +865,32 @@ ErrorCode GPULensRenderer::renderToTexture(
                                                    iris_result.frame_width, iris_result.frame_height);
     const float avg_luma = updateAvgIrisLuma(left_packet, right_packet);
 
+    // P6-W6 §1.3 C7: 블링크 시간적 envelope EMA 업데이트.
+    // 실측 dt 기반(30fps 고정 가정 금지). 눈 감김=down ramp(고정 60ms), 뜸=up ramp(B5 토글).
+    const auto now_ts = std::chrono::steady_clock::now();
+    float dt_ms = kDefaultDtMs;
+    if (has_last_ts_) {
+        const auto delta = std::chrono::duration<float, std::milli>(now_ts - last_render_ts_);
+        dt_ms = std::clamp(delta.count(), kDtClampMinMs, kDtClampMaxMs);
+    }
+    last_render_ts_ = now_ts;
+    has_last_ts_ = true;
+
+    // 좌/우 별도 eyeOpening 판정. eyelid 캐시 무효 시 open 취급(envelope 유지/복귀).
+    for (int i = 0; i < 2; ++i) {
+        const float eye_opening = eyelid_cache_[i].valid_frames > 0
+            ? std::fabs(eyelid_cache_[i].top - eyelid_cache_[i].bottom)
+            : 1.0f;
+        const bool closing = eye_opening < kBlinkCloseThreshold;
+        if (closing) {
+            const float a = computeEmaAlpha(dt_ms, kBlinkDownMs);  // target 0
+            render_alpha_[i] = (1.0f - a) * render_alpha_[i];
+        } else {
+            const float a = computeEmaAlpha(dt_ms, blink_up_ms_);  // target 1
+            render_alpha_[i] = a * 1.0f + (1.0f - a) * render_alpha_[i];
+        }
+    }
+
     // 출력 텍스처 획득
     auto* output_info = texture_pool_->acquireRenderTarget(width, height);
     if (!output_info) {
@@ -1027,6 +1088,21 @@ ErrorCode GPULensRenderer::renderToTexture(
 
     // 검출 높이 (Bug B: 픽셀 높이를 그대로 전달 — Kotlin의 detHf와 동일)
     glUniform1f(lens_uniforms_.uDetH, det_hf);
+
+    // P6-W6 §5.2/§5.7: C10 디테일 재주입 + B9 gate. texel은 출력 해상도 기준.
+    glUniform2f(lens_uniforms_.uTexelSize, 1.0f / static_cast<float>(std::max(width, 1)),
+                1.0f / static_cast<float>(std::max(height, 1)));
+    glUniform1f(lens_uniforms_.uGateThreshold, gate_threshold_);
+    glUniform1i(lens_uniforms_.uDetailReinject, detail_reinject_ ? 1 : 0);
+
+    // P6-W6 §1.3 C7: 블링크 ramp. mirror 시 좌/우 swap (eyelid uniform과 동일 패턴).
+    float l_alpha = render_alpha_[0];
+    float r_alpha = render_alpha_[1];
+    if (config.is_mirror) {
+        std::swap(l_alpha, r_alpha);
+    }
+    glUniform1f(lens_uniforms_.uLeftRenderAlpha, l_alpha);
+    glUniform1f(lens_uniforms_.uRightRenderAlpha, r_alpha);
 
     // 풀스크린 쿼드 렌더링
     glDisable(GL_DEPTH_TEST);
