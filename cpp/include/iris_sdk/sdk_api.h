@@ -118,16 +118,20 @@ typedef enum IrisEyeRefinerPolicy {
  * @brief 렌즈 블렌딩 모드
  *
  * 렌즈 렌더링 시 프레임과 텍스처를 합성하는 방식을 지정합니다.
+ *
+ * P6-W2 §5.4/§5.12: Canonical default = `IRIS_BLEND_LUMINANCE_TINT_LINEAR` (ID=5, TintLinearV2).
+ *   활성 ID = {0, 1, 2, 5, 7}. ID 3/4/6은 deprecated이며 셰이더에서 ID 5 fallback.
+ *   외부 API 호환성 유지를 위해 enum 값은 보존됨.
  */
 typedef enum IrisBlendMode {
     IRIS_BLEND_NORMAL = 0,              /**< 일반 알파 블렌딩 */
     IRIS_BLEND_MULTIPLY = 1,            /**< 곱하기 블렌딩 */
-    IRIS_BLEND_SCREEN = 2,              /**< 스크린 블렌딩 */
-    IRIS_BLEND_OVERLAY = 3,             /**< 오버레이 블렌딩 */
-    IRIS_BLEND_LUMINANCE_TINT = 4,      /**< 휘도 보존 틴트 (sRGB 근사) @experimental */
-    IRIS_BLEND_LUMINANCE_TINT_LINEAR = 5,/**< 휘도 보존 틴트 (선형 색공간) @experimental */
-    IRIS_BLEND_SOFT_LIGHT = 6,          /**< 소프트 라이트 블렌딩 @experimental */
-    IRIS_BLEND_COLOR_REPLACE = 7        /**< 색상 교체 블렌딩 (상대 밝기 정규화) @experimental */
+    IRIS_BLEND_SCREEN = 2,              /**< 스크린 (W2: 선형 공간 ScreenLinear) */
+    IRIS_BLEND_OVERLAY = 3,             /**< @deprecated TintLinearV2 fallback */
+    IRIS_BLEND_LUMINANCE_TINT = 4,      /**< @deprecated TintLinearV2 fallback */
+    IRIS_BLEND_LUMINANCE_TINT_LINEAR = 5,/**< 휘도 보존 틴트 — **canonical default** (W2 TintLinearV2) */
+    IRIS_BLEND_SOFT_LIGHT = 6,          /**< @deprecated TintLinearV2 fallback */
+    IRIS_BLEND_COLOR_REPLACE = 7        /**< 색상 교체 (W2: ColorReplaceLinear, B1 벤치 대기) */
 } IrisBlendMode;
 
 // ============================================================================
@@ -216,7 +220,7 @@ typedef struct IrisLensConfig {
     float offset_x;             /**< X 오프셋 (정규화, 기본값 0.0) */
     float offset_y;             /**< Y 오프셋 (정규화, 기본값 0.0) */
     float rotation;             /**< 회전 각도 (라디안, -PI~PI, 기본값 0.0) */
-    IrisBlendMode blend_mode;   /**< 블렌드 모드 (기본값 NORMAL) */
+    IrisBlendMode blend_mode;   /**< 블렌드 모드 (기본값 LUMINANCE_TINT_LINEAR, P6-W2 §5.12) */
     float edge_feather;         /**< 가장자리 페더링 (0.0~1.0, 기본값 0.1) */
     bool apply_left;            /**< 왼쪽 눈 적용 여부 (기본값 true) */
     bool apply_right;           /**< 오른쪽 눈 적용 여부 (기본값 true) */
@@ -837,6 +841,34 @@ IRIS_SDK_EXPORT int iris_sdk_is_gpu_lens_initialized(void);
  */
 IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_lens_texture(
     const uint8_t* data, int width, int height);
+
+/**
+ * @brief 렌즈 SKU 메타데이터 등록 (P6-W7)
+ *
+ * lens_meta.json 문자열을 파싱하여 SKU 레지스트리를 구성합니다.
+ * 등록된 메타는 GPU 렌즈 렌더러의 림발(limbal) on/off 판정 권위로 사용됩니다.
+ * GPU 렌즈 초기화 전/후 어느 시점에 호출해도 무방하며, 가장 최근 등록이 우선합니다.
+ *
+ * @param lens_meta_json SKU 메타데이터 JSON 문자열 (NULL 불가)
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_NULL_POINTER 입력 NULL,
+ *         IRIS_SDK_INVALID_FORMAT JSON 파싱 실패
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_lens_metadata(const char* lens_meta_json);
+
+/**
+ * @brief 렌즈 텍스처 로드 (RGBA 데이터 + SKU ID) (P6-W7)
+ *
+ * iris_sdk_load_lens_texture와 동일하나 sku_id를 함께 전달하여
+ * 등록된 SKU 메타(iris_sdk_set_lens_metadata)로 림발 판정을 수행합니다.
+ *
+ * @param data RGBA 픽셀 데이터
+ * @param width 너비
+ * @param height 높이
+ * @param sku_id SKU 식별자 (NULL이면 빈 문자열로 처리, 메타 미적용)
+ * @return IRIS_SDK_OK 성공
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_lens_texture_with_sku(
+    const uint8_t* data, int width, int height, const char* sku_id);
 
 /**
  * @brief 렌즈 텍스처 해제

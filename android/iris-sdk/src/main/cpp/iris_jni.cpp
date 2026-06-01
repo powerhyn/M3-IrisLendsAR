@@ -393,8 +393,10 @@ bool copyConfigFromJava(JNIEnv* env, jobject src, IrisLensConfig& dest) {
     dest.rotation = env->GetFloatField(src, g_jniCache.lensConfig_rotation);
     int rawBlendMode = env->GetIntField(src, g_jniCache.lensConfig_blendMode);
     if (rawBlendMode < IRIS_BLEND_NORMAL || rawBlendMode > IRIS_BLEND_COLOR_REPLACE) {
-        LOGW("Invalid blend mode from Java: %d, clamping to NORMAL(0)", rawBlendMode);
-        dest.blend_mode = IRIS_BLEND_NORMAL;
+        // P6-W2 §5.9: invalid blend ID는 TintLinearV2(ID=5)로 fallback. 셰이더 측 §5.9 경고와 정합.
+        LOGW("[IrisSDK] Invalid blend mode from Java: %d, falling back to LUMINANCE_TINT_LINEAR(5)",
+             rawBlendMode);
+        dest.blend_mode = IRIS_BLEND_LUMINANCE_TINT_LINEAR;
     } else {
         dest.blend_mode = static_cast<IrisBlendMode>(rawBlendMode);
     }
@@ -2074,6 +2076,59 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadLensTexture(
 }
 
 /**
+ * @brief 렌즈 SKU 메타데이터 등록 (P6-W7)
+ *
+ * Java: native int nativeSetLensMetadata(String json);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensMetadata(
+    JNIEnv* env, jclass /* clazz */,
+    jstring json)
+{
+    if (!json) {
+        LOGE("nativeSetLensMetadata: json is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    ScopedString jsonStr(env, json);
+    if (!jsonStr.valid()) {
+        LOGE("nativeSetLensMetadata: failed to get json string");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    return static_cast<jint>(iris_sdk_set_lens_metadata(jsonStr.get()));
+}
+
+/**
+ * @brief 렌즈 텍스처 로드 (RGBA + SKU ID) (P6-W7)
+ *
+ * Java: native int nativeLoadLensTextureWithSku(byte[] data, int width, int height, String skuId);
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeLoadLensTextureWithSku(
+    JNIEnv* env, jclass /* clazz */,
+    jbyteArray data, jint width, jint height, jstring skuId)
+{
+    if (!data) {
+        LOGE("nativeLoadLensTextureWithSku: data is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    ScopedByteArray arr(env, data, JNI_ABORT);
+    if (!arr.valid()) {
+        LOGE("nativeLoadLensTextureWithSku: failed to get byte array");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    // skuId는 NULL 허용 (메타 미적용). NULL이면 C API에 nullptr 전달.
+    ScopedString skuStr(env, skuId);
+    const char* sku = skuId ? skuStr.get() : nullptr;
+
+    return static_cast<jint>(
+        iris_sdk_load_lens_texture_with_sku(arr.data(), width, height, sku));
+}
+
+/**
  * Java: native void nativeUnloadLensTexture();
  */
 JNIEXPORT void JNICALL
@@ -2121,7 +2176,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeRenderLensTexture(
         config.edge_feather = 0.1f;
         config.apply_left = true;
         config.apply_right = true;
-        config.blend_mode = IRIS_BLEND_NORMAL;
+        config.blend_mode = IRIS_BLEND_LUMINANCE_TINT_LINEAR;  // P6-W2 §5.12 canonical default
     }
 
     uint32_t output_texture = 0;
@@ -2151,6 +2206,22 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensScleraProtect(
     iris_sdk_set_lens_sclera_protect(enabled ? 1 : 0);
 }
 
+// P6-W5 §5.9: B1/B8 4조합 벤치용 sclera veto 수식 토글.
+// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
+extern void iris_sdk_set_lens_sclera_veto_mode(int mode);
+
+/**
+ * Java: native void nativeSetScleraVetoMode(int mode);
+ * P6-W5 §5.9: mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetScleraVetoMode(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jint mode)
+{
+    iris_sdk_set_lens_sclera_veto_mode(static_cast<int>(mode));
+}
+
 /**
  * Java: native void nativeSetLensEllipseMask(boolean enabled);
  */
@@ -2171,6 +2242,116 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensHighlight(
     jboolean enabled)
 {
     iris_sdk_set_lens_highlight(enabled ? 1 : 0);
+}
+
+// ============================================================================
+// P6-W4 §5.7/§5.11: 환경 반사 internal C API forward declare.
+// sdk_api_v2.cpp에 정의됨. 공개 sdk_api.h 미노출 (W4 Phase 벤치 internal 경로).
+// ============================================================================
+extern IrisSdkError iris_sdk_load_env_map(const uint8_t* data, int width, int height);
+extern void iris_sdk_unload_env_map(void);
+extern void iris_sdk_set_reflection_mode(int mode);
+extern void iris_sdk_set_reflection_intensity(float intensity);
+
+/**
+ * Java: native int nativeLoadEnvMap(byte[] data, int width, int height);
+ * P6-W4 §5.7: env_map 텍스처 로드 (Android assets `env/`에서 byte 받음).
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeLoadEnvMap(
+    JNIEnv* env, jclass /* clazz */,
+    jbyteArray data, jint width, jint height)
+{
+    if (!data) {
+        LOGE("nativeLoadEnvMap: data is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    ScopedByteArray arr(env, data, JNI_ABORT);
+    if (!arr.valid()) {
+        LOGE("nativeLoadEnvMap: failed to get byte array");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    return static_cast<jint>(iris_sdk_load_env_map(arr.data(), width, height));
+}
+
+/**
+ * Java: native void nativeUnloadEnvMap();
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeUnloadEnvMap(
+    JNIEnv* /* env */, jclass /* clazz */)
+{
+    iris_sdk_unload_env_map();
+}
+
+/**
+ * Java: native void nativeSetReflectionMode(int mode);
+ * P6-W4 §5.11: mode 0=OFF, 1=EnvMap, 2=Periphery.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionMode(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jint mode)
+{
+    iris_sdk_set_reflection_mode(static_cast<int>(mode));
+}
+
+/**
+ * Java: native void nativeSetReflectionIntensity(float intensity);
+ * P6-W4 §5.7: intensity [0.0, 1.0] (W3 기본 0.3).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionIntensity(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat intensity)
+{
+    iris_sdk_set_reflection_intensity(static_cast<float>(intensity));
+}
+
+// ============================================================================
+// P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글.
+// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
+// ============================================================================
+extern void iris_sdk_set_lens_blink_up_ms(float ms);
+extern void iris_sdk_set_lens_gate_threshold(float threshold);
+extern void iris_sdk_set_lens_detail_reinject(int enabled);
+
+/**
+ * Java: native void nativeSetBlinkUpMs(float ms);
+ * P6-W6 B5: 블링크 up ramp 시간 (토글 60/80/120ms).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetBlinkUpMs(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat ms)
+{
+    iris_sdk_set_lens_blink_up_ms(static_cast<float>(ms));
+}
+
+/**
+ * Java: native void nativeSetGateThreshold(float threshold);
+ * P6-W6 B9: 저조도 디테일 gate 임계값 (토글 0.10/0.15/0.25).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetGateThreshold(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat threshold)
+{
+    iris_sdk_set_lens_gate_threshold(static_cast<float>(threshold));
+}
+
+/**
+ * Java: native void nativeSetDetailReinject(boolean enabled);
+ * P6-W6 C10: 홍채 디테일 재주입 on/off.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetDetailReinject(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jboolean enabled)
+{
+    iris_sdk_set_lens_detail_reinject(enabled ? 1 : 0);
 }
 
 }  // extern "C"

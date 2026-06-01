@@ -1,9 +1,10 @@
 # P6-W1: EyeRenderPacket 도입 + avg_iris_luma ROI 평균 실측
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: 계약 도입 + fallback chain 인프라 완료 (2026-04-29). **실측 source는 W6 이관**.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W0
 > **후속 의존**: P6-W2, W3, W4~W7 (모두 기반)
+> **회귀 이력**: glReadPixels + 임시 FBO + Android EXTERNAL_OES 충돌 → 검은 화면 → revert (§6.3 참조)
 
 ---
 
@@ -207,13 +208,14 @@ Codex R3 제안:
 
 ### 4.1 Definition of Done (구체 검증)
 
-- [ ] `eye_render_packet.h` 파일 존재, 필수/optional 필드 모두 포함
-- [ ] `gpu_lens_renderer.h` 의 render API가 `EyeRenderPacket&`를 받음
-- [ ] S1 주석 `// glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f); // 제거됨`이 실제 측정 코드로 치환됨
-- [ ] C++ 빌드 통과 (`cmake --build . --target iris_sdk`)
-- [ ] 단위 테스트: EyeRenderPacket 구조체 생성/복사/optional 처리 (최소 1개)
-- [ ] 실기기 1회 렌더링: LTL 모드에서 과도 tint 없음 (육안 확인)
-- [ ] 성능 회귀 없음 (MID tier 기준 FPS 유지)
+- [x] `eye_render_packet.h` 파일 존재, 필수/optional 필드 모두 포함 (a49ce59)
+- [x] `gpu_lens_renderer`의 render 경로가 **내부에서** `EyeRenderPacket` 경유 — adapter 레이어 (2206d4a). 공개 C++ 시그니처는 `feedback_refactor_vs_retune` 원칙에 따라 유지.
+- [x] S1 주석 위치에 `glUniform1f(uAvgIrisLum, avg_luma)` 주입 — fallback chain 산출값으로 매 프레임 갱신 (c36d883). uniform 미설정 → GL 기본값 0.0 회귀 차단.
+- [~] **avg_iris_luma 실측 — W6 이관**. W1 시도(임시 FBO + glReadPixels)는 Android EXTERNAL_OES 카메라 텍스처와 충돌하여 검은 화면 회귀 → 1b869c4/b16cf05/244ab1f revert. 정식 측정은 W6에서 비동기 PBO readback 또는 detector CPU 버퍼 활용으로 설계.
+- [x] C++ 빌드 통과 (`cmake --build . --target iris_sdk`, exit 0)
+- [ ] 단위 테스트: EyeRenderPacket 구조체 생성/복사/optional 처리 — full 모드 미실행 (default).
+- [x] 실기기 검은 화면 회귀 회복 — revert 후 정상 렌더 확인.
+- [ ] 성능 회귀 없음 (MID tier FPS) — 별도 트랙.
 
 ### 4.2 Out of scope (W1에서 하지 않는 것)
 
@@ -226,6 +228,8 @@ Codex R3 제안:
 ---
 
 ## 5. 99에서 확정된 사항
+
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.1 색공간/LUMA 규약 (CPU 측정 linear 공간, `uAvgIrisLum * uAvgIrisLum` 금지), §4.2 dist 정규화 규약.
 
 ### 5.1 EyeRenderPacket 스키마 (99 §1.3 확정)
 
@@ -280,19 +284,25 @@ avg = sum(dot(rgb, LUMA_COEFFS) * mask) / sum(mask)
 mask = (dist_from_iris_center_norm < 0.65) AND eyelid_mask(uv)   // 0~1 정규화 거리
 ```
 
-### 5.2.1 색공간 계약 (Codex R4 리뷰 반영 — 중요)
+### 5.2.1 색공간 계약 (W2 R1 합의 반영 — Rec.709 linear 전 경로 통일)
 
-**`uAvgIrisLum`는 sRGB 공간의 평균 luma 값으로 통일**. W2의 `blendTintLinearV2` 수식이 `avgLumLinear = uAvgIrisLum * uAvgIrisLum` (감마 2.0 근사로 sRGB→linear)를 가정하기 때문.
+**`uAvgIrisLum`는 linear 공간의 평균 luma 값**. W2 §5.10 R1 합의에 따라 **전 렌더 경로 linear-space 강제**.
 
-**LUMA_COEFFS 선택**:
-- 표준: `vec3(0.299, 0.587, 0.114)` (Rec.601 sRGB luma — sRGB 픽셀에 직접 적용)
-- 대안: `vec3(0.2126, 0.7152, 0.0722)` (Rec.709 — 원래 linear 공간용이지만 sRGB에 근사 적용 가능)
+**LUMA_COEFFS — Rec.709 linear 고정**: `vec3(0.2126, 0.7152, 0.0722)` (W2 §5.10 3/3 합의).
+Rec.601(sRGB) 계수 사용 금지. shader와 CPU가 동일 상수 사용.
 
-**Claude 추천**: Rec.601 (0.299/0.587/0.114). sRGB 공간 픽셀에 가장 자연스러움. W1 브레인스토밍에서 Codex/Gemini와 재확인.
+**CPU 측정 절차 (linear 공간)**:
+```
+1. iris ROI 픽셀을 sRGB → linear로 변환 (pixelL = pixel * pixel  // 감마 2.0 근사)
+2. Rec.709 계수로 luma 계산 (lumL = dot(pixelL, [0.2126, 0.7152, 0.0722]))
+3. ROI 평균 → uAvgIrisLum uniform 주입 (linear 공간 값)
+```
 
-→ **결과적으로 renderer 전체에서 uAvgIrisLum 사용 = sRGB 평균 luma 값**. W2/W6에서 필요 시 제곱 (`* uAvgIrisLum`)으로 linear 근사 변환.
+**W2/W6 shader 사용 시**: `uAvgIrisLum`를 그대로 linear 값으로 취급. **squaring(`uAvgIrisLum * uAvgIrisLum`) 금지** — 이중 변환 버그.
 
-**Codex R3 명시**: "1프레임 지연은 허용 가능하다" → CPU 경로 기본. 프레임 캡처 완료 직후 CPU에서 iris ROI 추출 → 평균 luma 계산 → 다음 프레임 렌더링 시 uniform 주입.
+**검증 (W9 §5.10 CI 체크)**: 동일 픽셀 영역에 대해 shader luma 계산 결과와 CPU 계산 결과 오차 ≤1% 테스트 케이스 필수.
+
+**Codex R3 명시**: "1프레임 지연은 허용 가능하다" → CPU 경로 기본. 프레임 캡처 완료 직후 CPU에서 iris ROI 추출 → linear 변환 → Rec.709 평균 계산 → 다음 프레임 렌더링 시 uniform 주입.
 
 ### 5.3 Fallback 체인 (W1에서 확정됨)
 
@@ -339,84 +349,122 @@ IrisSdkError iris_sdk_render_lens_texture(...) {
 
 **W1 브레인스토밍 시 확인**: 실제 수정 대상 함수가 위 둘(lens_texture, with_result) 외에 더 있는지.
 
+### 5.6 측정 경로 — **CPU 1회 (옵션 A) 확정** (W1 R1 합의, 3/3)
+
+- 프레임 캡처 직후 CPU에서 iris ROI 픽셀 평균 계산 → 다음 프레임 uniform 주입.
+- 1프레임 지연 허용. Codex R2/R3 입장 재확인됨.
+- GLES 3.1 compute shader 경로(옵션 C)는 99 §1.2 C-F에서 이미 기각 상태 유지.
+- 출처: `P6-W1_brainstorm/synthesis.md` §1.
+
+### 5.7 ROI 마스크 — r<0.60 초기값 (W1 R1 결론, 3분립 + 실기기 이관)
+
+3모델이 0.55/0.60/0.65로 3분립 → 논리만으로 수렴 불가, 실측 우선 원칙 적용.
+
+초기 구현:
+```
+mask = (dist < 0.60 * iris_radius)    // Claude 중간값, 3분립 초기점
+     * eyelidMask(packet.ellipse_*)   // Codex R2 파생, aperture 정보 기반
+final_luma = clamp(mean(mask), 0.1, 0.9)  // Gemini 제안, 극단 이상치 최소 안전망
+```
+
+- `eyelidMask` 파생: ellipse_radii/rotation 기반 aperture 마스크 재사용 (신규 계산 금지).
+- luminance outlier drop (3σ clip 등)은 **W1에서 미포함**. 필요 시 실기기 벤치 후 추가.
+- **실기기 A/B**: W1 구현 후 r ∈ {0.55, 0.60, 0.65} 스위프, tint flicker / 중앙 콩알 현상 기준 확정. W4 정성 체감 데이터와 함께 기록.
+- 출처: `P6-W1_brainstorm/synthesis.md` §3.
+
+### 5.8 Fallback 중립 상수 — **L_fallback = 0.35 확정** (W1 R1 다수 2/3)
+
+- Gemini, Claude: 0.35 (한국인 평균 홍채 luminance prior 근사).
+- Codex: 0.3 (약보정 안전).
+- **판정:** 다수결 0.35 채택. Codex 지적 "prior 잔존"은 fallback 구간이 N프레임 한정이므로 영향 제한적.
+- **후속 모니터링:** 실기기 "초기 과밝음" 피드백 시 0.3으로 재조정.
+- 출처: `P6-W1_brainstorm/synthesis.md` §2.
+
+### 5.9 avg_iris_luma EMA — **α=0.3 확정** (W1 R1 합의, 3/3)
+
+렌더러 레벨에서 시간 스무딩 적용:
+
+```
+L_t = 0.3 · measured_t + 0.7 · L_{t-1}
+L_0 = L_fallback (= 0.35)
+```
+
+- 저장 위치: 렌더러 멤버(static 아님). material temporal envelope 원칙(W1 경계)과 정합.
+- TemporalStabilizer는 center/radius, 렌더러는 material(luma) — 책임 분리.
+- Codex R3 "임의 계수 확정 금지" 지적을 R1 합의로 수치 못박아 해소.
+- 실기기 "반응 느림" 피드백 시 α=0.4~0.5 재조정 가능.
+- 출처: `P6-W1_brainstorm/synthesis.md` §1.
+
+### 5.10 어댑터 위치 — **`cpp/src/gpu/eye_render_packet_adapter.{h,cpp}` 확정** (W1 R1 합의, 3/3)
+
+- GPU 전용 계약 → `gpu/` 네임스페이스 하위. 단위 테스트/참조 추적 용이.
+- `gpu_lens_renderer.cpp` 내부 static 함수(옵션 3)는 테스트 어려움으로 기각.
+- 출처: `P6-W1_brainstorm/synthesis.md` §1.
+
+### 5.11 Packet 스키마 optional 필드 — **스키마 예약, W1 렌더러 미활용** (W1 R1 합의, 3/3)
+
+세 필드 공통: `std::optional<T>`로 스키마에 추가. W1 렌더러 어떤 분기도 읽지 않음. 향후 W가 필요해질 때 adapter가 값을 채움.
+
+| 필드 | 예약 타입 | 채움 시점 | 근거 |
+|------|-----------|-----------|------|
+| `head_pose_yaw_roll` | `std::optional<std::pair<float,float>>` | W4 env reflection 구현 | 구조체 재정의 회피 |
+| `reflection_dir` | `std::optional<std::array<float,3>>` | W4 env reflection 구현 | 동상 |
+| `render_confidence` | `std::optional<float>` | 필요 W에서 adapter가 채움 | **신규 수식 금지** |
+
+### 5.12 render_confidence — **TemporalStabilizer::visibility 재활용** (W1 R1 Codex 지적 수용 후 다수)
+
+- Gemini/Claude: "TemporalStabilizer의 기존 신뢰도 재활용".
+- Codex: "새 `render_confidence` 의미 만들면 `visibility`와 역할 중복".
+- **판정:** Codex 지적 수용 → 신규 파생 수식 없이 `stabilizer.visibility` 값을 그대로 packet에 전달.
+- 구현: `packet.render_confidence = std::optional<float>(stabilizer.visibility)`.
+- W1 렌더러는 읽지 않음 (5.11과 동일 예약만).
+- 출처: `P6-W1_brainstorm/synthesis.md` §2.
+
 ---
 
-## 6. 미결 사항 (W1 브레인스토밍에서 풀 질문)
+## 6. 미결 사항 (W1 브레인스토밍 R1 결과)
 
-### 6.1 측정 경로: CPU 1회 vs shader 내 (CRITICAL)
+### 6.0 R1 결과 요약 (2026-04-24)
 
-**옵션 A (CPU 1회)**: 프레임 캡처 후 CPU에서 iris ROI 픽셀 직접 접근 → 평균 계산 → uniform 주입. 1프레임 지연.
-- 장점: 구현 단순, GPU 부하 0
-- 단점: 1프레임 지연 (눈 감김 전환 시 약간 부정확할 수 있음)
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | 측정 경로 (CPU/shader/compute) | ✅ **닫힘** (3/3 합의) | §5.6 |
+| 6.2 | ROI 마스크 반경 (0.55/0.60/0.65) | 🔄 **실기기 이관** | §5.7 + 본 §6.2 |
+| 6.3 | Fallback 중립 상수 | ✅ **닫힘** (2/3 다수) | §5.8 |
+| 6.4 | 어댑터 위치 | ✅ **닫힘** (3/3 합의) | §5.10 |
+| 6.5 | EMA 적용 / 계수 | ✅ **닫힘** (3/3 합의) | §5.9 |
+| 6.6 | optional 필드 예약 | ✅ **닫힘** (3/3 합의) | §5.11 |
+| 6.7 | render_confidence 설계 | ✅ **닫힘** (Codex 지적 수용 + 다수) | §5.11 / §5.12 |
 
-**옵션 B (shader 내)**: 프래그먼트 셰이더에서 ROI 내 여러 fetch 평균. 매 프레임 실시간.
-- 장점: 지연 0
-- 단점: 매 프레임 fetch 9~16개 추가, GPU bandwidth 낭비
+참여 모델: Codex (gpt-5.4 xhigh), Gemini (gemini-3-flash), Claude (opus-4-7).
+원문: `docs/workPaper/P6-W1_brainstorm/{codex,gemini,claude}_w1.md`.
+종합: `docs/workPaper/P6-W1_brainstorm/synthesis.md`.
 
-**옵션 C (compute shader 1회/프레임)**: 별도 compute pass에서 ROI 평균 → uniform 주입.
-- 장점: GPU에서 처리, 지연 0~1프레임
-- 단점: GLES 3.1 compute 드라이버 이슈 (Adreno 일부). 99 §1.2 C-F에서 compute shader 도입은 이미 기각 상태.
+### 6.3 W1 measure 회귀 → W6 이관 (architectural lesson)
 
-**Codex R2 묵시적**: 옵션 A (1프레임 지연 허용). 확정 전 Codex/Gemini 재확인.
+**증상** (실기기, 2026-04-29): 블렌드 모드 무관 + 렌즈 텍스처 변경 시 검은 화면.
 
-**Claude 의견**: 옵션 A 강력 추천. 블렌드 정규화가 1프레임 지연으로 시각적으로 알아챌 수 없음.
+**원인**: `measureAvgIrisLumaROI`가 매 프레임 임시 FBO 생성 → `glFramebufferTexture2D(GL_TEXTURE_2D, input_texture)` → `glReadPixels`. Android 카메라 텍스처는 `GL_TEXTURE_EXTERNAL_OES` 타입인데 일반 `GL_TEXTURE_2D`로 attach 시도 → INVALID_OPERATION → GL state 오염 → 후속 메인 렌더 깨짐.
 
-### 6.2 ROI 마스크 구체: `inner iris r<0.65 AND eyelidMask` 충분?
+**조치**: `1b869c4`/`b16cf05`/`244ab1f` 3개 커밋 revert (`7bf9707`/`d62b314`/`8958500`). measure 코드 통째 제거. fallback chain 인프라만 별도 커밋(`c36d883`)으로 정비 → uniform 매 프레임 0.35 hold 주입.
 
-Codex R2의 원문: "inner iris ∩ eyelidMask". 
-**질문**:
-- r<0.65는 iris 반경의 65%. pupil 영역(보통 30~40%)을 제외하고도 안전한 margin?
-- eyelidMask는 어떻게 얻나? `ellipse_radii`로 파생?
-- 동공이 밝은 경우(홀수 조명 반사)를 평균에 포함해야 하나?
+**W6 이관 — 측정 경로 후보 2개**:
+1. **GLES PBO 비동기 readback** — `glReadBuffer` + PBO mapping. EXTERNAL_OES와 충돌 회피 가능 여부 검증 필요. blit으로 일반 텍스처 복사 후 readPixels이 안전 경로.
+2. **`mediapipe_detector` CPU 버퍼 활용** — detector가 이미 카메라 RGBA를 CPU에서 받고 있다면 그쪽에서 ROI 평균을 계산해 `IrisResult`(or 별도 채널)에 첨부. **GL 우회로 가장 깔끔**, 설계 단순.
 
-**Claude 제안**: 
-```
-mask = (dist < 0.55 * iris_radius)  // pupil 제외 강화
-     * aperture_mask(ellipse)        // 눈꺼풀 가림 제외
-     * (luminance_not_outlier)       // 이상치 제외 (optional)
-```
+W6 브레인스토밍 시 이 두 경로 우선 검토.
 
-W1 브레인스토밍에서 Codex/Gemini 피드백.
+### 6.2 ROI 마스크 반경 — 실기기 벤치로 확정 예정
 
-### 6.3 Fallback 중립 상수 값
+**현 상태 (R1 결론):** 초기값 r<0.60, [0.55, 0.65] 스위프 (§5.7 참조).
 
-- 옵션 α: 0.35 (Codex 원래 값, 한국인 평균)
-- 옵션 β: 0.5 (중간 회색)
-- 옵션 γ: 0.3 (보수적, 과도 tint 방지)
-- 옵션 δ: 이전 N프레임 EMA 시동값
+**남은 질문:**
+- 실기기 A/B에서 어느 반경이 tint flicker 최소? (객관 수치 + 정성 체감 병행)
+- luminance outlier drop(3σ clip)을 추가했을 때 시각 체감 개선이 유의미한지?
 
-**Claude 추천**: 0.35 그대로. 이번 세션 메모리 `feedback_real_data_first` 고려 — "priors 덮어씌움"은 사용 중 적용이 문제지, fallback 상수 자체는 괜찮음.
+**닫힘 조건:** W1 구현 완료 후 실기기 1회 + 외부 환경 2회(밝음/어두움)에서 0.55/0.60/0.65 클립 비교 → 2/3 이상 조건에서 선호되는 반경으로 확정 (정성 체감 원칙, 메모리 `feedback_qualitative_device_judgment`).
 
-### 6.4 어댑터 레이어 위치
-
-**옵션 1**: `cpp/src/gpu/eye_render_packet_adapter.{h,cpp}` — GPU 네임스페이스 하위
-**옵션 2**: `cpp/src/eye_render_packet_adapter.{h,cpp}` — SDK 공통
-**옵션 3**: `gpu_lens_renderer.cpp` 내부 static 함수 — 가장 단순
-
-**Claude 추천**: 옵션 1. GPU 렌더링 전용 계약이라 GPU 네임스페이스 적절.
-
-### 6.5 시간적 스무딩 중복 체크
-
-**질문**: avg_iris_luma가 프레임 간 급변하면 EMA 적용?
-
-- 적용 필요: 블링크 시 iris 영역 축소 → 평균 급변 → LTL 시각적 급변
-- 미적용 OK: W1 TemporalStabilizer가 iris_center/radius 스무딩하니까 연쇄 효과로 안정적
-
-**Claude 의견**: 측정값 EMA **렌더러 레벨에서 적용**. 이유: avg_iris_luma는 "material 속성"이라 W1 경계 원칙(렌더러 = material temporal envelope)과 일치. 계수 `α = 0.3` 정도로 완만하게.
-
-### 6.6 head_pose_yaw_roll / reflection_dir optional
-
-**질문**: W1 시점에 이 필드 준비만 하고 실제 활용은 W4?
-
-**Claude 의견**: 맞음. 스키마에 optional로 추가하되 current renderer에서는 무시 (향후 W4 벤치에서 env rotation 구현 시 활용). Adaptation 구조만 확보.
-
-### 6.7 render_confidence optional 설계 — W1 TemporalStabilizer와의 연결
-
-**질문**: render_confidence는 W1 TemporalStabilizer(P5-W1)에서 이미 제공 중인 값? 신규 계산?
-
-**Claude 추정**: TemporalStabilizer에 `getConfidence()` 같은 API 이미 존재. 어댑터에서 그걸 읽어 packet에 포함.
-
-**확인 필요**: `cpp/src/temporal_stabilizer.cpp`에서 confidence 제공 여부.
+**책임:** W1 구현 직후 본 문서에서 §5.7 업데이트 + §6.2 닫힘 처리.
 
 ---
 
@@ -501,14 +549,23 @@ W1 브레인스토밍에서 Codex/Gemini 피드백.
 - [ ] 단위 테스트 1개 이상
 - [ ] 실기기 1회 확인
 
-### 8.2 커밋 전략
+### 8.2 커밋 전략 (실제 커밋 해시 — revert 포함 history 그대로 보존)
 
-**커밋 1**: `docs(P6-W1): 섹션 2~8 본문 작성 — 세부 계획 상세화` (지금 이 수정)
-**커밋 2**: `refactor(gpu-lens): P6-W1 EyeRenderPacket 도입 + 어댑터 레이어`
-**커밋 3**: `feat(gpu-lens): P6-W1 avg_iris_luma masked ROI 평균 self-measure`
-**커밋 4** (선택): `test(gpu-lens): P6-W1 EyeRenderPacket 단위 테스트`
+| # | 해시 | 종류 | 제목 |
+|---|------|------|------|
+| 1 | `a49ce59` | feat | P6-W1 EyeRenderPacket 내부 계약 구조체 도입 |
+| 2 | `2206d4a` | feat | P6-W1 IrisResult → EyeRenderPacket 어댑터 레이어 |
+| 3 | `1b869c4` | feat | P6-W1 avg_iris_luma masked ROI self-measure + EMA + fallback |
+| 4 | `f7317fc` | docs | P6-W1 구현 완료 상태 반영 (이후 §5.3 갱신으로 재수정) |
+| 5 | `aeb67a9` | chore | P6-W1 검증용 LTL(Mode 5) 스피너 임시 노출 |
+| 6 | `b16cf05` | tune | P6-W1 §6.2 ROI 반경 0.60 → 0.55 (실기기 1차 피드백) |
+| 7 | `244ab1f` | fix | P6-W1 검은 화면 회귀 — measureAvgIrisLumaROI 임시 단락 |
+| 8 | `7bf9707` | revert | #7 단락 |
+| 9 | `d62b314` | revert | #6 ROI 0.55 |
+| 10 | `8958500` | revert | #3 measure 통째 |
+| 11 | `c36d883` | feat | P6-W1 avg_iris_luma fallback chain (실측 source W6 이관) |
 
-W별 멀티 커밋 권장 — 벤치 결과 역추적 용이.
+PR base: `feature/P6-Works`. revert history 보존 — W6 작업 시 같은 함정 재발 방지.
 
 ### 8.3 다음 W 트리거
 

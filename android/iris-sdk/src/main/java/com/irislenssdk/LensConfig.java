@@ -196,7 +196,7 @@ public class LensConfig {
         offsetX = 0.0f;
         offsetY = 0.0f;
         rotation = 0.0f;
-        blendMode = BLEND_NORMAL;
+        blendMode = BLEND_LUMINANCE_TINT_LINEAR;  // P6-W2 §5.12 canonical default
         edgeFeather = 0.15f;
         applyLeft = true;
         applyRight = true;

@@ -7,11 +7,13 @@
  */
 
 #include "iris_sdk/gpu/gpu_lens_renderer.h"
+#include "iris_sdk/gpu/eye_render_packet_adapter.h"
 #include "iris_sdk/gpu/render_context.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 #if IRIS_SDK_GPU_AVAILABLE
 #include "iris_sdk/gpu/gles_render_context.h"
@@ -68,6 +70,16 @@ static constexpr int LEFT_LOWER_EYELID[] = {145, 144, 153};
 static constexpr int RIGHT_UPPER_EYELID[] = {386, 385, 384};
 static constexpr int RIGHT_LOWER_EYELID[] = {374, 373, 380};
 static constexpr int EYELID_INDEX_COUNT = 3;
+
+#if IRIS_SDK_GPU_AVAILABLE
+namespace {
+// P6-W6 §5.5: 95% 도달 시간(target_ms) 기준 EMA 계수. dt_ms=직전 프레임 실측 delta.
+// 30fps 고정 가정 금지 — 프레임레이트가 흔들려도 동일한 시간 envelope을 보장.
+float computeEmaAlpha(float dt_ms, float target_ms) {
+    return 1.0f - std::pow(0.05f, dt_ms / std::max(target_ms, 1e-3f));
+}
+}  // namespace
+#endif
 
 // ============================================================================
 // 생성자/소멸자
@@ -170,6 +182,14 @@ void GPULensRenderer::release() {
     }
     lens_texture_width_ = 0;
     lens_texture_height_ = 0;
+
+    // P6-W4 §5.7/§5.11: env_map 텍스처 해제 (lens_texture_ 미러).
+    if (env_map_texture_ != 0) {
+        glDeleteTextures(1, &env_map_texture_);
+        env_map_texture_ = 0;
+    }
+    env_map_width_ = 0;
+    env_map_height_ = 0;
 #endif
 
     // 셰이더/텍스처 풀 해제
@@ -212,7 +232,8 @@ bool GPULensRenderer::isInitialized() const {
 // 텍스처 관리
 // ============================================================================
 
-bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height) {
+bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height,
+                                      const std::string& sku_id) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_) {
@@ -223,6 +244,12 @@ bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height
         LOGE("loadLensTexture: invalid parameters");
         return false;
     }
+
+    // P6-W7: 림발 셰이더 적용 판정 로직 제거.
+    // 실기기 검증 결과 렌즈마다 림발 색·스타일이 달라 고정 셰이더 darkening이 디자인 훼손.
+    // 림발은 에셋이 책임. sku_id 파이프라인은 향후 SKU별 설정용으로 보존(현재 미사용).
+    (void)sku_id;  // 인프라 보존을 위한 인자, 현재 미사용
+    (void)sku_registry_;
 
 #if IRIS_SDK_GPU_AVAILABLE
     if (render_context_) {
@@ -296,6 +323,112 @@ void GPULensRenderer::unloadLensTexture() {
     LOGI("Lens texture unloaded");
 }
 
+// ============================================================================
+// 환경 반사 (P6-W4 §5.7/§5.11)
+// loadLensTexture / unloadLensTexture 1:1 미러 패턴.
+// 차이점: format = RGB8 (W3 §5.13 RGB 8bit PNG), texture unit 2 bind는 render 시점.
+// ============================================================================
+
+bool GPULensRenderer::loadEnvMap(const uint8_t* data, int width, int height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_) {
+        LOGE("loadEnvMap: not initialized");
+        return false;
+    }
+    if (!data || width <= 0 || height <= 0) {
+        LOGE("loadEnvMap: invalid parameters");
+        return false;
+    }
+
+#if IRIS_SDK_GPU_AVAILABLE
+    if (render_context_) {
+        render_context_->makeCurrent();
+    }
+
+    // 기존 텍스처가 있으면 해제
+    if (env_map_texture_ != 0) {
+        glDeleteTextures(1, &env_map_texture_);
+        env_map_texture_ = 0;
+    }
+
+    glGenTextures(1, &env_map_texture_);
+    glBindTexture(GL_TEXTURE_2D, env_map_texture_);
+
+    while (glGetError() != GL_NO_ERROR) {} // 이전 누적 에러 클리어
+
+    // P6-W4 §5.13: env_map은 RGB 8bit PNG. alpha 채널 없음.
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, data);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    GLenum mipmap_err = glGetError();
+    if (mipmap_err == GL_NO_ERROR) {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        LOGI("EnvMap mipmap enabled (anti-shimmer)");
+    } else {
+        // mipmap-incomplete 폴백 — lens texture 패턴과 동일.
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        LOGW("EnvMap glGenerateMipmap failed (GL err=0x%x), fallback to GL_LINEAR", mipmap_err);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    env_map_width_ = width;
+    env_map_height_ = height;
+
+    LOGI("EnvMap loaded: %dx%d, id=%u", width, height, env_map_texture_);
+    return true;
+#else
+    env_map_texture_ = 1; // stub
+    env_map_width_ = width;
+    env_map_height_ = height;
+    LOGI("EnvMap loaded (stub): %dx%d", width, height);
+    return true;
+#endif
+}
+
+void GPULensRenderer::unloadEnvMap() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if IRIS_SDK_GPU_AVAILABLE
+    if (env_map_texture_ != 0) {
+        if (render_context_) {
+            render_context_->makeCurrent();
+        }
+        glDeleteTextures(1, &env_map_texture_);
+        env_map_texture_ = 0;
+    }
+#else
+    env_map_texture_ = 0;
+#endif
+    env_map_width_ = 0;
+    env_map_height_ = 0;
+    LOGI("EnvMap unloaded");
+}
+
+void GPULensRenderer::setReflectionMode(int mode) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (mode < 0 || mode > 2) {
+        LOGW("setReflectionMode: invalid mode %d, clamped to 0", mode);
+        reflection_mode_ = 0;
+        return;
+    }
+    reflection_mode_ = mode;
+}
+
+void GPULensRenderer::setReflectionIntensity(float intensity) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // P6-W4 Phase A 보완: clamp 상한 1.0 → 5.0 확장 (디버그/벤치 sweep용).
+    // 자연스러움 우선값은 0.3 (W3 §5.7)이지만 Phase A 검증/튜닝/디버그 시
+    // 1.0~3.0 범위 실험 필요. 영구 사용은 권장 안 함.
+    reflection_intensity_ = std::clamp(intensity, 0.0f, 5.0f);
+}
+
 bool GPULensRenderer::hasLensTexture() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return lens_texture_ != 0;
@@ -346,6 +479,7 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uEyelidFeather = glGetUniformLocation(lens_program_, "uEyelidFeather");
 
     lens_uniforms_.uScleraProtect = glGetUniformLocation(lens_program_, "uScleraProtect");
+    lens_uniforms_.uScleraVetoMode = glGetUniformLocation(lens_program_, "uScleraVetoMode");
     lens_uniforms_.uContactShadow = glGetUniformLocation(lens_program_, "uContactShadow");
     lens_uniforms_.uShadowIntensity = glGetUniformLocation(lens_program_, "uShadowIntensity");
     lens_uniforms_.uMaxDetail = glGetUniformLocation(lens_program_, "uMaxDetail");
@@ -360,7 +494,19 @@ void GPULensRenderer::cacheLensUniforms() {
 
     lens_uniforms_.uAvgIrisLum = glGetUniformLocation(lens_program_, "uAvgIrisLum");
     lens_uniforms_.uDetH = glGetUniformLocation(lens_program_, "uDetH");
+
+    // P6-W3 §5.6: C5 환경 반사 가산 계층 location 캐시.
+    lens_uniforms_.uSourceType = glGetUniformLocation(lens_program_, "uSourceType");
+    lens_uniforms_.uReflectionIntensity = glGetUniformLocation(lens_program_, "uReflectionIntensity");
+    lens_uniforms_.uEnvMap = glGetUniformLocation(lens_program_, "uEnvMap");
     // P5-W3-05 S1 D5: uHighlightEnabled uniform 제거
+
+    // P6-W6 §5.2/§5.7: C10 디테일 재주입 + B9 gate + C7 블링크 ramp location 캐시.
+    lens_uniforms_.uTexelSize = glGetUniformLocation(lens_program_, "uTexelSize");
+    lens_uniforms_.uGateThreshold = glGetUniformLocation(lens_program_, "uGateThreshold");
+    lens_uniforms_.uDetailReinject = glGetUniformLocation(lens_program_, "uDetailReinject");
+    lens_uniforms_.uLeftRenderAlpha = glGetUniformLocation(lens_program_, "uLeftRenderAlpha");
+    lens_uniforms_.uRightRenderAlpha = glGetUniformLocation(lens_program_, "uRightRenderAlpha");
 
     // 유효한 uniform location 카운트
     int valid_count = 0;
@@ -434,6 +580,16 @@ void GPULensRenderer::setScleraProtectEnabled(bool enabled) {
     sclera_protect_ = enabled;
 }
 
+void GPULensRenderer::setScleraVetoMode(int mode) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (mode < 0 || mode > 2) {
+        LOGW("setScleraVetoMode: invalid mode %d, clamped to 0", mode);
+        sclera_veto_mode_ = 0;
+        return;
+    }
+    sclera_veto_mode_ = mode;
+}
+
 void GPULensRenderer::setContactShadowEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     contact_shadow_ = enabled;
@@ -447,6 +603,30 @@ void GPULensRenderer::setContactShadowIntensity(float intensity) {
 void GPULensRenderer::setEllipseMaskEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     use_ellipse_mask_ = enabled;
+}
+
+// P6-W6 §5.5 B5: 블링크 up ramp 토글 (60/80/120ms). 실기기 벤치로 확정.
+void GPULensRenderer::setBlinkUpMs(float ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    blink_up_ms_ = std::clamp(ms, 30.0f, 200.0f);
+}
+
+// P6-W6 §5.7 B9: 저조도 디테일 gate 임계값 토글 (0.10/0.15/0.25).
+void GPULensRenderer::setGateThreshold(float t) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    gate_threshold_ = std::clamp(t, 0.0f, 1.0f);
+}
+
+// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off.
+void GPULensRenderer::setDetailReinject(bool enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    detail_reinject_ = enabled;
+}
+
+// P6-W7: SKU 레지스트리 주입 (외부 소유, null 허용).
+void GPULensRenderer::setSkuRegistry(const LensSkuRegistry* registry) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sku_registry_ = registry;
 }
 
 // P5-W3-05 S1 D5: setHighlightEnabled API 제거
@@ -614,6 +794,47 @@ void GPULensRenderer::updateEllipseCache(const IrisResult& iris_result) {
 }
 
 // ============================================================================
+// P6-W1: avg_iris_luma fallback chain (실측 source 미연결)
+// ============================================================================
+
+float GPULensRenderer::updateAvgIrisLuma(const gpu::EyeRenderPacket& left,
+                                         const gpu::EyeRenderPacket& right) {
+    // 1) packet.avg_iris_luma 우선 (양쪽 중 존재하는 값들의 평균).
+    //    W6에서 비동기 readback or detector CPU 버퍼로 packet에 채울 예정.
+    float raw = 0.0f;
+    bool  raw_ok = false;
+    if (left.avg_iris_luma || right.avg_iris_luma) {
+        float sum = 0.0f;
+        int   n = 0;
+        if (left.avg_iris_luma)  { sum += *left.avg_iris_luma;  ++n; }
+        if (right.avg_iris_luma) { sum += *right.avg_iris_luma; ++n; }
+        raw = sum / static_cast<float>(n);
+        raw_ok = true;
+    }
+
+    if (raw_ok) {
+        // 첫 유효값 진입 — fallback에서 시작해 EMA(α=0.3) 적용. (W1 §5.9)
+        if (!avg_luma_has_valid_) {
+            current_avg_luma_   = kAvgLumaFallback;
+            avg_luma_has_valid_ = true;
+        }
+        current_avg_luma_    = 0.3f * raw + 0.7f * current_avg_luma_;
+        avg_luma_hold_count_ = 0;
+    } else if (avg_luma_has_valid_ && avg_luma_hold_count_ < kAvgLumaMaxHoldFrames) {
+        // 2) hold (직전 유효값 유지)
+        ++avg_luma_hold_count_;
+    } else {
+        // 3) fallback 상수
+        current_avg_luma_    = kAvgLumaFallback;
+        avg_luma_hold_count_ = 0;
+        avg_luma_has_valid_  = false;
+    }
+
+    return std::max(kAvgLumaClampMin,
+                    std::min(kAvgLumaClampMax, current_avg_luma_));
+}
+
+// ============================================================================
 // 렌더링
 // ============================================================================
 
@@ -649,6 +870,40 @@ ErrorCode GPULensRenderer::renderToTexture(
     // 캐시 업데이트
     updateEyelidCache(iris_result);
     updateEllipseCache(iris_result);
+
+    // W1: 내부 EyeRenderPacket 경유. avg_iris_luma 실측은 W6 이관, 현 단계는
+    // packet 경로(미연결) → hold → fallback 0.35 만 동작. uniform은 매 프레임 주입.
+    const auto left_packet  = gpu::adaptIrisResult(iris_result, gpu::EyeSide::Left,
+                                                   iris_result.frame_width, iris_result.frame_height);
+    const auto right_packet = gpu::adaptIrisResult(iris_result, gpu::EyeSide::Right,
+                                                   iris_result.frame_width, iris_result.frame_height);
+    const float avg_luma = updateAvgIrisLuma(left_packet, right_packet);
+
+    // P6-W6 §1.3 C7: 블링크 시간적 envelope EMA 업데이트.
+    // 실측 dt 기반(30fps 고정 가정 금지). 눈 감김=down ramp(고정 60ms), 뜸=up ramp(B5 토글).
+    const auto now_ts = std::chrono::steady_clock::now();
+    float dt_ms = kDefaultDtMs;
+    if (has_last_ts_) {
+        const auto delta = std::chrono::duration<float, std::milli>(now_ts - last_render_ts_);
+        dt_ms = std::clamp(delta.count(), kDtClampMinMs, kDtClampMaxMs);
+    }
+    last_render_ts_ = now_ts;
+    has_last_ts_ = true;
+
+    // 좌/우 별도 eyeOpening 판정. eyelid 캐시 무효 시 open 취급(envelope 유지/복귀).
+    for (int i = 0; i < 2; ++i) {
+        const float eye_opening = eyelid_cache_[i].valid_frames > 0
+            ? std::fabs(eyelid_cache_[i].top - eyelid_cache_[i].bottom)
+            : 1.0f;
+        const bool closing = eye_opening < kBlinkCloseThreshold;
+        if (closing) {
+            const float a = computeEmaAlpha(dt_ms, kBlinkDownMs);  // target 0
+            render_alpha_[i] = (1.0f - a) * render_alpha_[i];
+        } else {
+            const float a = computeEmaAlpha(dt_ms, blink_up_ms_);  // target 1
+            render_alpha_[i] = a * 1.0f + (1.0f - a) * render_alpha_[i];
+        }
+    }
 
     // 출력 텍스처 획득
     auto* output_info = texture_pool_->acquireRenderTarget(width, height);
@@ -734,7 +989,18 @@ ErrorCode GPULensRenderer::renderToTexture(
     glUniform1f(lens_uniforms_.uOpacity, config.opacity);
     glUniform1f(lens_uniforms_.uLensScale, config.scale);
     glUniform1f(lens_uniforms_.uEdgeFeather, config.edge_feather);
-    glUniform1i(lens_uniforms_.uBlendMode, static_cast<int>(config.blend_mode));
+    // P6-W2 §5.9: invalid blend ID 1회 경고 (debug 빌드만). 유효 ID = {0,1,2,5,7}.
+    const int blend_id = static_cast<int>(config.blend_mode);
+#if !defined(NDEBUG)
+    const bool blend_valid = (blend_id == 0 || blend_id == 1 || blend_id == 2 ||
+                              blend_id == 5 || blend_id == 7);
+    if (!blend_valid && !invalid_blend_warned_) {
+        LOGW("[IrisSDK] Unknown blend ID=%d, falling back to TintLinearV2 (ID=5)",
+             blend_id);
+        invalid_blend_warned_ = true;
+    }
+#endif
+    glUniform1i(lens_uniforms_.uBlendMode, blend_id);
     // uFrameAspect: detection 프레임 기준 (Kotlin: detW/detH)
     glUniform1f(lens_uniforms_.uFrameAspect, det_wf / det_hf);
 
@@ -757,11 +1023,28 @@ ErrorCode GPULensRenderer::renderToTexture(
 
     // 기능 플래그
     glUniform1i(lens_uniforms_.uScleraProtect, sclera_protect_ ? 1 : 0);
+    glUniform1i(lens_uniforms_.uScleraVetoMode, sclera_veto_mode_);
     // P5-W3-05 S1 D5: uHighlightEnabled uniform 설정 제거
     glUniform1i(lens_uniforms_.uContactShadow, contact_shadow_ ? 1 : 0);
     glUniform1f(lens_uniforms_.uShadowIntensity, shadow_intensity_);
-    // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한 (Kotlin 기본 1.2)
-    glUniform1f(lens_uniforms_.uMaxDetail, 1.2f);
+    // uMaxDetail: ColorReplace blend의 홍채 밝기 보정 상한.
+    // P6-W5 §5.10: CRL clamp [0.75, 1.25] 확정 — W5 B1 벤치는 1.25 상한에서 비교.
+    glUniform1f(lens_uniforms_.uMaxDetail, 1.25f);
+
+    // P6-W3 §5.7/§5.11 / P6-W4 Phase A: C5 환경 반사 가산 계층.
+    // 멤버 변수 reflection_mode_ / reflection_intensity_ 로 런타임 토글.
+    // W4 B2 벤치 24클립에서 OFF/EnvMap/Periphery 비교 + 강도 sweep.
+    glUniform1i(lens_uniforms_.uSourceType, reflection_mode_);
+    glUniform1f(lens_uniforms_.uReflectionIntensity, reflection_intensity_);
+
+    // P6-W4 §5.11: env_map texture unit 2 bind.
+    // 셰이더는 uSourceType==1일 때만 sample하므로 OFF/Periphery에서는 무시.
+    // env_map_texture_==0이어도 uniform location은 항상 unit 2로 설정 — 안전.
+    if (env_map_texture_ != 0) {
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, env_map_texture_);
+    }
+    glUniform1i(lens_uniforms_.uEnvMap, 2);
 
     // 비대칭 타원 마스크
     glUniform1i(lens_uniforms_.uUseEllipseMask, use_ellipse_mask_ ? 1 : 0);
@@ -811,16 +1094,29 @@ ErrorCode GPULensRenderer::renderToTexture(
         }
     }
 
-    // P5-W3-05 S1 D4: uAvgIrisLum = 0.35f 하드코드 제거
-    // 근거: "priors 덮어씌움" (Codex R2/R3). 사용자 홍채 편차(0.2~0.6) + 조명 노출 편차 커서
-    //       고정값은 정규화를 망친다.
-    // S2에서 C9 (masked ROI 평균 실측) 도입 예정. 그전까지 uniform 미설정 → GL 기본값 0.0
-    //       → 셰이더 clamp 하한(0.01)에 걸려 scale이 최대(2.5 or 5.0)로 고정됨. 이는 임시 동작.
-    //       S2에서 EyeRenderPacket.avg_iris_luma 또는 self-measure로 교체.
-    // glUniform1f(lens_uniforms_.uAvgIrisLum, 0.35f);  // 제거됨
+    // W1 §5.3 fallback chain의 산출값. 실측 source(self-measure)는 W6 이관 —
+    // Android 카메라(EXTERNAL_OES) + 임시 FBO + glReadPixels 경로가 GL state 오염을
+    // 일으킨다는 사실이 실기기에서 확인됨. 정식 측정은 비동기 PBO readback or
+    // detector CPU 버퍼 활용으로 W6에서 다룬다. 현 단계는 hold/fallback만 작동.
+    glUniform1f(lens_uniforms_.uAvgIrisLum, avg_luma);
 
     // 검출 높이 (Bug B: 픽셀 높이를 그대로 전달 — Kotlin의 detHf와 동일)
     glUniform1f(lens_uniforms_.uDetH, det_hf);
+
+    // P6-W6 §5.2/§5.7: C10 디테일 재주입 + B9 gate. texel은 출력 해상도 기준.
+    glUniform2f(lens_uniforms_.uTexelSize, 1.0f / static_cast<float>(std::max(width, 1)),
+                1.0f / static_cast<float>(std::max(height, 1)));
+    glUniform1f(lens_uniforms_.uGateThreshold, gate_threshold_);
+    glUniform1i(lens_uniforms_.uDetailReinject, detail_reinject_ ? 1 : 0);
+
+    // P6-W6 §1.3 C7: 블링크 ramp. mirror 시 좌/우 swap (eyelid uniform과 동일 패턴).
+    float l_alpha = render_alpha_[0];
+    float r_alpha = render_alpha_[1];
+    if (config.is_mirror) {
+        std::swap(l_alpha, r_alpha);
+    }
+    glUniform1f(lens_uniforms_.uLeftRenderAlpha, l_alpha);
+    glUniform1f(lens_uniforms_.uRightRenderAlpha, r_alpha);
 
     // 풀스크린 쿼드 렌더링
     glDisable(GL_DEPTH_TEST);

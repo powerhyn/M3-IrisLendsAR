@@ -1,6 +1,6 @@
 # P6-W7: B4 림발 자동감지 fallback + 림발 정책 확정
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
+> **상태**: ✅ 종결 (2026-06-01). **셰이더 림발 영구 제거** — 림발은 에셋 책임. 메타 인프라(sku_id/registry)는 향후 SKU별 설정용으로 보존. §6.0.4 참조.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W3 (환경 반사 계층 스캐폴드)
 > **병렬 가능**: P6-W4, W5, W6과 병렬. 가장 작은 W.
@@ -252,16 +252,18 @@ bool has_baked_limbal = sku_meta.has_baked_limbal.value_or(auto_detected_limbal)
 
 ### 4.1 Definition of Done
 
-- [ ] B4 프로토타입 + 10 SKU 정확도 측정 완료
-- [ ] SKU 메타 구조 구현 (header + 로딩 로직)
-- [ ] 셰이더 림발 수식 부활 (uniform 스위치)
-- [ ] 20 SKU 메타 플래그 초기 설정
-- [ ] B4 결과에 따른 자동감지 채택/드롭 반영
-- [ ] 99 §1.2 C6 + §2 B4 업데이트
+- [x] B4 프로토타입 + 10 SKU 정확도 측정 완료 — **9/10** (`docs/bench/P6-W7/B4_limbal_detection_report.md`)
+- [x] SKU 메타 구조 구현 (header + 로딩 로직) — `cpp/include/iris_sdk/lens_sku_metadata.h` + `.cpp` (LensSkuRegistry + 경량 JSON 파서)
+- [x] 셰이더 림발 수식 부활 (uniform 스위치) — `shader_sources.cpp` `uApplyLimbal` + `gpu_lens_renderer` 주입
+- [x] 메타 플래그 초기 설정 — `android/demo-app/src/main/assets/lens_meta.json` (**실제 42 SKU**, 20 아님)
+- [x] B4 결과에 따른 자동감지 채택/드롭 반영 — **드롭** (9/10 < 10/10), `auto_detect_fallback_=false` 기본, 메타 전용
+- [x] 99 §1.2 C6 + §2 B4 업데이트 — 본 문서 §6.0.2 반영
 
 ---
 
 ## 5. 99에서 확정된 사항
+
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.5 SKU 메타 규약 (`lens_meta.json` — **W5와 공유 파일**, 스키마 3 필드), §4.3 영역 경계 매핑 (림발 0.85~1.0, 자동감지 ROI).
 
 ### 5.1 메타데이터 구조 (내부, 공개 API 불변)
 
@@ -305,9 +307,167 @@ if (uHasBakedLimbal == 0) {
 **림발 내장 5**: 로뮤_그레이 토프, 로뮤_디어 멜로우, 로뮤_러브 글림, 엔비_플럼 블랙, 오(OH)_베이글
 **림발 없음 5**: 클라셋_돌 초코, 클라셋_런웨이 그레이, 클라셋_클라우드 그레이, 엔비_퍼퓸 글로우, 오(OH)_키위
 
+### 5.6 자동감지 ROI — **`[0.85, 1.0]` 유지 확정** (W7 R1 합의 3/3)
+
+- false positive 방지 우선. 경계를 안쪽으로 넓히면 홍채 내부 패턴 간섭 위험.
+- W7 1차 튜닝 금지. 배포 후 false negative 반복 시 `[0.82, 1.0]` 하향 검토.
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.7 임계값 — **`0.75` 유지 확정** (W7 R1 합의 3/3)
+
+- 99 합의본 기준값. ROI/threshold 축을 고정한 채 정확도만 확인.
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.8 메타 저장 방식 — **JSON `lens_meta.json` 확정** (W7 R1 다수 2/3)
+
+- 위치: `android/demo-app/src/main/assets/lens_meta.json`.
+- 스키마:
+  ```json
+  [
+    {
+      "sku_id": "클라셋_돌_초코",
+      "display_name": "다크브라운",
+      "has_baked_limbal": true,
+      "prefers_crl": false,
+      "prefers_graphic_outline": false
+    }
+  ]
+  ```
+- SDK 공용 JSON 파서 우선 재사용, 없으면 경량 파서 추가.
+- **Default fallback:** 메타 누락 SKU는 모든 플래그 `false` (§5.9 WARN 병행).
+- Git 체크인으로 Codex 원안 "버전 고정" 우려 흡수.
+- 출처: `P6-W7_brainstorm/synthesis.md` §2.
+
+### 5.9 메타 누락 로그 — **WARN 확정** (W7 R1 합의 3/3)
+
+- 형식: `[IrisSDK] SKU meta missing for "<sku_id>", using default (has_baked_limbal=false, prefers_crl=false, prefers_graphic_outline=false)`.
+- 앱 정상 동작 유지. 개발자 모니터링에 포착.
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.10 9/10 vs 10/10 — **10/10 엄수 + 개별 메타 fallback 확정** (W7 R1 다수 2/3)
+
+- 자동감지 rule: **10/10 엄수** (R4 실기기 실측 결과).
+- **개별 실패 처리:** 배포 후 특정 디바이스에서 자동감지 실패 발견 시, 해당 SKU만 `has_baked_limbal: true` 메타 플래그로 명시 fallback.
+- 자동감지 완화 아님. "일관 rule + 예외 명시" 구조.
+- **배포 후 1개월 모니터링** 필수.
+- Gemini R1 원안 9/10 완화안은 소수 의견이며 "개별 메타 fallback"으로 우려 흡수.
+- **R2 (2026-05-29): Gemini가 9/10 철회 → 10/10 엄수 선회. 2/3 다수 → 3/3 만장일치로 강화.** R4 실측 팩트 수용.
+- 출처: `P6-W7_brainstorm/synthesis.md` §2, §R2.2.
+
+### 5.11 엔비_샤모 브라운 특별 처리 — **`prefers_graphic_outline: true` 확정** (W7 R1 합의 3/3)
+
+- 메타 플래그 `prefers_graphic_outline: true` 설정.
+- 효과: `has_baked_limbal OR prefers_graphic_outline` → `uApplyLimbal = 0` (셰이더 림발 강제 OFF).
+- 셰이더 내부 분기 없음. Uniform 레벨에서 제어.
+- **플래그 구분:**
+  - `has_baked_limbal`: 림발 링 텍스처가 에셋에 구워져 있음.
+  - `prefers_graphic_outline`: 그래픽 자체가 강한 outline 포함 (일반 림발 아님).
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
+### 5.12 B10 신규 벤치 — **불허 확정** (W7 R1 합의 3/3)
+
+- 99 합의본 out of scope. W7이 B10 재공론화 금지.
+- W7 범위: 99 §1.2 C6 "림발 기본 ON + 메타 플래그" 내 한정.
+- 신규 벤치 필요 시 별도 제안 문서 (P7 이후).
+- 출처: `P6-W7_brainstorm/synthesis.md` §1.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W7 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | ROI 경계 | ✅ **닫힘** (3/3) | §5.6 |
+| 6.2 | 임계값 | ✅ **닫힘** (3/3) | §5.7 |
+| 6.3 | 메타 저장 | ✅ **닫힘** (2/3 JSON) | §5.8 |
+| 6.4 | 로그 레벨 | ✅ **닫힘** (3/3 WARN) | §5.9 |
+| 6.5 | 9/10 vs 10/10 | ✅ **닫힘** (2/3 10/10 + 메타 fallback) | §5.10 |
+| 6.6 | 엔비_샤모 | ✅ **닫힘** (3/3) | §5.11 |
+| 6.7 | B10 신규 | ✅ **닫힘** (3/3 불허) | §5.12 |
+
+**Claude 편향 경계 재확인:** 6.5 10/10 입장은 R4 실측 팩트 수렴, 주관적 뒤집힘 없음. P5 R1~R3 3번 뒤집힘 맥락과 다름.
+
+**미결 없음.** 후속: 배포 후 1개월 자동감지 결과 모니터링.
+
+원문: `docs/workPaper/P6-W7_brainstorm/{codex,gemini,claude}_w7.md`.
+종합: `docs/workPaper/P6-W7_brainstorm/synthesis.md`.
+
+### 6.0.1 R2 교차 비판 결과 (2026-05-29, 구현 직전 검증)
+
+구현 착수 전 추가 확신을 위해 사용자 요청으로 R2 실행 (R1 synthesis는 R2 불필요 판정이었음).
+
+| 쟁점 | R1 | R2 | 변화 |
+|------|-----|-----|------|
+| 6.5 정확도 기준 | 2/3 10/10 (Gemini 9/10) | **3/3 10/10** (Gemini 철회) | **만장일치 강화** |
+| 6.3 메타 저장 | 2/3 JSON (Codex 하드코드) | 2/3 JSON 유지 (Codex 고수) | 없음 — §5.8 JSON 유지 |
+| 나머지 5개 | 3/3 | 3/3 | 없음 |
+
+- **6.5:** Gemini가 R4 실측 팩트 수용해 9/10 철회 → **닫힌 쟁점 6개로 증가**. R1 최대 논쟁점이 R2에서 가장 견고.
+- **6.3:** Codex 하드코드 레지스트리 권고 유지(렌더링 정책 필드를 외부 JSON으로 여는 blast radius 우려). 단 Hard veto 아님. W5 공유 `lens_meta.json` 규약(handoff §4.5) + Claude R2 "파서>200줄이면 하드코드 폴백" 트리거로 JSON 유지 타당. **구현 중 SDK 공용 파서 부재로 경량 파서 비용 과하면 하드코드 폴백 재검토 — 유일한 구현 판단 포인트.**
+
+원문: `docs/workPaper/P6-W7_brainstorm/{codex,gemini,claude}_w7_r2.md`.
+종합: `synthesis.md` §R2.
+
+### 6.0.2 B4 구현 실측 결과 — 자동감지 드롭, 메타 전용 채택 (2026-05-29)
+
+구현 단계에서 실제 42종 에셋에 `detectBakedLimbal`을 돌린 결과 브레인스토밍 전제가 뒤집혔다.
+
+1. **§5.2 원래 공식 작동 불능:** 렌즈 텍스처는 중심부(r<0.3)가 투명 동공이라 `center_lum = mean(r<0.3)`가 측정 불가 → 42/42 실패. §5.2는 카메라 프레임 홍채를 가정했으나 실제 대상은 렌즈 텍스처. → `center_inner` 환형 밴드 파라미터 추가로 보정.
+2. **보정 후에도 최고 9/10:** baked/non-baked가 edge/body ratio에서 본질적으로 겹침(약-베이크 oh_bagel 0.65 vs 강한-페이드 무림발 cloud-gray 0.50). 단일 임계값 10/10 분리 불가.
+3. **"R4 실기기 10/10" 미재현:** R1·R2가 합의 전제로 삼은 팩트가 실제 측정에서 재현 안 됨 (DoD의 B4 측정이 미체크였던 점이 방증).
+
+**결정 (사용자 승인):** §1.16/§5.10 사전 합의 분기 **"10/10 미달 → 자동감지 드롭, 메타데이터 only"** 적용.
+- 런타임: `lens_meta.json` 메타가 유일 권위. `auto_detect_fallback_ = false` 기본.
+- 메타 누락 SKU: `has_baked_limbal=false`(셰이더 림발 ON) + WARN.
+- 자동감지 코드: 진단/재활성용 보존(9/10 hint).
+
+실측이 보수적 경로(인간 판단 메타)를 정당화. R2 "10/10 엄수"의 취지(불안정 자동감지 출시 방지)가 실측으로 확인됨.
+
+상세: `docs/bench/P6-W7/B4_limbal_detection_report.md`.
+
+### 6.0.3 GPU 경로 와이어링 (W9 선반영, 2026-05-29)
+
+§1.14 원 범위는 C++ 코어만(JNI/Kotlin은 W9)이었으나, **실기기에서 메타 플래그까지 끝까지 검증**하기 위해 GPU 데모 경로 와이어링을 W7에 선반영(사용자 요청).
+
+- **공개 C API 동결 준수**: 기존 `iris_sdk_load_lens_texture(data,w,h)` 불변. 새 함수만 추가 — `iris_sdk_set_lens_metadata(json)`, `iris_sdk_load_lens_texture_with_sku(data,w,h,sku_id)` (sdk_api.h 선언, sdk_api_v2.cpp 구현, v2 격리). 레지스트리는 파일 스코프 전역(`g_sku_registry`)으로 수명 보장 + `init_gpu_lens` 양방향 지연주입.
+- **JNI**: `nativeSetLensMetadata(String)`, `nativeLoadLensTextureWithSku(byte[],int,int,String)`.
+- **Java/Kotlin (GPU 데모 경로만)**: `GpuRenderActivity`가 GPU init 후 `assets/lens_meta.json` → `setLensMetadata`, 렌즈 선택 시 `lens.id`(=createId, 예: `claset_doll_choco_png`)를 `loadLensTexture`까지 전달. 메인 데모(MainActivity)는 CPU Canvas 경로라 무관.
+- **검증**: macOS 코어 빌드 + Android Gradle `:demo-app:assembleDebug` 성공(APK 생성). 적대적 리뷰(architect-review)로 API 동결·시그니처 정합·레지스트리 수명·메타 로드 순서 통과.
+
+**실기기 확인 대상**: GpuRenderActivity에서 (1) 무림발 렌즈 셰이더 림발 ON, (2) baked 5종(romu_gray/dear/love, envie_plum-black, oh_bagel)·그래픽(envie_chameau-brown) 셰이더 림발 OFF(이중 림발 없음), (3) 메타 플래그 정확성. **GPU 셰이더는 런타임 컴파일**이라 이 빌드는 GLSL 유효성을 보장하지 않음 → 실기기 첫 실행 시 크래시/검은화면 없는지 확인 필수.
+
+### 6.0.4 셰이더 림발 영구 제거 — 도메인 통찰 (2026-06-01)
+
+W7 GPU 와이어링 후 실기기 검증에서 **셰이더 림발 기능 자체를 영구 제거** 결정.
+
+**발견된 문제(연속 3단)**:
+1. **검은 화면**: 셰이더에 `uniform int uApplyLimbal` 선언만 들어가고 `if` 블록이 누락된 채 빌드 → 일부 드라이버에서 unused uniform 이슈 의심. if 블록 추가하니 해결되지만 다음 문제 발생.
+2. **전 화면 darkening**: `smoothstep(0.7, 1.0, dist)`가 iris 바깥(`dist > 1`)에서 1로 clamp되어 카메라 passthrough까지 48% darkening (`blended × 0.4`). `step(dist, 1.0)` 마스크로 iris 안쪽에만 적용되도록 fix → 화면 어두워짐 사라짐.
+3. **림발 디자인 충돌(결정적)**: 사용자 실기기 육안 검증 — claset_doll-choco는 "림발 없음"이 아니라 **브라운 림발**을 가진 렌즈. 즉 림발 색·스타일은 **렌즈마다 다른 디자인 요소**이고, 셰이더 고정 darkening(회색)을 입히면 본래 디자인 훼손(브라운 림발 위에 회색 덮음).
+
+**P5-W3-05 S1 D2 제거 사유 재확인**: 당시 "LIMBAL_ENABLED=false 하드코드 블록 제거 / 림발 처리는 C6(에셋 기반) + B4 벤치로 재평가 예정"이라 적은 사유가 정확히 이거였다 — 셰이더 절차 림발은 시각적으로 부적합. W7이 부활시켰으나 같은 문제 반복 → **영구 제거**.
+
+**원칙 (메모리 `limbal-in-asset-not-shader`)**:
+- 렌즈별 디자인 다양성이 있는 요소(림발·패턴·하이라이트)는 **에셋이 책임**(baked).
+- SDK 셰이더는 보편적·컨텍스트 종속 효과(블링크, 디테일 재주입, 환경 반사)만.
+- 림발 메타 플래그(`has_baked_limbal`, `prefers_graphic_outline`)는 모두 의미 잃음 — 셰이더 림발이 없으므로 토글할 대상 없음.
+
+**제거 (커밋 `de1eeb7`)**:
+- 셰이더: `uniform int uApplyLimbal` 선언 + `if (uApplyLimbal == 1) {...}` 블록.
+- 렌더러: `uApplyLimbal` uniform cache·주입, `apply_limbal_` 멤버, `auto_detect_fallback_` 멤버, `setAutoDetectFallback` API, `loadLensTexture` 림발 판정 로직.
+
+**보존 (인프라)**:
+- `LensSkuRegistry` + JSON 파서, `setSkuRegistry` API, `loadLensTexture(sku_id)` 시그니처, C API/JNI/Java/Kotlin 와이어링 — 향후 W5 `prefers_crl` 같은 SKU별 설정에 재활용.
+- `detectBakedLimbal`/`measureLimbalRatio` 순수 함수 — 진단 유틸로 보존(`docs/bench/P6-W7/` 벤치 재현 가능).
+- `lens_meta.json` 데이터 파일 — 정보용으로 유지 (현재 런타임 동작 없음).
+
+**시각 검증 (2026-06-01)**: claset_doll-choco 선택 시 화면 어두워짐 없음, 에셋 그대로 렌더링 확인 (logcat `SDK lens texture loaded ... result=0` + `SDK C++ GPULensRenderer active` 정상).
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 자동감지 ROI 경계 튜닝
 

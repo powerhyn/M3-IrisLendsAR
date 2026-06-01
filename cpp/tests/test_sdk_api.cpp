@@ -339,7 +339,7 @@ TEST_F(SdkApiTest, DefaultLensConfigSetsCorrectValues) {
     EXPECT_FLOAT_EQ(0.0f, config.offset_x);
     EXPECT_FLOAT_EQ(0.0f, config.offset_y);
     EXPECT_FLOAT_EQ(0.0f, config.rotation);
-    EXPECT_EQ(IRIS_BLEND_NORMAL, config.blend_mode);
+    EXPECT_EQ(IRIS_BLEND_LUMINANCE_TINT_LINEAR, config.blend_mode);  // P6-W2 §5.12 canonical default
     EXPECT_FLOAT_EQ(0.1f, config.edge_feather);
     EXPECT_TRUE(config.apply_left);
     EXPECT_TRUE(config.apply_right);
@@ -441,13 +441,13 @@ TEST(SdkApiFormatTest, BlendModeEnumValues) {
 // Test hook: sdk_api.cpp의 convert_blend_mode()를 직접 호출
 extern "C" int iris_sdk_test_convert_blend_mode(int raw_mode);
 
-TEST(SdkApiFormatTest, InvalidBlendModeFallsBackToNormal) {
-    // 범위 밖 값 → Normal(0)으로 폴백 검증
-    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(-1));
-    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(8));
-    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(99));
-    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(INT_MIN));
-    EXPECT_EQ(0, iris_sdk_test_convert_blend_mode(INT_MAX));
+TEST(SdkApiFormatTest, InvalidBlendModeFallsBackToTintLinearV2) {
+    // P6-W2 §5.9: 범위 밖 값 → LuminanceTintLinear(5)로 폴백 (셰이더 측 §5.9 fallback과 정합)
+    EXPECT_EQ(5, iris_sdk_test_convert_blend_mode(-1));
+    EXPECT_EQ(5, iris_sdk_test_convert_blend_mode(8));
+    EXPECT_EQ(5, iris_sdk_test_convert_blend_mode(99));
+    EXPECT_EQ(5, iris_sdk_test_convert_blend_mode(INT_MIN));
+    EXPECT_EQ(5, iris_sdk_test_convert_blend_mode(INT_MAX));
 }
 
 TEST(SdkApiFormatTest, ValidBlendModeRoundTrip) {

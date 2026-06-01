@@ -13,6 +13,7 @@
 #include "iris_sdk/beauty_filter.h"
 #include "iris_sdk/cpu_beauty_backend.h"
 #include "iris_sdk/beauty_roi_manager.h"
+#include "iris_sdk/lens_sku_metadata.h"
 
 #ifdef IRIS_SDK_HAS_GLES
 #include "iris_sdk/gpu/gpu_beauty_backend.h"
@@ -37,6 +38,10 @@ std::mutex g_gpu_mutex;
 #ifdef IRIS_SDK_HAS_GLES
 std::unique_ptr<iris_sdk::GPUBeautyBackend> g_gpu_beauty;
 std::unique_ptr<iris_sdk::GPULensRenderer> g_gpu_lens;
+// P6-W7: SKU 메타 레지스트리. g_gpu_lens->setSkuRegistry()에 raw 포인터를 넘기므로
+// 수명이 g_gpu_lens와 동일한 파일 스코프 전역으로 보관해야 dangling을 방지한다.
+// (로컬 unique_ptr 금지 — g_gpu_mutex로 보호.)
+std::unique_ptr<iris_sdk::LensSkuRegistry> g_sku_registry;
 std::set<uint32_t> g_managed_textures;
 #endif
 
@@ -519,6 +524,11 @@ IrisSdkError iris_sdk_init_gpu_lens(void) {
         return IRIS_SDK_ERROR_NOT_INITIALIZED;
     }
 
+    // P6-W7: 메타가 init 이전에 등록된 경우 새 렌더러에 다시 연결.
+    if (g_sku_registry) {
+        g_gpu_lens->setSkuRegistry(g_sku_registry.get());
+    }
+
     return IRIS_SDK_OK;
 #else
     return IRIS_SDK_ERROR_NOT_SUPPORTED;
@@ -555,6 +565,55 @@ IrisSdkError iris_sdk_load_lens_texture(const uint8_t* data, int width, int heig
     }
     return g_gpu_lens->loadLensTexture(data, width, height) ? IRIS_SDK_OK : IRIS_SDK_RENDER_FAILED;
 #else
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+IrisSdkError iris_sdk_set_lens_metadata(const char* lens_meta_json) {
+#ifdef IRIS_SDK_HAS_GLES
+    if (!lens_meta_json) {
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+
+    auto reg = std::make_unique<iris_sdk::LensSkuRegistry>();
+    if (!reg->loadFromJson(lens_meta_json)) {
+        return IRIS_SDK_INVALID_FORMAT;
+    }
+
+    g_sku_registry = std::move(reg);
+
+    // 이미 GPU 렌즈가 초기화돼 있으면 즉시 연결. 미초기화 시에는
+    // iris_sdk_init_gpu_lens()에서 g_sku_registry를 연결한다.
+    if (g_gpu_lens) {
+        g_gpu_lens->setSkuRegistry(g_sku_registry.get());
+    }
+
+    return IRIS_SDK_OK;
+#else
+    (void)lens_meta_json;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+IrisSdkError iris_sdk_load_lens_texture_with_sku(
+    const uint8_t* data, int width, int height, const char* sku_id) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+    if (!data || width <= 0 || height <= 0) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+    const std::string sku = sku_id ? std::string(sku_id) : std::string();
+    return g_gpu_lens->loadLensTexture(data, width, height, sku) ? IRIS_SDK_OK : IRIS_SDK_RENDER_FAILED;
+#else
+    (void)data;
+    (void)width;
+    (void)height;
+    (void)sku_id;
     return IRIS_SDK_ERROR_NOT_SUPPORTED;
 #endif
 }
@@ -632,6 +691,19 @@ void iris_sdk_set_lens_sclera_protect(int enabled) {
 #endif
 }
 
+// P6-W5 §5.9: B1/B8 4조합 벤치용 sclera veto 수식 토글 internal C API.
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출.
+void iris_sdk_set_lens_sclera_veto_mode(int mode) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setScleraVetoMode(mode);
+    }
+#else
+    (void)mode;
+#endif
+}
+
 void iris_sdk_set_lens_ellipse_mask(int enabled) {
 #ifdef IRIS_SDK_HAS_GLES
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
@@ -648,6 +720,98 @@ void iris_sdk_set_lens_ellipse_mask(int enabled) {
 // C5 환경 반사 가산 계층(B2 결과 후)이 대체 역할 수행.
 void iris_sdk_set_lens_highlight(int enabled) {
     (void)enabled;  // no-op
+}
+
+// ============================================================================
+// P6-W4 §5.7/§5.11: 환경 반사 internal C API.
+// 공개 sdk_api.h에는 노출하지 않음 (W4 Phase 벤치 전용 internal 경로).
+// JNI 파일에서 forward declare 후 직접 호출. SDK 외부 surface 변화 없음.
+// W5~W6 정식 활성 시점에 sdk_api.h로 승격 검토.
+// ============================================================================
+
+IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_env_map(const uint8_t* data, int width, int height) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
+        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+    }
+    if (!data || width <= 0 || height <= 0) {
+        return IRIS_SDK_INVALID_PARAM;
+    }
+    return g_gpu_lens->loadEnvMap(data, width, height) ? IRIS_SDK_OK : IRIS_SDK_RENDER_FAILED;
+#else
+    (void)data; (void)width; (void)height;
+    return IRIS_SDK_ERROR_NOT_SUPPORTED;
+#endif
+}
+
+IRIS_SDK_EXPORT void iris_sdk_unload_env_map(void) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->unloadEnvMap();
+    }
+#endif
+}
+
+IRIS_SDK_EXPORT void iris_sdk_set_reflection_mode(int mode) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setReflectionMode(mode);
+    }
+#else
+    (void)mode;
+#endif
+}
+
+IRIS_SDK_EXPORT void iris_sdk_set_reflection_intensity(float intensity) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setReflectionIntensity(intensity);
+    }
+#else
+    (void)intensity;
+#endif
+}
+
+// ============================================================================
+// P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글 internal C API.
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출 (벤치 전용 internal 경로).
+// ============================================================================
+
+void iris_sdk_set_lens_blink_up_ms(float ms) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setBlinkUpMs(ms);
+    }
+#else
+    (void)ms;
+#endif
+}
+
+void iris_sdk_set_lens_gate_threshold(float threshold) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setGateThreshold(threshold);
+    }
+#else
+    (void)threshold;
+#endif
+}
+
+void iris_sdk_set_lens_detail_reinject(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setDetailReinject(enabled != 0);
+    }
+#else
+    (void)enabled;
+#endif
 }
 
 } // extern "C"

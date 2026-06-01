@@ -812,10 +812,18 @@ uniform float uAvgIrisLum;
 uniform float uDetH;
 
 uniform int uScleraProtect;
+uniform int uScleraVetoMode;  // P6-W5: 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini)
 uniform int uContactShadow;
 uniform float uShadowIntensity;
 uniform float uMaxDetail;
 // P5-W3-05 S1 D5: uHighlightEnabled uniform 제거
+
+// P6-W3 §5.6/§5.11: C5 환경 반사 가산 계층 uniform.
+// W3 scaffold는 uSourceType=0 (OFF) 기본 — 실기기 시각 변화 없음.
+// W4 B2 벤치에서 uSourceType 토글로 OFF/EnvMap/Periphery 비교.
+uniform int uSourceType;            // 0=OFF, 1=EnvMap, 2=Periphery
+uniform float uReflectionIntensity; // 0.0~1.0, W3 기본 0.3
+uniform sampler2D uEnvMap;          // W4 env-map 프로토타입용 (W3 미사용)
 
 uniform int uUseEllipseMask;
 uniform vec2 uLeftEyeEllipseCenter;
@@ -825,8 +833,23 @@ uniform vec2 uRightEyeEllipseCenter;
 uniform vec3 uRightEyeEllipseRadii;
 uniform float uRightEyeEllipseRot;
 
+// P6-W6 §5.2/§5.7: C10 홍채 디테일 재주입 + B9 저조도 gate.
+uniform vec2  uTexelSize;        // C10 3x3 blur 샘플 간격 (1/width, 1/height)
+uniform float uGateThreshold;    // B9 gate 임계값 (토글 0.10/0.15/0.25, 기본 0.15)
+uniform int   uDetailReinject;   // C10 on/off (기본 1)
+// P6-W6 §1.3 C7: 블링크 시간적 envelope (좌/우 EMA ramp). main()에서 좌→Left, 우→Right.
+uniform float uLeftRenderAlpha;
+uniform float uRightRenderAlpha;
+
 in vec2 vTexCoord;
 out vec4 fragColor;
+
+// P6-W2 §5.10: 블렌드 LUMA 계수 Rec.709 linear로 통일.
+// CPU 측 W1 avg_iris_luma 측정과 동일 상수. sRGB 평균 금지.
+const vec3 LUMA_709_LENS = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
+vec3 toSRGBFast(vec3 linear_color) { return sqrt(max(linear_color, vec3(0.0))); }
 
 vec3 blendNormal(vec3 base, vec3 blend, float opacity) {
     return mix(base, blend, opacity);
@@ -836,40 +859,35 @@ vec3 blendMultiply(vec3 base, vec3 blend, float opacity) {
     return mix(base, base * blend, opacity);
 }
 
-vec3 blendScreen(vec3 base, vec3 blend, float opacity) {
-    return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
+// P6-W2 §5.2 C3: ScreenLinear (선형 공간 Screen). sRGB blendScreen 대체.
+vec3 blendScreenLinear(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = toLinearFast(blend);
+    vec3 screened = vec3(1.0) - (vec3(1.0) - baseL) * (vec3(1.0) - lensL);
+    return toSRGBFast(mix(baseL, screened, opacity));
 }
 
-// P5-W3-05 S1 D6: blendOverlay / blendLuminanceTint(non-linear) / blendSoftLight 제거
-// 이유:
-//   - Overlay: 렌즈 도메인에서 대비 과장 → 플라스틱 느낌
-//   - LuminanceTint(non-linear): LuminanceTintLinear의 감마 오차 버전(하위호환)
-//   - SoftLight: Normal과 체감 차이 미미
-// uBlendMode 3/4/6가 들어오면 blendNormal로 자동 fallback (분기 default)
-
-vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
-vec3 toSRGBFast(vec3 linear_color) { return sqrt(max(linear_color, vec3(0.0))); }
-
-// P5-W3-05 S1 D3: realSpec 2줄 제거 (환경 반사 분리 계층에서 담당 예정)
-// 삭제된 원본: float realSpec = smoothstep(0.7, 0.95, lum);
-//              result = mix(result, baseL, realSpec);
-// 근거: "밝은 픽셀 보호"이지 "실반사 보호"가 아닌 개념 오류. C5 참조.
-vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
+// P6-W2 §5.1 C2: TintLinearV2 (canonical default). LTL 리네이밍 + squaring 제거.
+// uAvgIrisLum은 W1 fallback chain에서 이미 linear 공간 값으로 공급됨 (W1 §5.2.1).
+// K(=0.7) + clamp upper(7.0)는 실기기 시각 튜닝값. ColorReplaceLinear(ID=7)는 별도
+// 수식이라 K 영향 없음 — 5번 단독 강도 조정 가능.
+vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
     vec3 baseL = toLinearFast(base);
-    float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
-    float avgLumLinear = uAvgIrisLum * uAvgIrisLum;
-    float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
+    float lum = dot(baseL, LUMA_709_LENS);
+    float scale = clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0);
     vec3 tinted = toLinearFast(blend) * lum * scale;
     vec3 result = mix(baseL, tinted, opacity);
     return toSRGBFast(result);
 }
 
-vec3 blendColorReplace(vec3 base, vec3 blend, float opacity, float maxDetail) {
-    float lum = dot(base, vec3(0.299, 0.587, 0.114));
-    float detail = lum / max(0.01, uAvgIrisLum);
-    detail = clamp(detail, 0.2, maxDetail);
-    vec3 colored = blend * detail;
-    return mix(base, colored, opacity);
+// P6-W2 §5.3 C4: ColorReplaceLinear. W2 활성 — W5 B1 벤치 대상, 채택 확정 아님.
+vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDetail) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = toLinearFast(blend);
+    float lum = dot(baseL, LUMA_709_LENS);
+    float detail = clamp(pow(lum / max(0.01, uAvgIrisLum), 0.7), 0.75, maxDetail);
+    vec3 colored = lensL * detail;
+    return toSRGBFast(mix(baseL, colored, opacity));
 }
 
 float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
@@ -909,9 +927,52 @@ float calcContactShadow(float fragY, float minY, float eyelidFeather, float eyeO
     return shadowFactor * maskAlpha;
 }
 
+// P6-W3 §5.11 / P6-W4 §5.7/§5.8: sampleReflection — 방식 A (uniform 스위치, 단일 바이너리).
+// W4 Phase A: OFF/EnvMap/Periphery 3 프로토타입 활성.
+// reflectUV: env-map sampling UV (옵션 C iris local 좌표).
+// irisCenterAdjusted: Periphery annular ring 중심 (aspectRatio 보정된 좌표).
+// scaledRadius: Periphery ring 반경 단위 (irisRadius * uLensScale).
+vec3 sampleReflection(vec2 reflectUV, vec2 irisCenterAdjusted, float scaledRadius) {
+    if (uSourceType == 1) {
+        // EnvMap (Codex 안)
+        return texture(uEnvMap, reflectUV).rgb;
+    }
+    if (uSourceType == 2) {
+        // Periphery (Gemini 안) — annular ring r∈[1.8, 2.5] 8포인트, uCameraTexture에서 샘플.
+        // 얼굴 중앙 영역(70%) 자연 제외 효과: ring이 iris 외곽 1.8r 이상이라 동공/홍채 자체 제외.
+        const int N = 8;
+        const float RING_R = 2.15;  // [1.8, 2.5] 중앙값. W4 벤치 시 미세 조정 가능.
+        vec3 sum = vec3(0.0);
+        for (int i = 0; i < N; ++i) {
+            float angle = float(i) * (6.28318530718 / float(N));
+            // ring 위 한 점을 adjusted-coord 공간에서 계산 후 vTexCoord 공간으로 환원.
+            // adjustedCoord = vTexCoord * vec2(aspectRatio, 1) 이므로 역변환 시 aspect 나눠야.
+            vec2 adjustedRingPoint = irisCenterAdjusted + RING_R * scaledRadius * vec2(cos(angle), sin(angle));
+            // adjusted → vTexCoord 환원 (aspectRatio는 셰이더 전체 const 수준 — uFrameAspect 사용)
+            vec2 ringUV = vec2(adjustedRingPoint.x / uFrameAspect, adjustedRingPoint.y);
+            // 화면 밖 fallback: clamp로 가장자리 색 사용 (검은색 강제 회피)
+            ringUV = clamp(ringUV, vec2(0.0), vec2(1.0));
+            sum += texture(uCameraTexture, ringUV).rgb;
+        }
+        return sum / float(N);
+    }
+    return vec3(0.0);  // OFF (W3 기본)
+}
+
+// P6-W3 §5.8 + W4 Phase A 보완: calcFresnel — 옵션 C 가짜 Fresnel.
+// dist는 이미 /scaledRadius로 정규화 (0=중심, 1=외곽). 노멀 벡터 없음 (D1 재도입 회피).
+// boundary (0.6, 1.0): R1 inner 후보 [0.6, 0.7, 0.8] 중 가장 안쪽 채택.
+// 사유: Phase A 시각 검증에서 inner 0.7 + outer 1.0이 edgeAlpha 페이드와 정확히 중첩 →
+//       가시성 거의 0. inner 0.6으로 안쪽 이동해 외곽 40%에 반사 분포.
+//       outer 1.0은 R1 합의 그대로 유지 (W3 §5.8). W4 §1.15 참조.
+float calcFresnel(float dist) {
+    return smoothstep(0.6, 1.0, dist);
+}
+
 vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
                float eyeTop, float eyeBottom,
-               vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot) {
+               vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot,
+               float renderAlpha) {
     if (irisRadius <= 0.0) return camera;
 
     vec2 adjustedCoord = vec2(vTexCoord.x * aspectRatio, vTexCoord.y);
@@ -950,35 +1011,82 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
 
     float irisEdgeDist = dist * uLensScale;
     if (uScleraProtect == 1) {
-        float geomFactor = smoothstep(0.75, 1.0, irisEdgeDist);
-        float colorFactor = calcScleraFactor(camera.rgb);
-        float scleraFade = 1.0 - geomFactor * (0.5 + 0.5 * colorFactor);
+        float geom = smoothstep(0.75, 1.0, irisEdgeDist);
+        float scleraFade;
+        if (uScleraVetoMode == 1) {
+            // P6-W5 §5.4 / §5.14: Codex color-veto (sat + luma). 0.6 강도 W5 1차 고정.
+            float maxC = max(camera.r, max(camera.g, camera.b));
+            float minC = min(camera.r, min(camera.g, camera.b));
+            float sat = (maxC - minC) / max(maxC, 1e-4);
+            float lum = dot(camera.rgb, vec3(0.299, 0.587, 0.114));
+            float veto = smoothstep(0.18, 0.32, sat) * (1.0 - smoothstep(0.45, 0.65, lum));
+            scleraFade = 1.0 - geom * (1.0 - 0.6 * veto);
+        } else if (uScleraVetoMode == 2) {
+            // P6-W5 §5.4 / §5.12: Gemini luma-only (sat 항 제거). 임계값 (0.45, 0.65) 유지.
+            float lum = dot(camera.rgb, vec3(0.299, 0.587, 0.114));
+            float veto = 1.0 - smoothstep(0.45, 0.65, lum);
+            scleraFade = 1.0 - geom * (1.0 - 0.6 * veto);
+        } else {
+            // Legacy (W5 이전 수식). W5 결과 반영 시점에 §5.13 따라 단일 수식으로 정리.
+            float colorFactor = calcScleraFactor(camera.rgb);
+            scleraFade = 1.0 - geom * (0.5 + 0.5 * colorFactor);
+        }
         finalAlpha *= scleraFade;
     }
 
+    // P6-W6 §1.3 C7: 블링크 시간적 envelope. 눈 감김/뜸 EMA ramp(CPU 측 계산)를
+    // 최종 가시성에 곱해 깜빡임 hard pop 제거. blended 합성 전에 적용.
+    finalAlpha *= renderAlpha;
+
     float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
 
-    // P5-W3-05 S1 D6: uBlendMode 3/4/6 (Overlay/LuminanceTint/SoftLight) 분기 제거
-    // 해당 값이 들어오면 default(blendNormal)로 fallback
-    // Normal(0) 유지는 B1 벤치 (Normal vs ColorReplaceLinear) 대기용
+    // P6-W2 §5.4/§5.8/§5.9: 블렌드 분기 5종 등록 (0/1/2/5/7) + 빈 ID(3/4/6) fallback.
+    //   - ID 0 Normal: 유지 (W5 B1 Normal vs CRL 벤치 대기)
+    //   - ID 2 ScreenLinear: 선형 공간 (W2 sRGB Screen 대체)
+    //   - ID 5 TintLinearV2: canonical default
+    //   - ID 7 ColorReplaceLinear: W2 활성 — W5 B1 벤치 대상, 채택 확정 아님
+    //   - ID 3/4/6/기타: TintLinearV2 fallback (디버그 로그는 CPU 측에서 1회)
     vec3 blended;
     if (uBlendMode == 0) {
         blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 1) {
         blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 2) {
-        blended = blendScreen(camera.rgb, lens.rgb, finalAlpha);
+        blended = blendScreenLinear(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 5) {
-        blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
+        blended = blendTintLinearV2(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 7) {
-        blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha, maxDetail);
+        blended = blendColorReplaceLinear(camera.rgb, lens.rgb, finalAlpha, maxDetail);
     } else {
-        blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
+        blended = blendTintLinearV2(camera.rgb, lens.rgb, finalAlpha);
     }
 
-    // P5-W3-05 S1 D2: LIMBAL_ENABLED=false 하드코드 블록 제거
-    // 림발 처리는 C6 (에셋 기반) + B4 벤치로 재평가 예정
-    //
+    // P6-W6 §5.2 C10: iris inner 디테일 재주입. 블렌드 직후 / 반사 이전 (handoff §4 패스 순서).
+    // 입력은 원본 카메라(uCameraTexture, 렌즈 적용 전)의 고주파 디테일 — linear Rec.709 luma.
+    if (uDetailReinject == 1) {
+        vec2 t = uTexelSize;
+        float lC  = dot(toLinearFast(texture(uCameraTexture, vTexCoord).rgb), LUMA_709_LENS);
+        float lN  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(0.0, -t.y)).rgb), LUMA_709_LENS);
+        float lS  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(0.0,  t.y)).rgb), LUMA_709_LENS);
+        float lE  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x, 0.0)).rgb), LUMA_709_LENS);
+        float lW  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x, 0.0)).rgb), LUMA_709_LENS);
+        float lNE = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x, -t.y)).rgb), LUMA_709_LENS);
+        float lNW = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x, -t.y)).rgb), LUMA_709_LENS);
+        float lSE = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x,  t.y)).rgb), LUMA_709_LENS);
+        float lSW = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x,  t.y)).rgb), LUMA_709_LENS);
+        float blurLum = (lC * 2.0 + lN + lS + lE + lW + lNE + lNW + lSE + lSW) / 10.0;  // W6 §5.8 3x3 single-pass
+        float baseLum = lC;
+        float detail = clamp(baseLum / max(blurLum, 0.001), 0.85, 1.15);                 // W6 §5.2
+        float innerMask = smoothstep(0.7, 0.5, dist);                                    // W6 §5.9 중심=1, 외곽=0
+        float gateStrength = smoothstep(uGateThreshold - 0.03, uGateThreshold + 0.03, uAvgIrisLum); // W6 §5.7 ±0.03
+        float detailMul = mix(1.0, detail, gateStrength * innerMask);
+        blended *= vec3(detailMul);
+    }
+
+    // P6-W7 (제거): 셰이더 림발 수식. 실기기 적용 결과 렌즈마다 림발 색·스타일이 달라
+    // 고정 darkening이 디자인을 훼손함(예: 브라운 림발 렌즈에 회색 darkening 덮음).
+    // 림발은 렌즈 에셋이 책임. P5-W3-05 S1 D2 제거 사유와 동일.
+
     // P5-W3-05 S1 D5: uHighlightEnabled 각막 하이라이트 블록 제거
     // 고정 위치 하이라이트는 환경과 무관해 어색함. C5 환경 반사 가산 계층(B2 결과 후)이 대체
     // 삭제된 수식:
@@ -989,6 +1097,25 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     //     float highlight = smoothstep(0.25, 0.0, highlightDist);
     //     blended = mix(blended, vec3(1.0), highlight * 0.5 * finalAlpha);
     //   }
+
+    // P6-W3 §5.1/§5.4 + W4 Phase A 보완: C5 환경 반사 가산 합성.
+    // W3 §5.5 원안: renderMask = finalAlpha (= lens.a * uOpacity * edgeAlpha * eyelidMask).
+    // W4 Phase A 1차 보완: edgeAlpha 제거 → 외곽 가산 살아남 + 가시성 확보.
+    // W4 Phase A 2차 보완: lens silhouette 가드 누락 발견 (lensCoord clamp가 dist>1.0에서도
+    //   외곽 lens.a 반환 → 얼굴/안경 영역까지 반사 누수 → 노란 가로 띠 발생).
+    //   `step(dist, 1.0)`로 hard cutoff. edgeAlpha의 soft fade 역할은 포기하고
+    //   가드 역할만 복원. W3 §5.5/§5.8 + W4 §1.16 참조.
+    float renderMask = lens.a * uOpacity * eyelidMask * step(dist, 1.0);
+#ifdef RENDER_MASK_HOOK_ENABLED
+    // P6-W3 §5.10: W8 Pupil material 조건부 트랙. CMake 옵션으로만 활성 (프로덕션 비활성).
+    // smoothstep 인자는 Codex R4 Patch 4 단서대로 예시 — W8 구현 시 실기기 튜닝.
+    renderMask = max(finalAlpha, smoothstep(1.2, 0.0, dist));
+#endif
+    // P6-W3 §5.12: reflectUV 옵션 C (iris local 좌표). 노멀 없음 → 옵션 B(reflect) 배제.
+    vec2 reflectUV = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
+    vec3 reflection = sampleReflection(reflectUV, adjustedCenter, scaledRadius);
+    float fresnel = calcFresnel(dist);
+    blended += reflection * fresnel * uReflectionIntensity * renderMask;
 
     if (uContactShadow == 1) {
         float eyeOpening = abs(maxY - minY);
@@ -1008,13 +1135,15 @@ void main() {
     if (uApplyLeft == 1 && uLeftIrisRadius > 0.0) {
         result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio,
                            uLeftEyeTop, uLeftEyeBottom,
-                           uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot);
+                           uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot,
+                           uLeftRenderAlpha);
     }
 
     if (uApplyRight == 1 && uRightIrisRadius > 0.0) {
         result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio,
                            uRightEyeTop, uRightEyeBottom,
-                           uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot);
+                           uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot,
+                           uRightRenderAlpha);
     }
 
     fragColor = result;

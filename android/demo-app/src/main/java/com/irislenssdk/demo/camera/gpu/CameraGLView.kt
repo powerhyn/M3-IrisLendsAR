@@ -249,10 +249,78 @@ class CameraGLView @JvmOverloads constructor(
 
     /**
      * 렌즈 텍스처 설정 (비트맵)
+     *
+     * @param skuId P6-W7: 렌즈 SKU id (메타 연동, 빈 문자열이면 미적용)
      */
-    fun setLensTexture(bitmap: Bitmap?) {
+    fun setLensTexture(bitmap: Bitmap?, skuId: String = "") {
         queueEvent {
-            glRenderer.setLensTexture(bitmap)
+            glRenderer.setLensTexture(bitmap, skuId)
+        }
+    }
+
+    /**
+     * P6-W4 §5.7: 환경 반사 env_map 텍스처 로드 (RGB 8bit).
+     * GL 스레드에서 native loadEnvMap 호출.
+     */
+    fun setEnvMap(rgbData: ByteArray, width: Int, height: Int) {
+        queueEvent {
+            val result = com.irislenssdk.IrisLensSDK.loadEnvMap(rgbData, width, height)
+            android.util.Log.i("CameraGLView", "EnvMap load: ${width}x${height}, result=$result")
+        }
+    }
+
+    /**
+     * P6-W4 §5.11: 환경 반사 모드 토글 (0=OFF, 1=EnvMap, 2=Periphery).
+     */
+    fun setReflectionMode(mode: Int) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setReflectionMode(mode)
+        }
+    }
+
+    /**
+     * P6-W4 §5.7: 환경 반사 강도 (0.0~1.0, W3 기본 0.3).
+     */
+    fun setReflectionIntensity(intensity: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setReflectionIntensity(intensity)
+        }
+    }
+
+    /**
+     * P6-W5 §5.9: sclera veto 수식 토글 (B1/B8 4조합 벤치용).
+     * @param mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini)
+     */
+    fun setScleraVetoMode(mode: Int) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setScleraVetoMode(mode)
+        }
+    }
+
+    /**
+     * P6-W6 B5: 블링크 up ramp 시간 토글 (60/80/120ms).
+     */
+    fun setBlinkUpMs(ms: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setBlinkUpMs(ms)
+        }
+    }
+
+    /**
+     * P6-W6 B9: 저조도 디테일 gate 임계값 토글 (0.10/0.15/0.25).
+     */
+    fun setGateThreshold(threshold: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setGateThreshold(threshold)
+        }
+    }
+
+    /**
+     * P6-W6 C10: 홍채 디테일 재주입 on/off.
+     */
+    fun setDetailReinject(enabled: Boolean) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setDetailReinject(enabled)
         }
     }
 

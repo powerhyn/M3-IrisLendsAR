@@ -926,11 +926,92 @@ public final class IrisLensSDK {
     }
 
     /**
+     * 렌즈 텍스처를 SKU와 함께 로드합니다 (RGBA 바이트 배열).
+     *
+     * <p>P6-W7: sku_id를 함께 전달하여 코어에 등록된 렌즈 메타(림발 등)와
+     * 연동합니다. {@link #setLensMetadata(String)}로 등록한 메타에서
+     * 해당 sku_id 항목을 찾아 적용합니다.</p>
+     *
+     * @param rgbaData RGBA 픽셀 데이터
+     * @param width 너비
+     * @param height 높이
+     * @param skuId 렌즈 SKU 식별자 (빈 문자열이면 메타 미적용)
+     * @return 에러 코드
+     */
+    public static int loadLensTexture(byte[] rgbaData, int width, int height, String skuId) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeLoadLensTextureWithSku(rgbaData, width, height, skuId);
+    }
+
+    /**
+     * 렌즈 메타데이터(JSON)를 코어에 등록합니다.
+     *
+     * <p>P6-W7: lens_meta.json 등 SKU별 렌즈 메타(림발 강도 등)를
+     * 코어에 1회 등록합니다. GPU 렌즈가 초기화되어 있으면 즉시 주입하고,
+     * 그렇지 않으면 보관 후 초기화 시점에 주입합니다.</p>
+     *
+     * @param json 렌즈 메타데이터 JSON 문자열
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int setLensMetadata(String json) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeSetLensMetadata(json);
+    }
+
+    /**
      * 렌즈 텍스처를 해제합니다.
      */
     public static void unloadLensTexture() {
         if (sLibraryLoaded) {
             nativeUnloadLensTexture();
+        }
+    }
+
+    /**
+     * P6-W4 §5.7: 환경 반사 env_map 텍스처 로드 (RGB 8bit, ACES tone-mapped LDR 권장).
+     *
+     * @param rgbData RGB 픽셀 데이터 (3 bytes/pixel)
+     * @param width 너비 (W3 §5.13: 256 권장)
+     * @param height 높이 (W3 §5.13: 128 권장)
+     * @return 에러 코드 (0=성공)
+     */
+    public static int loadEnvMap(byte[] rgbData, int width, int height) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeLoadEnvMap(rgbData, width, height);
+    }
+
+    /** P6-W4 §5.7: 환경 반사 env_map 해제. */
+    public static void unloadEnvMap() {
+        if (sLibraryLoaded) {
+            nativeUnloadEnvMap();
+        }
+    }
+
+    /**
+     * P6-W4 §5.11: 환경 반사 모드 런타임 토글 (방식 A uniform 스위치, 단일 바이너리).
+     *
+     * @param mode 0=OFF, 1=EnvMap, 2=Periphery (W4 B2 벤치 3 프로토타입)
+     */
+    public static void setReflectionMode(int mode) {
+        if (sLibraryLoaded) {
+            nativeSetReflectionMode(mode);
+        }
+    }
+
+    /**
+     * P6-W4 §5.7 hand-off: 환경 반사 강도 조정 (W3 §5.7 기본 0.3, R1 미토론).
+     *
+     * @param intensity 0.0~1.0 (자동 clamp)
+     */
+    public static void setReflectionIntensity(float intensity) {
+        if (sLibraryLoaded) {
+            nativeSetReflectionIntensity(intensity);
         }
     }
 
@@ -960,6 +1041,46 @@ public final class IrisLensSDK {
     public static void setLensScleraProtect(boolean enabled) {
         if (sLibraryLoaded) {
             nativeSetLensScleraProtect(enabled);
+        }
+    }
+
+    /**
+     * P6-W5 §5.9: sclera veto 수식 토글 (B1/B8 4조합 벤치용).
+     * @param mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini). 범위 외 값은 0으로 clamp.
+     */
+    public static void setScleraVetoMode(int mode) {
+        if (sLibraryLoaded) {
+            nativeSetScleraVetoMode(mode);
+        }
+    }
+
+    /**
+     * P6-W6 B5: 블링크 up ramp 시간 토글 (벤치용).
+     * @param ms 60/80/120ms (자동 clamp [30,200]). 기본 80.
+     */
+    public static void setBlinkUpMs(float ms) {
+        if (sLibraryLoaded) {
+            nativeSetBlinkUpMs(ms);
+        }
+    }
+
+    /**
+     * P6-W6 B9: 저조도 디테일 gate 임계값 토글 (벤치용).
+     * @param threshold 0.10/0.15/0.25 (자동 clamp [0,1]). 기본 0.15.
+     */
+    public static void setGateThreshold(float threshold) {
+        if (sLibraryLoaded) {
+            nativeSetGateThreshold(threshold);
+        }
+    }
+
+    /**
+     * P6-W6 C10: 홍채 디테일 재주입 on/off 토글 (벤치용).
+     * @param enabled true=on(기본), false=off.
+     */
+    public static void setDetailReinject(boolean enabled) {
+        if (sLibraryLoaded) {
+            nativeSetDetailReinject(enabled);
         }
     }
 
@@ -1330,13 +1451,27 @@ public final class IrisLensSDK {
     private static native void nativeReleaseGpuLens();
     private static native boolean nativeIsGpuLensInitialized();
     private static native int nativeLoadLensTexture(byte[] data, int width, int height);
+    private static native int nativeLoadLensTextureWithSku(byte[] data, int width, int height, String skuId);  // P6-W7
+    private static native int nativeSetLensMetadata(String json);  // P6-W7
     private static native void nativeUnloadLensTexture();
     private static native int nativeRenderLensTexture(
             int inputTexture, int width, int height,
             long detectionPtr, LensConfig config);
     private static native void nativeSetLensScleraProtect(boolean enabled);
+    private static native void nativeSetScleraVetoMode(int mode);  // P6-W5 §5.9
     private static native void nativeSetLensEllipseMask(boolean enabled);
     private static native void nativeSetLensHighlight(boolean enabled);
+
+    // P6-W4 §5.7/§5.11: 환경 반사 (env_map + 모드 토글 + 강도)
+    private static native int nativeLoadEnvMap(byte[] rgbData, int width, int height);
+    private static native void nativeUnloadEnvMap();
+    private static native void nativeSetReflectionMode(int mode);
+    private static native void nativeSetReflectionIntensity(float intensity);
+
+    // P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글
+    private static native void nativeSetBlinkUpMs(float ms);
+    private static native void nativeSetGateThreshold(float threshold);
+    private static native void nativeSetDetailReinject(boolean enabled);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods

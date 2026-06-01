@@ -14,11 +14,13 @@ package com.irislenssdk.demo
 import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.opengl.GLES31
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
+import android.view.KeyEvent
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -100,6 +102,16 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnToggleShadow: Button
     private lateinit var btnToggleEllipse: Button
     private lateinit var btnToggleHighlight: Button
+
+    // P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 토글 (A/B/C/D)
+    private lateinit var btnBenchA: Button
+    private lateinit var btnBenchB: Button
+    private lateinit var btnBenchC: Button
+    private lateinit var btnBenchD: Button
+    // P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글
+    private lateinit var btnW6Blink: Button
+    private lateinit var btnW6Gate: Button
+    private lateinit var btnW6Detail: Button
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -198,6 +210,15 @@ class GpuRenderActivity : AppCompatActivity() {
         btnToggleShadow = findViewById(R.id.btnToggleShadow)
         btnToggleEllipse = findViewById(R.id.btnToggleEllipse)
         btnToggleHighlight = findViewById(R.id.btnToggleHighlight)
+
+        // P6-W5 §5.9: 4조합 블라인드 벤치 버튼 (A/B/C/D)
+        btnBenchA = findViewById(R.id.btnBenchA)
+        btnBenchB = findViewById(R.id.btnBenchB)
+        btnBenchC = findViewById(R.id.btnBenchC)
+        btnBenchD = findViewById(R.id.btnBenchD)
+        btnW6Blink = findViewById(R.id.btnW6Blink)
+        btnW6Gate = findViewById(R.id.btnW6Gate)
+        btnW6Detail = findViewById(R.id.btnW6Detail)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -225,6 +246,16 @@ class GpuRenderActivity : AppCompatActivity() {
             runOnUiThread {
                 tvGpuStatus.text = "GPU: Available (init: $success)"
                 Log.d(TAG, "GPU initialized: $success")
+            }
+            // P6-W4 §5.7: GPU lens init 완료 후 env_map 로드 (NOT_INITIALIZED 회피).
+            if (success && !envMapLoaded) {
+                loadEnvMapAsset()
+                envMapLoaded = true
+            }
+            // P6-W7: GPU lens init 완료 후 lens_meta.json 등록 (즉시 주입 보장).
+            if (success && !lensMetaLoaded) {
+                loadLensMetadataAsset()
+                lensMetaLoaded = true
             }
         }
 
@@ -305,7 +336,7 @@ class GpuRenderActivity : AppCompatActivity() {
             // 렌즈 적용
             val texture = lensManager.getTexture(lens)
             if (texture != null) {
-                cameraGLView.setLensTexture(texture)
+                cameraGLView.setLensTexture(texture, lens.id)  // P6-W7: sku_id 전달
                 cameraGLView.setLensConfig(lensConfig)
                 cameraGLView.setLensEnabled(true)
                 Log.d(TAG, "Lens applied: ${lens.name}")
@@ -352,10 +383,15 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // 블렌드 모드 선택 (Mode 5 비노출: ISS-005 B-2 존치 판정)
+        // 블렌드 모드 선택
+        // P6-W1 검증용으로 Mode 5 (Luminance Tint Linear) 임시 노출.
+        // W1이 S1에서 비운 uAvgIrisLum 주입을 실측으로 복구했고, LTL이 그 값을
+        // 직접 쓰는 유일한 모드라 시각 확인이 여기서만 가능하다. ISS-005 B-2 존치
+        // 판정은 W2 블렌드 3종 확정 단계에서 재검토 예정.
         val blendModeEntries = arrayOf(
             "Normal" to 0, "Multiply" to 1, "Screen" to 2, "Overlay" to 3,
-            "Luminance Tint" to 4, "Soft Light" to 6, "Color Replace" to 7
+            "Luminance Tint" to 4, "Luminance Tint Linear" to 5,
+            "Soft Light" to 6, "Color Replace" to 7
         )
         spinnerBlendMode.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item, blendModeEntries.map { it.first }.toTypedArray()
@@ -368,6 +404,10 @@ class GpuRenderActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+        // P6-W2 §5.12: SDK LensConfig 기본값(LuminanceTintLinear=5)과 spinner 초기 위치 동기화.
+        // 기본값 변경 시 demo가 SDK surface와 일관되게 시작.
+        val defaultIdx = blendModeEntries.indexOfFirst { it.second == lensConfig.blendMode }
+        if (defaultIdx >= 0) spinnerBlendMode.setSelection(defaultIdx)
 
         // Sclera Protection 토글 (P4-W2-01, 기본 ON)
         var scleraOn = true
@@ -415,6 +455,75 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+
+        // P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 토글 (A/B/C/D)
+        listOf(btnBenchA, btnBenchB, btnBenchC, btnBenchD).forEachIndexed { idx, btn ->
+            btn.setOnClickListener { applyBenchCombo(idx) }
+        }
+
+        // P6-W6: B5 블링크 up ramp / B9 저조도 gate / C10 디테일 재주입 벤치 토글
+        btnW6Blink.setOnClickListener {
+            w6BlinkIdx = (w6BlinkIdx + 1) % w6BlinkUpSweep.size
+            val ms = w6BlinkUpSweep[w6BlinkIdx]
+            cameraGLView.setBlinkUpMs(ms)
+            btnW6Blink.text = "up${ms.toInt()}"
+            Log.i(TAG, "P6-W6 B5 blink up → ${ms.toInt()}ms")
+        }
+        btnW6Gate.setOnClickListener {
+            w6GateIdx = (w6GateIdx + 1) % w6GateSweep.size
+            val t = w6GateSweep[w6GateIdx]
+            cameraGLView.setGateThreshold(t)
+            btnW6Gate.text = String.format("g%.2f", t)
+            Log.i(TAG, "P6-W6 B9 gate → $t")
+        }
+        btnW6Detail.setOnClickListener {
+            w6DetailOn = !w6DetailOn
+            cameraGLView.setDetailReinject(w6DetailOn)
+            btnW6Detail.text = if (w6DetailOn) "C10:on" else "C10:off"
+            Log.i(TAG, "P6-W6 C10 detail → ${if (w6DetailOn) "on" else "off"}")
+        }
+    }
+
+    //=========================================================================
+    // P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 (A/B/C/D)
+    // 정답표는 코드/로그에만 존재. 평가자에게는 라벨만 노출.
+    //=========================================================================
+
+    private data class BenchCombo(val label: String, val blendMode: Int, val vetoMode: Int, val desc: String)
+
+    private val benchCombos = listOf(
+        BenchCombo("A", 0, 1, "Normal + color-veto(Codex)"),
+        BenchCombo("B", 0, 2, "Normal + luma-only(Gemini)"),
+        BenchCombo("C", 7, 1, "CRL + color-veto(Codex)"),
+        BenchCombo("D", 7, 2, "CRL + luma-only(Gemini)"),
+    )
+    private var currentBenchIdx = -1
+
+    // P6-W6 §5.3/§5.7: 벤치 토글 sweep 상태 (기본값=중간값, 코어 기본과 일치).
+    private val w6BlinkUpSweep = floatArrayOf(60f, 80f, 120f)
+    private var w6BlinkIdx = 1   // 기본 80ms
+    private val w6GateSweep = floatArrayOf(0.10f, 0.15f, 0.25f)
+    private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
+    private var w6DetailOn = true
+
+    private fun applyBenchCombo(idx: Int) {
+        val combo = benchCombos[idx]
+        lensConfig.blendMode = combo.blendMode
+        cameraGLView.setLensConfig(lensConfig)
+        cameraGLView.setScleraVetoMode(combo.vetoMode)
+        // blendMode 0/7은 spinner index와 1:1 매핑 (Normal=0, ColorReplace=7)
+        spinnerBlendMode.setSelection(combo.blendMode)
+        currentBenchIdx = idx
+        updateBenchButtonHighlight()
+        Toast.makeText(this, "Bench ${combo.label}", Toast.LENGTH_SHORT).show()
+        Log.i(TAG, "P6-W5 bench → ${combo.label} (${combo.desc})")
+    }
+
+    private fun updateBenchButtonHighlight() {
+        val buttons = listOf(btnBenchA, btnBenchB, btnBenchC, btnBenchD)
+        buttons.forEachIndexed { idx, btn ->
+            btn.setBackgroundColor(if (idx == currentBenchIdx) 0xCC2196F3.toInt() else 0x66555555.toInt())
+        }
     }
 
     private fun setupBeautyControls() {
@@ -1082,6 +1191,84 @@ class GpuRenderActivity : AppCompatActivity() {
         super.onResume()
         cameraGLView.onResume()
         cameraGLView.resetTemporalState()  // P4-W1-03: resume jump 방지
+        // P6-W4 env_map 로드는 onGpuInitialized 콜백에서 처리 (GPU lens init 완료 보장).
+    }
+
+    //=========================================================================
+    // P6-W4: 환경 반사 벤치 (env_map 로드 + 3 프로토타입 토글)
+    //=========================================================================
+
+    private var envMapLoaded = false
+    private var lensMetaLoaded = false  // P6-W7: lens_meta.json 1회 등록 가드
+    private var reflectionMode = 0  // 0=OFF, 1=EnvMap, 2=Periphery
+
+    // P6-W4 Phase A 보완: intensity sweep (W3 §5.7 기본 0.3, clamp 0~5 확장).
+    private val intensitySweep = floatArrayOf(0.3f, 1.0f, 2.0f, 3.0f)
+    private var intensitySweepIdx = 0
+
+    /** P6-W4 §5.7: assets/env/env_default_256x128.png 로드 + GL 스레드 디스패치. */
+    private fun loadEnvMapAsset() {
+        try {
+            val bitmap = BitmapFactory.decodeStream(assets.open("env/env_default_256x128.png"))
+            val w = bitmap.width
+            val h = bitmap.height
+            val rgb = ByteArray(w * h * 3)
+            var idx = 0
+            for (y in 0 until h) {
+                for (x in 0 until w) {
+                    val pixel = bitmap.getPixel(x, y)
+                    rgb[idx++] = ((pixel shr 16) and 0xFF).toByte()
+                    rgb[idx++] = ((pixel shr 8) and 0xFF).toByte()
+                    rgb[idx++] = (pixel and 0xFF).toByte()
+                }
+            }
+            cameraGLView.setEnvMap(rgb, w, h)
+            Log.i(TAG, "P6-W4 env_map asset loaded: ${w}x${h}")
+        } catch (e: Exception) {
+            Log.e(TAG, "P6-W4 env_map load failed: ${e.message}")
+        }
+    }
+
+    /**
+     * P6-W7: assets/lens_meta.json 로드 + 코어 등록.
+     *
+     * 림발 등 SKU별 렌즈 메타를 코어에 1회 등록한다. assets가 없거나
+     * 등록 실패해도 앱은 계속 동작한다(로그만 남김).
+     */
+    private fun loadLensMetadataAsset() {
+        try {
+            val json = assets.open("lens_meta.json").bufferedReader().use { it.readText() }
+            val result = IrisLensSDK.setLensMetadata(json)
+            Log.i(TAG, "P6-W7 lens_meta.json registered: result=$result")
+        } catch (e: Exception) {
+            Log.e(TAG, "P6-W7 lens_meta.json load failed: ${e.message}")
+        }
+    }
+
+    /**
+     * P6-W4 §5.11: VOLUME_UP 키로 반사 모드 순환 (OFF → EnvMap → Periphery).
+     * P6-W4 Phase A 보완: VOLUME_DOWN 키로 intensity sweep (0.3 → 1.0 → 2.0 → 3.0).
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                reflectionMode = (reflectionMode + 1) % 3
+                cameraGLView.setReflectionMode(reflectionMode)
+                val modeName = arrayOf("OFF", "EnvMap", "Periphery")[reflectionMode]
+                Toast.makeText(this, "Reflection: $modeName", Toast.LENGTH_SHORT).show()
+                Log.i(TAG, "P6-W4 reflection mode → $modeName ($reflectionMode)")
+                return true
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                intensitySweepIdx = (intensitySweepIdx + 1) % intensitySweep.size
+                val newIntensity = intensitySweep[intensitySweepIdx]
+                cameraGLView.setReflectionIntensity(newIntensity)
+                Toast.makeText(this, "Intensity: $newIntensity", Toast.LENGTH_SHORT).show()
+                Log.i(TAG, "P6-W4 reflection intensity → $newIntensity")
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onPause() {

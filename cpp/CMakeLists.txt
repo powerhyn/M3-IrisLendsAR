@@ -49,6 +49,7 @@ set(IRIS_SDK_SOURCES
     src/iris_detector.cpp
     src/mediapipe_detector.cpp
     src/lens_renderer.cpp
+    src/lens_sku_metadata.cpp
     src/frame_processor.cpp
     src/inference_thread.cpp
     src/sdk_manager.cpp
@@ -69,6 +70,7 @@ set(IRIS_SDK_SOURCES
     src/gpu/texture_pool.cpp
     src/gpu/gpu_beauty_backend.cpp
     src/gpu/gpu_lens_renderer.cpp
+    src/gpu/eye_render_packet_adapter.cpp
     src/gpu/shader_sources.cpp
     src/gpu/gpu_profiler.cpp
     # Warp module
@@ -96,6 +98,8 @@ set(IRIS_SDK_HEADERS
     # include/iris_sdk/sdk_api.h
     # include/iris_sdk.h
     include/iris_sdk/beauty_roi_manager.h
+    # Lens SKU metadata + baked limbal auto-detect (P6-W7)
+    include/iris_sdk/lens_sku_metadata.h
     # Profiling and optimization headers
     include/iris_sdk/profiler.h
     include/iris_sdk/buffer_pool.h
@@ -107,6 +111,8 @@ set(IRIS_SDK_HEADERS
     include/iris_sdk/gpu/texture_pool.h
     include/iris_sdk/gpu/gpu_beauty_backend.h
     include/iris_sdk/gpu/gpu_profiler.h
+    include/iris_sdk/gpu/eye_render_packet.h
+    include/iris_sdk/gpu/eye_render_packet_adapter.h
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
     include/iris_sdk/warp/face_warp_controller.h
@@ -560,6 +566,20 @@ include(GenerateExportHeader)
 generate_export_header(iris_sdk
     EXPORT_FILE_NAME ${CMAKE_CURRENT_SOURCE_DIR}/include/iris_sdk/export.h
 )
+
+# =============================================================================
+# P6-W3 §5.10 hand-off / P6-W4 §1.15: W8 Pupil material renderMask hook 옵션.
+# =============================================================================
+# OFF default — 프로덕션 바이너리에서 hook dead code 제거 + 셰이더 #ifdef 비활성.
+# debug 벤치 시: cmake .. -DIRIS_SDK_RENDER_MASK_HOOK_ENABLED=ON
+# TODO(P6-W4): 셰이더 측 #define RENDER_MASK_HOOK_ENABLED prepend 미구현.
+#              현 단계는 C++ 빌드 매크로만 정의 — W8 활성 시 buildLensOverlayFragment()
+#              dynamic prepend 추가 (spec 5번 ⚠️ 안전 경로).
+option(IRIS_SDK_RENDER_MASK_HOOK_ENABLED "Enable W8 Pupil material renderMask hook (debug bench only)" OFF)
+if(IRIS_SDK_RENDER_MASK_HOOK_ENABLED)
+    target_compile_definitions(iris_sdk PRIVATE IRIS_SDK_RENDER_MASK_HOOK_ENABLED=1)
+    message(STATUS "P6-W4: RENDER_MASK_HOOK_ENABLED debug build (shader prepend TODO)")
+endif()
 
 # =============================================================================
 # Tests

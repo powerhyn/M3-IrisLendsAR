@@ -511,6 +511,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     // 렌즈 텍스처 (렌즈 이미지)
     private var lensImageTextureId: Int = 0
     private var pendingLensBitmap: Bitmap? = null
+    private var pendingLensSkuId: String = ""  // P6-W7: 렌즈 SKU id (메타 연동)
 
     // LUT 필터 (C++ Combined Color Pass로 통합 - 3D 텍스처만 관리)
     private var lut3dTextureId: Int = 0
@@ -685,11 +686,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         }
 
         // GPU Beauty Backend 초기화
+        // 권한 모달 → 카메라 재시작 등으로 EGL context가 재생성될 때 stale GL 핸들이 남아
+        // 다음 frame부터 glError 0x501이 발생하는 회귀를 차단하기 위해 init 직전 명시적 release.
+        IrisLensSDK.releaseGpuBeauty()
         val gpuInitResult = IrisLensSDK.initGpuBeauty()
         val gpuSuccess = (gpuInitResult == IrisLensSDK.OK || gpuInitResult == IrisLensSDK.ALREADY_INITIALIZED)
         Log.d(TAG, "GPU Beauty Backend init: $gpuInitResult (success: $gpuSuccess)")
 
-        // GPU Lens Renderer 초기화
+        // GPU Lens Renderer 초기화 (위와 동일 사유)
+        IrisLensSDK.releaseGpuLens()
         val gpuLensResult = IrisLensSDK.initGpuLens()
         Log.d(TAG, "GPU Lens Renderer init: $gpuLensResult")
 
@@ -831,6 +836,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     private fun uploadPendingLensTexture() {
         val bitmap = pendingLensBitmap ?: return
+        val skuId = pendingLensSkuId  // P6-W7: 스레드 안전하게 로컬 캡처
         pendingLensBitmap = null
 
         // 기존 텍스처 삭제
@@ -860,8 +866,8 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             val rgbaBytes = ByteArray(bitmap.width * bitmap.height * 4)
             val buffer = java.nio.ByteBuffer.wrap(rgbaBytes)
             bitmap.copyPixelsToBuffer(buffer)
-            val loadResult = IrisLensSDK.loadLensTexture(rgbaBytes, bitmap.width, bitmap.height)
-            Log.d(TAG, "SDK lens texture loaded: ${bitmap.width}x${bitmap.height}, result=$loadResult")
+            val loadResult = IrisLensSDK.loadLensTexture(rgbaBytes, bitmap.width, bitmap.height, skuId)
+            Log.d(TAG, "SDK lens texture loaded: ${bitmap.width}x${bitmap.height}, sku=$skuId, result=$loadResult")
         }
 
         Log.d(TAG, "Lens texture uploaded: ${bitmap.width}x${bitmap.height}, id=$lensImageTextureId")
@@ -1611,14 +1617,16 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      *
      * GL 스레드가 아닌 곳에서 호출해도 안전 (펜딩 처리)
      */
-    fun setLensTexture(bitmap: Bitmap?) {
+    fun setLensTexture(bitmap: Bitmap?, skuId: String = "") {
         if (bitmap == null) {
             // 렌즈 제거
             pendingLensBitmap = null
+            pendingLensSkuId = ""  // P6-W7
             lensEnabled = false
         } else {
             // 새 렌즈 설정 (GL 스레드에서 업로드)
             pendingLensBitmap = bitmap
+            pendingLensSkuId = skuId  // P6-W7
             lensEnabled = true
         }
     }

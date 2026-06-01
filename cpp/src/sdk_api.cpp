@@ -151,8 +151,11 @@ iris_sdk::BlendMode convert_blend_mode(IrisBlendMode mode) {
         case IRIS_BLEND_COLOR_REPLACE:
             return iris_sdk::BlendMode::ColorReplace;
         default:
-            LOGW("Unknown blend mode: %d, falling back to Normal", static_cast<int>(mode));
-            return iris_sdk::BlendMode::Normal;
+            // P6-W2 §5.9: invalid blend ID는 TintLinearV2(ID=5)로 fallback.
+            // 셰이더 측 §5.9 경고와 정합 (외부 API path도 동일 fallback 보장).
+            LOGW("[IrisSDK] Unknown blend mode: %d, falling back to LuminanceTintLinear (ID=5)",
+                 static_cast<int>(mode));
+            return iris_sdk::BlendMode::LuminanceTintLinear;
     }
 }
 
@@ -773,7 +776,7 @@ void iris_sdk_default_lens_config(IrisLensConfig* config) {
     config->offset_x = 0.0f;
     config->offset_y = 0.0f;
     config->rotation = 0.0f;
-    config->blend_mode = IRIS_BLEND_NORMAL;
+    config->blend_mode = IRIS_BLEND_LUMINANCE_TINT_LINEAR;  // P6-W2 §5.12 canonical default
     config->edge_feather = 0.1f;
     config->apply_left = true;
     config->apply_right = true;

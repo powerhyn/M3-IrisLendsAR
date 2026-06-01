@@ -5,6 +5,9 @@
 > **브랜치**: `feature/P5-W3-05` (base: `70633ac`)
 > **최신 커밋**: `9aee86d` (S1 롤백 완료)
 
+> 🔧 **구현 착수 시 반드시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md)
+> — 9개 W 브레인스토밍 R1 완료 후 작성한 구현 핸드오프. 전역 규약(색공간/LUMA, dist 정규화, 영역 경계, SKU 메타), 5건 버그 수정 내역, 의존성 그래프, W별 핵심 포인트, CI 체크리스트.
+
 ---
 
 ## 1. 인사이트 (세션 간 맥락 보존) ⭐ — 먼저 읽기
@@ -99,17 +102,60 @@ P6-W0 (index, 이 문서)
 
 **현재 상태**: 섹션 1(인사이트)만 작성 완료. 섹션 2~8은 stub. Step B 단계에서 채움.
 
-### 1.7 새 세션 시작 체크리스트 (재개 시)
+### 1.7 git 브랜치 전략
+
+**3-tier 구조** (P5-W3-05 → P6 통합 → W별):
+
+```
+develop  (W3-04 포함, Phase 6 완료까지 유지)
+  └── feature/P6-Works  (Phase 6 통합 브랜치, 현재 작업 중)
+        ├── feature/P6-W1-eye-render-packet (또는 feature/P6-W1)
+        ├── feature/P6-W2-blend-canonical
+        ├── feature/P6-W3-env-reflection-scaffold
+        ├── feature/P6-W4-env-reflection-bench
+        ├── feature/P6-W5-blend-sclera-bench
+        ├── feature/P6-W6-temporal-detail-bench
+        ├── feature/P6-W7-limbal-policy
+        ├── feature/P6-W8-pupil-material-conditional (조건부)
+        └── feature/P6-W9-integration
+```
+
+**플로우**:
+1. 각 W는 `feature/P6-Works`에서 분기 → W별 브레인스토밍/구현
+2. W 완료 시 `feature/P6-Works`로 PR 머지
+3. 전체 Phase 6 완료 후 `feature/P6-Works` → `develop` 한 번에 머지
+
+**참고**: 각 W 구현 시 브랜치명은 짧게(`feature/P6-W1`) 또는 설명 포함(`feature/P6-W1-eye-render-packet`) 중 선택. 명령어 편의 vs 의미 명확성 trade-off.
+
+### 1.8 새 세션 시작 체크리스트 (재개 시)
 
 새 세션에서 작업 재개할 때:
 
-1. `docs/workPaper/P6-W0_index.md` (이 파일) 먼저 읽기 (5분)
-2. 작업할 W의 `P6-W{N}_*.md` 문서 읽기 (10분)
-3. `docs/workPaper/P5-W3-05_brainstorm/99_final_decision.md` 해당 섹션 확인 (5분)
-4. 필요 시 `15_asset_analysis.md`, `16_product_crosscheck.md` 재확인 (5분)
-5. Codex/Gemini 팬 재기동 + W 세부 구현 확정 브레인스토밍 송신 (섹션 7 체크리스트 기반)
+1. **브랜치 확인/생성**:
+   ```bash
+   git branch --show-current          # 현재 위치 확인
+   git checkout feature/P6-Works      # 통합 브랜치로 이동
+   git pull                            # 최신 상태
+   git checkout -b feature/P6-W{N}-*   # W별 분기 (이미 있으면 checkout만)
+   ```
+2. `docs/workPaper/P6-W0_index.md` (이 파일) 먼저 읽기 (5분)
+3. 작업할 W의 `P6-W{N}_*.md` 문서 읽기 (10분)
+4. `docs/workPaper/P5-W3-05_brainstorm/99_final_decision.md` 해당 섹션 확인 (5분)
+5. 필요 시 `15_asset_analysis.md`, `16_product_crosscheck.md` 재확인 (5분)
+6. 필요 시 `docs/workPaper/P6_review/` Codex/Gemini 리뷰 의견 확인
+7. Codex/Gemini 팬 재기동 + W 세부 구현 확정 브레인스토밍 송신 (섹션 7 체크리스트 기반)
 
 **30분 내 맥락 완전 재개 가능**을 목표로 각 W 문서가 작성됨.
+
+### 1.9 이번 세션에서 확인된 주요 이슈 (R4 Critical 수정 반영 완료)
+
+각 W 브레인스토밍 시 이 수정 사항이 반영된 상태에서 시작한다는 점 인지:
+
+- **W1 §5.2.1**: `uAvgIrisLum`는 **sRGB 공간 평균 luma**로 통일. W2 수식이 이를 제곱해 linear 근사.
+- **W1 §5.5**: 공개 C API 실제 이름 `iris_sdk_render_lens_texture` / `iris_sdk_render_with_result` (이전에 잘못 쓴 `iris_sdk_render_lens_gpu`는 존재 안 함).
+- **W3/W6/W8**: 셰이더의 `dist`는 이미 `/scaledRadius`로 정규화된 0~1 값. `dist / iris_radius`, `smoothstep(iris_radius * 1.2, ...)` 같은 이중 정규화 수식 금지.
+- **W7**: "B10 신규 벤치", "기본 ON vs OFF 재판정"은 out of scope. 99 §1.2 C6 범위(B4 fallback + SKU 메타)로 제한.
+- **W6**: EMA 계수는 §5.1 정밀 공식 `1 - pow(0.05, dt/target_ms)` 사용. 근사 `α ≈ 3/(fps·target)`은 참고용.
 
 ---
 

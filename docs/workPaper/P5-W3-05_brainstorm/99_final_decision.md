@@ -26,25 +26,25 @@ R3에서 Codex·Gemini·Claude가 모두 동의한 항목만 포함. `99_claude_
 |----|----------|----------|----------|
 | D1 | 분석적 노멀 + 고정 조명 `vec3(0.3, 0.4, 1.0)` 블록 | `shader_sources.cpp:1008-1032` | 세 모델 R2 합의, R3 재확인 |
 | D2 | `LIMBAL_ENABLED = false` 하드코드 전역 비활성 | `shader_sources.cpp:999-1006` | 세 모델 R2 합의 |
-| D3 | `realSpec = smoothstep(0.7, 0.95, lum)` + `mix(result, baseL, realSpec)` | `shader_sources.cpp:865-874` (LTL 내부) | **조건부 폐기**: I1 환경 반사 계층 도입 성공(B2) 확정 후 제거. I1 실패 시 재평가 — Gemini/Claude R3 지적 |
+| D3 | `realSpec = smoothstep(0.7, 0.95, lum)` + `mix(result, baseL, realSpec)` | `shader_sources.cpp:865-874` (LTL 내부) | **조건부 폐기**: I1 환경 반사 계층 도입 성공(B2) 확정 후 제거. I1 실패 시 재평가 — Gemini/Claude R3 지적. ✅ **P6-W2 코드 완전 삭제** (커밋 b70490b, archive: `P6-W2_brainstorm/realSpec_archive.md`). ⚠️ **2026-05-18 확정 (Phase 6 이월)**: B2 환경 반사 Phase 6 이월 결정으로 D3는 **"조건부 유지" 확정** (완전 폐기 아님). 코드는 W2에서 삭제됐지만 Phase 7+ 환경 반사 재개 검토 시 함께 재고. 출처: `P6-W4 §1.17`. |
 | D4 | `uAvgIrisLum = 0.35` 하드코드 기본값 | `gpu_lens_renderer.cpp:811-813` 근처 | 세 모델 R2 합의 |
 | D5 | "3D Light" 토글 UI + `uHighlightEnabled` uniform | demo + shader | D1 제거 시 자동 무의미 |
-| D6 | 블렌드 중 `Overlay`, `LuminanceTint(nonlinear)`, `SoftLight` 3종 | `shader_sources.cpp:979-997` 분기 | ⚠️ **`Normal` 제거 철회** — Codex R3 "B1 벤치 전 제거는 결론 선반영" 지적. Normal은 B1 벤치 전까지 유지 |
+| D6 | 블렌드 중 `Overlay`, `LuminanceTint(nonlinear)`, `SoftLight` 3종 | `shader_sources.cpp:979-997` 분기 | ⚠️ **`Normal` 제거 철회** — Codex R3 "B1 벤치 전 제거는 결론 선반영" 지적. Normal은 B1 벤치 전까지 유지. ✅ **P6-W2 적용** (S1 9aee86d로 함수+분기 제거, W2 b70490b로 fallback default를 TintLinearV2로 통일, 25ebf99로 invalid ID 1회 경고). |
 
 ### 1.2 추가/변경할 것
 
 | ID | 변경 | 합의 출처 / R3 수정 내역 |
 |----|------|----------------------|
-| C1 | **블렌드 3종 확정**: `TintLinearV2`(기본값), `Multiply`, `ScreenLinear`. 4번째 슬롯은 §2 B1 벤치 결과로 확정 | ⚠️ **R3 수정**: Codex 원래 R2 입장(3종 확정 + 4번째 슬롯 벤치)으로 되돌림. 99_claude_synthesis의 "4종 확정" 왜곡 수정 |
-| C2 | `TintLinearV2` = 기존 LuminanceTintLinear에서 `realSpec` 완전 제거한 형태. 수식: `baseL=base*base; lensL=lens*lens; lum=dot(baseL,w); out=sqrt(mix(baseL, lensL*lum*scale, a))` | 세 모델 R2/R3 합의 |
-| C3 | `ScreenLinear` 신규 — 수식: `out = sqrt(mix(baseL, 1-(1-baseL)*(1-lensL), a))` | 세 모델 R2/R3 합의 |
-| C4 | `ColorReplaceLinear` **벤치 대상(B1)** — 수식: `detail = clamp(pow(lum/avgLum, 0.7), 0.75, 1.25); out = sqrt(mix(baseL, lensL*detail, a))` | Codex R2 제안, B1 결과 후 채택 결정 |
-| C5 | 환경 반사 가산 계층 분리. 기본: `float renderMask = finalAlpha; blended += reflection * fresnel * renderMask;`. **반사 소스는 B2 벤치로 결정**. **renderMask hook**: P6-W1 활성화 시 `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 분기로 `renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist))`로 확장 가능. 기본 동작은 기존 finalAlpha와 동일, 추가 런타임 비용 0. ⚠️ 이 smoothstep 수식은 **예시, 최종 구현 확정 아님** (Codex R4 단서) | Codex R1/R3 + R4 Patch 4 |
+| C1 | **블렌드 3종 확정**: `TintLinearV2`(기본값), `Multiply`, `ScreenLinear`. 4번째 슬롯은 §2 B1 벤치 결과로 확정 | ⚠️ **R3 수정**: Codex 원래 R2 입장(3종 확정 + 4번째 슬롯 벤치)으로 되돌림. 99_claude_synthesis의 "4종 확정" 왜곡 수정. ✅ **P6-W2 적용** (커밋 b70490b — 셰이더 함수 + 분기 등록 완료). |
+| C2 | `TintLinearV2` = 기존 LuminanceTintLinear에서 `realSpec` 완전 제거한 형태. 수식: `baseL=base*base; lensL=lens*lens; lum=dot(baseL,w); out=sqrt(mix(baseL, lensL*lum*scale, a))`. `scale = clamp(K / uAvgIrisLum, 0.8, ub)`에서 **K(비례 상수)와 ub(scale clamp upper)는 실기기 시각 튜닝값**. W2 적용 시 K=0.85, ub=7.0. | 세 모델 R2/R3 합의. ✅ **P6-W2 적용** (커밋 b70490b — squaring 버그 함께 수정, uAvgIrisLum 이미 linear 가정). 실기기 회귀 fix(K=0.5→0.85, ub=5.0→7.0)는 별도 fix 커밋. **추가 강도는 알고리즘 본질 한계(휘도 보존 구조)로 W5 B1 벤치 재검토 대상**. |
+| C3 | `ScreenLinear` 신규 — 수식: `out = sqrt(mix(baseL, 1-(1-baseL)*(1-lensL), a))` | 세 모델 R2/R3 합의. ✅ **P6-W2 적용** (커밋 b70490b — sRGB blendScreen 제거, 옵션 A). |
+| C4 | `ColorReplaceLinear` **벤치 대상(B1)** — 수식: `detail = clamp(pow(lum/avgLum, 0.7), 0.75, 1.25); out = sqrt(mix(baseL, lensL*detail, a))` | Codex R2 제안, B1 결과 후 채택 결정. ✅ **P6-W2 적용** (커밋 b70490b — ID 7 정식 분기 활성, §5.7 옵션 B. W5 B1 결과로 채택/제거). |
+| C5 | 환경 반사 가산 계층 분리. 기본: `float renderMask = finalAlpha; blended += reflection * fresnel * renderMask;`. **반사 소스는 B2 벤치로 결정**. **renderMask hook**: P6-W1 활성화 시 `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 분기로 `renderMask = max(finalAlpha, smoothstep(iris_radius * 1.2, 0.0, dist))`로 확장 가능. 기본 동작은 기존 finalAlpha와 동일, 추가 런타임 비용 0. ⚠️ 이 smoothstep 수식은 **예시, 최종 구현 확정 아님** (Codex R4 단서) | Codex R1/R3 + R4 Patch 4. ✅ **P6-W3 scaffold 구현 완료** (PR #3). ✅ **P6-W4 Phase A 3 프로토타입 활성** (커밋 121a262). ⚠️ **2026-05-18 확정 (Phase 6 이월)**: B2 24클립 벤치 미실행. Phase A 시각 검증에서 R1 §5.8 옵션 C "외곽 강조 Fresnel" 물리 가정 오류 발견 — 사용자 직관 "현실 발생 불가능 케이스" 지적으로 §B2 시나리오 "셋 다 차이 미미"(line 137) 채택. 코드는 OFF 기본 + 토글로 보존, Phase 7+ 재개 시 옵션 A/B 재검토. 출처: `P6-W4 §1.17`. |
 | C6 | 림발 기본 ON + SKU 메타데이터 플래그. 플래그는 **내부 material 모델 필드**(공개 `LensConfig`가 아닌 내부 표현) | ⚠️ **R3 수정**: Codex R3 "공개 API 변경 가능성" 지적 반영. 공개 API는 변경하지 않음 |
-| C7 | **블링크 alpha ramp — 시간 범위만 확정, 계수는 실측 튜닝**. down 50~80ms, up은 **B5 벤치로 확정**(아래 §2) | ⚠️ **R3 수정**: Gemini R3 "up 100~120ms 동의한 적 없음" + Codex R3 "α=0.15 계수가 목표 ms와 불일치" 둘 다 반영. up 시간 쟁점 자체를 벤치로 이관 |
+| C7 | **블링크 alpha ramp — 시간 범위만 확정, 계수는 실측 튜닝**. down 50~80ms, up은 **B5 벤치로 확정**(아래 §2) | ⚠️ **R3 수정**: Gemini R3 "up 100~120ms 동의한 적 없음" + Codex R3 "α=0.15 계수가 목표 ms와 불일치" 둘 다 반영. up 시간 쟁점 자체를 벤치로 이관. ✅ **P6-W6 Phase A 구현 완료** (feature/P6-W6, 2026-05-28): `computeEmaAlpha(dt_ms, target_ms) = 1 - pow(0.05, dt/target)` (실측 dt) + 좌/우 `render_alpha_` EMA (down 60ms 고정 / up `setBlinkUpMs` 토글 60·80·120ms). **up 시간 확정은 B5 실기기 벤치 후.** |
 | C8 | `EyeRenderPacket` 구조체 도입 (내부 어댑터 레이어) | 세 모델 R2/R3 합의 |
 | C9 | **avg_iris_luma 실측 — masked ROI 평균**. 수식: `avg = sum(dot(rgb,w)*mask)/sum(mask)`, `mask = (r < 0.65) AND eyelidMask`. 측정 실패 시 이전값 hold, 3프레임 이상 실패 시 중립 상수 fallback | ⚠️ **R3 수정**: Codex R3 "1샘플은 pupil 중심 검은 동공 읽음 → 정규화 망침" 지적 반영. 중심 샘플 폐기, ROI 평균으로 교체 |
-| C10 | 홍채 디테일 재주입 — `detail = clamp(baseLum / blur3x3(baseLum), 0.85, 1.15)`를 **iris inner(r<0.65)에만**, **spec/reflection 계층 계산 전에 합성**, **spec/reflection 영역 제외**. 저조도 gate 임계값은 **B9 벤치로 확정** | ⚠️ **R3 수정**: Codex R3 "spec/reflection 제외 빠짐" + Gemini R3 "gate 0.15 너무 낮을 수 있음" 반영. gate 임계값 확정 벤치 추가 |
+| C10 | 홍채 디테일 재주입 — `detail = clamp(baseLum / blur3x3(baseLum), 0.85, 1.15)`를 **iris inner(r<0.65)에만**, **spec/reflection 계층 계산 전에 합성**, **spec/reflection 영역 제외**. 저조도 gate 임계값은 **B9 벤치로 확정** | ⚠️ **R3 수정**: Codex R3 "spec/reflection 제외 빠짐" + Gemini R3 "gate 0.15 너무 낮을 수 있음" 반영. gate 임계값 확정 벤치 추가. ✅ **P6-W6 Phase A 구현 완료** (feature/P6-W6, 2026-05-28): 셰이더 디테일 재주입(3×3 카메라 blur, `innerMask=smoothstep(0.7,0.5,dist)`, 블렌드→디테일→반사 순서로 spec/reflection 자연 제외) + B9 gate `smoothstep(threshold±0.03, uAvgIrisLum)` 토글(0.10·0.15·0.25). **gate threshold = 0.10 채택** (벤치 없이 도메인 판단, 2026-05-28): 저조도 사용 시나리오가 드문 뷰티 시뮬레이션 특성상 저조도 노이즈 방지 실익이 낮음 → C10 디테일을 일반 환경에서 항상 살리는 쪽. gate 로직 보존(실측 연결 시 극단 저조도 자동 감쇄). 실기기 C10 디테일 시각 긍정 확인. ⚠️ `uAvgIrisLum` 실측 미연결(fallback 상수) — 실측 연결은 우선순위 강등(별도 작업). |
 | C11 | W2-W3 경계: pupil_center·occlusion·(optional) gaze는 W2 refiner 출력, W3는 EyeRenderPacket으로 수신만. **occlusion은 `visibility + aperture_mask`로 흡수**(별도 필드 X) | ⚠️ **R3 수정**: Codex R3 "스키마 불일치" 지적 반영. occlusion이 별도 필드가 아님을 명시 |
 
 ### 1.3 EyeRenderPacket 최종 스키마 (R3 확정)
@@ -116,6 +116,8 @@ struct EyeRenderPacket {
 - **소요**: 3~4시간 (SKU 1개 추가 반영)
 
 ### B2 — 환경 반사 소스: env map only vs Periphery camera vs OFF
+
+> ✅ **2026-05-18 종결 (Phase 6 이월 채택)**: 24클립 벤치 미실행. P6-W4 Phase A 시각 검증 단계에서 R1 §5.8 옵션 C "외곽 강조 Fresnel" 물리 가정 오류 발견 — 사용자 직관 "외곽 광택 자체가 현실 발생 불가능 케이스" 지적으로 아래 시나리오 **마지막 행(Phase 6 이월)** 채택. Phase A 코드(scaffold + 3 프로토타입 토글)는 OFF 기본으로 보존. Phase 7+ 재개 시 옵션 A(Schlick) 또는 옵션 B(reflect 기반) brainstorm 재호출. 출처: `P6-W4 §1.17`, `P6-W4_brainstorm/phase_a_issue{,_codex}.md`.
 
 - **프로토타입 3종**:
   1. **OFF** (baseline)
@@ -344,3 +346,54 @@ R3 합의본에서 사용자 판단이 필요했던 "Pupil cutout" 쟁점은 R4�
 - 어색하면 그때 P6-W1 시작, 자연 커버되면 트랙 폐기
 
 **사용자 판단 남은 항목**: 없음. 99_final_decision.md는 이제 **구현 착수 승인 대기 상태**.
+
+---
+
+## 10. Phase 6 종결 후속 처리 (2026-06-01, W9 단계 추가)
+
+> 본 §10은 R1~R4 합의본(§0~§9) 박제 후 **Phase 6 진행 결과**를 추가 기록한 부록. 합의 내용은 변경하지 않고, 각 결정이 Phase 6에서 어떤 상태로 닫혔는지만 추적한다.
+
+### 10.1 §6 미결/조건부 항목의 Phase 6 종결 상태
+
+| # | §6 항목 | Phase 6 종결 상태 | 근거 |
+|---|---|---|---|
+| 1 | D3 realSpec 완전 폐기 | ⏸️ **조건부 유지 → Phase 7+ 환경 반사 재개와 함께 재고** | W4 이월 (`P6-W4_*.md` §1.17) → realSpec 폐기 확정 조건 미충족 |
+| 2 | C4 ColorReplaceLinear (B1) | ✅ **B1 Phase A/B 완료** — TintLinearV2 자연도 우위, CRL 4번째 슬롯 불채택 경향 | 메모리 [[w5-b1-color-replace-decision]], `docs/bench/P6-W5/report.md` |
+| 3 | C5 환경 반사 소스 (B2) | ⏸️ **Phase 6 이월** — Phase A scaffold만 보존(OFF 기본), 24클립 미실행 | 메모리 [[w4-env-reflection-deferred]] |
+| 4 | C6 림발 자동 감지 fallback (B4) | ⛔ **셰이더 림발 영구 제거** (B4 자동감지 결과와 무관). 림발은 에셋 책임 | `P6-W7_*.md` §6.0.4, 커밋 `de1eeb7`/`8bdf825`, 메모리 [[limbal-in-asset-not-shader]] |
+| 5 | C7 블링크 up ramp (B5) | ✅ Phase A 완료 (W6 토글 인프라). 정량 ramp 수치는 후속 Phase B에서 확정 | `P6-W6_*.md` 상태 줄 |
+| 6 | C8 sclera veto 방식 (B8) | ✅ Phase B 1차 결과 — **luma-only 유력** (저조도 미검증, 후속) | `docs/bench/P6-W5/report.md` |
+| 7 | C10 저조도 gate (B9) | ✅ Phase A 완료 (gate 기본 0.10 채택, 도메인 판단) | 커밋 `97fff27`, 메모리 [[low-light-usage-rare]] |
+| 8 | Pupil cutout → P6-W8 조건부 트랙 | ⏸️ **자동 폐기** — 착수 조건(B2 2/3 Y) 충족 불가 (W4 이월 연쇄) | `P6-W8_*.md` 상태 줄 |
+
+### 10.2 §4 Phase 6 이월 표 신규 추가 (2026-06-01)
+
+§4 원안 7개 + 다음 항목 추가:
+
+| 신규 이월 항목 | 사유 | 재개 진입점 |
+|---|---|---|
+| **W4 환경 반사 트랙 (B2)** | Phase A 시각 검증에서 "외곽 광택은 현실 발생 드묾" 도메인 판단 (메모리 [[feedback-physical-assumption-validation]]) | `P6-W3/W4_*.md` Phase 7+ 재개 진입점, 메모리 [[w4-env-reflection-deferred]] |
+| **W8 Pupil material restore** | W4 종속 자동 폐기 | `P6-W8_*.md` 본문 Option E 설계 보존 |
+| **W5 Phase C (TintLinearV2 흰자 빛남 수식 개선)** | 1차 형광 벤치에서 신규 발견된 후속 과제 | 메모리 [[w5-b1-tintlinearv2-strength]] |
+
+### 10.3 P6-W1 → P6-W8 rename cross-reference (Codex R1 §1.2 지적 반영)
+
+§0/§4/§6/§9에서 "Pupil cutout → P6-W1 조건부 트랙"으로 명명한 항목은 Phase 6 구조화 과정에서 **P6-W8**로 재배치됨. 결정 내용 동일, 명명만 변경. 본 §10이 이를 명시 cross-reference.
+
+### 10.4 살아남은 산출물 (develop 머지 직전)
+
+- **C++ 코어**: EyeRenderPacket 계약, fallback chain, 블렌드 3종(TintLinearV2/Multiply/ScreenLinear, ID=5 default), uScleraVetoMode 3-way, 블링크 ramp + 디테일 재주입 + 저조도 gate, sku_id/LensSkuMetadata + 경량 JSON 파서, B4 자동감지 인프라(셰이더 림발만 제거, 메타 기반 SKU별 설정용으로 보존)
+- **JNI/Java/Kotlin**: sku_id 와이어링, lens_meta.json 42 SKU 등록, A/B/C/D 토글 UI, B5/B9/C10 internal API + 토글
+- **이월 산출물 보존**: W3 sampleReflection/calcFresnel/renderMask, W4 reflection mode toggle (OFF 기본), W4 벤치 인프라(`docs/bench/P6-W4/`)
+- **레거시 제거**: CPU 경로 MainActivity 제거(`1d4b19c`), 셰이더 림발 영구 제거(`de1eeb7`/`8bdf825`)
+
+### 10.5 미실행 CI 항목 (후속 이월)
+
+- LUMA 계수 shader vs CPU 오차 ≤1% 테스트 케이스 — W1 측정 source가 W6 이관됨에 따라 W6 후속 Phase에서 작성
+- 메모리 누수 (valgrind/sanitizer) — Android 실기기 long-run 관찰로 대체 (W9 통합 리포트 §3 참조)
+
+### 10.6 출처
+
+- W9 진행: `docs/workPaper/P6-W9_integration.md` §1.0 (2026-06-01 갱신)
+- 통합 리포트: `docs/workPaper/P6-W9_integration_report.md`
+- 머지 메시지: P6-W9_integration.md §1.0.7

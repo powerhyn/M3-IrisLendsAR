@@ -287,7 +287,7 @@ private:
 struct LensConfig {
     float opacity = 0.8f;
     float scale = 1.0f;
-    BlendMode blend_mode = BlendMode::NORMAL;
+    BlendMode blend_mode = BlendMode::LuminanceTintLinear;  // P6-W2 §5.12 canonical default
     bool render_left = true;
     bool render_right = true;
 };
@@ -443,7 +443,7 @@ struct SDKConfig {
 
     // 렌더링 설정
     float default_opacity = 0.8f;
-    BlendMode default_blend_mode = BlendMode::NORMAL;
+    BlendMode default_blend_mode = BlendMode::LuminanceTintLinear;  // P6-W2 §5.12 canonical default
 };
 
 } // namespace iris_sdk
@@ -503,13 +503,19 @@ typedef enum {
 } IrisPixelFormat;
 
 //=============================================================================
-// 블렌드 모드
+// 블렌드 모드 — P6-W2 §5.4/§5.12 기준 (실제 sdk_api.h와 일치)
+// 활성: 0(Normal) / 1(Multiply) / 2(Screen=ScreenLinear) / 5(LuminanceTintLinear, canonical default) / 7(ColorReplace=ColorReplaceLinear)
+// Deprecated: 3(Overlay) / 4(LuminanceTint) / 6(SoftLight) — 셰이더에서 ID 5 fallback
 //=============================================================================
-typedef enum {
-    IRIS_BLEND_NORMAL       = 0,
-    IRIS_BLEND_MULTIPLY     = 1,
-    IRIS_BLEND_SOFT_LIGHT   = 2,
-    IRIS_BLEND_OVERLAY      = 3
+typedef enum IrisBlendMode {
+    IRIS_BLEND_NORMAL                = 0,
+    IRIS_BLEND_MULTIPLY              = 1,
+    IRIS_BLEND_SCREEN                = 2,
+    IRIS_BLEND_OVERLAY               = 3,  /* @deprecated */
+    IRIS_BLEND_LUMINANCE_TINT        = 4,  /* @deprecated */
+    IRIS_BLEND_LUMINANCE_TINT_LINEAR = 5,  /* canonical default */
+    IRIS_BLEND_SOFT_LIGHT            = 6,  /* @deprecated */
+    IRIS_BLEND_COLOR_REPLACE         = 7
 } IrisBlendMode;
 
 //=============================================================================

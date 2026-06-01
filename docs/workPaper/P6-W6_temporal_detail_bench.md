@@ -1,7 +1,7 @@
 # P6-W6: B5 블링크 up ramp + B9 저조도 디테일 gate + C10 튜닝
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
-> **작성**: 2026-04-23
+> **상태**: ✅ Phase A 완료 (코드/토글 인프라, gate 기본 0.10 채택 — 커밋 `97fff27`/`5fa5fe0`/`14aac99`/`5e48cf6`). Phase B/C(실기기 후속 튜닝)는 W9 통합 머지 후 별도 진행. avg_iris_luma 실측 source 연결도 후속 (메모리 [[w6-avg-iris-luma-measure]]).
+> **작성**: 2026-04-23 / **구현**: 2026-05-28 (feature/P6-W6)
 > **선행 의존**: P6-W1 (avg_iris_luma — B9 gate 입력), P6-W3 (환경 반사 계층 스캐폴드 — detail 합성 순서)
 > **병렬 가능**: P6-W4, W5, W7와 병렬
 
@@ -270,13 +270,21 @@ W6에서 다룰 것:
 
 ### 4.1 Definition of Done
 
-- [ ] `computeEmaAlpha(target_ms, fps)` 유틸 함수 구현
-- [ ] B5 3 프로토타입 (60/80/120ms up) 토글 구현
-- [ ] B9 3 프로토타입 (0.10/0.15/0.25 gate) 토글 구현
-- [ ] C10 수식 (iris inner 마스크 + spec/reflection 제외) 셰이더 반영
-- [ ] 벤치 촬영 + 평가 완료
-- [ ] 결과 반영 커밋
-- [ ] 99 §1.2 C7/C10 + §2 B5/B9 업데이트
+**Phase A (구현/토글 인프라) — 완료 (2026-05-28):**
+- [x] `computeEmaAlpha(dt_ms, target_ms)` 유틸 함수 구현 (§5.5 실측 dt 시그니처)
+- [x] B5 3 프로토타입 (60/80/120ms up) 토글 구현 (`setBlinkUpMs`, 기본 80)
+- [x] B9 3 프로토타입 (0.10/0.15/0.25 gate) 토글 구현 (`setGateThreshold`, **기본 0.10** — 아래 도메인 판단)
+- [x] C10 수식 (iris inner 마스크 + spec/reflection 제외 순서) 셰이더 반영
+- [x] 벤치 토글 노출 (internal C API → JNI → Kotlin → demo UI 패널)
+- [x] C++ 코어 + Android APK 빌드 통과 + 실기기 C10 디테일 시각 긍정 확인
+
+**Phase B/C (벤치 + 반영) — B9는 도메인 판단으로 단축:**
+- [x] **B9 gate threshold = 0.10 채택** (벤치 없이 도메인 판단, 2026-05-28): 저조도 사용 시나리오가 드문 뷰티 시뮬레이션 특성(어두운 곳에선 효과 자체가 안 보여 사용자가 안 씀) → 저조도 노이즈 방지(B9 본래 목적)의 실익이 낮음. C10 디테일을 일반 환경에서 항상 살리는 쪽(gate 0.10) 채택. gate 로직은 보존 → 실측 연결 시 극단 저조도(luma<0.07) 자동 감쇄.
+- [ ] B5 up ramp 확정 — 60/80/120 미묘, 퀄리티 영향 작음(실기기 1차 관찰). 80ms 기본 유지 잠정.
+- [ ] (선택) avg_iris_luma 실측 연결 — 우선순위 강등(저조도 드묾). 연결 시 TintLinearV2 환경 색 정규화 + 저조도 gate 동시 활성.
+- [ ] 99 §1.2 C7/C10 + §2 B5/B9 최종 업데이트
+
+> **avg_iris_luma 실측 미연결 주의**: B9 gate는 `uAvgIrisLum`을 입력으로 쓰나 현재 fallback 상수(0.1225)만 공급됨(실측 source는 W1에서 GL state 오염으로 revert, 별도 작업으로 분리). 기본 gate 0.10에서 fallback luma 0.1225 → gate≈0.96이라 C10 디테일 일반 적용. 저조도 자동 적응은 실측 연결 후.
 
 ### 4.2 Out of scope
 
@@ -287,26 +295,29 @@ W6에서 다룰 것:
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.1 색공간/LUMA 규약 (`uAvgIrisLum` linear 값 직접 사용), §4.2 dist 정규화 규약, §4.3 영역 경계 매핑 (innerMask 0.5~0.7, W7 림발 0.85~1.0과 중간 0.7~0.85 공백 영역 존재), §4.4 GLSL 패스 규약 (블렌드→디테일→반사 순서).
+
 ### 5.1 C7 블링크 ramp 구조
 
 ```cpp
 // gpu_lens_renderer.cpp
-float computeEmaAlpha(float target_ms, float fps) {
-    float dt = 1000.0f / fps;
-    return 1.0f - std::pow(0.05f, dt / target_ms);
+// R2 C-1: 실측 dt_ms를 매 프레임 직접 입력 (fps 인자 금지). §5.5와 시그니처 통일.
+float computeEmaAlpha(float dt_ms, float target_ms) {
+    return 1.0f - std::pow(0.05f, dt_ms / target_ms);
 }
 
-// 프레임 단위 업데이트
+// 프레임 단위 업데이트 (dt_ms = 직전 프레임 delta time, runtime 실측)
 if (eye_closing) {
-    float alpha_close = computeEmaAlpha(60.0f, fps);  // down 60ms
+    float alpha_close = computeEmaAlpha(dt_ms, 60.0f);  // down 60ms
     render_alpha_ = alpha_close * 0.0f + (1.0f - alpha_close) * render_alpha_;
 } else {
-    float alpha_open = computeEmaAlpha(target_up_ms, fps);  // B5 결과
+    float alpha_open = computeEmaAlpha(dt_ms, target_up_ms);  // B5 결과
     render_alpha_ = alpha_open * target_alpha + (1.0f - alpha_open) * render_alpha_;
 }
 ```
 
 **`target_up_ms`**: B5 결과 (60/80/120).
+**`dt_ms`**: 직전 프레임 delta time 실측값 (30fps 고정 가정 금지 — §5.5 / R2 C-1).
 
 ### 5.2 C10 디테일 재주입 수식
 
@@ -346,9 +357,99 @@ blended *= vec3(detailMul);
 - 3 조도 × 3 gate = **9 클립**
 - SKU: 오(OH)_베이글 (중간 톤, 디테일 관찰 용이)
 
+### 5.5 EMA 공식 — **`1 - pow(0.05, dt_ms / target_ms)` 확정** (W6 R1 다수 2/3)
+
+- **공식:** `computeEmaAlpha(dt_ms, target_ms) = 1.0 - pow(0.05, dt_ms / target_ms)`.
+- **target_ms 정의:** **95% 도달 시간** (5% 잔존 시점).
+- **실측 dt 사용:** 30fps 고정 가정 금지. 실제 frame delta time을 runtime에서 주입.
+- **검증:** 구현 후 30fps/60fps 실기기 로그로 "80ms 만에 0.95 도달" 확인. Codex R3 계수 불일치 지적 해소.
+- Claude R1 원안 `α = 1 - exp(-dt/τ)` (τ=63% 도달) 공식은 소수 의견으로 정정.
+- **R2 C-1 정합성:** 시그니처를 `computeEmaAlpha(dt_ms, target_ms)` 단일형으로 확정. §5.1의 `(target_ms, fps)` 예시는 이 형태로 통일됨 (구버전 폐기).
+- 출처: `P6-W6_brainstorm/synthesis.md` §2 + `codex_w6_r2.md` §4.
+
+### 5.6 B5 user 수 — **3명 × 5 × 3 = 45 이벤트 확정** (W6 R1 합의 3/3)
+
+- 정성 판정 규모. 3명 중 2명 이상 "팝"/"지연" 불만 Y면 ramp 계수 추가 조정 판정.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.7 B9 gate smoothstep — **±0.03 대칭 폭 확정** (W6 R1 합의 3/3)
+
+- `smoothstep(threshold - 0.03, threshold + 0.03, avg_iris_luma)`.
+- **0.06 폭 linear-luma 연속 전이** → 루마 축 계단(밴딩) 방지 + threshold 의미 유지.
+- ⚠️ **R2 C-2 정정:** smoothstep은 **루마 값 매핑**이라 시간/프레임 평활화가 아님. "30fps 2~3프레임 transition"이라는 시간 해석은 부정확하므로 폐기. 입력 루마의 프레임 간 flicker 억제는 이 식이 보장하지 않음 (필요 시 별도 temporal filter).
+- 출처: `P6-W6_brainstorm/synthesis.md` §1 + `codex_w6_r2.md` §4.
+
+### 5.8 blur 커널 — **3×3 확정** (W6 R1 합의 3/3)
+
+- 9 fetch × iris ROI 한정. Single-pass 원칙(99 §1.2 C-F) 준수.
+- 5×5 / separable Gaussian 불채택.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.9 innerMask 경계 — **smoothstep `[0.7, 0.5]` 확정** (W6 R1 합의 3/3)
+
+- `smoothstep(0.7, 0.5, dist)` 형태. inner=1, outer=0.
+- ⚠️ **R2 C-3 정정:** `dist`는 셰이더에서 이미 `/scaledRadius`로 정규화됨(§5.2). `dist/iris_radius`는 **중복 정규화이므로 금지** — `dist` 그대로 사용.
+- hard cutoff의 "경계 픽셀 번쩍임" 방지.
+- 이 마스크는 중심에서 1이므로 **동공 제외를 단독 수행하지 않음** — 기존 iris/pupil 적용 마스크와 교차된 영역 안에서 사용 (C10 "동공 제외 iris 영역" 조건 유지).
+- W7 림발 영역(0.85~1.0)과 분리 — 중간 0.7~0.85는 iris 본체 (아무 처리 없음).
+- 출처: `P6-W6_brainstorm/synthesis.md` §1 + `codex_w6_r2.md` §4.
+
+### 5.10 저조도 정의 — **B9 threshold로 자동 정의** (W6 R1 합의 3/3)
+
+- 장면명(실내/실외)이 아닌 **`avg_iris_luma` 기준** 정의.
+- B9 벤치 threshold 후보 {0.10, 0.15, 0.25} 중 채택값이 "저조도 경계".
+- Claude 제안 시작값 0.15는 후보 중 하나로 포함.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1.
+
+### 5.11 B5 × B9 동시 측정 — **동시 캡처, 지표 독립 확정** (W6 R1 합의 3/3)
+
+- 저조도 환경에서 블링크 반복 = 단일 시나리오에서 B5+B9 동시 데이터 수집.
+- 세션 구조: **고정 응시 5초 → 블링크 반복 10초 → 고정 응시 5초** (교차 영향 점검).
+- 판정표 분리: B5 지표(블링크 직후 디테일 복귀) vs B9 지표(저조도 디테일 거북함).
+- **R2 C-4 — C10 프로토타입 선행, 최종 튜닝만 후행:** B9 자체가 gate 3안(0.10/0.15/0.25) 비교라 **C10 gate 토글 프로토타입은 캡처 *전* 필수**. "C10 후행"은 *최종 튜닝*만을 의미. 순서: **C10 프로토타입 구현(gate 토글 포함) → B5/B9 동시 캡처 → 판정 → C10 최종 튜닝(gate threshold 확정 + 재주입 강도) → 최종 실기기**.
+- 출처: `P6-W6_brainstorm/synthesis.md` §1 + `codex_w6_r2.md` §1/§5.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W6 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | EMA 공식 정확도 | ✅ **닫힘** (2/3 다수 + Claude 편향 정정) | §5.5 |
+| 6.2 | B5 user 수 | ✅ **닫힘** (3/3) | §5.6 |
+| 6.3 | gate smoothstep | ✅ **닫힘** (3/3) | §5.7 |
+| 6.4 | blur 커널 | ✅ **닫힘** (3/3) | §5.8 |
+| 6.5 | innerMask 경계 | ✅ **닫힘** (3/3) | §5.9 |
+| 6.6 | 저조도 환경 정의 | ✅ **닫힘** (3/3) | §5.10 |
+| 6.7 | B5×B9 동시 측정 | ✅ **닫힘** (3/3) | §5.11 |
+
+**B5/B9/C10 동시 수행 타당성 (3/3 재확인).** B5×B9 동시 캡처 → 판정 → C10 후행 튜닝.
+
+**미결 없음.** 가장 수렴도 높은 W. 후속: C10 튜닝 (B5/B9 결과 후), B9 threshold 확정 (0.10/0.15/0.25 중 실기기 선택).
+
+원문: `docs/workPaper/P6-W6_brainstorm/{codex,gemini,claude}_w6.md`.
+종합: `docs/workPaper/P6-W6_brainstorm/synthesis.md`.
+
+### 6.0.1 R2 교차검증 결과 (2026-05-27)
+
+R1 결정값(EMA 95%·gate ±0.03·3x3·innerMask smoothstep·luma 저조도 정의·동시측정) **전부 유지 — 재논의 불필요**. 단 Codex R2가 **문서 내부 정합성 4건**을 지적, 구현 전 정정 완료:
+
+| 코드 | 정정 | 반영 |
+|------|------|------|
+| C-1 | EMA 시그니처 `(target_ms, fps)` → `(dt_ms, target_ms)` 단일화 (실측 dt) | §5.1 / §5.5 |
+| C-2 | gate "30fps 2~3프레임 transition" 시간 주장 폐기 → 0.06 루마폭 연속전이 | §5.7 |
+| C-3 | innerMask `dist/iris_radius` 중복 정규화 제거 → `dist` 그대로 | §5.9 |
+| C-4 | "C10 후행" → 프로토타입 선행 / 최종 튜닝만 후행 명료화 | §5.11 |
+
+- Gemini R2: 전면 동의(R1 재확인 가치 O). 단 위 4건 미발견 + ±0.03 "인간 눈 대비" 근거는 검증 안 됨 → 미채택.
+- **R3 불필요.** 검토: `docs/workPaper/P6-W5_brainstorm/codex_phase_ab_review.md` 패턴의 critical-review 적용.
+- 원문: `docs/workPaper/P6-W6_brainstorm/{codex,gemini}_w6_r2.md`.
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 EMA α → ms 공식 정확도
 

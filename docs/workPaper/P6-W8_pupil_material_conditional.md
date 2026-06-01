@@ -1,10 +1,11 @@
 # P6-W8: Pupil Material Restore (조건부 트랙)
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
-> **조건부**: P6-W4 B2 벤치에서 "중앙 공동 체감" 지표 2/3 이상일 때만 착수. 미달 시 트랙 폐기.
+> **상태**: ⏸️ **Phase 6 자동 폐기 (2026-06-01, W9 단계)**. 트랙 자체는 Phase 7+ 환경 반사 재개 시 함께 재검토 가능.
+> **자동 폐기 사유**: 착수 조건이었던 W4 B2 결과 2/3 Y 확정 자체가 W4 Phase 6 이월(2026-05-18)로 무기한 보류 → W8 착수 조건 불충족 → 자동 폐기. 단 본문 §1~§5의 Option E 설계와 §5.6 centerProximity 수식 등은 Phase 7+ 재개 시 참조 가능 형태로 보존.
+> **조건부 (원안)**: P6-W4 B2 벤치에서 "중앙 공동 체감" 지표 2/3 이상일 때만 착수. 미달 시 트랙 폐기.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W4 (B2 결과)
-> **후속 의존**: P6-W9 (통합 테스트)
+> **후속 의존**: ~~P6-W9 (통합 테스트)~~ → Phase 7+ 환경 반사 재개 트랙
 
 ---
 
@@ -267,6 +268,8 @@ Gemini는 W3-05 포함을 강하게 주장했으나 사용자가 "자연 커버 
 
 ## 5. 99에서 확정된 사항
 
+> 🔧 **구현 시 참조**: [`P6_implementation_handoff.md`](P6_implementation_handoff.md) §4.2 dist 정규화 규약, §4.3 영역 경계 매핑 (centerProximity 0.0~0.4 / 평균 색 ROI 0.5~0.85), §4.4 GLSL 패스 규약 (material → C5 반사 순서, `#ifdef ENABLE_PUPIL_MATERIAL_RESTORE`). **착수 조건: W4 B2 = 2/3 이상 Y.**
+
 ### 5.1 Option E 수식 초안 (W8 시작 시 확정)
 
 ```glsl
@@ -323,9 +326,92 @@ vec3 compute_average_color(const Bitmap& lens_texture) {
 - 이전 : Option E ON/OFF 비교
 - 3명 재평가: "공동 체감 개선" Y/N
 
+### 5.6 centerProximity — **0.4 기본 확정** (W8 R1 합의 3/3)
+
+- 0.4 = 공동 커버(pupil 영역 대응) + 홍채 본체 보존 균형.
+- 0.3은 공동 커버 부족, 0.5는 material 과다 침범 위험.
+- 실기기 스위프 (선택적): [0.3, 0.5] 범위 3안 — 기본 0.4가 첫 구현 적정하면 sweep 생략.
+- 출처: `P6-W8_brainstorm/synthesis.md` §1.
+
+### 5.7 materialAlpha — **0.12 기본 확정** (W8 R1 합의 3/3)
+
+- 문서 원 기본값 유지. 은은한 재질감 + 환경 반사와 결합 시 눈물막 반투명도 근사.
+- 실기기 스위프 (선택적): [0.10, 0.15].
+- 출처: `P6-W8_brainstorm/synthesis.md` §1.
+
+### 5.8 평균 색 ROI — **외곽 링 `[0.5, 0.85]` 확정** (W8 R1 합의 3/3)
+
+- 중심부(pupil cutout 영향) 제외 + 림발 영역(0.85~1.0) 제외.
+- 렌즈 본체 material의 대표 색 추출 — 재질 덧씌움 색과 자연 동기화.
+- 출처: `P6-W8_brainstorm/synthesis.md` §1.
+
+### 5.9 레이어 순서 — **옵션 A (material → C5 반사) 확정** (W8 R1 합의 3/3)
+
+- 깊이 순서: material(iris 깊이) → C5 반사(각막 표면 최외층).
+- 반사 하이라이트를 material이 덮지 않음 → 광택 cue 보존.
+- 옵션 B(반사 후 material)는 반사 효과를 cover 영역에서 덮어 기각.
+- 출처: `P6-W8_brainstorm/synthesis.md` §1.
+
+### 5.10 활성 방식 — **`#ifdef ENABLE_PUPIL_MATERIAL_RESTORE` 확정** (W8 R1 합의 3/3)
+
+- W3 §5.10 `#ifdef` 원칙 연속. 조건부 트랙이므로 기본 바이너리 배제 원칙.
+- **W8 빌드 default 1**, B2 재검증 통과 후 프로덕션 빌드 1 전환.
+- 실패 시 0 롤백 (§5.12와 정합).
+- 출처: `P6-W8_brainstorm/synthesis.md` §1.
+
+### 5.11 Option A(baseLum 하한) 재고려 — **기각 유지 확정** (W8 R1 합의 3/3)
+
+- 전제 "2/3 Y"가 성립하므로 Option A 부활 조건(1/3 Y) 아님.
+- baseLum 하한은 원본 홍채 디테일 훼손 리스크 ("뿌연 안개" 효과).
+- Option E 유지.
+- 출처: `P6-W8_brainstorm/synthesis.md` §1.
+
+### 5.12 W8 실패 시 롤백 — **`#ifdef` 비활성 + Phase 7+ 이월 확정** (W8 R1 합의 3/3)
+
+체크리스트:
+- [ ] `#define ENABLE_PUPIL_MATERIAL_RESTORE 0` 전환.
+- [ ] W8 문서에 "수식 실패" 기록 + 실패 원인 (예: materialAlpha 0.15까지 올려도 체감 개선 없음).
+- [ ] 코드는 주석/삭제 불필요. `#ifdef` 블록 그대로 유지 (향후 재시도 경로).
+- [ ] B2 결과 "문제 있음"은 유지. "Option E가 해결 못함"만 기록.
+- [ ] Phase 7+ 대안 후보 (참고):
+  - Pupil 영역 별도 texture 블렌드 (디자이너 제작 아트 에셋).
+  - Gaze estimation 기반 시선 방향 material 회전.
+- 출처: `P6-W8_brainstorm/synthesis.md` §1, §5.
+
+### 5.13 메타 노트 — Gemini R2/R3 Pupil cutout 우려 실증
+
+W4 B2 벤치 2/3 Y 결과는 Gemini가 P5 R2/R3에서 지속 강조한 "동공 공동 현상"이 실기기 체감에서 실증된 것. **멀티-AI 교차 검토 프로세스의 가치 증명 사례**. 메모리 `feedback_multi_ai_orchestration_bias` 적용.
+
+향후 Gemini의 "재질 연속성" 축 의견에 가중치 상향 근거.
+
+출처: `P6-W8_brainstorm/synthesis.md` §3.
+
 ---
 
-## 6. 미결 사항
+## 6. 미결 사항 (W8 브레인스토밍 R1 결과)
+
+### 6.0 R1 결과 요약 (2026-04-24)
+
+| 번호 | 원 쟁점 | 상태 | 반영 위치 |
+|------|---------|------|-----------|
+| 6.1 | centerProximity | ✅ **닫힘** (3/3) | §5.6 |
+| 6.2 | materialAlpha | ✅ **닫힘** (3/3) | §5.7 |
+| 6.3 | 평균 색 ROI | ✅ **닫힘** (3/3) | §5.8 |
+| 6.4 | C5 순서 | ✅ **닫힘** (3/3 옵션 A) | §5.9 |
+| 6.5 | 활성 방식 | ✅ **닫힘** (3/3 #ifdef) | §5.10 |
+| 6.6 | Option A 재고려 | ✅ **닫힘** (3/3 기각 유지) | §5.11 |
+| 6.7 | 실패 시 롤백 | ✅ **닫힘** (3/3) | §5.12 |
+
+**가장 깔끔한 W.** 전 쟁점 3/3 합의, 미결 없음.
+
+**실제 착수 조건:** W4 B2 벤치에서 2/3 이상 "중앙 공동 체감" Y 확정 후.
+
+원문: `docs/workPaper/P6-W8_brainstorm/{codex,gemini,claude}_w8.md`.
+종합: `docs/workPaper/P6-W8_brainstorm/synthesis.md`.
+
+---
+
+## (원 미결 사항 세부 — 참고용)
 
 ### 6.1 centerProximity 범위 (0.3/0.4/0.5)
 
