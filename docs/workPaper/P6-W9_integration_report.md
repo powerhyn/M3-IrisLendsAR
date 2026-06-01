@@ -70,23 +70,61 @@
 
 > ⚠️ 환경 반사(W3/W4)·Pupil(W8) 시나리오는 폐기.
 
-### 3.1 결과 자리 (사용자 채움)
+### 3.1 HIGH tier 6 SKU 결과 (2026-06-01, Galaxy S23+ SM-S916N)
 
+검사 5축: ① 양안 / ② 블링크 ramp / ③ sclera veto (UI 토글 A/B/C/D) / ④ 블렌드+디테일 / ⑤ 림발(에셋 baked).
+블렌드는 Phase 6 canonical default인 **TintLinearV2 ID=5** 일관 적용 (다른 블렌드는 별도 양상이므로 18 시나리오 분리 검증 대상 아님).
+
+| SKU | ① | ② | ③ | ④ | ⑤ | 메모 |
+|---|---|---|---|---|---|---|
+| 1 클라셋_돌 초코 | ✅ | ✅ | ✅ | ✅ | ✅ | 짙은 톤, 가장 자연 |
+| 2 클라셋_런웨이 그레이 | ✅ | ✅ | ✅ | ⚠️ 흰자 빛남 중간 | ✅ | 밝은 톤, 흰자 빛남 첫 신호 |
+| 3 오(OH)_베이글 | ✅ | ✅ | ✅ | ⚠️ 약간 (밝은 영역 적어 인지 어려움) | ✅ | 중간 자연 톤 |
+| 4 엔비_퍼퓸 글로우 | ✅ | ✅ | ⚠️ A(color) 약간 자연/연해짐 트레이드 | (특이 없음) | ✅ | 쿨톤 형광, color≈luma 보강 |
+| 5 엔비_샤모 브라운 | ✅ | ✅ | ✅ | ⚠️ 그래픽 LTL에서 두드러짐 | ✅ 그래픽 outline 보존 | W7 §6.0.4 의도 확인 (셰이더 림발 제거 OK) |
+| 6 클라셋_누드 애쉬 로제 | ✅ | ✅ | ✅ | ⚠️ **가장 강함** | ✅ | 가장 밝은 톤, TintLinearV2 한계 정확히 노출 |
+
+**흰자 빛남 강도 패턴**:
 ```
-시나리오 결과 표:
-| SKU | Tier | A | B | C | D | E | FPS | 메모 |
-|...
-
-FAIL 항목:
-- (없음 / 또는 항목 + 후속 처리)
-
-메모리:
-- 10분 long-run delta: ___ MB
-- 누수 신호: 없음 / 있음
-
-머지 판정:
-- ✅ 머지 가능 / ⚠️ 보류 (사유)
+짙은 초코(1) < 쿨톤 형광(4) ≈ 베이글(3) < 그래픽 LTL(5) < 그레이(2) ≤ 누드 애쉬 로제(6)
+↑ TintLinearV2 흰자 빛남 강도, 렌즈 명도와 양의 상관
 ```
+
+→ W5 Phase C 후속 W (`w5-b1-tintlinearv2-strength`) 시급성 데이터 확정.
+
+**톤 분류 정정 (사용자 실측)**: SKU 6 "누드 애쉬 로제"는 W9 doc §1.4와 P6-W0 §1.5에서 "웜톤"으로 분류됐으나 실제로는 "애쉬(회색조) + 누드 톤"으로 **웜톤 로제핑크 아님**. SKU 카탈로그 정합성 후속 cleanup 필요(Phase 7 cleanup PR 또는 별도).
+
+**FPS**: Render 60fps 유지, Detection 30fps 유지 → CLAUDE.md 기준(30fps+/검출 33ms 이하) 통과.
+
+**FAIL 항목**: 없음. 모든 ⚠️ 항목은 머지 차단 사유 아님 — W5 Phase C(별도 W로 이미 분리), 또는 SKU 카탈로그 메타 정정(별도 cleanup).
+
+**머지 판정**: ✅ HIGH tier 머지 가능. MID/LOW tier 회귀 검증은 머지 후 후속 진행.
+
+### 3.2 검은 화면 회귀 + 0x501 잔재 (W9 단계 발견 + 부분 해결)
+
+**증상**: GpuRenderActivity 첫 진입(권한 모달 → 카메라 시작) 시 화면 검은색, `E CameraGLRenderer: onDrawFrame: glError 0x501` 매 frame.
+
+**원인 (cpp-pro 진단 1순위 + 코드 검증)**: 권한 모달 후 surface 재생성으로 EGL context 재생성 → `sdk_api_v2.cpp:517` `iris_sdk_init_gpu_lens()` ALREADY_INITIALIZED 분기로 즉시 반환 → 첫 EGL context의 stale GL 핸들이 그대로 살아남아 새 context에서 무효 호출 발생.
+
+**적용 수정** (`CameraGLRenderer.kt:688-697`, demo 측 방어):
+```kotlin
+// init 직전 명시적 release (idempotent, 첫 호출 시 nullptr 가드로 무해)
+IrisLensSDK.releaseGpuBeauty()
+val gpuInitResult = IrisLensSDK.initGpuBeauty()
+...
+IrisLensSDK.releaseGpuLens()
+val gpuLensResult = IrisLensSDK.initGpuLens()
+```
+
+**검증 결과** (logcat PID 29489):
+- ✅ 검은 화면 해결, 렌즈 정상 렌더
+- ⚠️ **`glError 0x501`은 잔재** — 두 번째 init 직후에도 여전 발생
+
+**0x501 잔재 가설 (cpp-pro 2순위)**: W6 detail-reinject 셰이더 (`shader_sources.cpp:1066-1083`) dynamic branch 내부 `texture(uCameraTexture, ...)` 9샘플의 implicit LOD undefined가 Adreno 드라이버에서 0x501 유발. 같은 셰이더 982라인 주석에 동일 패턴 회귀 기록 있음.
+
+**후속 처리**: 0x501 잔재는 **머지 차단 사유 아님** (lens 렌더링·검출·블렌드 모두 정상 동작). 별도 W로 분리:
+- 검증 필요: checkGlError() 임시 삽입으로 발생 패스 격리 → W6 detail-reinject 가설 확정 시 `textureLod(uCameraTexture, uv, 0.0)` 명시 또는 dynamic branch 밖으로 이동
+- 우선순위: Phase 7 초반, W5 Phase C(흰자 빛남)와 묶거나 단독
 
 ---
 
