@@ -13,7 +13,6 @@
 #include <array>
 #include <cmath>
 #include <cstring>
-#include <optional>
 #include <string>
 
 #if IRIS_SDK_GPU_AVAILABLE
@@ -246,33 +245,11 @@ bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height
         return false;
     }
 
-    // P6-W7 §1.12 / §5.8~§5.10: 림발 적용 판정 (GL 업로드와 무관한 CPU 측정).
-    // 메타데이터 전용 정책(기본 auto_detect_fallback_=false): 메타 권위만 사용,
-    // 자동감지는 fallback ON일 때만 lazy 스캔(전체 이미지 스캔 낭비 제거).
-    bool has_baked = false;
-    bool graphic_outline = false;
-    std::optional<LensSkuMetadata> meta;
-    if (sku_registry_ && !sku_id.empty()) {
-        meta = sku_registry_->find(sku_id);
-    }
-    if (meta.has_value()) {
-        has_baked = meta->has_baked_limbal;            // 메타 권위 우선 (자동감지 불필요)
-        graphic_outline = meta->prefers_graphic_outline;
-    } else if (!sku_id.empty()) {
-        // sku_id는 있는데 메타 누락 → WARN + 정책 분기.
-        LOGW("[IrisSDK] SKU meta missing for \"%s\", using default "
-             "(has_baked_limbal=false, prefers_crl=false, prefers_graphic_outline=false)",
-             sku_id.c_str());
-        // fallback OFF면 자동감지 스캔 생략(false). ON이면 그때만 1회 측정.
-        has_baked = auto_detect_fallback_ ? detectBakedLimbal(data, width, height) : false;
-        graphic_outline = false;
-    } else {
-        // sku_id 미전달(W7 단계 데모) → WARN 없이 정책 분기.
-        // fallback OFF면 자동감지 스캔 생략(false). ON이면 그때만 1회 측정.
-        has_baked = auto_detect_fallback_ ? detectBakedLimbal(data, width, height) : false;
-        graphic_outline = false;
-    }
-    apply_limbal_ = !(has_baked || graphic_outline);
+    // P6-W7: 림발 셰이더 적용 판정 로직 제거.
+    // 실기기 검증 결과 렌즈마다 림발 색·스타일이 달라 고정 셰이더 darkening이 디자인 훼손.
+    // 림발은 에셋이 책임. sku_id 파이프라인은 향후 SKU별 설정용으로 보존(현재 미사용).
+    (void)sku_id;  // 인프라 보존을 위한 인자, 현재 미사용
+    (void)sku_registry_;
 
 #if IRIS_SDK_GPU_AVAILABLE
     if (render_context_) {
@@ -531,9 +508,6 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uLeftRenderAlpha = glGetUniformLocation(lens_program_, "uLeftRenderAlpha");
     lens_uniforms_.uRightRenderAlpha = glGetUniformLocation(lens_program_, "uRightRenderAlpha");
 
-    // P6-W7: 셰이더 림발 적용 토글 location 캐시.
-    lens_uniforms_.uApplyLimbal = glGetUniformLocation(lens_program_, "uApplyLimbal");
-
     // 유효한 uniform location 카운트
     int valid_count = 0;
     const GLint* locs = reinterpret_cast<const GLint*>(&lens_uniforms_);
@@ -653,12 +627,6 @@ void GPULensRenderer::setDetailReinject(bool enabled) {
 void GPULensRenderer::setSkuRegistry(const LensSkuRegistry* registry) {
     std::lock_guard<std::mutex> lock(mutex_);
     sku_registry_ = registry;
-}
-
-// P6-W7: B4 자동감지 fallback 토글 (기본 on).
-void GPULensRenderer::setAutoDetectFallback(bool enabled) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto_detect_fallback_ = enabled;
 }
 
 // P5-W3-05 S1 D5: setHighlightEnabled API 제거
@@ -1140,10 +1108,6 @@ ErrorCode GPULensRenderer::renderToTexture(
                 1.0f / static_cast<float>(std::max(height, 1)));
     glUniform1f(lens_uniforms_.uGateThreshold, gate_threshold_);
     glUniform1i(lens_uniforms_.uDetailReinject, detail_reinject_ ? 1 : 0);
-
-    // P6-W7 §1.12: 셰이더 림발 적용 토글 (1=적용, 0=baked/graphic_outline → 스킵).
-    // apply_limbal_은 loadLensTexture에서 렌즈당 1회 결정 → 프레임당 주입.
-    glUniform1i(lens_uniforms_.uApplyLimbal, apply_limbal_ ? 1 : 0);
 
     // P6-W6 §1.3 C7: 블링크 ramp. mirror 시 좌/우 swap (eyelid uniform과 동일 패턴).
     float l_alpha = render_alpha_[0];

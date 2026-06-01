@@ -77,9 +77,8 @@ public:
     // ========================================
 
     /// 렌즈 텍스처 업로드 (RGBA 데이터)
-    /// P6-W7 §1.12: sku_id 전달 시 SKU 메타(권위)로 림발 판정. 메타 전용 정책(W7)이라
-    /// 메타 누락/미전달 시 기본값은 has_baked_limbal=false(셰이더 림발 ON). B4 자동감지는
-    /// auto_detect_fallback_=true(기본 false)일 때만 fallback. 기존 호출부 호환 위해 기본값.
+    /// P6-W7: sku_id는 SKU 레지스트리 조회용으로 보존된 인프라(현재 렌더링 분기는 없음 —
+    /// 림발은 에셋이 책임). 기존 3-인자 호출부 호환 위해 기본값.
     bool loadLensTexture(const uint8_t* data, int width, int height,
                          const std::string& sku_id = "");
 
@@ -156,10 +155,8 @@ public:
     // P6-W7: 림발 자동감지 fallback + SKU 메타데이터
     // ========================================
     /// 외부(바인딩/데모)가 파싱된 SKU 레지스트리를 주입. 외부 소유, null 허용.
-    /// W9 통합에서 데모가 lens_meta.json 로드 후 호출.
+    /// 림발은 에셋이 책임지므로 현재 SKU별 동작은 없음(인프라 보존, 향후 W5 prefers_crl 등 활용).
     void setSkuRegistry(const LensSkuRegistry* registry);
-    /// B4 자동감지 정확도가 10/10 미만으로 판정되면 false로 끄는 토글(기본 on).
-    void setAutoDetectFallback(bool enabled);
 
     /**
      * @deprecated P5-W3-05 S1에서 고정 조명 하이라이트 폐기. C5 환경 반사 계층이 대체.
@@ -245,13 +242,9 @@ private:
     bool use_ellipse_mask_ = false;
     // P5-W3-05 S1 D5: highlight_enabled_ 멤버 제거 (uniform/기능 모두 폐기)
 
-    // P6-W7: 림발 적용 판정 상태 (loadLensTexture에서 결정, uApplyLimbal로 주입).
-    bool apply_limbal_ = true;            // 최종: 셰이더 림발 적용 여부 (1=적용, 0=스킵)
-    // 메타데이터 전용 정책(W7). B4 자동감지 실측 9/10 < 10/10 엄수 기준 → 런타임 권위에서 드롭.
-    // 메타 누락 SKU는 has_baked_limbal=false(셰이더 림발 ON) + WARN(§5.8/§5.9).
-    // 자동감지 코드는 진단/향후 재활성용으로 보존. true로 켜면 누락 SKU에 자동감지 결과 사용.
-    bool auto_detect_fallback_ = false;
-    const LensSkuRegistry* sku_registry_ = nullptr;  // 외부 소유. null 허용.
+    // P6-W7: SKU 레지스트리 (외부 소유, null 허용). 림발 셰이더 기능은 제거됐고
+    // 현재 SKU 정보에 따른 렌더링 분기는 없음 — 인프라만 보존(향후 W5 prefers_crl 등 활용).
+    const LensSkuRegistry* sku_registry_ = nullptr;
 
     // ========================================
     // Uniform Location 캐시
@@ -314,9 +307,6 @@ private:
         GLint uDetailReinject = -1;
         GLint uLeftRenderAlpha = -1;
         GLint uRightRenderAlpha = -1;
-
-        // P6-W7: 셰이더 림발 적용 여부 (1=적용, 0=스킵).
-        GLint uApplyLimbal = -1;
     } lens_uniforms_;
 
     void cacheLensUniforms();
