@@ -1,12 +1,100 @@
 # P6-W9: 통합 테스트 + develop 머지
 
-> **상태**: 인사이트 작성 완료. 세부 계획 본문 작성 대기.
-> **작성**: 2026-04-23
-> **선행 의존**: 전체 W 완료 (W1~W7 + W8 여부 결정)
+> **상태**: 🔄 진행 중 (2026-06-01). §1.0 현 상태 변화 반영 블록 우선 참조.
+> **작성**: 2026-04-23 / **현 상태 갱신**: 2026-06-01
+> **선행 의존**: 살아남는 W 완료 (W1/W2/W5 Phase A/B/W6 Phase A/W7 종결)
+> **이월 트랙**: W3·W4·W8 — Phase 6 이월 (§1.0 참조)
 
 ---
 
-## 1. 인사이트 (세션 간 맥락 보존) ⭐
+## 1.0 현 상태 변화 반영 (2026-06-01) ⭐
+
+W9 본문(§1.1~§1.14)은 2026-04-23 시점 가정으로 작성됨. 이후 다음 결정으로 시나리오/체크리스트가 바뀜. 본 블록이 **최신 단일 출처**.
+
+### 1.0.1 트랙 상태 (현 시점)
+
+| W | doc 본문 가정 | 실제 현 상태 | 출처 |
+|---|---|---|---|
+| W1 | 인터페이스 + ROI 측정 | ✅ 계약/fallback 완료, ROI 실측 source는 W6 이관 | `P6-W1_eye_render_packet.md` §1.0, 메모리 [[w1-measure-external-oes-collision]] |
+| W2 | 블렌드 3종 + realSpec 폐기 | ✅ 완료 (LUMA_709 통일) | 커밋 `94546a2` |
+| W3 | 환경 반사 scaffold (활성) | ⏸️ **Phase 6 이월** (OFF 기본 보존) | `P6-W3_*.md` §1.16, 메모리 [[w4-env-reflection-deferred]] |
+| W4 | B2 24클립 벤치 | ⏸️ **Phase 6 이월** — 벤치 미진행 | `P6-W4_*.md` §1.17 |
+| W5 | B1 + B8 벤치 | ✅ Phase A/B 완료, Phase C(흰자 빛남 수식)는 별도 W로 분리 | 머지 `abc9a84`, 메모리 [[w5-phase-a-b-done]] |
+| W6 | B5/B9/C10 | ✅ Phase A 완료 (gate 기본 0.10) | 머지 `07d42a0` |
+| W7 | B4 자동감지 fallback 채택 | ✅ 종결 — **셰이더 림발 영구 제거** (메타 인프라 보존) | §6.0.4, 커밋 `de1eeb7`/`8bdf825`, 메모리 [[limbal-in-asset-not-shader]] |
+| W8 | Pupil material 조건부 | ⏸️ **자동 폐기** (W4 종속 + W4 이월) | `P6-W4_*.md` §1.17 연쇄 |
+
+### 1.0.2 시나리오 재구성
+
+§1.3 원안 9개 중 살아남는 항목 + 이월 항목:
+
+| # | 원안 항목 | 현 시점 처리 |
+|---|---|---|
+| 1 | 양안 정상 동작 | ✅ 유지 |
+| 2 | 블링크 ramp (W6) | ✅ 유지 |
+| 3 | Sclera veto (W5 B8) | ✅ 유지 |
+| 4 | **환경 반사 (W4 B2)** | ❌ **폐기 시나리오** (W3/W4 OFF 기본) |
+| 5 | 블렌드 모드 전환 (W5 B1 4조합) | ✅ 유지 |
+| 6 | 림발 표시 (W7 B4) | ⚠️ **단순화** — "에셋 baked 림발만 자연스러운지" 확인 (셰이더 림발은 영구 제거) |
+| 7 | **Pupil 체감 (W8)** | ❌ **폐기 시나리오** (W8 이월) |
+| 8 | 디테일 재주입 (W6 C10) | ✅ 유지 |
+| 9 | 성능 (FPS, 메모리) | ✅ 유지 (단 GPU ms 정밀 측정은 생략, FPS + 평균 프레임시간만) |
+
+### 1.0.3 SKU 세트는 원안 유지 (6개)
+
+§1.4의 6 SKU × 3 tier = 18 시나리오 그대로. 단 환경 반사/Pupil 관련 항목은 평가에서 제외.
+
+### 1.0.4 develop 머지 충돌 — **충돌 없음 확인**
+
+`feature/P6-Works`는 `origin/develop`을 fully ancestor로 포함 (`git merge-base = fff737f`, 0 commits behind, 74 ahead). 즉:
+- W3-04 (realSpec/고정 조명) 코드는 이미 P6-Works 안 `9aee86d` (S1 롤백)에서 제거됨
+- §1.5 "W3-04 코드 처리" 항목 폐기
+- §6.0 R1 결과 표의 6.1 "옵션 A 머지 커밋" 그대로 유효 (`--no-ff` 머지 커밋으로 W별 히스토리 + Phase 6 통합 시점 기록)
+
+### 1.0.5 성능 프로파일링 범위 축소
+
+§1.6의 GPU ms 정밀 측정(GLES timer query)은 W3-04 베이스라인 정밀치가 없어 비교 의미 없음 + 환경 반사 폐기로 +0.2~0.4ms 변동 항목 자체 사라짐. 그래서 **FPS + 평균 프레임시간**만 측정 (Android demo 기존 frame counter 재사용 or 최소 추가).
+
+### 1.0.6 CI 체크리스트 슬림화 — `P6_implementation_handoff.md` §7 기준에서 제외/유지
+
+| 항목 | 현 처리 |
+|---|---|
+| C++ 빌드 + ctest + APK 빌드 | ✅ 유지 |
+| Shader compile 에러/warning 0 | ✅ 유지 |
+| LUMA 계수 shader vs CPU 오차 ≤1% | ⚠️ 별도 테스트 케이스 미작성. 통합 리포트에 "후속 이월" 명기 (W1 측정 source가 W6 이관됨에 따라 검증 위치도 W6 후속 Phase로 이동) |
+| 메모리 누수 (`EyeRenderPacket`/`LensSkuMetadata` 교체) | ⚠️ valgrind/sanitizer 미실행. 통합 리포트에 "Android 실기기 long-run 10분+ 메모리 변동 관찰"로 대체 |
+| 3 tier jitter 프로파일링 | ✅ 유지 (FPS + 평균 프레임시간 측정으로 충족) |
+| **W1 §6.2 ROI 반경 closure** | ✅ "W6 이관 — 실측 source 연결 후 결정" 명기 (메모리 [[w6-avg-iris-luma-measure]]) |
+| **99 P6-W1→P6-W8 rename cross-ref** | ✅ 99 doc §4 이월 표 정정으로 처리 (별도 cross-ref 줄 추가) |
+| **W4 B2 결과 확정** | ❌ 폐기 — W4 이월로 확정 자체 폐기 |
+
+### 1.0.7 머지 메시지 (확정안)
+
+```
+Merge branch 'feature/P6-Works' into develop
+
+P6 통합 — W1/W2/W5 Phase A·B/W6 Phase A/W7 완료.
+W3·W4·W8 Phase 6 이월(보존 코드 + 재개 진입점 기록).
+
+상세:
+- W1: EyeRenderPacket 계약 + fallback (실측 source는 W6 이관)
+- W2: 블렌드 3종 + realSpec 폐기 + LUMA_709
+- W3: 환경 반사 scaffold (OFF 기본 보존)
+- W4: B2 벤치 Phase 6 이월
+- W5: B1/B8 Phase A/B 완료, Phase C 별도 W로 분리
+- W6: 블링크 ramp + 저조도 gate + 디테일 재주입 (Phase A)
+- W7: 셰이더 림발 영구 제거, 메타 인프라(sku_id/registry) 보존
+- W8: 자동 폐기 (W4 이월 연쇄)
+
+참조: docs/workPaper/P6-W9_integration_report.md
+```
+
+---
+
+## 1. 인사이트 (세션 간 맥락 보존) ⭐ — 원본 (2026-04-23, 본문)
+
+> ⚠️ §1.1~§1.14는 작성 시점 가정. **현 시점 변화는 §1.0이 권위 소스**. 본문은 의사결정 히스토리로 보존.
+
 
 ### 1.1 이 W의 역할
 

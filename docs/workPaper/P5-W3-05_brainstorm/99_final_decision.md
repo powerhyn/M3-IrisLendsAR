@@ -346,3 +346,54 @@ R3 합의본에서 사용자 판단이 필요했던 "Pupil cutout" 쟁점은 R4�
 - 어색하면 그때 P6-W1 시작, 자연 커버되면 트랙 폐기
 
 **사용자 판단 남은 항목**: 없음. 99_final_decision.md는 이제 **구현 착수 승인 대기 상태**.
+
+---
+
+## 10. Phase 6 종결 후속 처리 (2026-06-01, W9 단계 추가)
+
+> 본 §10은 R1~R4 합의본(§0~§9) 박제 후 **Phase 6 진행 결과**를 추가 기록한 부록. 합의 내용은 변경하지 않고, 각 결정이 Phase 6에서 어떤 상태로 닫혔는지만 추적한다.
+
+### 10.1 §6 미결/조건부 항목의 Phase 6 종결 상태
+
+| # | §6 항목 | Phase 6 종결 상태 | 근거 |
+|---|---|---|---|
+| 1 | D3 realSpec 완전 폐기 | ⏸️ **조건부 유지 → Phase 7+ 환경 반사 재개와 함께 재고** | W4 이월 (`P6-W4_*.md` §1.17) → realSpec 폐기 확정 조건 미충족 |
+| 2 | C4 ColorReplaceLinear (B1) | ✅ **B1 Phase A/B 완료** — TintLinearV2 자연도 우위, CRL 4번째 슬롯 불채택 경향 | 메모리 [[w5-b1-color-replace-decision]], `docs/bench/P6-W5/report.md` |
+| 3 | C5 환경 반사 소스 (B2) | ⏸️ **Phase 6 이월** — Phase A scaffold만 보존(OFF 기본), 24클립 미실행 | 메모리 [[w4-env-reflection-deferred]] |
+| 4 | C6 림발 자동 감지 fallback (B4) | ⛔ **셰이더 림발 영구 제거** (B4 자동감지 결과와 무관). 림발은 에셋 책임 | `P6-W7_*.md` §6.0.4, 커밋 `de1eeb7`/`8bdf825`, 메모리 [[limbal-in-asset-not-shader]] |
+| 5 | C7 블링크 up ramp (B5) | ✅ Phase A 완료 (W6 토글 인프라). 정량 ramp 수치는 후속 Phase B에서 확정 | `P6-W6_*.md` 상태 줄 |
+| 6 | C8 sclera veto 방식 (B8) | ✅ Phase B 1차 결과 — **luma-only 유력** (저조도 미검증, 후속) | `docs/bench/P6-W5/report.md` |
+| 7 | C10 저조도 gate (B9) | ✅ Phase A 완료 (gate 기본 0.10 채택, 도메인 판단) | 커밋 `97fff27`, 메모리 [[low-light-usage-rare]] |
+| 8 | Pupil cutout → P6-W8 조건부 트랙 | ⏸️ **자동 폐기** — 착수 조건(B2 2/3 Y) 충족 불가 (W4 이월 연쇄) | `P6-W8_*.md` 상태 줄 |
+
+### 10.2 §4 Phase 6 이월 표 신규 추가 (2026-06-01)
+
+§4 원안 7개 + 다음 항목 추가:
+
+| 신규 이월 항목 | 사유 | 재개 진입점 |
+|---|---|---|
+| **W4 환경 반사 트랙 (B2)** | Phase A 시각 검증에서 "외곽 광택은 현실 발생 드묾" 도메인 판단 (메모리 [[feedback-physical-assumption-validation]]) | `P6-W3/W4_*.md` Phase 7+ 재개 진입점, 메모리 [[w4-env-reflection-deferred]] |
+| **W8 Pupil material restore** | W4 종속 자동 폐기 | `P6-W8_*.md` 본문 Option E 설계 보존 |
+| **W5 Phase C (TintLinearV2 흰자 빛남 수식 개선)** | 1차 형광 벤치에서 신규 발견된 후속 과제 | 메모리 [[w5-b1-tintlinearv2-strength]] |
+
+### 10.3 P6-W1 → P6-W8 rename cross-reference (Codex R1 §1.2 지적 반영)
+
+§0/§4/§6/§9에서 "Pupil cutout → P6-W1 조건부 트랙"으로 명명한 항목은 Phase 6 구조화 과정에서 **P6-W8**로 재배치됨. 결정 내용 동일, 명명만 변경. 본 §10이 이를 명시 cross-reference.
+
+### 10.4 살아남은 산출물 (develop 머지 직전)
+
+- **C++ 코어**: EyeRenderPacket 계약, fallback chain, 블렌드 3종(TintLinearV2/Multiply/ScreenLinear, ID=5 default), uScleraVetoMode 3-way, 블링크 ramp + 디테일 재주입 + 저조도 gate, sku_id/LensSkuMetadata + 경량 JSON 파서, B4 자동감지 인프라(셰이더 림발만 제거, 메타 기반 SKU별 설정용으로 보존)
+- **JNI/Java/Kotlin**: sku_id 와이어링, lens_meta.json 42 SKU 등록, A/B/C/D 토글 UI, B5/B9/C10 internal API + 토글
+- **이월 산출물 보존**: W3 sampleReflection/calcFresnel/renderMask, W4 reflection mode toggle (OFF 기본), W4 벤치 인프라(`docs/bench/P6-W4/`)
+- **레거시 제거**: CPU 경로 MainActivity 제거(`1d4b19c`), 셰이더 림발 영구 제거(`de1eeb7`/`8bdf825`)
+
+### 10.5 미실행 CI 항목 (후속 이월)
+
+- LUMA 계수 shader vs CPU 오차 ≤1% 테스트 케이스 — W1 측정 source가 W6 이관됨에 따라 W6 후속 Phase에서 작성
+- 메모리 누수 (valgrind/sanitizer) — Android 실기기 long-run 관찰로 대체 (W9 통합 리포트 §3 참조)
+
+### 10.6 출처
+
+- W9 진행: `docs/workPaper/P6-W9_integration.md` §1.0 (2026-06-01 갱신)
+- 통합 리포트: `docs/workPaper/P6-W9_integration_report.md`
+- 머지 메시지: P6-W9_integration.md §1.0.7

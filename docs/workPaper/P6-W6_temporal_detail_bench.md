@@ -1,6 +1,6 @@
 # P6-W6: B5 블링크 up ramp + B9 저조도 디테일 gate + C10 튜닝
 
-> **상태**: 구현 완료 (Phase A — 코드/토글 인프라). Phase B 실기기 벤치 대기 → Phase C 최종 튜닝.
+> **상태**: ✅ Phase A 완료 (코드/토글 인프라, gate 기본 0.10 채택 — 커밋 `97fff27`/`5fa5fe0`/`14aac99`/`5e48cf6`). Phase B/C(실기기 후속 튜닝)는 W9 통합 머지 후 별도 진행. avg_iris_luma 실측 source 연결도 후속 (메모리 [[w6-avg-iris-luma-measure]]).
 > **작성**: 2026-04-23 / **구현**: 2026-05-28 (feature/P6-W6)
 > **선행 의존**: P6-W1 (avg_iris_luma — B9 gate 입력), P6-W3 (환경 반사 계층 스캐폴드 — detail 합성 순서)
 > **병렬 가능**: P6-W4, W5, W7와 병렬
