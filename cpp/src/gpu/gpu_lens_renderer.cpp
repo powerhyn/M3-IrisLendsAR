@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 #if IRIS_SDK_GPU_AVAILABLE
 #include "iris_sdk/gpu/gles_render_context.h"
@@ -231,7 +232,8 @@ bool GPULensRenderer::isInitialized() const {
 // 텍스처 관리
 // ============================================================================
 
-bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height) {
+bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height,
+                                      const std::string& sku_id) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_) {
@@ -242,6 +244,12 @@ bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height
         LOGE("loadLensTexture: invalid parameters");
         return false;
     }
+
+    // P6-W7: 림발 셰이더 적용 판정 로직 제거.
+    // 실기기 검증 결과 렌즈마다 림발 색·스타일이 달라 고정 셰이더 darkening이 디자인 훼손.
+    // 림발은 에셋이 책임. sku_id 파이프라인은 향후 SKU별 설정용으로 보존(현재 미사용).
+    (void)sku_id;  // 인프라 보존을 위한 인자, 현재 미사용
+    (void)sku_registry_;
 
 #if IRIS_SDK_GPU_AVAILABLE
     if (render_context_) {
@@ -613,6 +621,12 @@ void GPULensRenderer::setGateThreshold(float t) {
 void GPULensRenderer::setDetailReinject(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     detail_reinject_ = enabled;
+}
+
+// P6-W7: SKU 레지스트리 주입 (외부 소유, null 허용).
+void GPULensRenderer::setSkuRegistry(const LensSkuRegistry* registry) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sku_registry_ = registry;
 }
 
 // P5-W3-05 S1 D5: setHighlightEnabled API 제거

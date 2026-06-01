@@ -1083,9 +1083,10 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended *= vec3(detailMul);
     }
 
-    // P5-W3-05 S1 D2: LIMBAL_ENABLED=false 하드코드 블록 제거
-    // 림발 처리는 C6 (에셋 기반) + B4 벤치로 재평가 예정
-    //
+    // P6-W7 (제거): 셰이더 림발 수식. 실기기 적용 결과 렌즈마다 림발 색·스타일이 달라
+    // 고정 darkening이 디자인을 훼손함(예: 브라운 림발 렌즈에 회색 darkening 덮음).
+    // 림발은 렌즈 에셋이 책임. P5-W3-05 S1 D2 제거 사유와 동일.
+
     // P5-W3-05 S1 D5: uHighlightEnabled 각막 하이라이트 블록 제거
     // 고정 위치 하이라이트는 환경과 무관해 어색함. C5 환경 반사 가산 계층(B2 결과 후)이 대체
     // 삭제된 수식:

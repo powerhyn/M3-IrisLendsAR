@@ -926,6 +926,43 @@ public final class IrisLensSDK {
     }
 
     /**
+     * 렌즈 텍스처를 SKU와 함께 로드합니다 (RGBA 바이트 배열).
+     *
+     * <p>P6-W7: sku_id를 함께 전달하여 코어에 등록된 렌즈 메타(림발 등)와
+     * 연동합니다. {@link #setLensMetadata(String)}로 등록한 메타에서
+     * 해당 sku_id 항목을 찾아 적용합니다.</p>
+     *
+     * @param rgbaData RGBA 픽셀 데이터
+     * @param width 너비
+     * @param height 높이
+     * @param skuId 렌즈 SKU 식별자 (빈 문자열이면 메타 미적용)
+     * @return 에러 코드
+     */
+    public static int loadLensTexture(byte[] rgbaData, int width, int height, String skuId) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeLoadLensTextureWithSku(rgbaData, width, height, skuId);
+    }
+
+    /**
+     * 렌즈 메타데이터(JSON)를 코어에 등록합니다.
+     *
+     * <p>P6-W7: lens_meta.json 등 SKU별 렌즈 메타(림발 강도 등)를
+     * 코어에 1회 등록합니다. GPU 렌즈가 초기화되어 있으면 즉시 주입하고,
+     * 그렇지 않으면 보관 후 초기화 시점에 주입합니다.</p>
+     *
+     * @param json 렌즈 메타데이터 JSON 문자열
+     * @return 에러 코드 (OK = 성공)
+     */
+    public static int setLensMetadata(String json) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeSetLensMetadata(json);
+    }
+
+    /**
      * 렌즈 텍스처를 해제합니다.
      */
     public static void unloadLensTexture() {
@@ -1414,6 +1451,8 @@ public final class IrisLensSDK {
     private static native void nativeReleaseGpuLens();
     private static native boolean nativeIsGpuLensInitialized();
     private static native int nativeLoadLensTexture(byte[] data, int width, int height);
+    private static native int nativeLoadLensTextureWithSku(byte[] data, int width, int height, String skuId);  // P6-W7
+    private static native int nativeSetLensMetadata(String json);  // P6-W7
     private static native void nativeUnloadLensTexture();
     private static native int nativeRenderLensTexture(
             int inputTexture, int width, int height,

@@ -21,6 +21,7 @@
 #include "iris_sdk/gpu/eye_render_packet.h"
 #include "iris_sdk/gpu/shader_manager.h"
 #include "iris_sdk/gpu/texture_pool.h"
+#include "iris_sdk/lens_sku_metadata.h"
 #include "iris_sdk/one_euro_filter.h"
 #include "iris_sdk/types.h"
 
@@ -28,6 +29,7 @@
 #include <mutex>
 #include <array>
 #include <chrono>
+#include <string>
 
 namespace iris_sdk {
 
@@ -75,7 +77,10 @@ public:
     // ========================================
 
     /// 렌즈 텍스처 업로드 (RGBA 데이터)
-    bool loadLensTexture(const uint8_t* data, int width, int height);
+    /// P6-W7: sku_id는 SKU 레지스트리 조회용으로 보존된 인프라(현재 렌더링 분기는 없음 —
+    /// 림발은 에셋이 책임). 기존 3-인자 호출부 호환 위해 기본값.
+    bool loadLensTexture(const uint8_t* data, int width, int height,
+                         const std::string& sku_id = "");
 
     /// 렌즈 텍스처 해제
     void unloadLensTexture();
@@ -145,6 +150,13 @@ public:
     void setGateThreshold(float t);
     /// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off (기본 on).
     void setDetailReinject(bool enabled);
+
+    // ========================================
+    // P6-W7: 림발 자동감지 fallback + SKU 메타데이터
+    // ========================================
+    /// 외부(바인딩/데모)가 파싱된 SKU 레지스트리를 주입. 외부 소유, null 허용.
+    /// 림발은 에셋이 책임지므로 현재 SKU별 동작은 없음(인프라 보존, 향후 W5 prefers_crl 등 활용).
+    void setSkuRegistry(const LensSkuRegistry* registry);
 
     /**
      * @deprecated P5-W3-05 S1에서 고정 조명 하이라이트 폐기. C5 환경 반사 계층이 대체.
@@ -229,6 +241,10 @@ private:
     float shadow_intensity_ = 0.15f;
     bool use_ellipse_mask_ = false;
     // P5-W3-05 S1 D5: highlight_enabled_ 멤버 제거 (uniform/기능 모두 폐기)
+
+    // P6-W7: SKU 레지스트리 (외부 소유, null 허용). 림발 셰이더 기능은 제거됐고
+    // 현재 SKU 정보에 따른 렌더링 분기는 없음 — 인프라만 보존(향후 W5 prefers_crl 등 활용).
+    const LensSkuRegistry* sku_registry_ = nullptr;
 
     // ========================================
     // Uniform Location 캐시

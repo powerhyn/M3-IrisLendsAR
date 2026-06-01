@@ -252,6 +252,11 @@ class GpuRenderActivity : AppCompatActivity() {
                 loadEnvMapAsset()
                 envMapLoaded = true
             }
+            // P6-W7: GPU lens init 완료 후 lens_meta.json 등록 (즉시 주입 보장).
+            if (success && !lensMetaLoaded) {
+                loadLensMetadataAsset()
+                lensMetaLoaded = true
+            }
         }
 
         // GPU FPS 콜백 설정
@@ -331,7 +336,7 @@ class GpuRenderActivity : AppCompatActivity() {
             // 렌즈 적용
             val texture = lensManager.getTexture(lens)
             if (texture != null) {
-                cameraGLView.setLensTexture(texture)
+                cameraGLView.setLensTexture(texture, lens.id)  // P6-W7: sku_id 전달
                 cameraGLView.setLensConfig(lensConfig)
                 cameraGLView.setLensEnabled(true)
                 Log.d(TAG, "Lens applied: ${lens.name}")
@@ -1194,6 +1199,7 @@ class GpuRenderActivity : AppCompatActivity() {
     //=========================================================================
 
     private var envMapLoaded = false
+    private var lensMetaLoaded = false  // P6-W7: lens_meta.json 1회 등록 가드
     private var reflectionMode = 0  // 0=OFF, 1=EnvMap, 2=Periphery
 
     // P6-W4 Phase A 보완: intensity sweep (W3 §5.7 기본 0.3, clamp 0~5 확장).
@@ -1220,6 +1226,22 @@ class GpuRenderActivity : AppCompatActivity() {
             Log.i(TAG, "P6-W4 env_map asset loaded: ${w}x${h}")
         } catch (e: Exception) {
             Log.e(TAG, "P6-W4 env_map load failed: ${e.message}")
+        }
+    }
+
+    /**
+     * P6-W7: assets/lens_meta.json 로드 + 코어 등록.
+     *
+     * 림발 등 SKU별 렌즈 메타를 코어에 1회 등록한다. assets가 없거나
+     * 등록 실패해도 앱은 계속 동작한다(로그만 남김).
+     */
+    private fun loadLensMetadataAsset() {
+        try {
+            val json = assets.open("lens_meta.json").bufferedReader().use { it.readText() }
+            val result = IrisLensSDK.setLensMetadata(json)
+            Log.i(TAG, "P6-W7 lens_meta.json registered: result=$result")
+        } catch (e: Exception) {
+            Log.e(TAG, "P6-W7 lens_meta.json load failed: ${e.message}")
         }
     }
 

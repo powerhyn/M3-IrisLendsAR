@@ -49,6 +49,7 @@ set(IRIS_SDK_SOURCES
     src/iris_detector.cpp
     src/mediapipe_detector.cpp
     src/lens_renderer.cpp
+    src/lens_sku_metadata.cpp
     src/frame_processor.cpp
     src/inference_thread.cpp
     src/sdk_manager.cpp
@@ -97,6 +98,8 @@ set(IRIS_SDK_HEADERS
     # include/iris_sdk/sdk_api.h
     # include/iris_sdk.h
     include/iris_sdk/beauty_roi_manager.h
+    # Lens SKU metadata + baked limbal auto-detect (P6-W7)
+    include/iris_sdk/lens_sku_metadata.h
     # Profiling and optimization headers
     include/iris_sdk/profiler.h
     include/iris_sdk/buffer_pool.h

@@ -1,0 +1,296 @@
+[
+  {
+    "sku_id": "claset_cloud_gray_png",
+    "display_name": "claset cloud gray",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "claset_doll_choco_png",
+    "display_name": "claset doll choco",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "claset_dusty_grape_png",
+    "display_name": "claset dusty grape",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "claset_killer_gray_png",
+    "display_name": "claset killer gray",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "claset_lovey_beige_png",
+    "display_name": "claset lovey beige",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "claset_never_olive_png",
+    "display_name": "claset never olive",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "claset_nude_ash_rose_png",
+    "display_name": "claset nude ash rose",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "claset_runway_gray_png",
+    "display_name": "claset runway gray",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_chameau_brown_png",
+    "display_name": "envie chameau brown",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": true
+  },
+  {
+    "sku_id": "envie_coral_cheek_png",
+    "display_name": "envie coral cheek",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_minuit_apricot_png",
+    "display_name": "envie minuit apricot",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_muuce_beige_png",
+    "display_name": "envie muuce beige",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_muuce_gray_png",
+    "display_name": "envie muuce gray",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_parfum_bleu_png",
+    "display_name": "envie parfum bleu",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_parfum_glow_png",
+    "display_name": "envie parfum glow",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_parfum_roze_png",
+    "display_name": "envie parfum roze",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_plum_black_png",
+    "display_name": "envie plum black",
+    "has_baked_limbal": true,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "envie_vanilla_fig_png",
+    "display_name": "envie vanilla fig",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "miyu_bonbon_gray_png",
+    "display_name": "miyu bonbon gray",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "miyu_lina_blue_png",
+    "display_name": "miyu lina blue",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "miyu_noir_brown_png",
+    "display_name": "miyu noir brown",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "miyu_tulle_olive_png",
+    "display_name": "miyu tulle olive",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "oh_bagel_png",
+    "display_name": "oh bagel",
+    "has_baked_limbal": true,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "oh_kiwi_png",
+    "display_name": "oh kiwi",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "oh_rizz_png",
+    "display_name": "oh rizz",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "oh_shy_png",
+    "display_name": "oh shy",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_cocomio_beige_png",
+    "display_name": "ooha cocomio beige",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_cocomio_gray_png",
+    "display_name": "ooha cocomio gray",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_cocomio_pink_png",
+    "display_name": "ooha cocomio pink",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_cocomio_rose_brown_png",
+    "display_name": "ooha cocomio rose brown",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_dew_e_dew_charcoal_png",
+    "display_name": "ooha dew e dew charcoal",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_dew_e_dew_choco_png",
+    "display_name": "ooha dew e dew choco",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_dew_e_dew_purple_png",
+    "display_name": "ooha dew e dew purple",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_travel_kyoto_brown_png",
+    "display_name": "ooha travel kyoto brown",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_travel_laguna_beige_png",
+    "display_name": "ooha travel laguna beige",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "ooha_travel_seoul_gray_png",
+    "display_name": "ooha travel seoul gray",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "romu_dear_mellow_png",
+    "display_name": "romu dear mellow",
+    "has_baked_limbal": true,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "romu_gray_taupe_png",
+    "display_name": "romu gray taupe",
+    "has_baked_limbal": true,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "romu_love_gleam_png",
+    "display_name": "romu love gleam",
+    "has_baked_limbal": true,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "romu_milky_tan_png",
+    "display_name": "romu milky tan",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "romu_moon_gleam_png",
+    "display_name": "romu moon gleam",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  },
+  {
+    "sku_id": "romu_mottle_peach_png",
+    "display_name": "romu mottle peach",
+    "has_baked_limbal": false,
+    "prefers_crl": false,
+    "prefers_graphic_outline": false
+  }
+]
