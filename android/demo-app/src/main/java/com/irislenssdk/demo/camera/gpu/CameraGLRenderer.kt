@@ -686,11 +686,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         }
 
         // GPU Beauty Backend 초기화
+        // 권한 모달 → 카메라 재시작 등으로 EGL context가 재생성될 때 stale GL 핸들이 남아
+        // 다음 frame부터 glError 0x501이 발생하는 회귀를 차단하기 위해 init 직전 명시적 release.
+        IrisLensSDK.releaseGpuBeauty()
         val gpuInitResult = IrisLensSDK.initGpuBeauty()
         val gpuSuccess = (gpuInitResult == IrisLensSDK.OK || gpuInitResult == IrisLensSDK.ALREADY_INITIALIZED)
         Log.d(TAG, "GPU Beauty Backend init: $gpuInitResult (success: $gpuSuccess)")
 
-        // GPU Lens Renderer 초기화
+        // GPU Lens Renderer 초기화 (위와 동일 사유)
+        IrisLensSDK.releaseGpuLens()
         val gpuLensResult = IrisLensSDK.initGpuLens()
         Log.d(TAG, "GPU Lens Renderer init: $gpuLensResult")
 
