@@ -1,6 +1,6 @@
 # P6-W7: B4 림발 자동감지 fallback + 림발 정책 확정
 
-> **상태**: ✅ 구현 완료 (2026-05-29). 메타데이터 전용 채택 (B4 자동감지 실측 9/10 → 런타임 권위 드롭).
+> **상태**: ✅ 종결 (2026-06-01). **셰이더 림발 영구 제거** — 림발은 에셋 책임. 메타 인프라(sku_id/registry)는 향후 SKU별 설정용으로 보존. §6.0.4 참조.
 > **작성**: 2026-04-23
 > **선행 의존**: P6-W3 (환경 반사 계층 스캐폴드)
 > **병렬 가능**: P6-W4, W5, W6과 병렬. 가장 작은 W.
@@ -437,6 +437,33 @@ if (uHasBakedLimbal == 0) {
 - **검증**: macOS 코어 빌드 + Android Gradle `:demo-app:assembleDebug` 성공(APK 생성). 적대적 리뷰(architect-review)로 API 동결·시그니처 정합·레지스트리 수명·메타 로드 순서 통과.
 
 **실기기 확인 대상**: GpuRenderActivity에서 (1) 무림발 렌즈 셰이더 림발 ON, (2) baked 5종(romu_gray/dear/love, envie_plum-black, oh_bagel)·그래픽(envie_chameau-brown) 셰이더 림발 OFF(이중 림발 없음), (3) 메타 플래그 정확성. **GPU 셰이더는 런타임 컴파일**이라 이 빌드는 GLSL 유효성을 보장하지 않음 → 실기기 첫 실행 시 크래시/검은화면 없는지 확인 필수.
+
+### 6.0.4 셰이더 림발 영구 제거 — 도메인 통찰 (2026-06-01)
+
+W7 GPU 와이어링 후 실기기 검증에서 **셰이더 림발 기능 자체를 영구 제거** 결정.
+
+**발견된 문제(연속 3단)**:
+1. **검은 화면**: 셰이더에 `uniform int uApplyLimbal` 선언만 들어가고 `if` 블록이 누락된 채 빌드 → 일부 드라이버에서 unused uniform 이슈 의심. if 블록 추가하니 해결되지만 다음 문제 발생.
+2. **전 화면 darkening**: `smoothstep(0.7, 1.0, dist)`가 iris 바깥(`dist > 1`)에서 1로 clamp되어 카메라 passthrough까지 48% darkening (`blended × 0.4`). `step(dist, 1.0)` 마스크로 iris 안쪽에만 적용되도록 fix → 화면 어두워짐 사라짐.
+3. **림발 디자인 충돌(결정적)**: 사용자 실기기 육안 검증 — claset_doll-choco는 "림발 없음"이 아니라 **브라운 림발**을 가진 렌즈. 즉 림발 색·스타일은 **렌즈마다 다른 디자인 요소**이고, 셰이더 고정 darkening(회색)을 입히면 본래 디자인 훼손(브라운 림발 위에 회색 덮음).
+
+**P5-W3-05 S1 D2 제거 사유 재확인**: 당시 "LIMBAL_ENABLED=false 하드코드 블록 제거 / 림발 처리는 C6(에셋 기반) + B4 벤치로 재평가 예정"이라 적은 사유가 정확히 이거였다 — 셰이더 절차 림발은 시각적으로 부적합. W7이 부활시켰으나 같은 문제 반복 → **영구 제거**.
+
+**원칙 (메모리 `limbal-in-asset-not-shader`)**:
+- 렌즈별 디자인 다양성이 있는 요소(림발·패턴·하이라이트)는 **에셋이 책임**(baked).
+- SDK 셰이더는 보편적·컨텍스트 종속 효과(블링크, 디테일 재주입, 환경 반사)만.
+- 림발 메타 플래그(`has_baked_limbal`, `prefers_graphic_outline`)는 모두 의미 잃음 — 셰이더 림발이 없으므로 토글할 대상 없음.
+
+**제거 (커밋 `de1eeb7`)**:
+- 셰이더: `uniform int uApplyLimbal` 선언 + `if (uApplyLimbal == 1) {...}` 블록.
+- 렌더러: `uApplyLimbal` uniform cache·주입, `apply_limbal_` 멤버, `auto_detect_fallback_` 멤버, `setAutoDetectFallback` API, `loadLensTexture` 림발 판정 로직.
+
+**보존 (인프라)**:
+- `LensSkuRegistry` + JSON 파서, `setSkuRegistry` API, `loadLensTexture(sku_id)` 시그니처, C API/JNI/Java/Kotlin 와이어링 — 향후 W5 `prefers_crl` 같은 SKU별 설정에 재활용.
+- `detectBakedLimbal`/`measureLimbalRatio` 순수 함수 — 진단 유틸로 보존(`docs/bench/P6-W7/` 벤치 재현 가능).
+- `lens_meta.json` 데이터 파일 — 정보용으로 유지 (현재 런타임 동작 없음).
+
+**시각 검증 (2026-06-01)**: claset_doll-choco 선택 시 화면 어두워짐 없음, 에셋 그대로 렌더링 확인 (logcat `SDK lens texture loaded ... result=0` + `SDK C++ GPULensRenderer active` 정상).
 
 ---
 
