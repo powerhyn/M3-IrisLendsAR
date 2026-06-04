@@ -1,6 +1,6 @@
 # P7-W1: 0x501 spec fix + HIGH tier 회귀
 
-> **상태**: §5 확정 사항 작성 완료. 구현 착수 대기 (`ar-lens-implement`).
+> **상태**: 🔄 코드 구현 완료 (commit `38368ec`, 2026-06-04). **HIGH tier(S23+) 실기기 검증 대기 — DoD 게이트** (0x501 logcat 사라짐 + 6 SKU × 5축 회귀). 실기기 통과 후 develop 머지.
 > **작성**: 2026-06-04
 > **선행 의존**: 없음 (P7 첫 W, P6 develop 머지 64ba08b 완료 상태에서 즉시 진입 가능)
 > **병렬 가능**: P7-W3 (cleanup, risk 0)
@@ -132,11 +132,12 @@ Stage 1 (107 agents, 25 sources)에서 F2가 confidence high (7 claims 3-0 vote)
 
 ### 4.1 Definition of Done
 
-- [ ] `shader_sources.cpp:1068-1076` 9개 `texture()` → `textureLod(uv, 0.0)` 교체
-- [ ] C++ iris_sdk + Android demo APK 빌드 성공 (shader compile warning/error 0)
-- [ ] HIGH tier (S23+) DetailReinject ON 상태에서 logcat `glError 0x501` 사라짐 (1분 long-run 관찰)
-- [ ] HIGH tier 6 SKU × 5축 회귀 — Phase 6 통과 패턴과 동일 (메모리 `solo-dev-bench-method` 정합)
-- [ ] DetailReinject ON/OFF 토글 시각 차이 없음 (uDetailReinject==0 분기 우회로 baseline 보존)
+- [x] `shader_sources.cpp` detail-reinject 블록 9개 `texture()` → `textureLod(uv, 0.0)` 교체 (commit `38368ec`)
+- [x] C++ iris_sdk 빌드 성공 (`libiris_sdkd.a` 링크, 신규 warning/error 0 — 기존 TFLite/mediapipe 경고만)
+- [x] textureLod 등가성 검증 (적대적 4-agent: verdict=identical — uCameraTexture는 sampler2D + GL_LINEAR + mipmap 미사용)
+- [ ] **(실기기 대기)** HIGH tier (S23+) DetailReinject ON 상태에서 logcat `glError 0x501` 사라짐 (1분 long-run 관찰)
+- [ ] **(실기기 대기)** HIGH tier 6 SKU × 5축 회귀 — Phase 6 통과 패턴과 동일 (메모리 `solo-dev-bench-method` 정합)
+- [ ] **(실기기 대기)** DetailReinject ON/OFF 토글 시각 차이 없음 (uDetailReinject==0 분기 우회로 baseline 보존)
 
 ### 4.2 Out of scope
 
@@ -250,6 +251,32 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 - **0x501 잔재**: ⚠️ → 2순위 가설 추적 별도 W (W1.1 또는 별도)
 - **시각 회귀 발견**: 즉시 revert + 추가 조사 (드라이버 차이 가능)
 
+### 6.3 구현 중 적대적 검증 결과 (2026-06-04, 4-agent 워크플로우 `wf_f10ec798-dee`)
+
+W1 패치 직후 독립 4 에이전트로 ① 편집 정확성 ② textureLod 등가성 ③·④ 셰이더 전체 §8.9 잔존 위반 2회 교차 스캔 수행. Claude 직접 기술 판정으로 필터링.
+
+**① 편집**: 9개 모두 `textureLod(uv, 0.0)` 변환, 오프셋 9종 보존, 괄호 균형 ✅. 블록 내 implicit `texture(` 잔여 0건.
+
+**② 등가성**: `verdict=identical`. `uCameraTexture`는 `sampler2D`(EXTERNAL_OES 아님), `rgbaTextureId` GL_LINEAR min/mag + `glGenerateMipmap` 미호출 → mipmap 없음 → LOD 0 강제 = base level 샘플 = implicit과 동일. 근거: `shader_sources.cpp:790`(선언), `gpu_lens_renderer.cpp:930`(GL_TEXTURE_2D 바인딩), `CameraGLRenderer.kt:1746-1755`(필터 설정, mipmap 없음).
+
+**③·④ 잔존 §8.9 스캔 (Claude 판정 후)** — 두 스캔 상충(Scan1 2 violation+5 suspect / Scan2 0 violation). 기술 판정 결과:
+
+| 위치 | 셰이더 | 패턴 | Claude 판정 | lens 패스? | W1 블로커? |
+|---|---|---|---|---|---|
+| ~389 | COMBINED_COLOR_ADJUSTMENT (LUT) | `texture()` in `if(uLutIntensity>0.01)` | **동일 클래스 후보** (uniform-toggle 분기 내 implicit texture, detail-reinject와 동형). Scan1의 "non-uniform 좌표=위반"은 오판 — §8.9는 control flow 발산 문제 | ❌ (`gpu_lens_renderer.cpp` 미참조 = 별도 beauty 파이프라인) | ❌ |
+| ~449 | FREQ_SEP_GAUSSIAN | `texture()` in `for(uRadius)` loop | 동일 클래스 후보 (runtime uniform loop bound). spec상 dynamically-uniform이나 Adreno caution | ❌ | ❌ |
+| 109/264/419/420 | BILATERAL/SOFT_FOCUS/GAUSSIAN | const-loop `texture()` | **safe 오탐** — const 루프 = 완전 언롤 = straight-line. §8.9 무관 | ❌ | ❌ |
+| 938/955 | LENS_OVERLAY `sampleReflection` | `texture()` in `if(uSourceType==1/2)` | 동일 클래스이나 **기본 OFF** — `reflection_mode_=0`이라 분기 미진입(셰이더 line 959 "OFF (W3 기본)") | ✅ (단 미진입) | ❌ (반사 토글 시만 노출) |
+
+**위험 2 결론**: lens overlay 셰이더(0x501 관측 셰이더)의 **유일한 활성 §8.9-클래스 패턴은 detail-reinject 1건뿐**이었고 본 W1이 제거. 반사 분기는 기본 OFF, beauty 셰이더(389/449)는 lens 패스 밖. → **기본 구성에서 0x501이 본 패치로 해소될 가능성 높음** (단, 실기기 confirm이 DoD 게이트). 잔존 후보는 W1 블로커 아님.
+
+**P7-W3 cleanup 피드**:
+- (선택) 389(LUT 분기) / 449(freq-sep 루프) `textureLod` 위생 패치 — beauty 파이프라인 활성 시 예방. **활성 여부 먼저 확인** (어느 데모 패스에서 컴파일되는지).
+- 938/955 반사 분기는 Phase 9 환경 반사 재개 시 `textureLod` 동시 적용 (메모리 `w4-env-reflection-deferred` cross-link).
+- const-loop suspects는 무시 (safe).
+
+**실기기에서 0x501 잔재 시 (위험 2 발현)**: 2순위 후보 우선순위 = ① 반사 토글이 켜져 있었는지 확인 → ② beauty 패스(389/449) 활성 여부 → ③ 텍스처 binding/FBO state 등 비-셰이더 원인.
+
 ---
 
 ## 7. 체크리스트 (구현자용)
@@ -312,3 +339,4 @@ W1 완료 시 `P7-W0_index.md` §2.P7-W1에 상태 ✅ + 결과 1줄 추가 + co
 | 날짜 | 변경 |
 |---|---|
 | 2026-06-04 | 초안 작성. P7-W0 R1 합의 + Stage 1 F2 근거 반영. `ar-lens-implement` 호출 대기. |
+| 2026-06-04 | **코드 구현 완료** (commit `38368ec`). 9개 `texture()`→`textureLod(uv,0.0)`. C++ 빌드 통과. 적대적 4-agent 검증(§6.3): 편집 정확 + 등가성 identical + 잔존 §8.9 landscape. DoD 코드 3항 ✅ / 실기기 3항 대기. |

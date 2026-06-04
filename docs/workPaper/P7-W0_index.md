@@ -71,6 +71,8 @@ Phase 8 = **뷰티 기능** (턱 깎기, 얼굴 사이즈 축소). P7 범위 밖
 
 ### P7-W1: 0x501 spec fix + HIGH tier 회귀
 
+> **상태 (2026-06-04)**: 🔄 코드 구현 완료 (commit `38368ec`, branch `feature/P7-W1-0x501-spec-fix`). 9개 `texture()`→`textureLod(uv,0.0)`, 빌드 통과, 적대적 4-agent 검증(편집 정확·등가성 identical·잔존 §8.9 landscape — `P7-W1_*.md` §6.3). **HIGH tier(S23+) 실기기 검증 대기 = DoD 게이트** → 0x501 logcat 사라짐 확인 후 develop 머지.
+
 **목표**: GLSL ES 3.0 spec §8.9 위반 제거.
 
 **대상 코드**: `cpp/src/gpu/shader_sources.cpp:1066-1083` — `if(uDetailReinject==1){ 9 sample texture() }` 패턴.
