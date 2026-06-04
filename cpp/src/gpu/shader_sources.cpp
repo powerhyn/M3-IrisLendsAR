@@ -1065,15 +1065,18 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     // 입력은 원본 카메라(uCameraTexture, 렌즈 적용 전)의 고주파 디테일 — linear Rec.709 luma.
     if (uDetailReinject == 1) {
         vec2 t = uTexelSize;
-        float lC  = dot(toLinearFast(texture(uCameraTexture, vTexCoord).rgb), LUMA_709_LENS);
-        float lN  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(0.0, -t.y)).rgb), LUMA_709_LENS);
-        float lS  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(0.0,  t.y)).rgb), LUMA_709_LENS);
-        float lE  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x, 0.0)).rgb), LUMA_709_LENS);
-        float lW  = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x, 0.0)).rgb), LUMA_709_LENS);
-        float lNE = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x, -t.y)).rgb), LUMA_709_LENS);
-        float lNW = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x, -t.y)).rgb), LUMA_709_LENS);
-        float lSE = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2( t.x,  t.y)).rgb), LUMA_709_LENS);
-        float lSW = dot(toLinearFast(texture(uCameraTexture, vTexCoord + vec2(-t.x,  t.y)).rgb), LUMA_709_LENS);
+        // P7-W1: dynamic branch(uDetailReinject==1) 안 implicit-LOD texture() 는 GLSL ES 3.0
+        // spec §8.9 위반(non-uniform control flow 에서 derivative undefined). textureLod(uv,0.0)
+        // 으로 명시 LOD 지정 → derivative 불필요. mipmap 미사용 + LINEAR filter라 시각 결과 동일.
+        float lC  = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord, 0.0).rgb), LUMA_709_LENS);
+        float lN  = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2(0.0, -t.y), 0.0).rgb), LUMA_709_LENS);
+        float lS  = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2(0.0,  t.y), 0.0).rgb), LUMA_709_LENS);
+        float lE  = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2( t.x, 0.0), 0.0).rgb), LUMA_709_LENS);
+        float lW  = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2(-t.x, 0.0), 0.0).rgb), LUMA_709_LENS);
+        float lNE = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2( t.x, -t.y), 0.0).rgb), LUMA_709_LENS);
+        float lNW = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2(-t.x, -t.y), 0.0).rgb), LUMA_709_LENS);
+        float lSE = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2( t.x,  t.y), 0.0).rgb), LUMA_709_LENS);
+        float lSW = dot(toLinearFast(textureLod(uCameraTexture, vTexCoord + vec2(-t.x,  t.y), 0.0).rgb), LUMA_709_LENS);
         float blurLum = (lC * 2.0 + lN + lS + lE + lW + lNE + lNW + lSE + lSW) / 10.0;  // W6 §5.8 3x3 single-pass
         float baseLum = lC;
         float detail = clamp(baseLum / max(blurLum, 0.001), 0.85, 1.15);                 // W6 §5.2
