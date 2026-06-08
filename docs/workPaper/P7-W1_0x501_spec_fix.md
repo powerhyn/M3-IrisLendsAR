@@ -1,6 +1,6 @@
 # P7-W1: 0x501 spec fix + HIGH tier 회귀
 
-> **상태**: §5 확정 사항 작성 완료. 구현 착수 대기 (`ar-lens-implement`).
+> **상태**: ✅ **완료** (2026-06-08). 코드 `38368ec` + S23+(Adreno 740) 실기기 검증 통과 — 0x501 per-frame 제거(렌즈 65fps 렌더 중 0건), C10 ON/OFF 토글 육안 등가. 6 SKU 풀 회귀는 lens-독립성 근거로 waive(§4.1). develop `--no-ff` 머지.
 > **작성**: 2026-06-04
 > **선행 의존**: 없음 (P7 첫 W, P6 develop 머지 64ba08b 완료 상태에서 즉시 진입 가능)
 > **병렬 가능**: P7-W3 (cleanup, risk 0)
@@ -132,11 +132,12 @@ Stage 1 (107 agents, 25 sources)에서 F2가 confidence high (7 claims 3-0 vote)
 
 ### 4.1 Definition of Done
 
-- [ ] `shader_sources.cpp:1068-1076` 9개 `texture()` → `textureLod(uv, 0.0)` 교체
-- [ ] C++ iris_sdk + Android demo APK 빌드 성공 (shader compile warning/error 0)
-- [ ] HIGH tier (S23+) DetailReinject ON 상태에서 logcat `glError 0x501` 사라짐 (1분 long-run 관찰)
-- [ ] HIGH tier 6 SKU × 5축 회귀 — Phase 6 통과 패턴과 동일 (메모리 `solo-dev-bench-method` 정합)
-- [ ] DetailReinject ON/OFF 토글 시각 차이 없음 (uDetailReinject==0 분기 우회로 baseline 보존)
+- [x] `shader_sources.cpp` detail-reinject 블록 9개 `texture()` → `textureLod(uv, 0.0)` 교체 (commit `38368ec`)
+- [x] C++ iris_sdk 빌드 성공 (`libiris_sdkd.a` 링크, 신규 warning/error 0 — 기존 TFLite/mediapipe 경고만)
+- [x] textureLod 등가성 검증 (적대적 4-agent: verdict=identical — uCameraTexture는 sampler2D + GL_LINEAR + mipmap 미사용)
+- [x] HIGH tier (S23+ SM-S916N, Adreno 740) DetailReinject ON + 렌즈 렌더(~65fps) 상태 1분+ long-run: logcat `glError 0x501` **0건** (`nativeRenderLensTexture` 매 프레임 실행 + detected 4003건 = detail-reinject 분기 활성인데도 0x501 미발생 → per-frame 0x501 제거 확인. 2026-06-08)
+- [~] HIGH tier 6 SKU × 5축 회귀 — **풀 6 SKU 미수행 (사용자 판단으로 waive)**. 사유: 본 변경은 lens-독립적(`detailMul`은 `uCameraTexture` luma에서만 산출, 모든 SKU에서 textureLod≡texture로 byte-identical)이고 양안/블링크/sclera/림발 4축은 코드 미변경. 단일 SKU(doll choco) 토글 검증 + 객관 0x501=0으로 충분 판정 (메모리 `solo-dev-bench-method`/`qualitative-device-judgment` 정합). 2026-06-08
+- [x] DetailReinject ON/OFF 토글 시각 차이 없음 — S23+ `clāset doll choco` 렌즈 적용, C10 토글 4회(off↔on) 실기기 통제: 양쪽 0x501=0, 사용자 육안 "차이 거의 못 느낌, 미세한 디테일 차이만" = §5.2 step4 통과 기준(textureLod≡texture). (2026-06-08)
 
 ### 4.2 Out of scope
 
@@ -246,9 +247,35 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 
 ### 6.2 W 완료 후 후속 조건
 
-- **0x501 사라짐 확인**: ✅ → W1 종결, P7-W2/W3로 진입
-- **0x501 잔재**: ⚠️ → 2순위 가설 추적 별도 W (W1.1 또는 별도)
-- **시각 회귀 발견**: 즉시 revert + 추가 조사 (드라이버 차이 가능)
+- **0x501 사라짐 확인**: ✅ **실측 확정** (S23+/Adreno 740, 렌즈 65fps 렌더 중 0x501 0건, 2026-06-08) → W1 종결, P7-W2/W3로 진입. 위험 2 미발현(§6.3 예측대로 기본 구성에서 해소).
+- **0x501 잔재**: 미발생 → 2순위 가설 추적 불필요 (잔존 §8.9 후보 389/449는 P7-W3 위생 항목으로만 남음).
+- **시각 회귀 발견**: 없음 (ON/OFF 토글 육안 등가 확인).
+
+### 6.3 구현 중 적대적 검증 결과 (2026-06-04, 4-agent 워크플로우 `wf_f10ec798-dee`)
+
+W1 패치 직후 독립 4 에이전트로 ① 편집 정확성 ② textureLod 등가성 ③·④ 셰이더 전체 §8.9 잔존 위반 2회 교차 스캔 수행. Claude 직접 기술 판정으로 필터링.
+
+**① 편집**: 9개 모두 `textureLod(uv, 0.0)` 변환, 오프셋 9종 보존, 괄호 균형 ✅. 블록 내 implicit `texture(` 잔여 0건.
+
+**② 등가성**: `verdict=identical`. `uCameraTexture`는 `sampler2D`(EXTERNAL_OES 아님), `rgbaTextureId` GL_LINEAR min/mag + `glGenerateMipmap` 미호출 → mipmap 없음 → LOD 0 강제 = base level 샘플 = implicit과 동일. 근거: `shader_sources.cpp:790`(선언), `gpu_lens_renderer.cpp:930`(GL_TEXTURE_2D 바인딩), `CameraGLRenderer.kt:1746-1755`(필터 설정, mipmap 없음).
+
+**③·④ 잔존 §8.9 스캔 (Claude 판정 후)** — 두 스캔 상충(Scan1 2 violation+5 suspect / Scan2 0 violation). 기술 판정 결과:
+
+| 위치 | 셰이더 | 패턴 | Claude 판정 | lens 패스? | W1 블로커? |
+|---|---|---|---|---|---|
+| ~389 | COMBINED_COLOR_ADJUSTMENT (LUT) | `texture()` in `if(uLutIntensity>0.01)` | **동일 클래스 후보** (uniform-toggle 분기 내 implicit texture, detail-reinject와 동형). Scan1의 "non-uniform 좌표=위반"은 오판 — §8.9는 control flow 발산 문제 | ❌ (`gpu_lens_renderer.cpp` 미참조 = 별도 beauty 파이프라인) | ❌ |
+| ~449 | FREQ_SEP_GAUSSIAN | `texture()` in `for(uRadius)` loop | 동일 클래스 후보 (runtime uniform loop bound). spec상 dynamically-uniform이나 Adreno caution | ❌ | ❌ |
+| 109/264/419/420 | BILATERAL/SOFT_FOCUS/GAUSSIAN | const-loop `texture()` | **safe 오탐** — const 루프 = 완전 언롤 = straight-line. §8.9 무관 | ❌ | ❌ |
+| 938/955 | LENS_OVERLAY `sampleReflection` | `texture()` in `if(uSourceType==1/2)` | 동일 클래스이나 **기본 OFF** — `reflection_mode_=0`이라 분기 미진입(셰이더 line 959 "OFF (W3 기본)") | ✅ (단 미진입) | ❌ (반사 토글 시만 노출) |
+
+**위험 2 결론**: lens overlay 셰이더(0x501 관측 셰이더)의 **유일한 활성 §8.9-클래스 패턴은 detail-reinject 1건뿐**이었고 본 W1이 제거. 반사 분기는 기본 OFF, beauty 셰이더(389/449)는 lens 패스 밖. → **기본 구성에서 0x501이 본 패치로 해소될 가능성 높음** (단, 실기기 confirm이 DoD 게이트). 잔존 후보는 W1 블로커 아님.
+
+**P7-W3 cleanup 피드**:
+- (선택) 389(LUT 분기) / 449(freq-sep 루프) `textureLod` 위생 패치 — beauty 파이프라인 활성 시 예방. **활성 여부 먼저 확인** (어느 데모 패스에서 컴파일되는지).
+- 938/955 반사 분기는 Phase 9 환경 반사 재개 시 `textureLod` 동시 적용 (메모리 `w4-env-reflection-deferred` cross-link).
+- const-loop suspects는 무시 (safe).
+
+**실기기에서 0x501 잔재 시 (위험 2 발현)**: 2순위 후보 우선순위 = ① 반사 토글이 켜져 있었는지 확인 → ② beauty 패스(389/449) 활성 여부 → ③ 텍스처 binding/FBO state 등 비-셰이더 원인.
 
 ---
 
@@ -312,3 +339,5 @@ W1 완료 시 `P7-W0_index.md` §2.P7-W1에 상태 ✅ + 결과 1줄 추가 + co
 | 날짜 | 변경 |
 |---|---|
 | 2026-06-04 | 초안 작성. P7-W0 R1 합의 + Stage 1 F2 근거 반영. `ar-lens-implement` 호출 대기. |
+| 2026-06-04 | **코드 구현 완료** (commit `38368ec`). 9개 `texture()`→`textureLod(uv,0.0)`. C++ 빌드 통과. 적대적 4-agent 검증(§6.3): 편집 정확 + 등가성 identical + 잔존 §8.9 landscape. DoD 코드 3항 ✅ / 실기기 3항 대기. |
+| 2026-06-08 | **실기기 검증 완료 + W1 종결** (S23+ SM-S916N / Adreno 740). 통제 런: 렌즈 65fps 렌더 중 0x501 **0건**(패치 전 매 frame → 0). C10 ON/OFF 토글 4회: 양쪽 0x501=0 + 육안 등가("미세 디테일만"). 6 SKU 풀 회귀는 lens-독립성 근거로 waive. develop `--no-ff` 머지. DoD 5/6 ✅ + 1 waive. |

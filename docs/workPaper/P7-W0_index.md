@@ -71,6 +71,8 @@ Phase 8 = **뷰티 기능** (턱 깎기, 얼굴 사이즈 축소). P7 범위 밖
 
 ### P7-W1: 0x501 spec fix + HIGH tier 회귀
 
+> **상태 (2026-06-08)**: ✅ **완료**. 코드 `38368ec`(9개 `texture()`→`textureLod(uv,0.0)`) + S23+(Adreno 740) 실기기 검증 통과 — 렌즈 65fps 렌더 중 0x501 **0건**(패치 전 매 frame), C10 ON/OFF 토글 육안 등가. 6 SKU 풀 회귀는 lens-독립성 근거로 waive. develop `--no-ff` 머지. 적대적 4-agent 검증 §6.3 (잔존 §8.9 후보 389/449는 P7-W3 위생 항목).
+
 **목표**: GLSL ES 3.0 spec §8.9 위반 제거.
 
 **대상 코드**: `cpp/src/gpu/shader_sources.cpp:1066-1083` — `if(uDetailReinject==1){ 9 sample texture() }` 패턴.
