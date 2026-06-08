@@ -1,6 +1,6 @@
 # P7-W1: 0x501 spec fix + HIGH tier 회귀
 
-> **상태**: 🔄 코드 구현 완료 (commit `38368ec`, 2026-06-04). **HIGH tier(S23+) 실기기 검증 대기 — DoD 게이트** (0x501 logcat 사라짐 + 6 SKU × 5축 회귀). 실기기 통과 후 develop 머지.
+> **상태**: ✅ **완료** (2026-06-08). 코드 `38368ec` + S23+(Adreno 740) 실기기 검증 통과 — 0x501 per-frame 제거(렌즈 65fps 렌더 중 0건), C10 ON/OFF 토글 육안 등가. 6 SKU 풀 회귀는 lens-독립성 근거로 waive(§4.1). develop `--no-ff` 머지.
 > **작성**: 2026-06-04
 > **선행 의존**: 없음 (P7 첫 W, P6 develop 머지 64ba08b 완료 상태에서 즉시 진입 가능)
 > **병렬 가능**: P7-W3 (cleanup, risk 0)
@@ -135,9 +135,9 @@ Stage 1 (107 agents, 25 sources)에서 F2가 confidence high (7 claims 3-0 vote)
 - [x] `shader_sources.cpp` detail-reinject 블록 9개 `texture()` → `textureLod(uv, 0.0)` 교체 (commit `38368ec`)
 - [x] C++ iris_sdk 빌드 성공 (`libiris_sdkd.a` 링크, 신규 warning/error 0 — 기존 TFLite/mediapipe 경고만)
 - [x] textureLod 등가성 검증 (적대적 4-agent: verdict=identical — uCameraTexture는 sampler2D + GL_LINEAR + mipmap 미사용)
-- [ ] **(실기기 대기)** HIGH tier (S23+) DetailReinject ON 상태에서 logcat `glError 0x501` 사라짐 (1분 long-run 관찰)
-- [ ] **(실기기 대기)** HIGH tier 6 SKU × 5축 회귀 — Phase 6 통과 패턴과 동일 (메모리 `solo-dev-bench-method` 정합)
-- [ ] **(실기기 대기)** DetailReinject ON/OFF 토글 시각 차이 없음 (uDetailReinject==0 분기 우회로 baseline 보존)
+- [x] HIGH tier (S23+ SM-S916N, Adreno 740) DetailReinject ON + 렌즈 렌더(~65fps) 상태 1분+ long-run: logcat `glError 0x501` **0건** (`nativeRenderLensTexture` 매 프레임 실행 + detected 4003건 = detail-reinject 분기 활성인데도 0x501 미발생 → per-frame 0x501 제거 확인. 2026-06-08)
+- [~] HIGH tier 6 SKU × 5축 회귀 — **풀 6 SKU 미수행 (사용자 판단으로 waive)**. 사유: 본 변경은 lens-독립적(`detailMul`은 `uCameraTexture` luma에서만 산출, 모든 SKU에서 textureLod≡texture로 byte-identical)이고 양안/블링크/sclera/림발 4축은 코드 미변경. 단일 SKU(doll choco) 토글 검증 + 객관 0x501=0으로 충분 판정 (메모리 `solo-dev-bench-method`/`qualitative-device-judgment` 정합). 2026-06-08
+- [x] DetailReinject ON/OFF 토글 시각 차이 없음 — S23+ `clāset doll choco` 렌즈 적용, C10 토글 4회(off↔on) 실기기 통제: 양쪽 0x501=0, 사용자 육안 "차이 거의 못 느낌, 미세한 디테일 차이만" = §5.2 step4 통과 기준(textureLod≡texture). (2026-06-08)
 
 ### 4.2 Out of scope
 
@@ -247,9 +247,9 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 
 ### 6.2 W 완료 후 후속 조건
 
-- **0x501 사라짐 확인**: ✅ → W1 종결, P7-W2/W3로 진입
-- **0x501 잔재**: ⚠️ → 2순위 가설 추적 별도 W (W1.1 또는 별도)
-- **시각 회귀 발견**: 즉시 revert + 추가 조사 (드라이버 차이 가능)
+- **0x501 사라짐 확인**: ✅ **실측 확정** (S23+/Adreno 740, 렌즈 65fps 렌더 중 0x501 0건, 2026-06-08) → W1 종결, P7-W2/W3로 진입. 위험 2 미발현(§6.3 예측대로 기본 구성에서 해소).
+- **0x501 잔재**: 미발생 → 2순위 가설 추적 불필요 (잔존 §8.9 후보 389/449는 P7-W3 위생 항목으로만 남음).
+- **시각 회귀 발견**: 없음 (ON/OFF 토글 육안 등가 확인).
 
 ### 6.3 구현 중 적대적 검증 결과 (2026-06-04, 4-agent 워크플로우 `wf_f10ec798-dee`)
 
@@ -340,3 +340,4 @@ W1 완료 시 `P7-W0_index.md` §2.P7-W1에 상태 ✅ + 결과 1줄 추가 + co
 |---|---|
 | 2026-06-04 | 초안 작성. P7-W0 R1 합의 + Stage 1 F2 근거 반영. `ar-lens-implement` 호출 대기. |
 | 2026-06-04 | **코드 구현 완료** (commit `38368ec`). 9개 `texture()`→`textureLod(uv,0.0)`. C++ 빌드 통과. 적대적 4-agent 검증(§6.3): 편집 정확 + 등가성 identical + 잔존 §8.9 landscape. DoD 코드 3항 ✅ / 실기기 3항 대기. |
+| 2026-06-08 | **실기기 검증 완료 + W1 종결** (S23+ SM-S916N / Adreno 740). 통제 런: 렌즈 65fps 렌더 중 0x501 **0건**(패치 전 매 frame → 0). C10 ON/OFF 토글 4회: 양쪽 0x501=0 + 육안 등가("미세 디테일만"). 6 SKU 풀 회귀는 lens-독립성 근거로 waive. develop `--no-ff` 머지. DoD 5/6 ✅ + 1 waive. |

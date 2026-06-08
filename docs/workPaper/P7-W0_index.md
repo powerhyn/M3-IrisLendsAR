@@ -71,7 +71,7 @@ Phase 8 = **뷰티 기능** (턱 깎기, 얼굴 사이즈 축소). P7 범위 밖
 
 ### P7-W1: 0x501 spec fix + HIGH tier 회귀
 
-> **상태 (2026-06-04)**: 🔄 코드 구현 완료 (commit `38368ec`, branch `feature/P7-W1-0x501-spec-fix`). 9개 `texture()`→`textureLod(uv,0.0)`, 빌드 통과, 적대적 4-agent 검증(편집 정확·등가성 identical·잔존 §8.9 landscape — `P7-W1_*.md` §6.3). **HIGH tier(S23+) 실기기 검증 대기 = DoD 게이트** → 0x501 logcat 사라짐 확인 후 develop 머지.
+> **상태 (2026-06-08)**: ✅ **완료**. 코드 `38368ec`(9개 `texture()`→`textureLod(uv,0.0)`) + S23+(Adreno 740) 실기기 검증 통과 — 렌즈 65fps 렌더 중 0x501 **0건**(패치 전 매 frame), C10 ON/OFF 토글 육안 등가. 6 SKU 풀 회귀는 lens-독립성 근거로 waive. develop `--no-ff` 머지. 적대적 4-agent 검증 §6.3 (잔존 §8.9 후보 389/449는 P7-W3 위생 항목).
 
 **목표**: GLSL ES 3.0 spec §8.9 위반 제거.
 
