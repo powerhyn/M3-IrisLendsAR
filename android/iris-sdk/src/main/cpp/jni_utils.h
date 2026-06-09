@@ -351,6 +351,10 @@ struct JniCache {
     jfieldID irisResult_eyelidRatioRight = nullptr;
     jfieldID irisResult_eyeRefinerUsed = nullptr;
 
+    // P7-W2: iris ROI 실측 평균 luma (디텍트→렌더 round-trip 시 보존 필요)
+    jfieldID irisResult_avgIrisLumaLeft = nullptr;
+    jfieldID irisResult_avgIrisLumaRight = nullptr;
+
     // LensConfig 클래스
     jclass lensConfigClass = nullptr;
     jfieldID lensConfig_opacity = nullptr;

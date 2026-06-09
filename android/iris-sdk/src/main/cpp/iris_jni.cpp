@@ -77,6 +77,10 @@ bool JniCache::init(JNIEnv* env) {
     irisResult_eyelidRatioRight = env->GetFieldID(irisResultClass, "eyelidRatioRight", "F");
     irisResult_eyeRefinerUsed = env->GetFieldID(irisResultClass, "eyeRefinerUsed", "Z");
 
+    // P7-W2: iris ROI 실측 평균 luma 필드 ID 캐시
+    irisResult_avgIrisLumaLeft = env->GetFieldID(irisResultClass, "avgIrisLumaLeft", "F");
+    irisResult_avgIrisLumaRight = env->GetFieldID(irisResultClass, "avgIrisLumaRight", "F");
+
     // 필드 ID 검증
     if (!irisResult_detected || !irisResult_leftDetected || !irisResult_rightDetected ||
         !irisResult_confidence || !irisResult_leftIrisX || !irisResult_leftIrisY ||
@@ -88,7 +92,8 @@ bool JniCache::init(JNIEnv* env) {
         !irisResult_frameHeight || !irisResult_faceMeshValid || !irisResult_faceMesh ||
         !irisResult_irisQualityLeft || !irisResult_irisQualityRight ||
         !irisResult_eyelidRatioLeft || !irisResult_eyelidRatioRight ||
-        !irisResult_eyeRefinerUsed) {
+        !irisResult_eyeRefinerUsed ||
+        !irisResult_avgIrisLumaLeft || !irisResult_avgIrisLumaRight) {
         LOGE("Failed to get IrisResult field IDs");
         return false;
     }
@@ -270,6 +275,10 @@ bool copyResultToJava(JNIEnv* env, const IrisResult& src, jobject dest) {
     env->SetFloatField(dest, g_jniCache.irisResult_eyelidRatioRight, src.eyelid_ratio_right);
     env->SetBooleanField(dest, g_jniCache.irisResult_eyeRefinerUsed, src.eye_refiner_used);
 
+    // P7-W2: iris ROI 실측 luma (디텍트→렌더 round-trip 보존).
+    env->SetFloatField(dest, g_jniCache.irisResult_avgIrisLumaLeft, src.avg_iris_luma_left);
+    env->SetFloatField(dest, g_jniCache.irisResult_avgIrisLumaRight, src.avg_iris_luma_right);
+
     // Face Mesh 데이터 복사
     env->SetBooleanField(dest, g_jniCache.irisResult_faceMeshValid, src.face_mesh_valid);
 
@@ -349,6 +358,10 @@ bool copyResultFromJava(JNIEnv* env, jobject src, IrisResult& dest) {
     dest.eyelid_ratio_left = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioLeft);
     dest.eyelid_ratio_right = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioRight);
     dest.eye_refiner_used = env->GetBooleanField(src, g_jniCache.irisResult_eyeRefinerUsed);
+
+    // P7-W2: iris ROI 실측 luma (Java→native, 렌더 패스가 소비). 미측정=-1.
+    dest.avg_iris_luma_left = env->GetFloatField(src, g_jniCache.irisResult_avgIrisLumaLeft);
+    dest.avg_iris_luma_right = env->GetFloatField(src, g_jniCache.irisResult_avgIrisLumaRight);
 
     // Face Mesh
     dest.face_mesh_valid = env->GetBooleanField(src, g_jniCache.irisResult_faceMeshValid);
@@ -2317,6 +2330,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionIntensity(
 extern void iris_sdk_set_lens_blink_up_ms(float ms);
 extern void iris_sdk_set_lens_gate_threshold(float threshold);
 extern void iris_sdk_set_lens_detail_reinject(int enabled);
+// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (internal).
+extern void iris_sdk_set_use_measured_luma(int enabled);
 
 /**
  * Java: native void nativeSetBlinkUpMs(float ms);
@@ -2352,6 +2367,18 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetDetailReinject(
     jboolean enabled)
 {
     iris_sdk_set_lens_detail_reinject(enabled ? 1 : 0);
+}
+
+/**
+ * Java: native void nativeSetUseMeasuredLuma(boolean enabled);
+ * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 false=fallback).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetUseMeasuredLuma(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jboolean enabled)
+{
+    iris_sdk_set_use_measured_luma(enabled ? 1 : 0);
 }
 
 }  // extern "C"

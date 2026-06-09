@@ -1085,6 +1085,17 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글.
+     * false=fallback(0.1225, 기본, 안전 롤백), true=detector 실측 사용.
+     * @param enabled true=실측, false=fallback.
+     */
+    public static void setUseMeasuredLuma(boolean enabled) {
+        if (sLibraryLoaded) {
+            nativeSetUseMeasuredLuma(enabled);
+        }
+    }
+
+    /**
      * GPU 렌즈 타원 마스크 설정.
      * GL 스레드에서 호출.
      * @param enabled true=on, false=off
@@ -1472,6 +1483,7 @@ public final class IrisLensSDK {
     private static native void nativeSetBlinkUpMs(float ms);
     private static native void nativeSetGateThreshold(float threshold);
     private static native void nativeSetDetailReinject(boolean enabled);
+    private static native void nativeSetUseMeasuredLuma(boolean enabled);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods
