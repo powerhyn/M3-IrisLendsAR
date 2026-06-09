@@ -505,6 +505,7 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uTexelSize = glGetUniformLocation(lens_program_, "uTexelSize");
     lens_uniforms_.uGateThreshold = glGetUniformLocation(lens_program_, "uGateThreshold");
     lens_uniforms_.uDetailReinject = glGetUniformLocation(lens_program_, "uDetailReinject");
+    lens_uniforms_.uLowLightActive = glGetUniformLocation(lens_program_, "uLowLightActive");
     lens_uniforms_.uLeftRenderAlpha = glGetUniformLocation(lens_program_, "uLeftRenderAlpha");
     lens_uniforms_.uRightRenderAlpha = glGetUniformLocation(lens_program_, "uRightRenderAlpha");
 
@@ -621,6 +622,12 @@ void GPULensRenderer::setGateThreshold(float t) {
 void GPULensRenderer::setDetailReinject(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
     detail_reinject_ = enabled;
+}
+
+// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글. false면 fallback chain만 작동.
+void GPULensRenderer::setUseMeasuredLuma(bool enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    use_measured_luma_ = enabled;
 }
 
 // P6-W7: SKU 레지스트리 주입 (외부 소유, null 허용).
@@ -800,10 +807,11 @@ void GPULensRenderer::updateEllipseCache(const IrisResult& iris_result) {
 float GPULensRenderer::updateAvgIrisLuma(const gpu::EyeRenderPacket& left,
                                          const gpu::EyeRenderPacket& right) {
     // 1) packet.avg_iris_luma 우선 (양쪽 중 존재하는 값들의 평균).
-    //    W6에서 비동기 readback or detector CPU 버퍼로 packet에 채울 예정.
+    //    P7-W2 §5.6: use_measured_luma_=false면 실측을 무시하고 fallback chain만 →
+    //    A/B 토글 깔끔 분리(셀프 롤백). detector producer(§5.5)가 packet을 채움.
     float raw = 0.0f;
     bool  raw_ok = false;
-    if (left.avg_iris_luma || right.avg_iris_luma) {
+    if (use_measured_luma_ && (left.avg_iris_luma || right.avg_iris_luma)) {
         float sum = 0.0f;
         int   n = 0;
         if (left.avg_iris_luma)  { sum += *left.avg_iris_luma;  ++n; }
@@ -830,8 +838,24 @@ float GPULensRenderer::updateAvgIrisLuma(const gpu::EyeRenderPacket& left,
         avg_luma_has_valid_  = false;
     }
 
-    return std::max(kAvgLumaClampMin,
-                    std::min(kAvgLumaClampMax, current_avg_luma_));
+    const float ema_luma = std::max(kAvgLumaClampMin,
+                                    std::min(kAvgLumaClampMax, current_avg_luma_));
+
+    // P7-W2 §5.4: 저조도 gate 전용 dual-threshold 래치(hysteresis).
+    //   진동(밝음↔어두움 경계 1프레임 떨림) 차단. EMA된 luma로 갱신.
+    //   ⚠️ 래치는 gate(uLowLightActive)에만 쓰고, 반환되는 uAvgIrisLum(블렌드
+    //   정규화 분모)에는 절대 반영하지 않음 — 변조 시 블렌드 깨짐(§5.4 금지).
+    if (is_low_light_) {
+        if (ema_luma > kLowLightExit) {
+            is_low_light_ = false;
+        }
+    } else {
+        if (ema_luma < kLowLightEnter) {
+            is_low_light_ = true;
+        }
+    }
+
+    return ema_luma;
 }
 
 // ============================================================================
@@ -1108,6 +1132,9 @@ ErrorCode GPULensRenderer::renderToTexture(
                 1.0f / static_cast<float>(std::max(height, 1)));
     glUniform1f(lens_uniforms_.uGateThreshold, gate_threshold_);
     glUniform1i(lens_uniforms_.uDetailReinject, detail_reinject_ ? 1 : 0);
+    // P7-W2 §5.4: gate 전용 저조도 래치 상태(0/1). 셰이더 gate에서만 활용 —
+    // 블렌드(877/888)는 raw uAvgIrisLum 그대로라 영향 없음.
+    glUniform1f(lens_uniforms_.uLowLightActive, is_low_light_ ? 1.0f : 0.0f);
 
     // P6-W6 §1.3 C7: 블링크 ramp. mirror 시 좌/우 swap (eyelid uniform과 동일 패턴).
     float l_alpha = render_alpha_[0];

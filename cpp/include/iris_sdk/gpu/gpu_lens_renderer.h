@@ -150,6 +150,9 @@ public:
     void setGateThreshold(float t);
     /// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off (기본 on).
     void setDetailReinject(bool enabled);
+    /// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 false=fallback, 안전 롤백).
+    ///   false면 updateAvgIrisLuma가 항상 fallback chain → 0.1225. true면 packet 실측 사용.
+    void setUseMeasuredLuma(bool enabled);
 
     // ========================================
     // P6-W7: 림발 자동감지 fallback + SKU 메타데이터
@@ -305,6 +308,7 @@ private:
         GLint uTexelSize = -1;
         GLint uGateThreshold = -1;
         GLint uDetailReinject = -1;
+        GLint uLowLightActive = -1;  // P7-W2 §5.4: gate 전용 저조도 래치 상태 (0..1)
         GLint uLeftRenderAlpha = -1;
         GLint uRightRenderAlpha = -1;
     } lens_uniforms_;
@@ -401,6 +405,17 @@ private:
     // 보존되어 실측 연결 시 극단 저조도(luma<0.07)만 자동 감쇄.
     float gate_threshold_ = 0.10f;  // B9 토글 후보 0.10/0.15/0.25
     bool  detail_reinject_ = true;  // C10 on/off
+
+    // P7-W2 §5.6: 실측 luma A/B 토글. false면 packet 실측을 무시하고 fallback 0.1225만.
+    // 안전 롤백 기본값(false) — 실기기 검증 후 활성화.
+    bool  use_measured_luma_ = false;
+
+    // P7-W2 §5.4: 저조도 gate 전용 dual-threshold 래치(hysteresis). enter<0.08→true,
+    // exit>0.12→false. ⚠️ gate(uLowLightActive)에만 영향. uAvgIrisLum(블렌드 정규화
+    // 분모)은 raw EMA값 그대로 — 히스테리시스로 변조 금지(블렌드 깨짐).
+    bool  is_low_light_ = false;
+    static constexpr float kLowLightEnter = 0.08f;  // 이 미만이면 저조도 진입
+    static constexpr float kLowLightExit  = 0.12f;  // 이 초과면 저조도 해제
 
     // W6 §1.3: down ramp는 고정(생리적 눈 감김이 뜸보다 빠름).
     static constexpr float kBlinkDownMs        = 60.0f;

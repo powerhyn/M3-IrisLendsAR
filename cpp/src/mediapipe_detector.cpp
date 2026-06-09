@@ -2252,6 +2252,87 @@ public:
 
         return total_dist / 4.0f;
     }
+
+    /**
+     * @brief iris ROI 평균 linear luma 측정 (P7-W2 §5.5/§5.7)
+     *
+     * 셰이더 정규화 분모(uAvgIrisLum)와 동일 색공간으로 측정해야 정합한다:
+     *   각 픽셀 srgb = v/255, linear = srgb*srgb (toLinearFast, shader_sources.cpp:851),
+     *   luma = dot(linear_rgb, Rec.709). ROI 평균. sRGB 평균 금지(§5.5).
+     * ROI = iris center ± 0.65·radius 원형 마스크(§5.2). OOB 클램프 필수.
+     *
+     * @param rgb_mat uint8 RGB, 해상도=원본 프레임
+     * @param center_norm_x 홍채 중심 X (정규화 0~1)
+     * @param center_norm_y 홍채 중심 Y (정규화 0~1)
+     * @param radius_px 홍채 반경 (픽셀, frame_w 기준)
+     * @param frame_w 프레임 너비 (픽셀)
+     * @param frame_h 프레임 높이 (픽셀)
+     * @return ROI 평균 linear luma [0.01, 0.81] clamp, count==0이면 -1
+     */
+    float calculateIrisLuma(const cv::Mat& rgb_mat,
+                            float center_norm_x, float center_norm_y,
+                            float radius_px, int frame_w, int frame_h) const {
+        if (rgb_mat.empty() || rgb_mat.type() != CV_8UC3 ||
+            frame_w <= 0 || frame_h <= 0) {
+            return -1.0f;
+        }
+
+        // 정규화 중심 → 픽셀. rgb_mat 해상도가 frame과 다를 수 있어 mat 기준으로 환산.
+        const float sx = static_cast<float>(rgb_mat.cols) / static_cast<float>(frame_w);
+        const float sy = static_cast<float>(rgb_mat.rows) / static_cast<float>(frame_h);
+        const float cx_px = center_norm_x * static_cast<float>(frame_w) * sx;
+        const float cy_px = center_norm_y * static_cast<float>(frame_h) * sy;
+        // radius_px는 frame_w 기준이므로 mat 가로 스케일로 환산. r=0.65·radius(§5.2).
+        const float r_px = radius_px * sx * 0.65f;
+        if (!(r_px > 0.0f)) {
+            return -1.0f;
+        }
+        const float r_sq = r_px * r_px;
+
+        // ROI 바운딩 박스를 mat 경계로 클램프(OOB 방지, §5.5).
+        const int x0 = std::max(0, static_cast<int>(std::floor(cx_px - r_px)));
+        const int y0 = std::max(0, static_cast<int>(std::floor(cy_px - r_px)));
+        const int x1 = std::min(rgb_mat.cols - 1, static_cast<int>(std::ceil(cx_px + r_px)));
+        const int y1 = std::min(rgb_mat.rows - 1, static_cast<int>(std::ceil(cy_px + r_px)));
+        if (x1 < x0 || y1 < y0) {
+            return -1.0f;
+        }
+
+        // Rec.709 linear 계수 (셰이더 LUMA_709_LENS와 동일).
+        constexpr float kR = 0.2126f, kG = 0.7152f, kB = 0.0722f;
+        constexpr float kInv255 = 1.0f / 255.0f;
+
+        double luma_sum = 0.0;
+        int count = 0;
+        for (int y = y0; y <= y1; ++y) {
+            const float dy = static_cast<float>(y) - cy_px;
+            const uchar* row = rgb_mat.ptr<uchar>(y);
+            for (int x = x0; x <= x1; ++x) {
+                const float dx = static_cast<float>(x) - cx_px;
+                if (dx * dx + dy * dy > r_sq) {
+                    continue;  // 원형 마스크 밖
+                }
+                const uchar* px = row + x * 3;
+                // srgb = v/255, linear = srgb*srgb (toLinearFast). sRGB 평균 금지.
+                const float sr = static_cast<float>(px[0]) * kInv255;
+                const float sg = static_cast<float>(px[1]) * kInv255;
+                const float sb = static_cast<float>(px[2]) * kInv255;
+                const float lr = sr * sr;
+                const float lg = sg * sg;
+                const float lb = sb * sb;
+                luma_sum += static_cast<double>(kR * lr + kG * lg + kB * lb);
+                ++count;
+            }
+        }
+
+        if (count == 0) {
+            return -1.0f;
+        }
+
+        const float avg = static_cast<float>(luma_sum / count);
+        // div-by-zero/극단 방지. consumer clamp(kAvgLumaClamp*)와 동일 범위(§5.5).
+        return std::max(0.01f, std::min(0.81f, avg));
+    }
 #endif  // IRIS_SDK_HAS_TFLITE && IRIS_SDK_HAS_OPENCV
 };
 
@@ -2324,6 +2405,9 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     result.confidence = 0.0f;
     result.frame_width = width;
     result.frame_height = height;
+    // P7-W2 §5.5: 미측정 sentinel(-1). 측정 성공 시 §6 결과 구성부에서 덮어씀.
+    result.avg_iris_luma_left = -1.0f;
+    result.avg_iris_luma_right = -1.0f;
 
     // 디버그: 초기화 상태 및 조건부 컴파일 매크로 확인
     static bool init_debug_printed = false;
@@ -3069,6 +3153,22 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
             eye_factor = 1.0f;
         }
         result.confidence = face_confidence * eye_factor;
+    }
+
+    // =========================================================
+    // 6.1. P7-W2 §5.5: iris ROI 실측 평균 luma (셰이더 uAvgIrisLum source).
+    //   매 detection 측정(N 서브샘플링 안 함). 미검출 눈은 -1 sentinel 유지.
+    //   rgb_mat은 원본 프레임 해상도 RGB. center는 정규화, radius는 frame_w 기준 px.
+    // =========================================================
+    if (result.left_detected) {
+        result.avg_iris_luma_left = impl_->calculateIrisLuma(
+            rgb_mat, result.left_iris[0].x, result.left_iris[0].y,
+            result.left_radius, width, height);
+    }
+    if (result.right_detected) {
+        result.avg_iris_luma_right = impl_->calculateIrisLuma(
+            rgb_mat, result.right_iris[0].x, result.right_iris[0].y,
+            result.right_radius, width, height);
     }
 
     // 얼굴 회전 추정 (간단한 버전: 코, 눈 위치 기반)
