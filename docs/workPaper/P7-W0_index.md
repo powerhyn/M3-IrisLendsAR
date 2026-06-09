@@ -99,7 +99,7 @@ Phase 8 = **뷰티 기능** (턱 깎기, 얼굴 사이즈 축소). P7 범위 밖
 
 ### P7-W2: avg_iris_luma 측정 패스 + W6 Phase B/C
 
-> **상태 (2026-06-08)**: ✅ 브레인스토밍 R1 완료 → 본문 `P7-W2_avg_iris_luma_measure.md` §5 확정. 핵심 결정: **측정 위치 C(detector CPU 버퍼, GL 우회)** 3/3. consumer EMA 이미 존재 → producer CPU 측정만 신규. **구현 대기** (`implement P7-W2`).
+> **상태 (2026-06-09)**: 🔄 브레인스토밍 R1+R2 완료 + **코드 구현 완료** (커밋 `5c22075`~`087e1b8`, branch `feature/P7-W2-avg-iris-luma`). detector CPU 측정 producer + A/B 토글(`lum:fb`↔`lum:meas`) + gate hysteresis. 단위테스트 7/7 + Android BUILD SUCCESSFUL. **실기기 A/B 재벤치 대기 = DoD 게이트** (메인 블렌드 ID=5/7 6 SKU, 밝은 환경 over-tint 교정 확인). R2가 "측정 연결 → 측정+블렌드 재벤치"로 확장.
 
 **목표**: W6 fallback 0.1225 대신 실측 source 연결 + 블링크 ramp/저조도 gate 최종 튜닝.
 
