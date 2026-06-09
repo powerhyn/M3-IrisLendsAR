@@ -32,6 +32,17 @@ target_link_libraries(test_types PRIVATE
 # add_test는 gtest_discover_tests가 대체함
 
 # ============================================================
+# P7-W2: iris ROI luma 측정 색공간(srgb²+Rec.709) 정합 테스트
+# (self-contained reference, SDK/OpenCV 비의존)
+# ============================================================
+add_executable(test_iris_luma_measure test_iris_luma_measure.cpp)
+target_include_directories(test_iris_luma_measure PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_iris_luma_measure PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+)
+
+# ============================================================
 # P1-W3-01: IrisDetector 인터페이스 테스트
 # ============================================================
 add_executable(test_iris_detector test_iris_detector.cpp)
@@ -209,6 +220,7 @@ endif()
 # ============================================================
 include(GoogleTest)
 gtest_discover_tests(test_types DISCOVERY_TIMEOUT 60)
+gtest_discover_tests(test_iris_luma_measure DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_iris_detector DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_mediapipe_detector DISCOVERY_TIMEOUT 60)
 gtest_discover_tests(test_mediapipe_detector_performance DISCOVERY_TIMEOUT 120)
