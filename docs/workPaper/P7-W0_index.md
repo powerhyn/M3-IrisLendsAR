@@ -99,6 +99,8 @@ Phase 8 = **뷰티 기능** (턱 깎기, 얼굴 사이즈 축소). P7 범위 밖
 
 ### P7-W2: avg_iris_luma 측정 패스 + W6 Phase B/C
 
+> **상태 (2026-06-08)**: ✅ 브레인스토밍 R1 완료 → 본문 `P7-W2_avg_iris_luma_measure.md` §5 확정. 핵심 결정: **측정 위치 C(detector CPU 버퍼, GL 우회)** 3/3. consumer EMA 이미 존재 → producer CPU 측정만 신규. **구현 대기** (`implement P7-W2`).
+
 **목표**: W6 fallback 0.1225 대신 실측 source 연결 + 블링크 ramp/저조도 gate 최종 튜닝.
 
 **설계** (R1 3/3 통합):
