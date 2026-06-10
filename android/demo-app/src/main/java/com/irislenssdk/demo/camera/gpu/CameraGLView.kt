@@ -406,15 +406,6 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
-     * 각막 하이라이트(Corneal Specular) 활성화/비활성화
-     */
-    fun setHighlight(enabled: Boolean) {
-        queueEvent {
-            glRenderer.setHighlight(enabled)
-        }
-    }
-
-    /**
      * LUT 필터 강도 설정 (0.0 ~ 1.0)
      */
     fun setLutIntensity(intensity: Float) {
