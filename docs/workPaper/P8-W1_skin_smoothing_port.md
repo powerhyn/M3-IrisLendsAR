@@ -3,7 +3,7 @@
 > **상태**: 🔄 구현 중 (2026-06-10)
 > **작성**: 2026-06-10
 > **성격**: P7 진행 중 사용자 요청으로 삽입된 **선행 P8(뷰티) 트랙**. P7-W4(재베이스라인 대기)와 독립 병렬.
-> **출처 스펙**: `docs/skin-smoothing-handoff-from-lenssimulator.md` (LensSimulator/CGG에서 S23+ 실기기 검증 완료 — "아주 마음에 듦", 30fps 유지, 적대적 리뷰 통과)
+> **출처 스펙**: `docs/lenssim-handoff/skin-smoothing-handoff-from-lenssimulator.md` (LensSimulator/CGG에서 S23+ 실기기 검증 완료 — "아주 마음에 듦", 30fps 유지, 적대적 리뷰 통과)
 > **브레인스토밍 생략 사유**: 알고리즘·파라미터·함정이 원 프로젝트에서 이미 실기기 검증+적대적 리뷰로 확정됨. 본 W의 결정 사항은 "IrisLensSDK 통합 지점"만이며 §1.3에 코드 실측 기반으로 기록.
 
 ---
