@@ -1,6 +1,7 @@
 # P8-W1: 피부 보정(skin smoothing) 이식 — LensSimulator 검증 스펙
 
-> **상태**: ✅ 구현 완료 + APK b293 S23+ 설치 (2026-06-10) — **실기기 육안 검증 대기** (§4.1 잔여 2항). 커밋 `a1d34e5`~`d2676fa` 6개.
+> **상태**: ✅ **구현 완료 + develop 머지** (2026-06-10, 사용자 지시). 커밋 `a1d34e5`~`d2676fa` + 문서. APK b293 S23+ 설치됨.
+> **잔여 (머지 후 후속)**: §4.1 실기기 육안 2항 — `skin:off→0.5→1.0` 토글로 룩 재현·에지 선명도·FreqSep A/B·30fps + OFF 무회귀. 결과에 따라 기본값 전환/FreqSep 정리 후속 W 판단.
 > **작성**: 2026-06-10
 > **성격**: P7 진행 중 사용자 요청으로 삽입된 **선행 P8(뷰티) 트랙**. P7-W4(재베이스라인 대기)와 독립 병렬.
 > **출처 스펙**: `docs/lenssim-handoff/skin-smoothing-handoff-from-lenssimulator.md` (LensSimulator/CGG에서 S23+ 실기기 검증 완료 — "아주 마음에 듦", 30fps 유지, 적대적 리뷰 통과)
