@@ -194,6 +194,22 @@ extern const char* FREQ_SEP_COMPOSITE_FRAGMENT;
 /// Luminance Sharpen 셰이더 (FreqSep 후 선명도 복구)
 extern const char* LUMINANCE_SHARPEN_FRAGMENT;
 
+//=============================================================================
+// P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
+//=============================================================================
+
+/// 단색 채움 버텍스 셰이더 (피부 마스크 삼각팬 — UV 불필요, position만)
+extern const char* SKIN_MASK_FILL_VERTEX;
+
+/// 단색 채움 프래그먼트 셰이더 (uValue를 R 채널에 기록)
+extern const char* SKIN_MASK_FILL_FRAGMENT;
+
+/// 분리형 가우시안 5-fetch (linear sampling 트릭) — 컬러/마스크 공용 블러
+extern const char* SKIN_SEPARABLE_BLUR_FRAGMENT;
+
+/// 에지 가드 컴포지트 (피부 스무딩 — base/blur/mask 동일 UV)
+extern const char* SKIN_SMOOTH_COMPOSITE_FRAGMENT;
+
 /// 렌즈 오버레이 버텍스 셰이더
 extern const char* LENS_OVERLAY_VERTEX;
 

@@ -1759,6 +1759,20 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetSkinColorFilter(
 }
 
 /**
+ * @brief P8-W1: landmark-masked skin smoothing 모드 설정 (internal, 벤치/A-B용)
+ *
+ * Java: native void nativeSetSkinMaskSmoothing(boolean enabled, float strength);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetSkinMaskSmoothing(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jboolean enabled,
+    jfloat strength) {
+    iris_sdk_set_skin_mask_smoothing(enabled ? 1 : 0, static_cast<float>(strength));
+}
+
+/**
  * @brief Face Warp 적용 (GPU)
  *
  * Java: native int nativeApplyFaceWarp(int inputTexture, int width, int height,

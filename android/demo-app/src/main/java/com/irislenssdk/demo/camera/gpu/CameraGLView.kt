@@ -335,6 +335,16 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * P8-W1: landmark-masked skin smoothing 토글 (FreqSep 대체 A/B).
+     * 뷰티 활성(beautyEnabled) 상태에서만 시각 효과 발생.
+     */
+    fun setSkinMaskSmoothing(enabled: Boolean, strength: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setSkinMaskSmoothing(enabled, strength)
+        }
+    }
+
+    /**
      * LUT 3D 텍스처 설정 (임의 스레드에서 호출 가능 — 내부에서 GL 스레드로 큐잉)
      *
      * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)

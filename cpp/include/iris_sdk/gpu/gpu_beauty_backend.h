@@ -15,6 +15,7 @@
 #include "iris_sdk/gpu/gpu_profiler.h"
 #include "iris_sdk/one_euro_filter.h"
 
+#include <array>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -389,6 +390,35 @@ private:
         const BeautyFilterConfigV2& config);
 
     //=========================================================================
+    // P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
+    //=========================================================================
+
+    /// 새 모드 활성 + 강도>0 + face_mesh 유효 여부 판정 (비용 게이팅 진입점).
+    bool skinMaskSmoothingActive(const IrisResult* detection) const;
+
+    /// 1/4 해상도 5타깃(RGBA8×3 + R8×2) 지연 생성. 실패 시 1회 로그 후 비활성.
+    /// 원본 ensureBeautyTargets/createBeautyTargets 패턴 (Renderer.kt 455-506).
+    bool ensureSkinTargets(int width, int height);
+    void destroySkinTargets();
+
+    /// detection->face_mesh → 픽셀 공간 One-Euro 필터 → 이마 확장(마스크 전용) →
+    /// 팬 정점 NDC 채우기. 모드 활성 시만 호출 (필터링 비용 0 게이팅).
+    void prepareSkinFans(const IrisResult* detection, int width, int height, double frame_ts);
+
+    /// 패스 1-2: 입력 1/4 다운샘플 → 컬러 블러 H/V → 마스크 팬 → 마스크 블러 H/V.
+    void renderSkinBasePasses(GLuint input_tex, int width, int height);
+
+    /// 분리형 가우시안 1방향 (저해상도 타깃 한정).
+    void skinBlurPass(GLuint src_tex, GLuint dst_fbo, float dir_x, float dir_y, float offset_scale);
+
+    /// 패스 3: 풀해상도 에지 가드 컴포지트 (output_fbo에 기록).
+    void renderSkinComposite(GLuint base_tex, GLuint output_fbo,
+                             int width, int height, float strength);
+
+    /// landmark-masked smoothing 셰이더 초기화 (non-fatal).
+    bool initializeSkinSmoothingShaders();
+
+    //=========================================================================
     // 멤버 변수
     //=========================================================================
 
@@ -426,6 +456,64 @@ private:
     GLuint skin_mask_texture_ = 0;
     int skin_mask_width_ = 0;
     int skin_mask_height_ = 0;
+
+    //=========================================================================
+    // P8-W1: landmark-masked skin smoothing 상태
+    //=========================================================================
+
+    // 5타깃 인덱스: [0]=다운샘플 RGBA, [1]=블러 중간 RGBA, [2]=컬러 블러 RGBA,
+    //              [3]=마스크 R8, [4]=마스크 블러 R8 (원본 BT_LOW..BT_MASK_BLUR)
+    static constexpr int kSkinTargetCount = 5;
+    static constexpr int kSkinLow = 0;
+    static constexpr int kSkinTmp = 1;
+    static constexpr int kSkinBlur = 2;
+    static constexpr int kSkinMask = 3;       // 이 인덱스 이상은 R8 단일 채널
+    static constexpr int kSkinMaskBlur = 4;
+
+    // 팬 정점 카운트 [무게중심+N+첫점반복]: 외곽38/눈썹12×2/입술22/눈18×2 (원본 동일)
+    static constexpr std::array<int, 6> kSkinFanCounts = {38, 12, 12, 22, 18, 18};
+    // 총 정점 수 = Σ kSkinFanCounts = 120 → 240 floats
+    static constexpr int kSkinFanFloats = 240;
+    // 폴리곤별 점 수: 외곽36/눈썹10×2/입술20/눈16×2 (= 108점, 216 floats)
+    static constexpr int kSkinPointCount = 108;
+    static constexpr float kSkinColorBlurScale = 1.6f; // 컬러 블러 offsetScale (P8-W1 §5)
+    static constexpr float kSkinMaskBlurScale = 1.0f;  // 마스크 블러 offsetScale
+
+    GLuint skin_mask_fill_program_ = 0;
+    GLuint skin_blur_program_ = 0;
+    GLuint skin_composite_program_ = 0;
+
+    GLuint skin_target_tex_[kSkinTargetCount] = {0, 0, 0, 0, 0};
+    GLuint skin_target_fbo_[kSkinTargetCount] = {0, 0, 0, 0, 0};
+    int skin_low_w_ = 0;
+    int skin_low_h_ = 0;
+    bool skin_targets_ready_ = false;
+    bool skin_targets_failed_ = false;  // 생성 실패 — 매 프레임 재시도 방지
+
+    // 모드 토글 (internal API)
+    bool skin_mask_smoothing_enabled_ = false;
+    float skin_mask_smoothing_strength_ = 0.0f;
+
+    // 팬 정점 버퍼 (NDC, position만) + 픽셀 좌표 작업 버퍼 (프레임당 할당 금지)
+    std::array<float, kSkinFanFloats> skin_fan_{};
+    std::array<float, kSkinPointCount * 2> skin_oval_px_{};  // 외곽 픽셀 (이마 확장용)
+
+    // 픽셀 공간 One-Euro 필터 — 점별 x/y 2축 (모드 활성 시만 필터링·재획득 시 reset).
+    // P8-W1 §5: min_cutoff 0.5 / beta 0.007 / d_cutoff 1.0 (원본 FaceTracker ADR-0002).
+    std::array<OneEuroFilter, kSkinPointCount * 2> skin_landmark_filters_;
+    bool skin_filters_active_ = false;  // 직전 프레임에 필터가 동작했는지 (재획득 reset 판정)
+
+    // Skin smoothing uniform 캐시
+    struct SkinUniforms {
+        GLint maskFillValue = -1;
+        GLint blurTexture = -1;
+        GLint blurDirection = -1;
+        GLint blurOffsetScale = -1;
+        GLint compositeTexture = -1;
+        GLint compositeBlurTex = -1;
+        GLint compositeMaskTex = -1;
+        GLint compositeSkin = -1;
+    } skin_uniforms_;
 
     //=========================================================================
     // Uniform Location 캐시 (성능 최적화)
@@ -543,6 +631,16 @@ public:
     int getFreqSepDebugMode() const { return freqsep_debug_mode_; }
     void setSkinColorFilter(bool enabled) { skin_color_filter_ = enabled; }
     bool getSkinColorFilter() const { return skin_color_filter_; }
+
+    /// P8-W1: landmark-masked skin smoothing 모드 토글 (internal/벤치용).
+    /// 활성 시 기존 FreqSep/Bilateral 스무딩을 대체한다 (다른 패스는 불변).
+    /// strength=0 또는 enabled=false면 마스크/블러/필터/타깃 전부 생략 (비용 0).
+    void setSkinMaskSmoothing(bool enabled, float strength) {
+        skin_mask_smoothing_enabled_ = enabled;
+        skin_mask_smoothing_strength_ = (strength < 0.0f) ? 0.0f : (strength > 1.0f ? 1.0f : strength);
+    }
+    bool getSkinMaskSmoothingEnabled() const { return skin_mask_smoothing_enabled_; }
+    float getSkinMaskSmoothingStrength() const { return skin_mask_smoothing_strength_; }
 private:
 
     /// Uniform Location 캐싱 (초기화 시 호출)

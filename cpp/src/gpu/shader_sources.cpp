@@ -762,6 +762,76 @@ void main() {
 )glsl";
 
 //=============================================================================
+// P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
+// 출처: Renderer.kt MASK_VS/MASK_FS/BLUR_FS/COMPOSITE_FS (1196-1210, 1180-1194, 1108-1167)
+//=============================================================================
+
+// 피부 마스크 단색 채움 — UV 불필요, NDC position만 (원본 MASK_VS)
+const char* SKIN_MASK_FILL_VERTEX = R"glsl(
+#version 310 es
+layout(location = 0) in vec2 aPosition;
+void main() {
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+)glsl";
+
+// 마스크 값을 R 채널에 기록 (외곽=1.0, 제외 폴리곤=0.0 덮어쓰기). 원본 MASK_FS.
+const char* SKIN_MASK_FILL_FRAGMENT = R"glsl(
+#version 310 es
+precision mediump float;
+uniform float uValue;
+out vec4 fragColor;
+void main() {
+    fragColor = vec4(uValue);
+}
+)glsl";
+
+// 분리형 가우시안 5-fetch (linear sampling 트릭). 원본 BLUR_FS 원문 그대로.
+// uDirection = 텍셀 단위 방향 (1/w,0) 또는 (0,1/h); uOffsetScale 컬러 1.6 / 마스크 1.0.
+const char* SKIN_SEPARABLE_BLUR_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+uniform sampler2D uTexture;
+uniform vec2 uDirection;
+uniform float uOffsetScale;
+in vec2 vTexCoord;
+out vec4 fragColor;
+void main() {
+    vec2 o1 = uDirection * (1.3846154 * uOffsetScale);
+    vec2 o2 = uDirection * (3.2307692 * uOffsetScale);
+    fragColor = texture(uTexture, vTexCoord) * 0.2270270
+        + (texture(uTexture, vTexCoord + o1) + texture(uTexture, vTexCoord - o1)) * 0.3162162
+        + (texture(uTexture, vTexCoord + o2) + texture(uTexture, vTexCoord - o2)) * 0.0702703;
+}
+)glsl";
+
+// 에지 가드 컴포지트 — base/blur/mask 동일 UV (P8-W1 §1.4: OES/ST/크롭/미러/워프 체인 제거).
+// 피부 스무딩 코어는 원본 COMPOSITE_FS(1159-1163) 수치 그대로.
+const char* SKIN_SMOOTH_COMPOSITE_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+uniform sampler2D uTexture;     // 원본 (풀해상도, base)
+uniform sampler2D uBlurTex;     // 컬러 블러 결과 (1/4)
+uniform sampler2D uSkinMaskTex; // 마스크 블러 결과 (1/4, R 채널)
+uniform float uSkin;            // 0..1 강도. 0이면 패스 호출 안 됨
+in vec2 vTexCoord;
+out vec4 fragColor;
+void main() {
+    vec3 base = texture(uTexture, vTexCoord).rgb;
+    vec3 blur = texture(uBlurTex, vTexCoord).rgb;
+    float mask = texture(uSkinMaskTex, vTexCoord).r;
+    // 에지 가드 (surface blur 근사): 강한 에지(코선·윤곽·머리카락·안경)는 휘도차가 커서
+    // 스무딩에서 자동 제외 — 저대비 질감(모공·잡티)만 평탄화.
+    float lumaBase = dot(base, vec3(0.299, 0.587, 0.114));
+    float lumaBlur = dot(blur, vec3(0.299, 0.587, 0.114));
+    float edge = smoothstep(0.06, 0.18, abs(lumaBase - lumaBlur));
+    vec3 smoothed = blur + (base - blur) * 0.5; // 고주파 디테일 50% 보존
+    base = mix(base, smoothed, mask * uSkin * (1.0 - edge));
+    fragColor = vec4(base, 1.0);
+}
+)glsl";
+
+//=============================================================================
 // 렌즈 오버레이 버텍스 셰이더 (풀스크린 쿼드, 텍스처 좌표 패스스루)
 //=============================================================================
 const char* LENS_OVERLAY_VERTEX = R"glsl(

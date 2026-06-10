@@ -5,10 +5,13 @@
 
 #include "iris_sdk/gpu/gpu_beauty_backend.h"
 #include "iris_sdk/gpu/render_context.h"
+#include "iris_sdk/gpu/skin_mask_geometry.h"
 #include "iris_sdk/beauty_roi_manager.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 
@@ -110,6 +113,11 @@ extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
 extern const char* FREQ_SEP_GAUSSIAN_FRAGMENT;
 extern const char* FREQ_SEP_COMPOSITE_FRAGMENT;
 extern const char* VIVID_POSTPROCESS_FRAGMENT;
+// P8-W1: landmark-masked skin smoothing
+extern const char* SKIN_MASK_FILL_VERTEX;
+extern const char* SKIN_MASK_FILL_FRAGMENT;
+extern const char* SKIN_SEPARABLE_BLUR_FRAGMENT;
+extern const char* SKIN_SMOOTH_COMPOSITE_FRAGMENT;
 }
 
 GPUBeautyBackend::GPUBeautyBackend() = default;
@@ -209,6 +217,14 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
     LOGI("Device tier detected: %s",
          device_tier_ == DeviceTier::HIGH ? "HIGH" :
          device_tier_ == DeviceTier::MID ? "MID" : "LOW");
+
+    // P8-W1 §5: landmark One-Euro 픽셀 공간 파라미터 (min_cutoff 0.5 / beta 0.007 / d_cutoff 1.0).
+    // 기본 생성자는 min_cutoff=1.0 이므로 0.5로 명시 설정.
+    for (auto& f : skin_landmark_filters_) {
+        f.setMinCutoff(0.5f);
+        f.setBeta(0.007f);
+        f.setDCutoff(1.0f);
+    }
 
     initialized_ = true;
     LOGI("GPUBeautyBackend initialized successfully");
@@ -313,8 +329,48 @@ bool GPUBeautyBackend::initializeShaders() {
         // Non-fatal: Freq Sep은 선택적 기능, Bilateral fallback 사용
     }
 
+    // P8-W1: landmark-masked skin smoothing 셰이더 (non-fatal — OFF 시 영향 없음)
+    if (!initializeSkinSmoothingShaders()) {
+        LOGW("Failed to create skin-mask smoothing shaders (non-fatal)");
+    }
+
     LOGI("All %zu shader programs created successfully",
          shader_manager_->getCachedProgramCount());
+    return true;
+}
+
+bool GPUBeautyBackend::initializeSkinSmoothingShaders() {
+    // 마스크 채움 (전용 VS: position만, UV 없음)
+    if (!shader_manager_->createProgram(
+            shaders::SKIN_MASK_FILL_VERTEX,
+            shaders::SKIN_MASK_FILL_FRAGMENT,
+            skin_mask_fill_program_)) {
+        LOGE("Failed to create skin_mask_fill program");
+        return false;
+    }
+    shader_manager_->cacheProgram("skin_mask_fill", skin_mask_fill_program_);
+
+    // 분리형 가우시안 블러 (풀스크린 쿼드 VS 재사용)
+    if (!shader_manager_->createProgram(
+            shaders::FULLSCREEN_QUAD_VERTEX,
+            shaders::SKIN_SEPARABLE_BLUR_FRAGMENT,
+            skin_blur_program_)) {
+        LOGE("Failed to create skin_blur program");
+        return false;
+    }
+    shader_manager_->cacheProgram("skin_blur", skin_blur_program_);
+
+    // 에지 가드 컴포지트
+    if (!shader_manager_->createProgram(
+            shaders::FULLSCREEN_QUAD_VERTEX,
+            shaders::SKIN_SMOOTH_COMPOSITE_FRAGMENT,
+            skin_composite_program_)) {
+        LOGE("Failed to create skin_composite program");
+        return false;
+    }
+    shader_manager_->cacheProgram("skin_composite", skin_composite_program_);
+
+    LOGI("Skin-mask smoothing shaders created successfully");
     return true;
 }
 
@@ -433,6 +489,22 @@ void GPUBeautyBackend::cacheUniformLocations() {
         luminance_sharpen_uniforms_.uTexelSize = glGetUniformLocation(luminance_sharpen_program_, "uTexelSize");
     }
 
+    // P8-W1: Skin-mask smoothing Uniforms
+    if (skin_mask_fill_program_ != 0) {
+        skin_uniforms_.maskFillValue = glGetUniformLocation(skin_mask_fill_program_, "uValue");
+    }
+    if (skin_blur_program_ != 0) {
+        skin_uniforms_.blurTexture = glGetUniformLocation(skin_blur_program_, "uTexture");
+        skin_uniforms_.blurDirection = glGetUniformLocation(skin_blur_program_, "uDirection");
+        skin_uniforms_.blurOffsetScale = glGetUniformLocation(skin_blur_program_, "uOffsetScale");
+    }
+    if (skin_composite_program_ != 0) {
+        skin_uniforms_.compositeTexture = glGetUniformLocation(skin_composite_program_, "uTexture");
+        skin_uniforms_.compositeBlurTex = glGetUniformLocation(skin_composite_program_, "uBlurTex");
+        skin_uniforms_.compositeMaskTex = glGetUniformLocation(skin_composite_program_, "uSkinMaskTex");
+        skin_uniforms_.compositeSkin = glGetUniformLocation(skin_composite_program_, "uSkin");
+    }
+
     LOGI("Uniform locations cached successfully");
 #endif
 }
@@ -532,6 +604,10 @@ void GPUBeautyBackend::release() {
     }
     skin_mask_width_ = 0;
     skin_mask_height_ = 0;
+
+    // P8-W1: landmark-masked smoothing 타깃 해제
+    destroySkinTargets();
+    skin_targets_failed_ = false;
 #endif
 
     // 셰이더 해제
@@ -570,6 +646,9 @@ void GPUBeautyBackend::release() {
     freq_sep_composite_program_ = 0;
     luminance_sharpen_program_ = 0;
     vivid_program_ = 0;
+    skin_mask_fill_program_ = 0;
+    skin_blur_program_ = 0;
+    skin_composite_program_ = 0;
 
     LOGI("GPUBeautyBackend released");
 }
@@ -1608,6 +1687,255 @@ std::string GPUBeautyBackend::getProfilingReport() const {
 }
 
 //=============================================================================
+// P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
+//=============================================================================
+
+bool GPUBeautyBackend::skinMaskSmoothingActive(const IrisResult* detection) const {
+    return skin_mask_smoothing_enabled_
+        && skin_mask_smoothing_strength_ > 0.0f
+        && detection != nullptr
+        && detection->detected
+        && detection->face_mesh_valid
+        && skin_mask_fill_program_ != 0
+        && skin_blur_program_ != 0
+        && skin_composite_program_ != 0;
+}
+
+bool GPUBeautyBackend::ensureSkinTargets(int width, int height) {
+#if IRIS_SDK_GPU_AVAILABLE
+    if (skin_targets_failed_) return false;
+
+    const int target_w = std::max(1, width / 4);
+    const int target_h = std::max(1, height / 4);
+    // 동일 크기면 재생성 생략 (원본 createBeautyTargets 크기 가드)
+    if (skin_targets_ready_ && skin_low_w_ == target_w && skin_low_h_ == target_h) {
+        return true;
+    }
+    destroySkinTargets();
+    skin_low_w_ = target_w;
+    skin_low_h_ = target_h;
+
+    glGenTextures(kSkinTargetCount, skin_target_tex_);
+    glGenFramebuffers(kSkinTargetCount, skin_target_fbo_);
+    for (int i = 0; i < kSkinTargetCount; ++i) {
+        const bool r8 = (i >= kSkinMask);  // 마스크 계열은 단일 채널 (원본과 동일)
+        glBindTexture(GL_TEXTURE_2D, skin_target_tex_[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0,
+                     r8 ? GL_R8 : GL_RGBA8, skin_low_w_, skin_low_h_, 0,
+                     r8 ? GL_RED : GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindFramebuffer(GL_FRAMEBUFFER, skin_target_fbo_[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, skin_target_tex_[i], 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            LOGE("Skin smoothing FBO incomplete (index=%d) — disabling mode", i);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            destroySkinTargets();
+            skin_targets_failed_ = true;  // 매 프레임 재시도 방지 (원본 ensureBeautyTargets)
+            return false;
+        }
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    skin_targets_ready_ = true;
+    return true;
+#else
+    (void)width; (void)height;
+    return false;
+#endif
+}
+
+void GPUBeautyBackend::destroySkinTargets() {
+#if IRIS_SDK_GPU_AVAILABLE
+    if (skin_target_tex_[0] != 0 || skin_target_fbo_[0] != 0) {
+        glDeleteFramebuffers(kSkinTargetCount, skin_target_fbo_);
+        glDeleteTextures(kSkinTargetCount, skin_target_tex_);
+    }
+    for (int i = 0; i < kSkinTargetCount; ++i) {
+        skin_target_tex_[i] = 0;
+        skin_target_fbo_[i] = 0;
+    }
+    skin_low_w_ = 0;
+    skin_low_h_ = 0;
+    skin_targets_ready_ = false;
+#endif
+}
+
+void GPUBeautyBackend::prepareSkinFans(const IrisResult* detection,
+                                       int width, int height, double frame_ts) {
+    // 좌표 정합 (P8-W1 §6): face_mesh 정규 좌표(MediaPipe 0..1, 원본 미러링 전 기준)를
+    // 입력 텍스처 공간에 맞춘다. 입력 텍스처는 전면 카메라라 이미 X 미러링되어 있으므로
+    // 기존 FreqSep ROI 경로와 동일하게 mx = 1 - x 로 X를 뒤집는다(applyTextureId 1672-1689).
+    // Y는 GL 풀스크린 쿼드 규약상 입력 텍스처의 vTexCoord.y = 1 - (이미지 y)로 나타나므로
+    // 팬 NDC는 ny = 2*(1 - y) - 1 = 1 - 2y. 컴포지트는 base/blur/mask를 모두 vTexCoord로
+    // 샘플하므로 셋이 동일 공간에서 일치한다 (마스크 Y-flip 별도 불필요).
+    const float fw = static_cast<float>(width);
+    const float fh = static_cast<float>(height);
+
+    // ── 점별 픽셀 좌표 추출 + One-Euro 필터링 (모드 활성 시만, 재획득 시 reset) ──
+    if (!skin_filters_active_) {
+        for (auto& f : skin_landmark_filters_) f.reset();  // false→true 전환: 글라이드 방지
+    }
+    skin_filters_active_ = true;
+
+    // 폴리곤 순서: 외곽36 / 우눈썹10 / 좌눈썹10 / 입술20 / 우눈16 / 좌눈16
+    // (skin_oval_px_ 0..71 은 외곽 — 이마 확장 대상, 나머지는 팬에서 직접 사용)
+    std::array<float, kSkinPointCount * 2> pts{};  // 필터링된 픽셀 좌표 (mirrored-x, image-y)
+
+    auto fillIndices = [&](const int* idx, int n, int point_offset) {
+        for (int i = 0; i < n; ++i) {
+            const IrisLandmark& lm = detection->face_mesh[idx[i]];
+            const float mx = (1.0f - lm.x) * fw;  // 미러 보정 후 픽셀 X
+            const float py = lm.y * fh;            // 이미지 Y (픽셀)
+            const int fi = (point_offset + i) * 2;
+            pts[fi]     = skin_landmark_filters_[fi].filter(mx, frame_ts);
+            pts[fi + 1] = skin_landmark_filters_[fi + 1].filter(py, frame_ts);
+        }
+    };
+
+    int po = 0;
+    fillIndices(skin_mask::kFaceOval.data(), skin_mask::kFaceOvalCount, po); po += skin_mask::kFaceOvalCount;
+    fillIndices(skin_mask::kRightBrow.data(), skin_mask::kBrowCount, po); po += skin_mask::kBrowCount;
+    fillIndices(skin_mask::kLeftBrow.data(), skin_mask::kBrowCount, po); po += skin_mask::kBrowCount;
+    fillIndices(skin_mask::kLipsOuter.data(), skin_mask::kLipsCount, po); po += skin_mask::kLipsCount;
+    fillIndices(skin_mask::kRightEyeContour.data(), skin_mask::kEyeContourCount, po); po += skin_mask::kEyeContourCount;
+    fillIndices(skin_mask::kLeftEyeContour.data(), skin_mask::kEyeContourCount, po);
+
+    // 외곽 36점만 이마 확장 사본에 복사 후 확장 (마스크 전용 — P8-W1 §5)
+    for (int i = 0; i < skin_mask::kFaceOvalCount * 2; ++i) {
+        skin_oval_px_[i] = pts[i];
+    }
+    skin_mask::extendForehead(skin_oval_px_.data(), skin_mask::kFaceOvalCount,
+                              skin_mask::kForeheadExtend);
+
+    // ── 팬 정점(NDC) 채우기: [무게중심, p0..pN-1, p0] ──
+    // px(미러 X, 이미지 Y) → NDC: nx = 2*(px/W) - 1, ny = 1 - 2*(py/H)
+    int out = 0;
+    auto fanFromPx = [&](const float* src_px, int n) {
+        float sumX = 0.0f, sumY = 0.0f;
+        for (int p = 0; p < n; ++p) {
+            const float nx = 2.0f * (src_px[p * 2] / fw) - 1.0f;
+            const float ny = 1.0f - 2.0f * (src_px[p * 2 + 1] / fh);
+            skin_fan_[out + (p + 1) * 2]     = nx;
+            skin_fan_[out + (p + 1) * 2 + 1] = ny;
+            sumX += nx;
+            sumY += ny;
+        }
+        skin_fan_[out] = sumX / static_cast<float>(n);          // 무게중심
+        skin_fan_[out + 1] = sumY / static_cast<float>(n);
+        skin_fan_[out + (n + 1) * 2]     = skin_fan_[out + 2];   // 첫 점 반복 (닫기)
+        skin_fan_[out + (n + 1) * 2 + 1] = skin_fan_[out + 3];
+        out += (n + 2) * 2;
+    };
+
+    // 외곽은 이마 확장 사본, 나머지는 필터링 결과 (pts)에서 오프셋 슬라이스
+    fanFromPx(skin_oval_px_.data(), skin_mask::kFaceOvalCount);
+    fanFromPx(pts.data() + skin_mask::kFaceOvalCount * 2, skin_mask::kBrowCount);
+    fanFromPx(pts.data() + (skin_mask::kFaceOvalCount + skin_mask::kBrowCount) * 2, skin_mask::kBrowCount);
+    fanFromPx(pts.data() + (skin_mask::kFaceOvalCount + 2 * skin_mask::kBrowCount) * 2, skin_mask::kLipsCount);
+    fanFromPx(pts.data() + (skin_mask::kFaceOvalCount + 2 * skin_mask::kBrowCount + skin_mask::kLipsCount) * 2, skin_mask::kEyeContourCount);
+    fanFromPx(pts.data() + (skin_mask::kFaceOvalCount + 2 * skin_mask::kBrowCount + skin_mask::kLipsCount + skin_mask::kEyeContourCount) * 2, skin_mask::kEyeContourCount);
+}
+
+void GPUBeautyBackend::skinBlurPass(GLuint src_tex, GLuint dst_fbo,
+                                    float dir_x, float dir_y, float offset_scale) {
+#if IRIS_SDK_GPU_AVAILABLE
+    glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+    glViewport(0, 0, skin_low_w_, skin_low_h_);
+    glUseProgram(skin_blur_program_);
+    glUniform1i(skin_uniforms_.blurTexture, 0);
+    glUniform2f(skin_uniforms_.blurDirection, dir_x, dir_y);
+    glUniform1f(skin_uniforms_.blurOffsetScale, offset_scale);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, src_tex);
+    renderFullscreenQuad();
+#else
+    (void)src_tex; (void)dst_fbo; (void)dir_x; (void)dir_y; (void)offset_scale;
+#endif
+}
+
+void GPUBeautyBackend::renderSkinBasePasses(GLuint input_tex, int width, int height) {
+#if IRIS_SDK_GPU_AVAILABLE
+    (void)width; (void)height;
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+
+    // ① 입력 1/4 다운샘플 (passthrough — LINEAR 필터로 자동 박스 다운샘플)
+    glBindFramebuffer(GL_FRAMEBUFFER, skin_target_fbo_[kSkinLow]);
+    glViewport(0, 0, skin_low_w_, skin_low_h_);
+    glUseProgram(passthrough_program_);
+    glUniform1i(glGetUniformLocation(passthrough_program_, "uTexture"), 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, input_tex);
+    renderFullscreenQuad();
+
+    // ② 컬러 블러 H/V (offsetScale 1.6 — P8-W1 §5)
+    skinBlurPass(skin_target_tex_[kSkinLow], skin_target_fbo_[kSkinTmp],
+                 1.0f / static_cast<float>(skin_low_w_), 0.0f, kSkinColorBlurScale);
+    skinBlurPass(skin_target_tex_[kSkinTmp], skin_target_fbo_[kSkinBlur],
+                 0.0f, 1.0f / static_cast<float>(skin_low_h_), kSkinColorBlurScale);
+
+    // ③ 피부 마스크: 외곽 팬 1.0 → 눈썹×2/입술/눈×2 팬 0.0 덮어쓰기 (블렌드 없음, 순서 중요)
+    glBindFramebuffer(GL_FRAMEBUFFER, skin_target_fbo_[kSkinMask]);
+    glViewport(0, 0, skin_low_w_, skin_low_h_);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(skin_mask_fill_program_);
+    // ES 3.x: client-side 정점 배열은 기본 VAO(0)에서만 허용 — quad_vao_ 바인딩 금지.
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glEnableVertexAttribArray(0);
+    int first = 0;
+    for (std::size_t fan = 0; fan < kSkinFanCounts.size(); ++fan) {
+        glUniform1f(skin_uniforms_.maskFillValue, (fan == 0) ? 1.0f : 0.0f);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, skin_fan_.data() + first * 2);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, kSkinFanCounts[fan]);
+        first += kSkinFanCounts[fan];
+    }
+    glDisableVertexAttribArray(0);
+
+    // ④ 마스크 블러 H/V (페더링 — offsetScale 1.0)
+    skinBlurPass(skin_target_tex_[kSkinMask], skin_target_fbo_[kSkinTmp],
+                 1.0f / static_cast<float>(skin_low_w_), 0.0f, kSkinMaskBlurScale);
+    skinBlurPass(skin_target_tex_[kSkinTmp], skin_target_fbo_[kSkinMaskBlur],
+                 0.0f, 1.0f / static_cast<float>(skin_low_h_), kSkinMaskBlurScale);
+#else
+    (void)input_tex; (void)width; (void)height;
+#endif
+}
+
+void GPUBeautyBackend::renderSkinComposite(GLuint base_tex, GLuint output_fbo,
+                                           int width, int height, float strength) {
+#if IRIS_SDK_GPU_AVAILABLE
+    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+    glViewport(0, 0, width, height);
+    glUseProgram(skin_composite_program_);
+    glUniform1i(skin_uniforms_.compositeTexture, 0);
+    glUniform1i(skin_uniforms_.compositeBlurTex, 1);
+    glUniform1i(skin_uniforms_.compositeMaskTex, 2);
+    glUniform1f(skin_uniforms_.compositeSkin, strength);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, base_tex);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, skin_target_tex_[kSkinBlur]);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, skin_target_tex_[kSkinMaskBlur]);
+    renderFullscreenQuad();
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+#else
+    (void)base_tex; (void)output_fbo; (void)width; (void)height; (void)strength;
+#endif
+}
+
+//=============================================================================
 // V2 API - 텍스처 ID 기반 (C API 호환)
 //=============================================================================
 
@@ -1716,9 +2044,14 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
     BeautyFilterConfigV2 effective_config = buildEffectiveConfig(config);
 
+    // P8-W1: landmark-masked smoothing 모드 — 활성 시 FreqSep/Bilateral 스무딩을 대체한다.
+    // 강도 0 / 모드 OFF / face_mesh 무효면 false → 마스크·블러·필터·타깃 전부 생략(비용 0).
+    const bool use_skin_mask = config.enabled && skinMaskSmoothingActive(detection);
+
     // 활성 필터 수에 따라 동적으로 텍스처 할당
     int active_filter_count = 0;
-    if (effective_config.skinQuality > 0.0f || effective_config.smoothing > 0.01f
+    if (use_skin_mask
+        || effective_config.skinQuality > 0.0f || effective_config.smoothing > 0.01f
         || effective_config.smoothIntensity > 0.0f || effective_config.poreReduction > 0.0f) {
         active_filter_count++;
     }
@@ -1852,7 +2185,28 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // 필터 체인 실행 (최적화됨 + 프로파일링)
     bool profiling = profiler_ && profiler_->isEnabled();
 
-    // 1. 스무딩: Freq Sep (skinQuality > 0 또는 2축 모드) 또는 Bilateral (기존)
+    // 1. 스무딩 (P8-W1): landmark-masked smoothing 모드면 FreqSep/Bilateral을 대체.
+    //    실패(타깃 생성 실패 등) 시 안전하게 스무딩만 생략 (다른 패스는 정상).
+    if (use_skin_mask) {
+        if (profiling) profiler_->begin("SkinMaskSmoothing");
+        // 마스크는 폴리곤이 영역을 정의하므로 ROI scissor를 끄고 전체 프레임에서 동작
+        if (scissor_active) glDisable(GL_SCISSOR_TEST);
+        if (ensureSkinTargets(width, height)) {
+            prepareSkinFans(detection, width, height, frame_ts);
+            renderSkinBasePasses(current_input, width, height);
+            glViewport(0, 0, width, height);  // base 패스가 1/4 뷰포트로 바꿈 → 복원
+            renderSkinComposite(current_input, current_output->fbo_id,
+                                width, height, skin_mask_smoothing_strength_);
+            current_input = current_output->texture_id;
+            if (pong) current_output = (current_output == ping) ? pong : ping;
+        }
+        if (scissor_active) glEnable(GL_SCISSOR_TEST);
+        if (profiling) profiler_->end("SkinMaskSmoothing");
+    } else {
+    // 스킨 모드가 이 프레임에 동작하지 않음 → 다음 활성 프레임에 필터 reset 하도록 표시
+    // (얼굴 재획득 시 묵은 필터 상태로 인한 마스크 경계 글라이드 방지 — 원본 FaceTracker)
+    skin_filters_active_ = false;
+    // 1b. 기존 경로: Freq Sep (skinQuality > 0 또는 2축 모드) 또는 Bilateral (기존)
     int face_w = 0;
     if (roi_ptr && roi_ptr->valid) {
         face_w = static_cast<int>(roi_ptr->face_rect.width);
@@ -1964,6 +2318,7 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         current_input = current_output->texture_id;
         if (pong) current_output = (current_output == ping) ? pong : ping;
     }
+    }  // end else (use_skin_mask 미사용 — 기존 FreqSep/Bilateral 경로)
 
     // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening + LUT)
     //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소

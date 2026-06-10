@@ -277,6 +277,18 @@
             android:backgroundTint="#66555555"
             style="@style/Widget.MaterialComponents.Button.TextButton" />
 
+        <Button
+            android:id="@+id/btnP8Skin"
+            android:layout_width="72dp"
+            android:layout_height="36dp"
+            android:text="skin:off"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:minWidth="0dp"
+            android:backgroundTint="#66555555"
+            style="@style/Widget.MaterialComponents.Button.TextButton" />
+
     </LinearLayout>
 
     <!-- 컨트롤 패널 -->
