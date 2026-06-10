@@ -1,6 +1,6 @@
 # P8-W1: 피부 보정(skin smoothing) 이식 — LensSimulator 검증 스펙
 
-> **상태**: 🔄 구현 중 (2026-06-10)
+> **상태**: ✅ 구현 완료 + APK b293 S23+ 설치 (2026-06-10) — **실기기 육안 검증 대기** (§4.1 잔여 2항). 커밋 `a1d34e5`~`d2676fa` 6개.
 > **작성**: 2026-06-10
 > **성격**: P7 진행 중 사용자 요청으로 삽입된 **선행 P8(뷰티) 트랙**. P7-W4(재베이스라인 대기)와 독립 병렬.
 > **출처 스펙**: `docs/lenssim-handoff/skin-smoothing-handoff-from-lenssimulator.md` (LensSimulator/CGG에서 S23+ 실기기 검증 완료 — "아주 마음에 듦", 30fps 유지, 적대적 리뷰 통과)
@@ -83,12 +83,13 @@
 
 ### 4.1 Definition of Done
 
-- [ ] **(코드)** 스킨 마스크 패스 (1/4 R8, 6팬, 이마 확장 0.35, One-Euro 0.5/0.007 픽셀 공간)
-- [ ] **(코드)** 분리형 가우시안 5-fetch (컬러 1.6 / 마스크 1.0) + 1/4 타깃 lazy 생성
-- [ ] **(코드)** 에지 가드 컴포지트 (0.06/0.18, 디테일 0.5) — 확정 파라미터 그대로
-- [ ] **(코드)** 비용 게이팅 (강도 0 → 전부 생략) + internal C API + JNI + demo 토글
-- [ ] **(테스트)** 이마 확장 GoogleTest (원본 5케이스 포팅)
-- [ ] **(빌드)** `cmake --build --target iris_sdk` 통과 + Android 빌드 통과
+- [x] **(코드)** 스킨 마스크 패스 (1/4 R8, 6팬, 이마 확장 0.35, One-Euro 0.5/0.007 픽셀 공간)
+- [x] **(코드)** 분리형 가우시안 5-fetch (컬러 1.6 / 마스크 1.0) + 1/4 타깃 lazy 생성
+- [x] **(코드)** 에지 가드 컴포지트 (0.06/0.18, 디테일 0.5) — 확정 파라미터 그대로
+- [x] **(코드)** 비용 게이팅 (강도 0 → 전부 생략) + internal C API + JNI + Java 메서드
+- [x] **(코드)** demo 토글 `btnP8Skin` (off→0.5→1.0 사이클, 기본 off — `d2676fa`)
+- [x] **(테스트)** 이마 확장 GoogleTest (원본 5케이스 + no-op 가드 = 6/6 통과)
+- [x] **(빌드)** `cmake --build --target iris_sdk` 통과 (데스크톱 비-GPU) + **Android BUILD SUCCESSFUL** (APK b293, S23+ 설치)
 - [ ] **(실기기)** S23+ 육안: LensSimulator 룩 재현 + 에지(코선/안경/머리카락) 선명 유지 + FreqSep 대비 A/B + 30fps
 - [ ] **(실기기)** 모드 OFF 무회귀
 
@@ -105,11 +106,18 @@
 | 랜드마크 | FACE_OVAL 36 / BROW 10×2 / LIPS 20 / EYE 16×2 (핸드오프 §랜드마크 표 그대로) |
 | One-Euro | min_cutoff 0.5 / beta 0.007 / d_cutoff 1.0, 픽셀 공간, 모드 활성 시만 |
 
-## 6. 미결 (구현 중 판정, 저위험)
+## 6. 미결 (구현 중 판정, 저위험) — 해소됨
 
-- internal API 네이밍 (`iris_sdk_set_skin_mask_smoothing(enabled, strength)` 류)
-- 기존 FreqSep 디버그 모드(`set_freqsep_debug_mode`)와의 토글 UI 공존 방식
-- 좌표 정합 세부: 랜드마크 정규 좌표 ↔ 입력 텍스처 공간 (기존 beauty face_rect 변환 패턴 따름 — 구현 시 검증)
+- ✅ **internal API 네이밍**: `iris_sdk_set_skin_mask_smoothing(int enabled, float strength)` 확정.
+  JNI `nativeSetSkinMaskSmoothing(boolean, float)` → Java `IrisLensSDK.setSkinMaskSmoothing(boolean, float)`.
+- ⏳ **FreqSep 디버그 모드 토글 UI 공존**: demo Kotlin UI는 본 W 범위 밖(후속). C++ 레벨에서는
+  `setSkinMaskSmoothing` 활성 시 FreqSep/Bilateral 스무딩 서브패스만 대체하고 다른 패스는 불변이므로 독립 토글 가능.
+- ✅ **좌표 정합 (§6 판정)**: `detection->face_mesh`는 MediaPipe 정규 좌표(0..1, 미러링 전 기준)이고,
+  입력 텍스처는 전면 카메라라 이미 X 미러링됨 → 기존 FreqSep ROI 경로(`applyTextureId` 1672-1689)와 동일하게
+  `mx = 1 - x`로 X 뒤집음. Y는 GL 풀스크린 쿼드 규약상 입력 텍스처 `vTexCoord.y = 1 - (이미지 y)`이므로
+  팬 NDC를 `ny = 1 - 2y`로 생성. 컴포지트가 base/blur/mask를 **전부 동일 `vTexCoord`**로 샘플하므로
+  셋이 자동 일치(원본 COMPOSITE_FS의 OES/ST/크롭/미러/워프 체인은 §1.4대로 전부 제거,
+  FreqSep이 CPU 마스크에 쓰던 `1.0 - vTexCoord.y` Y-flip도 불필요 — 마스크를 입력 텍스처 공간에 직접 렌더하므로).
 
 ## 7. 커밋 전략 (분할)
 
@@ -124,3 +132,5 @@
 | 날짜 | 변경 |
 |---|---|
 | 2026-06-10 | 초안 — 핸드오프 스펙 + SDK/원본 양측 Explore 실측 + 통합 아키텍처 결정(§1.3). 구현 착수. |
+| 2026-06-10 | 구현 완료(실기기 검증 제외). 신규: `skin_mask_geometry.{h,cpp}`, 4 GLSL 셰이더(MASK_FILL/BLUR/COMPOSITE), GoogleTest 6/6 통과. `GPUBeautyBackend`에 landmark-masked smoothing 모드 추가(FreqSep 스무딩 대체, OFF 시 무회귀). internal API `iris_sdk_set_skin_mask_smoothing` + JNI + Java. §6 좌표 정합 3항 해소. iris_sdk 빌드 통과. |
+| 2026-06-10 | 분할 커밋 6개(`a1d34e5` 지오메트리+테스트 / `17bab19` GLSL / `049e72a` 파이프라인 / `ea17b6d` API 체인 / `d2676fa` demo 토글 / 본 문서). Android BUILD SUCCESSFUL → APK **b293** S23+ 설치. 잔여: 실기기 육안 검증 2항 (룩 재현+에지+A/B+30fps / OFF 무회귀). cpp-pro 주의 항목: 마스크 팬은 기본 VAO(0)에서 client-side 배열 드로우 — 실기기 GL_INVALID_OPERATION 미발생 확인 필요. |
