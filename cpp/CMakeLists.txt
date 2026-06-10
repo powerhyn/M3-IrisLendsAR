@@ -72,6 +72,7 @@ set(IRIS_SDK_SOURCES
     src/gpu/gpu_lens_renderer.cpp
     src/gpu/eye_render_packet_adapter.cpp
     src/gpu/shader_sources.cpp
+    src/gpu/skin_mask_geometry.cpp
     src/gpu/gpu_profiler.cpp
     # Warp module
     src/warp/grid_mesh.cpp

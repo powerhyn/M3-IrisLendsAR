@@ -627,6 +627,19 @@ target_link_libraries(test_one_euro_filter PRIVATE
 gtest_discover_tests(test_one_euro_filter DISCOVERY_TIMEOUT 60)
 
 # ============================================================
+# P8-W1: 피부 마스크 이마 확장 순수 함수 테스트
+# ============================================================
+add_executable(test_skin_mask_geometry test_skin_mask_geometry.cpp)
+target_include_directories(test_skin_mask_geometry PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_skin_mask_geometry PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_skin_mask_geometry DISCOVERY_TIMEOUT 60)
+
+# ============================================================
 # P4-W3-04: DeviceTier 분류 + FreqSep 매핑 테스트
 # ============================================================
 add_executable(test_device_tier test_device_tier.cpp)
