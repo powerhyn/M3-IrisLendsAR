@@ -126,6 +126,8 @@ Phase 8 = **뷰티 기능** (턱 깎기, 얼굴 사이즈 축소). P7 범위 밖
 
 ### P7-W3: A 그룹 cleanup 일괄
 
+> **상태 (2026-06-10)**: ✅ **구현 완료** (branch `feature/P7-W3-cleanup`). deprecated `setLensHighlight` Java+데모 제거(C8 C API 보존), 3D Light UI 제거(Ellipse 유지), SKU 누드 애쉬 로제 톤 정정, Phase 9 cross-link. Android BUILD SUCCESSFUL. **blend dropdown 3종 축소는 P7-W4 후로 보류**(사용자 확정).
+
 **목표**: Phase 6 후속 정리. P7-W1과 병렬 가능 (risk 0).
 
 **범위**:

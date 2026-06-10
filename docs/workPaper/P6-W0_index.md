@@ -157,6 +157,16 @@ develop  (W3-04 포함, Phase 6 완료까지 유지)
 - **W7**: "B10 신규 벤치", "기본 ON vs OFF 재판정"은 out of scope. 99 §1.2 C6 범위(B4 fallback + SKU 메타)로 제한.
 - **W6**: EMA 계수는 §5.1 정밀 공식 `1 - pow(0.05, dt/target_ms)` 사용. 근사 `α ≈ 3/(fps·target)`은 참고용.
 
+### 1.10 Phase 9 이월 트랙 (2026-06-04 분리 확정 / P7-W3 cross-link)
+
+P6-W3/W4/W8 이월 트랙은 **Phase 9(또는 7.5)로 분리**. P8 뷰티 우선.
+
+- **W3** 환경 반사 scaffold: OFF 기본 보존 (메모리 `w4-env-reflection-deferred`)
+- **W4** B2 24클립 벤치: 인프라 보존 (`docs/bench/P6-W4/`)
+- **W8** Pupil material: Option E 설계 보존 (`P6-W8_*.md`)
+
+재개 시점: Phase 8 완료 후 비즈니스 임팩트 재평가. 진입점: 메모리 `phase9-deferred-tracks`, 로드맵 `P7-W0_index.md` §8.
+
 ---
 
 ## 2. 배경/맥락
