@@ -112,6 +112,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Gate: Button
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
+    private lateinit var btnP8Skin: Button       // P8-W1: landmark-masked skin smoothing
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -219,6 +220,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Gate = findViewById(R.id.btnW6Gate)
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
+        btnP8Skin = findViewById(R.id.btnP8Skin)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -481,6 +483,15 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW7Measured.text = if (w7MeasuredOn) "lum:meas" else "lum:fb"
             Log.i(TAG, "P7-W2 measured luma → ${if (w7MeasuredOn) "on" else "off"}")
         }
+        // P8-W1: landmark-masked skin smoothing — off → 0.5 → 1.0 사이클 (FreqSep A/B).
+        // 뷰티 토글 ON 상태에서만 시각 효과. off면 기존 FreqSep 경로 그대로.
+        btnP8Skin.setOnClickListener {
+            p8SkinIdx = (p8SkinIdx + 1) % p8SkinSweep.size
+            val s = p8SkinSweep[p8SkinIdx]
+            cameraGLView.setSkinMaskSmoothing(s > 0f, s)
+            btnP8Skin.text = if (s > 0f) String.format("skin:%.1f", s) else "skin:off"
+            Log.i(TAG, "P8-W1 skin mask smoothing → strength $s")
+        }
     }
 
     //=========================================================================
@@ -505,6 +516,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
+    private val p8SkinSweep = floatArrayOf(0f, 0.5f, 1.0f)   // P8-W1: off → 0.5 → 1.0 사이클
+    private var p8SkinIdx = 0         // 기본 off (SDK default와 일치 — FreqSep 경로 무회귀)
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]
