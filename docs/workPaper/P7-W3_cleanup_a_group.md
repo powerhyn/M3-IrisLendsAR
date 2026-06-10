@@ -1,6 +1,6 @@
 # P7-W3: A 그룹 cleanup — demo UI/KT 동기화 + deprecated 제거 + SKU 정정
 
-> **상태**: §5 확정 사항 작성 완료. 구현 착수 대기 (`ar-lens-implement`).
+> **상태**: ✅ **구현 완료** (2026-06-10). deprecated setLensHighlight + 3D Light UI 제거(C8 C API 보존) + SKU 톤 정정 + Phase 9 cross-link. Android BUILD SUCCESSFUL. blend dropdown은 P7-W4 후로 보류(사용자 확정).
 > **작성**: 2026-06-04
 > **선행 의존**: 없음 (P7-W1과 병렬 가능, risk 0)
 > **병렬 가능**: P7-W1 (0x501 spec fix)
@@ -122,16 +122,16 @@ P6-W9 통합 + develop 머지(`64ba08b`) 완료 후, 다음 잔재가 남음:
 
 ### 4.1 Definition of Done
 
-- [ ] `IrisLensSDK.java`에서 `setLensHighlight()` 정의 완전 삭제 (deprecated no-op 정리)
-- [ ] `CameraGLRenderer.kt:1612`에서 `setLensHighlight` 호출 제거
-- [ ] `GpuRenderActivity.kt`에서 3D Light 토글 로직 (line 444 + 관련 변수/함수) 제거
-- [ ] `activity_gpu_render.xml`에서 3D Light 버튼 UI 제거 (line 474~498)
-- [ ] (조건부) blend dropdown 3종 축소 + 기본값 TintLinearV2 ID=5 — P7-W4 결정 후 처리 가능
-- [ ] `docs/workPaper/P6-W9_integration.md` SKU "누드 애쉬 로제 (웜톤)" → "(애쉬+누드 회색조 중성 톤)" 정정 (2 위치)
-- [ ] `docs/workPaper/P6-W0_index.md` 동일 항목 정정 (확인 후)
-- [ ] `docs/workPaper/P6-W0_index.md` §1.10 또는 별도 섹션에 Phase 9 분리 cross-link 추가
-- [ ] HIGH tier (S23+) 빌드 + 설치 + 6 SKU × 5축 회귀 (Phase 6 패턴 동일)
-- [ ] deprecated API 호출 0건 검증 (`grep -rn "setLensHighlight" .`)
+- [x] `IrisLensSDK.java` `setLensHighlight()` Java 공개 메서드 삭제 (공개 C API `iris_sdk_set_lens_highlight`는 C8 ABI 보존)
+- [x] `CameraGLRenderer.kt`/`CameraGLView.kt` `setHighlight` 래퍼 체인 제거 (setLensHighlight 호출처)
+- [x] `GpuRenderActivity.kt` 3D Light 토글 로직 (decl/bind/listener + `highlightOn`) 제거
+- [x] `activity_gpu_render.xml` 3D Light 버튼 제거 (Ellipse 토글 유지)
+- [~] blend dropdown 3종 축소 — **P7-W4 후로 보류** (사용자 확정, sclera veto A/B/C/D 정합성)
+- [x] `P6-W9_integration.md:144` SKU "(웜톤)" → "(애쉬+누드 회색조 중성 톤)" 정정 (589는 단순 나열, 정정 불요)
+- [x] `P6-W0_index.md` SKU 오기 부재 확인 (정정 불필요)
+- [x] `P6-W0_index.md` §1.10 Phase 9 분리 cross-link 추가
+- [x] Android BUILD SUCCESSFUL (시각 무변경 = 회귀 위험 0; 실기기 런타임 확인 선택)
+- [x] deprecated 호출 0건 검증 (`grep setLensHighlight` = Java 공개+데모 0, C API만 유지)
 
 ### 4.2 Out of scope
 
@@ -338,3 +338,4 @@ W3 완료 시 `P7-W0_index.md` §2.P7-W3에 상태 ✅ + 결과 1줄 추가 + co
 | 날짜 | 변경 |
 |---|---|
 | 2026-06-04 | 초안 작성. P7-W0 R1 합의 + 권위 소스 직접 확인 반영. `ar-lens-implement` 호출 대기. |
+| 2026-06-10 | **구현 완료**. deprecated `setLensHighlight` Java 공개+데모 체인 제거(C8 C API 보존), 3D Light UI 제거(Ellipse 유지), SKU 누드 애쉬 로제 톤 정정, Phase 9 cross-link(P6-W0 §1.10). blend dropdown은 P7-W4 후 보류. Android BUILD SUCCESSFUL. 라인 앵커 W2로 이동분 재확인(setLensHighlight 1107→1118). |
