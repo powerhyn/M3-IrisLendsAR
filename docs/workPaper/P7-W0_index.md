@@ -99,6 +99,8 @@ Phase 8 = **뷰티 기능** (턱 깎기, 얼굴 사이즈 축소). P7 범위 밖
 
 ### P7-W2: avg_iris_luma 측정 패스 + W6 Phase B/C
 
+> **상태 (2026-06-10)**: ✅ **완료**. 브레인스토밍 R1+R2 + 코드 구현 + **S23+ 실기기 A/B 재벤치 통과** + 실측 default ON(`a9fadae`). detector CPU 측정 → JNI round-trip → consumer EMA, gate 전용 hysteresis. 무회귀 개선(어두움=fallback clamp 7.0 동일 / 밝음=over-tint 교정 scale 7.0→1.27, 육안 자연). develop `--no-ff` 머지. cross-tier(MID/LOW)는 P7-W5.
+
 **목표**: W6 fallback 0.1225 대신 실측 source 연결 + 블링크 ramp/저조도 gate 최종 튜닝.
 
 **설계** (R1 3/3 통합):

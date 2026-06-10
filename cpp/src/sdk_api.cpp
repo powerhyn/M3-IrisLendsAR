@@ -237,6 +237,10 @@ void convert_to_c_iris_result(const iris_sdk::IrisResult& cpp_result, IrisResult
     c_result->eyelid_ratio_left = cpp_result.eyelid_ratio_left;
     c_result->eyelid_ratio_right = cpp_result.eyelid_ratio_right;
     c_result->eye_refiner_used = cpp_result.eye_refiner_used;
+
+    // P7-W2: iris ROI 실측 luma 전달 (없으면 -1 sentinel).
+    c_result->avg_iris_luma_left = cpp_result.avg_iris_luma_left;
+    c_result->avg_iris_luma_right = cpp_result.avg_iris_luma_right;
 }
 
 /**
@@ -301,6 +305,10 @@ iris_sdk::IrisResult convert_to_cpp_iris_result(const IrisResult* c_result) {
     cpp_result.eyelid_ratio_left = c_result->eyelid_ratio_left;
     cpp_result.eyelid_ratio_right = c_result->eyelid_ratio_right;
     cpp_result.eye_refiner_used = c_result->eye_refiner_used;
+
+    // P7-W2: iris ROI 실측 luma 전달 (없으면 -1 sentinel).
+    cpp_result.avg_iris_luma_left = c_result->avg_iris_luma_left;
+    cpp_result.avg_iris_luma_right = c_result->avg_iris_luma_right;
 
     return cpp_result;
 }

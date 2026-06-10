@@ -112,6 +112,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Blink: Button
     private lateinit var btnW6Gate: Button
     private lateinit var btnW6Detail: Button
+    private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -219,6 +220,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Blink = findViewById(R.id.btnW6Blink)
         btnW6Gate = findViewById(R.id.btnW6Gate)
         btnW6Detail = findViewById(R.id.btnW6Detail)
+        btnW7Measured = findViewById(R.id.btnW7Measured)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -482,6 +484,13 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW6Detail.text = if (w6DetailOn) "C10:on" else "C10:off"
             Log.i(TAG, "P6-W6 C10 detail → ${if (w6DetailOn) "on" else "off"}")
         }
+        // P7-W2 §5.6: avg_iris_luma fallback(lum:fb) ↔ 실측(lum:meas) A/B 토글.
+        btnW7Measured.setOnClickListener {
+            w7MeasuredOn = !w7MeasuredOn
+            cameraGLView.setUseMeasuredLuma(w7MeasuredOn)
+            btnW7Measured.text = if (w7MeasuredOn) "lum:meas" else "lum:fb"
+            Log.i(TAG, "P7-W2 measured luma → ${if (w7MeasuredOn) "on" else "off"}")
+        }
     }
 
     //=========================================================================
@@ -505,6 +514,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private val w6GateSweep = floatArrayOf(0.10f, 0.15f, 0.25f)
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
+    private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]

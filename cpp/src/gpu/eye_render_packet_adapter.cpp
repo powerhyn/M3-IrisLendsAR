@@ -91,8 +91,17 @@ EyeRenderPacket adaptIrisResult(const IrisResult& result,
     // --- render_confidence: W1 §5.12 — stabilizer 미연결이면 visibility 값을 그대로 ---
     packet.render_confidence = packet.visibility;
 
-    // pupil_center_norm / head_pose_yaw_roll / reflection_dir / avg_iris_luma /
-    // eye_depth_mm: W1 §5.11에 따라 스키마 예약만, nullopt 유지.
+    // --- avg_iris_luma: P7-W2 §5.5 — detector 실측값(eye별). 미측정이면 nullopt 유지
+    //     → 기존 consumer fallback chain(0.1225) 작동. 측정값이면 packet에 설정. ---
+    //     >0 가드: -1 sentinel + memset(0)/zero-init(0)을 모두 미측정 처리 (실측은 clamp상 항상 ≥0.01).
+    const float measured_luma = is_left ? result.avg_iris_luma_left
+                                        : result.avg_iris_luma_right;
+    if (measured_luma > 0.0f) {
+        packet.avg_iris_luma = measured_luma;
+    }
+
+    // pupil_center_norm / head_pose_yaw_roll / reflection_dir / eye_depth_mm:
+    // W1 §5.11에 따라 스키마 예약만, nullopt 유지.
 
     return packet;
 }

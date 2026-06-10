@@ -216,6 +216,18 @@ public class IrisResult {
      */
     public boolean eyeRefinerUsed;
 
+    /**
+     * 왼쪽 홍채 ROI 실측 평균 luma (P7-W2, srgb²+Rec.709 linear, 0~1).
+     * 미측정/미검출 시 -1.0f. 디텍트→렌더 round-trip 시 보존되어 SDK가 소비합니다.
+     */
+    public float avgIrisLumaLeft;
+
+    /**
+     * 오른쪽 홍채 ROI 실측 평균 luma (P7-W2, srgb²+Rec.709 linear, 0~1).
+     * 미측정/미검출 시 -1.0f.
+     */
+    public float avgIrisLumaRight;
+
     // ========================================================================
     // 프레임 정보
     // ========================================================================
@@ -284,6 +296,10 @@ public class IrisResult {
         eyelidRatioLeft = 0.0f;
         eyelidRatioRight = 0.0f;
         eyeRefinerUsed = false;
+
+        // P7-W2: 미측정 sentinel(-1).
+        avgIrisLumaLeft = -1.0f;
+        avgIrisLumaRight = -1.0f;
 
         faceMeshValid = false;
         if (faceMesh == null) {
@@ -355,6 +371,10 @@ public class IrisResult {
         this.eyelidRatioLeft = src.eyelidRatioLeft;
         this.eyelidRatioRight = src.eyelidRatioRight;
         this.eyeRefinerUsed = src.eyeRefinerUsed;
+
+        // P7-W2: iris ROI 실측 luma 보존.
+        this.avgIrisLumaLeft = src.avgIrisLumaLeft;
+        this.avgIrisLumaRight = src.avgIrisLumaRight;
 
         this.faceMeshValid = src.faceMeshValid;
         if (src.faceMesh != null) {

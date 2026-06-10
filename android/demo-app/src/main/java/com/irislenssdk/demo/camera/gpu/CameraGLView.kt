@@ -325,6 +325,16 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * P7-W2 §5.6: avg_iris_luma fallback(false) ↔ 실측(true) A/B 토글.
+     * 실측 ON 시 SDK가 detector 측정값으로 uAvgIrisLum을 구동(블렌드 정규화 + gate).
+     */
+    fun setUseMeasuredLuma(enabled: Boolean) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setUseMeasuredLuma(enabled)
+        }
+    }
+
+    /**
      * LUT 3D 텍스처 설정 (임의 스레드에서 호출 가능 — 내부에서 GL 스레드로 큐잉)
      *
      * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)

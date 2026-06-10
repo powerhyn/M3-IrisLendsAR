@@ -170,6 +170,14 @@ struct IrisResult {
     float eyelid_ratio_left;    ///< 왼쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
     float eyelid_ratio_right;   ///< 오른쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
     bool eye_refiner_used;      ///< Eye Refiner 사용 여부 (디버그용)
+
+    // P7-W2 §5.5: iris ROI 실측 평균 luma (srgb²+Rec.709 linear, 0~1).
+    // 미측정/미검출 시 -1.0f sentinel. C IrisResult(sdk_api.h)와 reinterpret_cast로
+    // 교환되므로(sdk_api_v2.cpp) 양쪽 동일 위치(struct 끝)에 동일 타입으로 추가.
+    // default -1: detect() 밖(frame_processor 등) stack 생성 시 garbage 방지(완전성).
+    // is_trivially_copyable/standard_layout 불변(test_types 통과), memset(0) 경로는 어댑터 >0 가드.
+    float avg_iris_luma_left = -1.0f;   ///< 왼쪽 홍채 ROI 평균 linear luma (-1=미측정)
+    float avg_iris_luma_right = -1.0f;  ///< 오른쪽 홍채 ROI 평균 linear luma (-1=미측정)
 };
 
 /**

@@ -837,6 +837,7 @@ uniform float uRightEyeEllipseRot;
 uniform vec2  uTexelSize;        // C10 3x3 blur 샘플 간격 (1/width, 1/height)
 uniform float uGateThreshold;    // B9 gate 임계값 (토글 0.10/0.15/0.25, 기본 0.15)
 uniform int   uDetailReinject;   // C10 on/off (기본 1)
+uniform float uLowLightActive;   // P7-W2 §5.4: gate 전용 저조도 래치(0..1, hysteresis)
 // P6-W6 §1.3 C7: 블링크 시간적 envelope (좌/우 EMA ramp). main()에서 좌→Left, 우→Right.
 uniform float uLeftRenderAlpha;
 uniform float uRightRenderAlpha;
@@ -1082,6 +1083,10 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         float detail = clamp(baseLum / max(blurLum, 0.001), 0.85, 1.15);                 // W6 §5.2
         float innerMask = smoothstep(0.7, 0.5, dist);                                    // W6 §5.9 중심=1, 외곽=0
         float gateStrength = smoothstep(uGateThreshold - 0.03, uGateThreshold + 0.03, uAvgIrisLum); // W6 §5.7 ±0.03
+        // P7-W2 §5.4: 저조도 래치가 켜지면 디테일 재주입을 안정적으로 끈다(경계 진동 차단).
+        //   uLowLightActive는 CPU dual-threshold(enter0.08/exit0.12) 래치 상태.
+        //   uAvgIrisLum(블렌드 정규화 분모)은 그대로 — gate에만 영향(§5.4).
+        gateStrength *= (1.0 - uLowLightActive);
         float detailMul = mix(1.0, detail, gateStrength * innerMask);
         blended *= vec3(detailMul);
     }

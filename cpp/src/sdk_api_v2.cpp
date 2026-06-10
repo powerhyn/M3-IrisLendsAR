@@ -36,6 +36,11 @@ namespace {
 std::mutex g_gpu_mutex;
 
 #ifdef IRIS_SDK_HAS_GLES
+// P7-W2: 이 파일은 C IrisResult ↔ C++ iris_sdk::IrisResult를 reinterpret_cast로
+// 교환한다(렌더/ROI 경로). 두 구조체 레이아웃이 어긋나면 UB → 컴파일 타임에 차단.
+static_assert(sizeof(::IrisResult) == sizeof(iris_sdk::IrisResult),
+              "C/C++ IrisResult layout must match for reinterpret_cast (P7-W2 field add)");
+
 std::unique_ptr<iris_sdk::GPUBeautyBackend> g_gpu_beauty;
 std::unique_ptr<iris_sdk::GPULensRenderer> g_gpu_lens;
 // P6-W7: SKU 메타 레지스트리. g_gpu_lens->setSkuRegistry()에 raw 포인터를 넘기므로
@@ -808,6 +813,19 @@ void iris_sdk_set_lens_detail_reinject(int enabled) {
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
     if (g_gpu_lens) {
         g_gpu_lens->setDetailReinject(enabled != 0);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
+// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 internal C API.
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출(detail_reinject와 동일 패턴).
+void iris_sdk_set_use_measured_luma(int enabled) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setUseMeasuredLuma(enabled != 0);
     }
 #else
     (void)enabled;
