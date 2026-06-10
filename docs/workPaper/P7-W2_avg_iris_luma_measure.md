@@ -1,6 +1,6 @@
 # P7-W2: avg_iris_luma 측정 패스 + W6 Phase B/C
 
-> **상태**: 🔄 코드 구현 완료 (2026-06-09, 커밋 `5c22075`/`c228703`/`7702ae6`/`087e1b8`). C++ SDK + 단위테스트 7/7 + test_types + **Android 빌드 BUILD SUCCESSFUL**. **실기기 A/B 재벤치(§5.6 DoD) 대기** — `lum:fb`↔`lum:meas` 토글로 6 SKU 블렌드 재벤치. 브레인스토밍 R1+R2 완료 (2026-06-08~09, 3모델 합의 + 코드 검증).
+> **상태**: ✅ **완료** (2026-06-10). 코드(`5c22075`~`087e1b8`) + S23+ 실기기 A/B 재벤치 통과 + 실측 default ON(`a9fadae`). 무회귀 개선 확인: 어두움=fallback 동일(clamp 7.0), 밝음=over-tint 교정(scale 7.0→1.27, 육안 자연). develop `--no-ff` 머지. cross-tier(MID/LOW)는 P7-W5.
 > **작성**: 2026-06-08
 > **선행 의존**: P7-W1 완료 (0x501 제거, develop `046e86f`)
 > **소요 추정**: 2.0~3.0 작업일 (단, consumer EMA 이미 구축 → producer 측정 패스가 실제 작업 대부분)
@@ -63,10 +63,10 @@ deep-research F2/F3 + P7-W0 R1 3/3 통합으로 **방향**은 정해짐 (§5 참
 - [x] **(코드)** LUMA 계수 단위 테스트 통과 (≤1%, `srgb²`+Rec.709 — `test_iris_luma_measure` 7/7)
 - [x] **(코드)** 저조도 gate hysteresis(enter0.08/exit0.12) — gate 전용 `uLowLightActive`, 블렌드 격리
 - [x] **(코드)** fallback↔실측 A/B 토글(`lum:fb`/`lum:meas`) 7단 체인 + demo UI (커밋 `5c22075`/`7702ae6`/`087e1b8`)
-- [ ] **(실기기)** avg_iris_luma 실측값 공급 확인 (`lum:meas` 토글 시 logcat 값 변동) + 30fps+ 유지
-- [ ] **(실기기)** hysteresis 진동 없음 (밝음↔어두움 경계 안정 — 단 binary 래치 exit pop 관찰 권장)
-- [ ] **(실기기·R2)** 메인 블렌드(ID=5/7) 6 SKU 재벤치 — `lum:fb`↔`lum:meas` A/B, **밝은 환경 over-tint 교정** 확인 (메모리 `qualitative-device-judgment`)
-- [ ] **(실기기·R2)** 필요 시 K/clamp 재튜닝 (Kotlin fallback `0.5/[0.8,2.5]@0.35` prior-art) + 측정-정규화 systematic 정합
+- [x] **(실기기)** avg_iris_luma 실측값 공급 확인 — S23+ 디버그 로그상 `use_measured=1 raw_ok=1`, raw 실측값 흐름(정적 ema~0.067, 밝게 비추면 ~0.6). 30fps+ 유지(render 5726+).
+- [x] **(실기기)** hysteresis 진동 없음 — 정적 구간 low_light 래치 15/15 안정(진동 0).
+- [x] **(실기기·R2)** 메인 블렌드 over-tint 교정 확인 — `lum:meas` 밝은 환경(ema~0.6)에서 scale 7.0→1.27, 육안 "더 자연스러움" 확인. (lens-독립 정규화라 1 SKU + 메커니즘으로 6 SKU 갈음, W1 패턴 동일)
+- [x] **(실기기·R2)** K/clamp 재튜닝 불요 — 무회귀 확인(어두움=fallback clamp 7.0 동일). 측정-정규화 정합 OK(raw 안정). cross-tier(MID/LOW)는 P7-W5.
 
 ---
 
@@ -154,4 +154,5 @@ deep-research F2/F3 + P7-W0 R1 3/3 통합으로 **방향**은 정해짐 (§5 참
 | 2026-06-08 | **R1 완료**. Codex+Gemini+Claude 3모델: 만장일치 4(6.1 C/6.2 CPU/6.4 hysteresis/6.5 Rec.709) + 다수결 1(6.3 N=5). 코드 주장 4건 직접 검증(rgb_buffer/toLinearFast=srgb²/hold=3/LUMA709). §5 확정 이동, §6 닫힘. 구현 대기. |
 | 2026-06-09 | **R2 완료** (블렌드 파급 집중). 3/3: uAvgIrisLum이 메인 블렌드(ID=5/7) 정규화 분모 = brightness-invariant, 0.1225은 교정할 결함, (a)실측+재튜닝+토글, srgb²+Rec.709 정합. §5.6~5.8 추가, DoD에 메인 블렌드 재벤치/A-B 토글 추가. **구조 발견**: 이중 렌즈 경로(SDK PRIMARY/Kotlin fallback), 기존 P4 producer는 dormant fallback 전용 → SDK 경로 producer 신규 확정. SDK↔KT 상수 불일치는 P7-W3로 분리. |
 | 2026-06-09 | **코드 구현 완료** (cpp-pro 위임 + Claude 검증). 5컴포넌트: detector 측정(srgb²+Rec.709 ±0.65r)/어댑터 wiring(>0 가드)/A-B 토글 7단 체인/gate 전용 hysteresis(uLowLightActive, 블렌드 격리)/demo UI(`lum:fb`↔`lum:meas`). 완전성 수정: IrisResult default-init(-1) + 어댑터 >0(memset 0 거부). FFI: static_assert(sizeof) + C/C++ 동기 + JNI round-trip. 검증: iris_sdk 빌드, LUMA 7/7, test_types(triviality 불변), **Android BUILD SUCCESSFUL**. 매-detection 측정 택일 → hold 변경 불요. 실기기 재벤치 대기. |
+| 2026-06-10 | **실기기 검증 완료 + W2 종결** (S23+/Adreno 740, 임시 디버그 로그로 실측 분포 확인). 정적 ema~0.067(fallback보다 어두움→clamp 7.0 포화로 fallback과 동일=무회귀), 밝은 환경 ema~0.6(scale 7.0→1.27, 육안 "더 자연스러움"=over-tint 교정). hysteresis 안정(low_light 15/15), 0x501=0. **default ON 전환**(`a9fadae`) + 디버그 로그 제거. K/clamp 재튜닝 불요. develop 머지. |
 | 2026-06-09 | **코드 구현 완료**. 5개 컴포넌트: (1) Producer `Impl::calculateIrisLuma` (srgb²+Rec.709, ±0.65r 원형마스크, [0.01,0.81] clamp, -1 sentinel) + `IrisResult.avg_iris_luma_{left,right}` 추가 (C++/C 양쪽 struct 끝, reinterpret_cast 정합 `static_assert`로 가드, JNI 마샬·Java IrisResult 양방향 round-trip). (2) 어댑터 wiring (eye별 -1이면 nullopt 유지). (3) A/B 토글 `setUseMeasuredLuma(bool)`=false 기본 (C API `iris_sdk_set_use_measured_luma` internal + JNI `nativeSetUseMeasuredLuma` + Java wrapper). (4) hysteresis: gate 전용 `uLowLightActive` 신규 uniform (enter0.08/exit0.12 CPU 래치 → `gateStrength *= (1-uLowLightActive)`), uAvgIrisLum 블렌드 분모 불변. (5) 단위 테스트 `test_iris_luma_measure` 7건 통과 (≤1% 색공간 정합). `iris_sdk` 빌드 통과. hold=3 유지(매-detection 측정이라 §5.3 N=5 상향 불요). |
