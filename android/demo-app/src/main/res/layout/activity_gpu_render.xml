@@ -269,7 +269,7 @@
             android:id="@+id/btnW7Measured"
             android:layout_width="72dp"
             android:layout_height="36dp"
-            android:text="lum:fb"
+            android:text="lum:meas"
             android:textSize="12sp"
             android:textStyle="bold"
             android:textAllCaps="false"

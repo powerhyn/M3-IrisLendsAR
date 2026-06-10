@@ -407,8 +407,10 @@ private:
     bool  detail_reinject_ = true;  // C10 on/off
 
     // P7-W2 §5.6: 실측 luma A/B 토글. false면 packet 실측을 무시하고 fallback 0.1225만.
-    // 안전 롤백 기본값(false) — 실기기 검증 후 활성화.
-    bool  use_measured_luma_ = false;
+    // 기본 true(정식 ON) — S23+ 실기기 검증 완료(2026-06-10): 무회귀 개선
+    //   (어두움=fallback과 clamp 7.0 동일, 밝음=over-tint 교정 scale 7.0→1.27, 육안 자연 확인).
+    //   토글로 fallback 롤백 가능. cross-tier(MID/LOW)는 P7-W5에서 재확인.
+    bool  use_measured_luma_ = true;
 
     // P7-W2 §5.4: 저조도 gate 전용 dual-threshold 래치(hysteresis). enter<0.08→true,
     // exit>0.12→false. ⚠️ gate(uLowLightActive)에만 영향. uAvgIrisLum(블렌드 정규화

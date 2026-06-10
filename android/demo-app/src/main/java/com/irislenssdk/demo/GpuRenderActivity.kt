@@ -514,7 +514,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private val w6GateSweep = floatArrayOf(0.10f, 0.15f, 0.25f)
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
-    private var w7MeasuredOn = false   // P7-W2 §5.6: 기본 fallback(0.1225), 재벤치용 토글
+    private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]
