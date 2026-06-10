@@ -1106,20 +1106,8 @@ public final class IrisLensSDK {
         }
     }
 
-    /**
-     * GPU 렌즈 각막 하이라이트 설정.
-     *
-     * @deprecated P5-W3-05 S1: 고정 조명 하이라이트 폐기 (환경과 무관해 어색함).
-     *             C5 환경 반사 가산 계층(B2 결과 후)이 대체. 현재 no-op.
-     *             호출부는 제거 권장. 공개 API 호환성을 위해 심볼만 유지.
-     * @param enabled (무시됨)
-     */
-    @Deprecated
-    public static void setLensHighlight(boolean enabled) {
-        if (sLibraryLoaded) {
-            nativeSetLensHighlight(enabled);
-        }
-    }
+    // P7-W3: deprecated setLensHighlight(no-op) 공개 메서드 제거 (P5-W3-05 S1 하이라이트 폐기).
+    //   공개 C API iris_sdk_set_lens_highlight(sdk_api.h)는 C8 ABI 보존 위해 유지.
 
     // ========================================================================
     // Detection Slot API (더블 버퍼, Lock-free)
