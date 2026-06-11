@@ -87,6 +87,8 @@ set(IRIS_SDK_SOURCES
     src/param_tuner.cpp
     # Temporal stabilizer (P5-W1)
     src/temporal_stabilizer.cpp
+    # Landmark injection boundary (ADR-0001 §6 — 추적 외부화 진입점)
+    src/landmark_injection.cpp
 )
 
 set(IRIS_SDK_HEADERS

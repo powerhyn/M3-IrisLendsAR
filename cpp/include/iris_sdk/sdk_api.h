@@ -1085,6 +1085,61 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_render_with_result(
     const IrisResult* iris_result,
     const IrisLensConfig* config);
 
+// ============================================================================
+// 랜드마크 주입 경계 (ADR-0001 §6 — 추적 외부화 진입점)
+// ============================================================================
+//
+// 추적(코어 밖)이 478점 랜드마크를 코어로 주입한다. 프레임 픽셀은 경계를 넘지 않는다.
+// ③-1 단계: 신규 부가 채널로 가동(기존 detect 경로는 무변경). 완전 단일화는 ④.
+//
+// 좌표 계약(ADR §7): 주입 478점은 회전 보정 완료(upright) 프레임 기준 정규화 좌표
+//   [0,1] (x,y) + z. 항상 비미러(센서 원본). 미러는 렌더 단일 책임. 홍채 z 기하 사용 금지.
+
+/**
+ * @brief 478점 랜드마크 + upright 프레임 치수 + 타임스탬프 주입.
+ *
+ * 호출 스레드에서 코어 내부 버퍼로 deep-copy한다(호출자 버퍼 수명은 반환 시 종료).
+ * 478점·frame dims·timestamp가 한 세대(generation)에 원자 결속된다(seqlock 더블버퍼).
+ *
+ * 스레딩 계약(ADR §6.1): 본 함수와 내부 detect 경로(iris_sdk_detect*)의 478점 자동 공급은
+ * 동일한 주입 저장소를 공유한다. 두 writer가 서로 다른 스레드에서 동시 진입해도 저장소가
+ * writer 측 직렬화를 책임지므로(seqlock generation 규율 보존), torn snapshot이나 generation
+ * 홀수 잔류가 발생하지 않는다. 즉 전환기에 detect 가동 중 본 함수를 동시 호출해도 안전하다.
+ * (단 동일 세대로 묶이는 것은 한 write 호출의 478점 전부이며, 두 writer 간 어느 쪽 주입이
+ *  최신으로 공개되는지는 호출 시점에 따른다 — last-writer-wins.)
+ *
+ * 입력 유효성(ADR §6.1) — 거부 시 직전 유효 주입(스테일) 유지, generation 불변:
+ *   - num_points != 478 → IRIS_SDK_INVALID_PARAM
+ *   - pts == NULL 또는 out_generation == NULL → IRIS_SDK_NULL_POINTER
+ *   - NaN/Inf 포함, frame_width/height <= 0 → IRIS_SDK_INVALID_PARAM
+ *
+ * @param pts          num_points×3 (x,y,z) 정규화 좌표 (배열 길이 ≥ num_points×3 필수).
+ * @param num_points   점 수 — 478 고정 계약 (그 외 거부).
+ * @param frame_width  upright 프레임 너비 (px) — 파생 어댑터 픽셀 환산 기준(§7.0).
+ *                     렌더 타깃 치수와 별개(§6.1 — 종횡비 왜곡 봉쇄).
+ * @param frame_height upright 프레임 높이 (px).
+ * @param timestamp_us 단조 증가 타임스탬프 (µs) — One-Euro dt 산출용.
+ * @param out_generation 성공 시 갱신된 주입 세대 번호 출력 (NULL 불가).
+ * @return IRIS_SDK_OK 성공, 그 외 에러 코드.
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_set_landmarks(
+    const float* pts,
+    int32_t num_points,
+    int32_t frame_width,
+    int32_t frame_height,
+    int64_t timestamp_us,
+    uint32_t* out_generation);
+
+/**
+ * @brief 현재 주입 세대 번호 조회.
+ *
+ * 0 = 미주입(주입 이력 없음). 짝수 = 완결 세대. iris_set_landmarks 성공마다 증가한다.
+ * (호출자가 슬롯 일관성을 검증하거나 새 주입 도착을 감지하는 용도 — ADR §6.1 노출 필수.)
+ *
+ * @return 현재 세대 번호.
+ */
+IRIS_SDK_EXPORT uint32_t iris_get_landmark_generation(void);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

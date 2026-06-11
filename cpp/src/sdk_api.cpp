@@ -12,6 +12,7 @@
 #include "iris_sdk/sdk_manager.h"
 #include "iris_sdk/frame_processor.h"
 #include "iris_sdk/temporal_stabilizer.h"
+#include "iris_sdk/landmark_injection.h"
 #include "iris_sdk/types.h"
 
 #include <cstring>
@@ -58,6 +59,43 @@ bool g_use_inference_thread_request = true;  // 기본값: InferenceThread 사�
 /// Temporal Stabilizer 인스턴스 관리
 std::unordered_map<int64_t, std::unique_ptr<iris_sdk::TemporalStabilizer>> g_stabilizers;
 int64_t g_next_stabilizer_handle = 1;
+
+/// 랜드마크 주입 저장소 (ADR-0001 §6.1 — seqlock 더블버퍼, 내부 자체 동기화).
+/// 자체 atomic generation(무락 reader)으로 동기화하고 write()는 내부 writer 전용 mutex로
+/// 직렬화하므로, g_mutex 밖에서 접근해도(그리고 두 writer가 동시 진입해도) 안전하다.
+/// ③-1: 신규 주입 경로(iris_set_landmarks, g_mutex 미보유)와 detector 직접 경로의 내부
+/// 공급(feed_landmark_store, g_mutex 보유)을 함께 받는다 — 두 writer 직렬화는 store가 책임진다.
+iris_sdk::LandmarkInjectionStore g_landmark_store;
+
+/**
+ * @brief detector 결과의 478점을 주입 저장소에 내부 공급한다 (ADR §6.4 안전한 최소형).
+ *
+ * "이펙트/렌더 코어가 detector를 직접 참조하지 않고 주입 저장소만 보는" 방향의 첫 단계로,
+ * detector 직접 경로(iris_sdk_detect*)가 산출한 478점을 저장소에 흘려보낸다. 기존 공개
+ * 경로의 출력은 무변경(이 공급은 부가 효과일 뿐 반환값/result에 영향 없음 — 동작 불변).
+ * face_mesh 미검출 결과는 공급하지 않는다(스테일 유지 — write가 478 미만/무효를 거부).
+ *
+ * @note 호출자는 g_mutex를 보유한 채 호출해도 무방하다(store는 자체 writer 직렬화).
+ *       공개 주입 경로 iris_set_landmarks(g_mutex 미보유)와 동시 진입해도 store의
+ *       writer_mutex_가 두 writer를 직렬화하므로 seqlock generation 규율이 보존된다.
+ */
+void feed_landmark_store(const iris_sdk::IrisResult& cpp_result) {
+    if (!cpp_result.face_mesh_valid) {
+        return;  // 미검출 — 직전 유효 주입 유지(스테일).
+    }
+    // face_mesh(IrisLandmark[478])에서 (x,y,z) 478×3 평탄 버퍼로 변환해 deep-copy 공급.
+    float pts[iris_sdk::landmark_indices::kNumPoints * 3];
+    for (int i = 0; i < iris_sdk::landmark_indices::kNumPoints; ++i) {
+        pts[i * 3 + 0] = cpp_result.face_mesh[i].x;
+        pts[i * 3 + 1] = cpp_result.face_mesh[i].y;
+        pts[i * 3 + 2] = cpp_result.face_mesh[i].z;
+    }
+    // timestamp_ms(detector) → µs로 환산. frame dims는 detector 결과 그대로.
+    const int64_t ts_us = cpp_result.timestamp_ms * 1000;
+    g_landmark_store.write(pts, iris_sdk::landmark_indices::kNumPoints,
+                           cpp_result.frame_width, cpp_result.frame_height,
+                           ts_us, /*out_generation=*/nullptr);
+}
 
 /**
  * @brief 마지막 에러 메시지 설정
@@ -493,6 +531,7 @@ IrisSdkError iris_sdk_detect(
     iris_sdk::IrisResult cpp_result = g_processor->detectOnly(frame_data, width, height, cpp_format);
 
     convert_to_c_iris_result(cpp_result, result);
+    feed_landmark_store(cpp_result);  // ADR §6.4: detector 결과 478점을 주입 저장소에 내부 공급(동작 불변)
 
     if (!cpp_result.detected) {
         // 검출은 성공했지만 얼굴이 없음
@@ -548,6 +587,7 @@ IrisSdkError iris_sdk_detect_with_rotation(
     if (normalized_rotation == 0) {
         iris_sdk::IrisResult cpp_result = g_processor->detectOnly(frame_data, width, height, cpp_format);
         convert_to_c_iris_result(cpp_result, result);
+        feed_landmark_store(cpp_result);  // ADR §6.4: 478점 내부 공급(동작 불변)
         set_last_error(nullptr);
         return IRIS_SDK_OK;
     }
@@ -557,6 +597,7 @@ IrisSdkError iris_sdk_detect_with_rotation(
         frame_data, width, height, cpp_format, normalized_rotation);
 
     convert_to_c_iris_result(cpp_result, result);
+    feed_landmark_store(cpp_result);  // ADR §6.4: 478점 내부 공급(동작 불변)
 
     set_last_error(nullptr);
     return IRIS_SDK_OK;
@@ -1200,6 +1241,55 @@ IrisSdkError iris_sdk_set_eye_refiner_policy(IrisEyeRefinerPolicy policy) {
     // For now, store and apply on next init
     // TODO: Implement via SDKManager
     return IRIS_SDK_OK;
+}
+
+// ============================================================================
+// 랜드마크 주입 경계 구현 (ADR-0001 §6 / §6.1)
+// ============================================================================
+
+IrisSdkError iris_set_landmarks(
+    const float* pts,
+    int32_t num_points,
+    int32_t frame_width,
+    int32_t frame_height,
+    int64_t timestamp_us,
+    uint32_t* out_generation) {
+
+    // NULL 가드 (ADR §6.1 — silent false 금지, 명시 에러).
+    if (!pts) {
+        set_last_error("iris_set_landmarks: pts is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+    if (!out_generation) {
+        set_last_error("iris_set_landmarks: out_generation is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+    // 점 수 478 고정 계약 (ADR §6.1 — 478 외 즉시 거부).
+    if (num_points != iris_sdk::landmark_indices::kNumPoints) {
+        set_last_error("iris_set_landmarks: num_points must be 478");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+    // 치수 가드 (frame dims ≤ 0 거부 — 픽셀 환산 기준 §6.1).
+    if (frame_width <= 0 || frame_height <= 0) {
+        set_last_error("iris_set_landmarks: frame dimensions must be positive");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    // store.write가 NaN/Inf까지 검증한다. 거부 시 직전 유효 주입 유지(스테일), generation 불변.
+    const bool ok = g_landmark_store.write(
+        pts, num_points, frame_width, frame_height, timestamp_us, out_generation);
+    if (!ok) {
+        // 여기 도달 = NaN/Inf 포함 (위 가드는 통과). 명시 에러(silent false 금지).
+        set_last_error("iris_set_landmarks: rejected (NaN/Inf in landmarks)");
+        return IRIS_SDK_INVALID_PARAM;
+    }
+
+    set_last_error(nullptr);
+    return IRIS_SDK_OK;
+}
+
+uint32_t iris_get_landmark_generation(void) {
+    return g_landmark_store.generation();
 }
 
 }  // extern "C"

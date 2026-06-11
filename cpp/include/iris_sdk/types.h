@@ -107,14 +107,23 @@ enum class EyeRefinerPolicy : int {
 // ============================================================
 
 /**
- * @brief 홍채 랜드마크 좌표
+ * @brief 홍채/메시 랜드마크 좌표
  * 정규화된 좌표 (0.0~1.0) 및 가시성 점수
  * POD 타입 - FFI 호환
+ *
+ * 좌표 계약 (ADR-0001 §7 — 명문 확정):
+ *   - x/y는 회전 보정 완료(upright) 프레임 기준 정규화 좌표 [0,1]이다.
+ *     회전 책임은 공급자(추적 글루)에 있다 — 코어는 upright 공간만 받는다(§7.1).
+ *   - 주입 478점은 항상 비미러(센서 원본 upright). 전면 카메라 미러는 렌더 단계
+ *     단일 책임이며 호출자별 분기를 금지한다(§7.4). L/R 의미는 미러 여부와 무관.
+ *   - 거리·반경 계산은 반드시 픽셀 좌표 변환 후 수행한다(정규화 그대로 쓰면 종횡비
+ *     왜곡으로 가짜 타원 발생, §7.0). frame_width/height가 픽셀 환산 기준이다.
  */
 struct IrisLandmark {
-    float x;            ///< X 좌표 (정규화, 0.0~1.0)
-    float y;            ///< Y 좌표 (정규화, 0.0~1.0)
-    float z;            ///< Z 좌표 (깊이, 정규화)
+    float x;            ///< X 좌표 (정규화, 0.0~1.0, upright 공간 — §7.1)
+    float y;            ///< Y 좌표 (정규화, 0.0~1.0, upright 공간 — §7.1)
+    float z;            ///< Z 좌표 (깊이). 홍채 z(인덱스 468~477)는 기하 사용 금지(§7.0/§7.2).
+                        ///<   비홍채 z는 비기하(깊이 순서) 용도만 허용, 거리·반경 계산 금지(§7.2).
     float visibility;   ///< 가시성 점수 (0.0~1.0)
 };
 
@@ -134,6 +143,19 @@ struct Rect {
  * @brief 홍채 검출 결과
  * 양쪽 눈의 홍채 정보 및 얼굴 메타데이터
  * POD 타입 - FFI 호환
+ *
+ * left/right 명명 계약 (ADR-0001 §7.3):
+ *   - 인덱스가 정본이고 라벨은 보조 표기다. left_iris ← face_mesh 인덱스 468그룹
+ *     {468,469,470,471,472}, right_iris ← 473그룹 {473,474,475,476,477}.
+ *   - ⚠️ 현 코어 라벨은 MediaPipe canonical 해부학 명명과 반전돼 있다(§7.3 — 코드 'left'=
+ *     468그룹=canonical FACEMESH_RIGHT). ③-1(동작 불변)은 현 라벨을 유지한다. canonical
+ *     기준 일괄 정정은 ④(추적 교체) 시 골든 재기준선과 함께 수행한다.
+ *   - 화면 기준 게이트(데모 applyLeft 등)는 screen_left/screen_right로 명시 분리하고
+ *     해부학 라벨과 혼용을 금지한다(§7.3).
+ *
+ * 홍채 경계 순서 (ADR §7.0 — boundary 인덱스 순서):
+ *   right(469/474) → top(470/475) → left(471/476) → bottom(472/477) (이미지 좌표 기준).
+ *   patlevin IrisIndex의 LEFT/RIGHT 라벨은 반대이므로 신뢰 금지.
  */
 struct IrisResult {
     // 검출 상태
@@ -141,14 +163,16 @@ struct IrisResult {
     bool left_detected;     ///< 왼쪽 눈 검출 여부
     bool right_detected;    ///< 오른쪽 눈 검출 여부
     float confidence;       ///< 전체 신뢰도 (0.0~1.0)
+                            ///<   주입 경로(§6.2): confidence는 경계에서 제거(MediaPipe Tasks
+                            ///<   미노출). 검출 실패=주입 부재, 게이팅은 visibility(EAR 파생)로 일원화.
 
-    // 왼쪽 눈 홍채 (5개 랜드마크: center + 4 boundary)
+    // 왼쪽 눈 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 468 (§7.3 계약)
     IrisLandmark left_iris[5];
-    float left_radius;      ///< 왼쪽 홍채 반지름 (픽셀)
+    float left_radius;      ///< 왼쪽 홍채 반지름 (픽셀 — 중심↔경계 평균 거리, 픽셀 환산 §7.0)
 
-    // 오른쪽 눈 홍채 (5개 랜드마크: center + 4 boundary)
+    // 오른쪽 눈 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 473 (§7.3 계약)
     IrisLandmark right_iris[5];
-    float right_radius;     ///< 오른쪽 홍채 반지름 (픽셀)
+    float right_radius;     ///< 오른쪽 홍채 반지름 (픽셀 — 픽셀 환산 §7.0)
 
     // 얼굴 메타데이터
     Rect face_rect;             ///< 얼굴 바운딩 박스
