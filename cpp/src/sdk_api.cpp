@@ -1237,9 +1237,12 @@ IrisSdkError iris_sdk_render_with_result(
 }
 
 IrisSdkError iris_sdk_set_eye_refiner_policy(IrisEyeRefinerPolicy policy) {
-    // This needs to access the SDK manager's detector
-    // For now, store and apply on next init
-    // TODO: Implement via SDKManager
+    // ③-2 B1 (NO-OP STUB): 본 함수는 아직 SDKManager/detector에 연결되지 않아
+    // 어떤 정책도 실제로 적용하지 않는다(내부 기본값 EyeRefinerPolicy::Never 유지).
+    // 그럼에도 호출자 호환을 위해 IRIS_SDK_OK를 반환한다(조용한 성공).
+    // 동작/반환값 변경은 ③-2 범위 밖이므로 현 동작을 그대로 유지한다.
+    // @todo (④) SDKManager 경유로 실제 연결하거나 IRIS_SDK_NOT_SUPPORTED 류 반환.
+    (void)policy;
     return IRIS_SDK_OK;
 }
 

@@ -87,11 +87,14 @@ public:
     /**
      * @brief 추적 최소 신뢰도 설정
      *
-     * 랜드마크 추적 결과의 최소 신뢰도.
-     * 이 값 이하면 추적 실패로 간주하고 다시 Face Detection 수행.
-     * 기본값: 0.5
-     *
      * @param confidence 신뢰도 (0.0 ~ 1.0)
+     *
+     * @warning DEAD SETTING (③-2 B1 문서화): 이 값은 내부 멤버에 저장만 되고
+     *          현재 검출 파이프라인 어디에서도 사용되지 않는다. 추적 유지 판단은
+     *          min_presence_confidence(setMinPresenceConfidence)로만 이루어진다.
+     *          따라서 이 setter를 호출해도 추적 동작은 바뀌지 않는다(조용한 무시).
+     * @todo (④ 표면 정리) 실제 추적 유지 판단에 연결하거나, API/문서에서
+     *       deprecated 처리 후 제거할 것. 동작 변경은 ③-2 범위 밖이므로 보류.
      */
     void setMinTrackingConfidence(float confidence);
 

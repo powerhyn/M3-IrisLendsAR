@@ -64,8 +64,13 @@ public:
         state_ = SDKState::Initializing;
 
         // 로깅 설정 먼저 적용 (이후 로그 출력을 위해)
+        // ③-2 B1: log_callback_은 항상 log_mutex_로 보호한다(쓰기/읽기 뮤텍스 통일).
+        //         기존엔 여기서 mutex_ 보유 중에 쓰고 logV/setLogCallback은
+        //         log_mutex_로 읽어, 같은 std::function을 서로 다른 뮤텍스가
+        //         보호하는 규율 불일치(잠재 UB)가 있었다.
         log_level_ = config.log_level;
         if (config.log_callback) {
+            std::lock_guard<std::mutex> log_lock(log_mutex_);
             log_callback_ = config.log_callback;
         }
 
@@ -110,8 +115,12 @@ public:
         logInternal(LogLevel::Info, "SDKManager", "Shutting down SDK...");
 
         // 설정 초기화
+        // ③-2 B1: log_callback_ 쓰기는 log_mutex_로 보호(읽기와 뮤텍스 통일).
         config_ = SDKConfig{};
-        log_callback_ = nullptr;
+        {
+            std::lock_guard<std::mutex> log_lock(log_mutex_);
+            log_callback_ = nullptr;
+        }
         log_level_ = LogLevel::Info;
 
         state_ = SDKState::Uninitialized;

@@ -8,6 +8,7 @@
 
 #include "iris_sdk/mediapipe_detector.h"
 #include <algorithm>  // std::clamp
+#include <atomic>     // ③-2 B1: 함수-로컬 디버그 플래그 data race 제거(std::atomic<bool>)
 #include <filesystem>
 #include <cstring>    // std::memcpy
 #include <cmath>      // std::sqrt, std::exp
@@ -1015,7 +1016,7 @@ public:
         letterbox_orig_height = src_height;
 
         // 디버그 출력 (최초 1회)
-        static bool letterbox_debug_printed = false;
+        static std::atomic<bool> letterbox_debug_printed{false};
         if (!letterbox_debug_printed) {
             std::fprintf(stderr, "[DEBUG] ISS-001 Letterbox preprocessing:\n");
             std::fprintf(stderr, "  Original: %dx%d, Target: %dx%d\n",
@@ -1216,7 +1217,7 @@ public:
         crop_rect.height = max_y - min_y;
 
         // 디버그: ROI 계산 결과 확인
-        static bool roi_debug_printed = false;
+        static std::atomic<bool> roi_debug_printed{false};
         if (!roi_debug_printed) {
             std::fprintf(stderr, "[DEBUG] MediaPipe Eye ROI Calculation:\n");
             std::fprintf(stderr, "  inner(%d): (%.4f, %.4f)\n", inner_corner_idx, inner_x, inner_y);
@@ -1472,7 +1473,7 @@ public:
         cv::Mat cropped = rgb_image(roi);
 
         // 디버그: 픽셀 기준 정사각형 crop 확인
-        static bool crop_debug = false;
+        static std::atomic<bool> crop_debug{false};
         if (!crop_debug) {
             std::fprintf(stderr, "[DEBUG] Square Crop (pixel-based):\n");
             std::fprintf(stderr, "  face_rect: x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
@@ -1566,7 +1567,7 @@ public:
         int num_anchors = 0;
 
         // 출력 텐서 차원 분석 및 디버그 출력 (최초 1회만)
-        static bool debug_printed = false;
+        static std::atomic<bool> debug_printed{false};
         int num_dims = boxes_tensor->dims->size;
         int num_outputs = static_cast<int>(face_detection_interpreter->outputs().size());
 
@@ -1616,7 +1617,7 @@ public:
         int effective_anchors = std::min(num_anchors, anchor_count);
 
         // 디버그: 첫 몇 개 점수 출력
-        static bool scores_debug_printed = false;
+        static std::atomic<bool> scores_debug_printed{false};
         if (!scores_debug_printed && scores_data) {
             std::fprintf(stderr, "[DEBUG] First 10 scores (raw logits):\n  ");
             for (int i = 0; i < std::min(10, effective_anchors); ++i) {
@@ -1696,7 +1697,7 @@ public:
         float h = h_letterbox / content_scale_y;
 
         // 디버그 출력 (최초 1회)
-        static bool letterbox_inverse_debug = false;
+        static std::atomic<bool> letterbox_inverse_debug{false};
         if (!letterbox_inverse_debug) {
             std::fprintf(stderr, "[DEBUG] ISS-001 Letterbox inverse transform:\n");
             std::fprintf(stderr, "  Letterbox coords: cx=%.4f, cy=%.4f, w=%.4f, h=%.4f\n",
@@ -1790,7 +1791,7 @@ public:
         }
 
         // 디버그: V2 홍채 추출 확인 (최초 1회만)
-        static bool v2_iris_debug = false;
+        static std::atomic<bool> v2_iris_debug{false};
         if (!v2_iris_debug) {
             std::fprintf(stderr, "[DEBUG] Extracting iris from Face Landmark V2 (embedded):\n");
             std::fprintf(stderr, "  crop_rect: x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
@@ -1922,7 +1923,7 @@ public:
             std::pow(right_iris_x - right_eye_center_x, 2.0f) +
             std::pow(right_iris_y - right_eye_center_y, 2.0f));
 
-        static bool fix_debug_printed = false;
+        static std::atomic<bool> fix_debug_printed{false};
 
         // ISS-004 Fix-C: 왼쪽 홍채 검증 및 보간(lerp) 보정
         // 강제 이동 대신 보간하여 시선 추적 정보를 보존
@@ -2084,7 +2085,7 @@ public:
                     out_quality_left = (eye_width > 0.001f) ? std::clamp(1.0f - (dist / (eye_width * 0.5f)), 0.0f, 1.0f) : 0.5f;
                     any_refined = true;
 
-                    static bool refiner_left_debug = false;
+                    static std::atomic<bool> refiner_left_debug{false};
                     if (!refiner_left_debug) {
                         std::fprintf(stderr, "[DEBUG] Eye Refiner LEFT: center=(%.4f, %.4f), quality=%.3f\n",
                                     left_iris[0], left_iris[1], out_quality_left);
@@ -2127,7 +2128,7 @@ public:
                     out_quality_right = (eye_width > 0.001f) ? std::clamp(1.0f - (dist / (eye_width * 0.5f)), 0.0f, 1.0f) : 0.5f;
                     any_refined = true;
 
-                    static bool refiner_right_debug = false;
+                    static std::atomic<bool> refiner_right_debug{false};
                     if (!refiner_right_debug) {
                         std::fprintf(stderr, "[DEBUG] Eye Refiner RIGHT: center=(%.4f, %.4f), quality=%.3f\n",
                                     right_iris[0], right_iris[1], out_quality_right);
@@ -2177,7 +2178,7 @@ public:
         }
 
         // 디버그: 모든 출력 텐서 정보 확인
-        static bool output_size_printed = false;
+        static std::atomic<bool> output_size_printed{false};
         if (!output_size_printed) {
             int num_outputs = static_cast<int>(iris_landmark_interpreter->outputs().size());
             std::fprintf(stderr, "[DEBUG] Iris Landmark Model: %d output tensors\n", num_outputs);
@@ -2216,7 +2217,7 @@ public:
         }
 
         // 디버그: 추출된 홍채 랜드마크 확인
-        static bool iris_extract_debug = false;
+        static std::atomic<bool> iris_extract_debug{false};
         if (!iris_extract_debug) {
             std::fprintf(stderr, "[DEBUG] Extracted Iris Landmarks (index 0-4):\n");
             for (int i = 0; i < IRIS_LANDMARK_COUNT; ++i) {
@@ -2410,7 +2411,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     result.avg_iris_luma_right = -1.0f;
 
     // 디버그: 초기화 상태 및 조건부 컴파일 매크로 확인
-    static bool init_debug_printed = false;
+    static std::atomic<bool> init_debug_printed{false};
     if (!init_debug_printed) {
         std::fprintf(stderr, "[DEBUG] detect() entry point\n");
         std::fprintf(stderr, "[DEBUG] impl_->initialized = %s\n",
@@ -2477,7 +2478,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     // 1. Face Detection: 얼굴 바운딩 박스 검출
     // (추적 모드에서 스킵 가능)
     // =========================================================
-    static bool detect_debug_printed = false;
+    static std::atomic<bool> detect_debug_printed{false};
     if (!detect_debug_printed) {
         std::fprintf(stderr, "[DEBUG] detect() called: %dx%d, format=%d\n",
                     width, height, static_cast<int>(format));
@@ -2490,7 +2491,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                                     FACE_DETECTION_INPUT_WIDTH,
                                     FACE_DETECTION_INPUT_HEIGHT,
                                     impl_->face_detection_input_buffer.data())) {
-            static bool preprocess_fail_printed = false;
+            static std::atomic<bool> preprocess_fail_printed{false};
             if (!preprocess_fail_printed) {
                 std::fprintf(stderr, "[DEBUG] preprocessImage failed!\n");
                 preprocess_fail_printed = true;
@@ -2499,7 +2500,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
             return result;
         }
 
-        static bool preprocess_ok_printed = false;
+        static std::atomic<bool> preprocess_ok_printed{false};
         if (!preprocess_ok_printed) {
             std::fprintf(stderr, "[DEBUG] preprocessImage succeeded, calling runFaceDetection\n");
             preprocess_ok_printed = true;
@@ -2508,7 +2509,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
         if (!impl_->runFaceDetection(impl_->face_detection_input_buffer.data(),
                                      face_rect, face_confidence)) {
             // 얼굴 미검출 시 추적 캐시 초기화
-            static bool facedet_fail_printed = false;
+            static std::atomic<bool> facedet_fail_printed{false};
             if (!facedet_fail_printed) {
                 std::fprintf(stderr, "[DEBUG] runFaceDetection failed (no face found)\n");
                 facedet_fail_printed = true;
@@ -2517,7 +2518,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
             return result;
         }
 
-        static bool facedet_ok_printed = false;
+        static std::atomic<bool> facedet_ok_printed{false};
         if (!facedet_ok_printed) {
             std::fprintf(stderr, "[DEBUG] runFaceDetection succeeded: face_rect=(%.2f,%.2f,%.2f,%.2f), conf=%.2f\n",
                         face_rect.x, face_rect.y, face_rect.width, face_rect.height, face_confidence);
@@ -2636,7 +2637,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     }
 
     // 디버그: Face Landmark 모델 RAW 출력 확인
-    static bool fl_raw_debug = false;
+    static std::atomic<bool> fl_raw_debug{false};
     if (!fl_raw_debug) {
         std::fprintf(stderr, "[DEBUG] Face Landmark RAW Output (before transform):\n");
         std::fprintf(stderr, "  actual_face_crop: x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
@@ -2715,7 +2716,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     // 정규화 좌표는 절대 1.5를 초과할 수 없음 (약간의 여유 포함)
     bool is_pixel_coords = (max_x > 1.5f || max_y > 1.5f);
 
-    static bool coord_type_printed = false;
+    static std::atomic<bool> coord_type_printed{false};
     if (!coord_type_printed) {
         std::fprintf(stderr, "[DEBUG] Face Landmark V%d coordinate type: %s (max_x=%.2f, max_y=%.2f)\n",
                     impl_->model_version,
@@ -2740,7 +2741,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     float crop_scale_x = actual_face_crop.width;
     float crop_scale_y = actual_face_crop.height;  // ISS-002: 직접 height 사용
 
-    static bool aspect_fix_debug = false;
+    static std::atomic<bool> aspect_fix_debug{false};
     if (!aspect_fix_debug) {
         std::fprintf(stderr, "[DEBUG] ISS-002 Coordinate transform:\n");
         std::fprintf(stderr, "  image size: %dx%d\n", width, height);
@@ -2771,7 +2772,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     }
 
     // 변환 후 좌표 범위 디버그
-    static bool transform_result_printed = false;
+    static std::atomic<bool> transform_result_printed{false};
     if (!transform_result_printed) {
         float post_min_x = 1.0f, post_max_x = 0.0f;
         float post_min_y = 1.0f, post_max_y = 0.0f;
@@ -2802,7 +2803,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
     // V2: Face Landmark 출력에서 직접 추출 (인덱스 468-477)
     // =========================================================
     // 디버그: Face Landmark 눈 좌표 확인
-    static bool eye_debug_printed = false;
+    static std::atomic<bool> eye_debug_printed{false};
     if (!eye_debug_printed) {
         std::fprintf(stderr, "[DEBUG] Face Landmark V%d Eye Coordinates:\n", impl_->model_version);
         std::fprintf(stderr, "  LEFT_EYE (idx 33): x=%.4f, y=%.4f\n",
@@ -2950,7 +2951,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
             result.left_detected = true;
             result.left_radius = impl_->calculateIrisRadius(result.left_iris, width, height);
 
-            static bool v2_left_debug = false;
+            static std::atomic<bool> v2_left_debug{false};
             if (!v2_left_debug) {
                 std::fprintf(stderr, "[DEBUG] V2 Left Iris Final (embedded):\n");
                 std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
@@ -2970,7 +2971,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
             result.right_detected = true;
             result.right_radius = impl_->calculateIrisRadius(result.right_iris, width, height);
 
-            static bool v2_right_debug = false;
+            static std::atomic<bool> v2_right_debug{false};
             if (!v2_right_debug) {
                 std::fprintf(stderr, "[DEBUG] V2 Right Iris Final (embedded):\n");
                 std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
@@ -2998,7 +2999,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                                               left_eye_crop,
                                               false)) {  // 왼쪽 눈: 반전 없음
             // 디버그: 눈 크롭 영역 확인
-            static bool crop_debug_printed = false;
+            static std::atomic<bool> crop_debug_printed{false};
             if (!crop_debug_printed) {
                 std::fprintf(stderr, "[DEBUG] V1 Left Eye Crop (MediaPipe): x=%.4f, y=%.4f, w=%.4f, h=%.4f\n",
                             left_eye_crop.x, left_eye_crop.y, left_eye_crop.width, left_eye_crop.height);
@@ -3034,7 +3035,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                 result.left_radius = impl_->calculateIrisRadius(result.left_iris, width, height);
 
                 // 디버그: 변환된 좌표 확인
-                static bool left_result_debug = false;
+                static std::atomic<bool> left_result_debug{false};
                 if (!left_result_debug) {
                     std::fprintf(stderr, "[DEBUG] V1 Left Iris Final (MediaPipe method):\n");
                     std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
@@ -3091,7 +3092,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
                 result.right_radius = impl_->calculateIrisRadius(result.right_iris, width, height);
 
                 // 디버그: 변환된 좌표 확인
-                static bool right_result_debug = false;
+                static std::atomic<bool> right_result_debug{false};
                 if (!right_result_debug) {
                     std::fprintf(stderr, "[DEBUG] V1 Right Iris Final (MediaPipe method with flip):\n");
                     std::fprintf(stderr, "  center: x=%.4f, y=%.4f, radius=%.1f\n",
@@ -3223,7 +3224,7 @@ IrisResult MediaPipeDetector::detect(const uint8_t* frame_data,
             }
             // Face Mesh 기반 새 face_rect 저장 (다음 프레임 추적용)
             // 디버그: 주요 랜드마크 좌표 확인
-            static bool landmark_debug_printed = false;
+            static std::atomic<bool> landmark_debug_printed{false};
             if (!landmark_debug_printed && calc_count > 0) {
                 // 주요 랜드마크: 10(이마상단), 152(턱끝), 234(왼쪽귀), 454(오른쪽귀)
                 std::fprintf(stderr, "[DEBUG] Face Mesh bounding box calculation:\n");
@@ -3302,6 +3303,10 @@ void MediaPipeDetector::setMinDetectionConfidence(float confidence) {
 }
 
 void MediaPipeDetector::setMinTrackingConfidence(float confidence) {
+    // ③-2 B1 (DEAD SETTING): min_tracking_confidence는 저장만 되고 detect()의
+    // 추적 분기에서 사용되지 않는다(추적 유지 판단은 min_presence_confidence만 사용).
+    // 동작 변경은 ③-2 범위 밖이므로 저장 동작을 그대로 유지한다.
+    // @todo (④) 추적 판단에 연결하거나 deprecated 처리 후 제거.
     impl_->min_tracking_confidence = std::clamp(confidence, 0.0f, 1.0f);
 }
 

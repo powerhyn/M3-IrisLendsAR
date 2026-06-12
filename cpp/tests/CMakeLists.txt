@@ -713,3 +713,44 @@ target_link_libraries(test_temporal_stability PRIVATE
 )
 
 gtest_discover_tests(test_temporal_stability DISCOVERY_TIMEOUT 120)
+
+# ============================================================
+# ③-2 B1: InferenceThread 수명/스레드 안전성 테스트
+# (실모델 불필요 — 존재하지 않는 경로로 init 실패를 결정적으로 유발)
+# ============================================================
+add_executable(test_inference_thread_lifecycle test_inference_thread_lifecycle.cpp)
+target_include_directories(test_inference_thread_lifecycle PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_inference_thread_lifecycle PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+# OpenCV 연결 (iris_sdk가 OpenCV에 의존)
+if(OpenCV_FOUND)
+    target_link_libraries(test_inference_thread_lifecycle PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_inference_thread_lifecycle PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+
+# TFLite 연결 (InferenceThread → MediaPipeDetector 링크 의존)
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_inference_thread_lifecycle PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_inference_thread_lifecycle PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_inference_thread_lifecycle PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_inference_thread_lifecycle PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_inference_thread_lifecycle PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+gtest_discover_tests(test_inference_thread_lifecycle DISCOVERY_TIMEOUT 60)
