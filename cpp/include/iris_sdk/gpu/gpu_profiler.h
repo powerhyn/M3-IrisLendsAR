@@ -13,6 +13,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <cstdint>
 #include <vector>
@@ -216,6 +217,11 @@ private:
     std::vector<GLuint> query_pool_;
     size_t pool_index_ = 0;
     static constexpr size_t QUERY_POOL_SIZE = 32;
+
+    // [B2 idx21] 아직 결과를 수집하지 못한 in-flight 쿼리 id 집합.
+    // acquireQuery가 이 집합에 있는 쿼리를 건너뛰어, GPU가 밀려 결과 수집 전에
+    // 같은 쿼리를 glBeginQueryEXT로 재시작해 이전 측정을 덮어쓰는 것을 막는다.
+    std::unordered_set<GLuint> in_flight_queries_;
 
     // Active queries (currently in-flight)
     std::unordered_map<std::string, QueryInfo> active_queries_;

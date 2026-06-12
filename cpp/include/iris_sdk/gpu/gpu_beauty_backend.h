@@ -285,6 +285,10 @@ private:
     /// Temporal filter 일괄 리셋 (release/얼굴 추적 끊김 시 공통 호출)
     void resetTemporalFilters();
 
+    /// [B2 idx20] 이전 프레임이 이월한 ping/pong 텍스처와 GPU fence를 정리한다.
+    /// applyTextureId 진입 시(필터 활성/비활성 모두)와 조기 반환 경로에서 공통 호출.
+    void releasePreviousFrameResources();
+
     /// 셰이더 프로그램 초기화
     bool initializeShaders();
 
@@ -515,6 +519,11 @@ private:
         GLint compositeSkin = -1;
     } skin_uniforms_;
 
+    // [B2 idx18] passthrough 셰이더 uTexture location 캐시
+    // (renderSkinBasePasses에서 매 프레임 glGetUniformLocation 호출 제거)
+    // maybe_unused: 비-GPU(desktop) 빌드에서는 GL 경로가 컴파일되지 않아 미사용.
+    [[maybe_unused]] GLint passthrough_u_texture_ = -1;
+
     //=========================================================================
     // Uniform Location 캐시 (성능 최적화)
     //=========================================================================
@@ -649,7 +658,12 @@ private:
     // 이전 출력 텍스처 추적 (텍스처 풀 관리용)
     TexturePool::TextureInfo* previous_output_ping_ = nullptr;
     TexturePool::TextureInfo* previous_output_pong_ = nullptr;
-    GLuint previous_output_texture_ = 0;
+
+    // [B2 idx2] applyTexture(TextureHandle) 출력 핸들이 가리킬 안정적 GLuint 저장소.
+    // 풀 내부 TextureInfo 멤버 주소를 직접 노출하면 trim()이 unique_ptr을 파괴할 때
+    // 댕글링 포인터가 되므로, 백엔드 수명에 묶인 멤버 버퍼의 주소를 노출한다.
+    // maybe_unused: 비-GPU(desktop) 빌드에서는 GL 경로가 컴파일되지 않아 미사용.
+    [[maybe_unused]] GLuint applytexture_output_id_ = 0;
 
     // GPU 동기화 펜스 (glFinish 대체)
 #if IRIS_SDK_GPU_AVAILABLE

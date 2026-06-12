@@ -930,6 +930,13 @@ ErrorCode GPULensRenderer::renderToTexture(
     }
 
     // 출력 텍스처 획득
+    // [B2 idx5/idx6 후속] beauty backend와 동일 패턴으로 입력 크기까지 상한을
+    // 끌어올린다. lens 풀은 1920x1080 하드코딩 상한이라 portrait/고해상도 입력 시
+    // acquireRenderTarget이 silent 실패(매 프레임 RenderFailed → 렌즈 오버레이 소멸)
+    // 하던 결함을 막는다. ensureCapacity는 lazy(즉시 재할당 없음)·GL 무관이라
+    // 현 데모(960x720, 상한 이하)에는 영향이 없다(동작 불변).
+    texture_pool_->ensureCapacity(width, height);
+
     auto* output_info = texture_pool_->acquireRenderTarget(width, height);
     if (!output_info) {
         LOGE("Failed to acquire render target %dx%d", width, height);

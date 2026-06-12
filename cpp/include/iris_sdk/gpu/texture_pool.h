@@ -183,6 +183,22 @@ public:
     void resizePool(int new_max_textures);
 
     /**
+     * @brief 입력 크기 기반 텍스처 크기 상한 보장 (B2 idx5)
+     *
+     * 호스트가 portrait(예: 1080x1920)나 고해상도 텍스처를 넘기면 기존의
+     * 하드코딩 상한(예: 1920x1080)을 초과하여 acquireRenderTarget이 매 프레임
+     * silent 실패(nullptr 반환 → 파이프라인 전체 무력화)하던 결함을 막는다.
+     *
+     * 요청 크기가 현재 상한을 넘으면 상한을 요청 크기까지 확장한다(기존 텍스처는
+     * lazy 생성이므로 즉시 재할당하지 않음). 상한을 줄이지는 않는다.
+     *
+     * @param width  요청 텍스처 너비
+     * @param height 요청 텍스처 높이
+     * @return 상한이 변경되었으면 true (신규/확장), 변경 없으면 false
+     */
+    bool ensureCapacity(int width, int height);
+
+    /**
      * @brief 현재 메모리 사용량 조회
      *
      * @return 사용 중인 텍스처 메모리 (바이트)
@@ -214,10 +230,20 @@ public:
     /**
      * @brief 메모리 압력 알림 처리
      *
-     * Android onTrimMemory()에서 호출됩니다.
-     *
      * @param level Android trim level (10=RUNNING_LOW, 15=CRITICAL,
      *              40=BACKGROUND, 60=MODERATE, 80=COMPLETE)
+     *
+     * @warning [B2 idx22] 스레드 친화성 결함 — 현재 미연결(죽은 경로).
+     *   이 메서드는 trim()/resizePool()을 통해 glDeleteFramebuffers/glDeleteTextures를
+     *   직접 호출한다. 그러나 Android onTrimMemory()는 main 스레드 콜백이라 GL 컨텍스트가
+     *   current가 아니다 — mutex_는 데이터 경합만 막을 뿐 GL 호출의 스레드 유효성을
+     *   보장하지 못한다. **GL을 호출하는 모든 메서드는 GL 스레드에서만 호출해야 한다.**
+     *
+     *   따라서 main 스레드 onTrimMemory()에 직접 연결하면 안 된다(GL no-op로 리소스
+     *   누수 또는 다른 컨텍스트 객체 오삭제). 올바른 연동은 '정리 요청 플래그만 세우고
+     *   실제 glDelete는 다음 GL 스레드 진입(applyTextureId) 시 수행'하는 지연 정리
+     *   패턴이며, 이는 ④ 단계에서 설계한다. 현재는 JNI/Java/sdk_api 어디에서도
+     *   호출되지 않으므로 도달 불가하다.
      */
     void onMemoryPressure(int level);
 
@@ -234,6 +260,16 @@ private:
     /// 사용 가능한 텍스처 검색
     TextureInfo* findAvailable(int width, int height);
 
+    /// 풀 만석 시 유휴(불일치) 텍스처 1장을 즉시 회수 (GL 리소스 삭제 + 슬롯 제거)
+    /// [B2 idx6 후속] 정확 크기 매칭 전환으로 불일치 유휴 텍스처가 풀에 영구
+    /// 잔류할 수 있다. trim()의 유일 production 호출처 onMemoryPressure()가
+    /// 현재 미연결(죽은 경로)이므로 회수 수단이 없어, 해상도 전환(전/후면 카메라,
+    /// 프리뷰 크기 변경) 반복 시 만석으로 신해상도 acquire가 영구 실패할 수 있다.
+    /// 이 함수는 GL 스레드에서만 호출되는 acquireRenderTargetLocked에서만 사용되며,
+    /// 가장 오래 유휴인(LRU) 텍스처 1장을 evict하여 새 크기 생성 슬롯을 확보한다.
+    /// @return 1장이라도 회수하면 true, 회수 가능한 유휴 텍스처가 없으면 false
+    bool evictOneIdleLocked();
+
     /// 현재 시간 (밀리초)
     static int64_t currentTimeMs();
 
@@ -243,6 +279,11 @@ private:
     int max_textures_ = 8;
     int max_width_ = 1920;
     int max_height_ = 1080;
+
+    // [B2 idx5] 상한 초과 거부 로그 스로틀 — 같은 크기가 매 프레임 거부될 때
+    // 로그 스팸을 막되, 새 크기 거부는 1회 명시 로그를 남긴다.
+    int last_rejected_w_ = 0;
+    int last_rejected_h_ = 0;
 
     bool initialized_ = false;
     mutable std::mutex mutex_;
