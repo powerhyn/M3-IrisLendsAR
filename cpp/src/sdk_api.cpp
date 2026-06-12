@@ -1295,6 +1295,27 @@ uint32_t iris_get_landmark_generation(void) {
     return g_landmark_store.generation();
 }
 
+IrisSdkError iris_get_injected_result(IrisResult* out) {
+    if (!out) {
+        set_last_error("iris_get_injected_result: out is null");
+        return IRIS_SDK_NULL_POINTER;
+    }
+
+    // 무락 seqlock 재시도 (ADR §6.1). g_mutex 미보유 — 주입 경로와 동일하게
+    // store가 reader/writer 직렬화를 책임진다(iris_sdk_get_latest_result의 g_processor
+    // 경로와 별개의 채널). readDerived는 미주입(generation==0) 시 false를 반환한다.
+    iris_sdk::IrisResult cpp_result;
+    if (!g_landmark_store.readDerived(&cpp_result)) {
+        // 주입 이력 없음 = 검출 결과 부재 일원화 (ADR §6.2). out은 미변경(silent OK 금지).
+        set_last_error("iris_get_injected_result: no landmarks injected");
+        return IRIS_SDK_NO_FACE;
+    }
+
+    convert_to_c_iris_result(cpp_result, out);
+    set_last_error(nullptr);
+    return IRIS_SDK_OK;
+}
+
 }  // extern "C"
 
 // ============================================================================

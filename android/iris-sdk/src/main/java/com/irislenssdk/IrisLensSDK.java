@@ -1172,6 +1172,65 @@ public final class IrisLensSDK {
     }
 
     // ========================================================================
+    // 랜드마크 주입 경계 API (③-3 §3-2 — ADR-0001 §6)
+    // ========================================================================
+
+    /**
+     * 478점 랜드마크 + upright 프레임 치수 + 타임스탬프를 코어로 주입합니다.
+     *
+     * <p>외부 추적기(MediaPipe Tasks 등)가 산출한 478×3 정규화 좌표(upright, 비미러 —
+     * ADR §7.1/§7.4)를 코어에 주입합니다. 코어가 호출 내에서 deep-copy하며,
+     * 478점·프레임 치수·타임스탬프가 한 세대(generation)에 원자 결속됩니다.</p>
+     *
+     * @param pts478x3 478×3 정규화 좌표 (배열 길이 ≥ 1434 필수)
+     * @param frameWidth upright 프레임 너비 (px) — 파생 어댑터 픽셀 환산 기준
+     * @param frameHeight upright 프레임 높이 (px)
+     * @param timestampUs 단조 증가 타임스탬프 (µs) — One-Euro dt 산출용
+     * @return 에러 코드 (OK = 성공, INVALID_PARAM = 길이/치수/NaN 거부, NULL_POINTER = pts null)
+     */
+    public static int setLandmarks(@NonNull float[] pts478x3, int frameWidth,
+                                   int frameHeight, long timestampUs) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeSetLandmarks(pts478x3, frameWidth, frameHeight, timestampUs);
+    }
+
+    /**
+     * 현재 주입 세대 번호를 반환합니다.
+     *
+     * <p>0 = 미주입(주입 이력 없음). setLandmarks 성공마다 증가합니다.
+     * 호출자가 새 주입 도착을 감지하거나 슬롯 일관성을 검증하는 용도입니다.</p>
+     *
+     * @return 세대 번호 (라이브러리 미로드 시 0)
+     */
+    public static long getLandmarkGeneration() {
+        if (!sLibraryLoaded) {
+            return 0L;
+        }
+        return nativeGetLandmarkGeneration();
+    }
+
+    /**
+     * 주입된 랜드마크에서 파생된 IrisResult를 조회합니다.
+     *
+     * <p>setLandmarks로 주입된 478점에서 코어 어댑터가 유도한 파생 결과
+     * (홍채 중심·반경, EAR→visibility, face_rect)를 result에 채웁니다.
+     * 내부 detect 경로(detect*)와 별개의 주입 전용 채널입니다.</p>
+     *
+     * <p>미주입 시 NO_FACE를 반환하며 result는 미변경으로 남습니다.</p>
+     *
+     * @param result 파생 결과 출력 객체
+     * @return 에러 코드 (OK = 결과 있음, NO_FACE = 미주입, NULL_POINTER = result null)
+     */
+    public static int getInjectedResult(@NonNull IrisResult result) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeGetInjectedResult(result);
+    }
+
+    // ========================================================================
     // 정보 API
     // ========================================================================
 
@@ -1518,4 +1577,13 @@ public final class IrisLensSDK {
      * Detection 슬롯 해제
      */
     private static native void nativeReleaseDetectionSlot();
+
+    // ========================================================================
+    // 랜드마크 주입 경계 (③-3 §3-2 — ADR-0001 §6)
+    // ========================================================================
+
+    private static native int nativeSetLandmarks(float[] pts478x3, int frameWidth,
+                                                 int frameHeight, long timestampUs);
+    private static native long nativeGetLandmarkGeneration();
+    private static native int nativeGetInjectedResult(IrisResult out);
 }

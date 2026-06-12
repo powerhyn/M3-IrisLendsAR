@@ -1148,6 +1148,23 @@ IRIS_SDK_EXPORT IrisSdkError iris_set_landmarks(
  */
 IRIS_SDK_EXPORT uint32_t iris_get_landmark_generation(void);
 
+/**
+ * @brief 가장 최근 완결 세대의 주입 랜드마크에서 파생된 IrisResult를 조회한다.
+ *
+ * iris_set_landmarks로 주입된 478점에서 코어 어댑터가 유도한 파생 결과
+ * (홍채 중심·반경, EAR→visibility, face_rect 등 ADR §6.2)를 out에 채운다.
+ * 내부 LandmarkInjectionStore::readDerived()에 위임한다(reader 무락 seqlock 재시도 —
+ * ADR §6.1). 주입 채널 전용이며 iris_sdk_get_latest_result(내부 detect 경로)와 별개다.
+ *
+ * 미주입(generation==0) 시 명시 에러(IRIS_SDK_NO_FACE)를 반환한다 — 검출 실패=주입 부재
+ * 일원화(ADR §6.2). out은 미변경으로 남는다(silent OK 금지).
+ *
+ * @param out 파생 결과 출력 (NULL 불가).
+ * @return IRIS_SDK_OK 결과 있음, IRIS_SDK_NO_FACE 미주입(주입 이력 없음),
+ *         IRIS_SDK_NULL_POINTER out이 NULL.
+ */
+IRIS_SDK_EXPORT IrisSdkError iris_get_injected_result(IrisResult* out);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

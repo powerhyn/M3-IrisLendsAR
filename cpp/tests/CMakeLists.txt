@@ -653,6 +653,33 @@ target_link_libraries(test_landmark_injection PRIVATE
     iris_sdk
 )
 
+# ③-3: C API 표면 경유 E2E(iris_set_landmarks/iris_get_injected_result) 추가로
+# sdk_api.cpp.o가 링크에 끌려오며, 그 객체가 참조하는 g_processor→mediapipe_detector(TFLite)
+# 심볼이 필요해진다. test_sdk_api와 동일한 TFLite/OpenCV 링크 처리를 적용한다(동작 불변).
+if(OpenCV_FOUND)
+    target_link_libraries(test_landmark_injection PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_landmark_injection PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_landmark_injection PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_landmark_injection PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_landmark_injection PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_landmark_injection PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_landmark_injection PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
 gtest_discover_tests(test_landmark_injection DISCOVERY_TIMEOUT 60)
 
 # ============================================================

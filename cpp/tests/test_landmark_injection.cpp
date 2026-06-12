@@ -9,12 +9,16 @@
  *      eps_pix=0.5) 참조값 사용.
  *   2. seqlock 더블버퍼 + 입력 유효성: write/readDerived 라운드트립, generation 운용,
  *      478 외/NULL/NaN/Inf/치수≤0 거부 시 스테일 유지.
+ *   3. C API 표면 경유 왕복(③-3 §3-3): 골든 baseline 478점을 iris_set_landmarks →
+ *      iris_get_injected_result로 왕복시켜 detector 파생값과 ε 비교. ②가 store/어댑터를
+ *      직접 호출하는 단위 검증이라면, ③은 공개 C 경계(sdk_api.h)를 통과하는 E2E다.
  *
  * JSON 파싱은 표준 라이브러리만으로 한다(golden_compare.py 정책과 일치 — 외부 의존 금지).
  * baseline JSON은 평탄·결정적 포맷이라 경량 토큰 파서로 충분하다.
  */
 
 #include "iris_sdk/landmark_injection.h"
+#include "iris_sdk/sdk_api.h"
 #include "iris_sdk/types.h"
 
 #include <gtest/gtest.h>
@@ -33,8 +37,11 @@
 
 namespace {
 
-using iris_sdk::IrisResult;
-using iris_sdk::IrisLandmark;
+// sdk_api.h가 전역 ::IrisResult / ::IrisLandmark(C struct)를 도입하므로,
+// C++ 타입은 별칭으로 명시해 전역 스코프(TEST 본문)에서의 이름 모호성을 피한다.
+// (anonymous namespace의 using-directive 암묵 노출 + 전역 C typedef = ambiguous.)
+using CppIrisResult = iris_sdk::IrisResult;
+using CppIrisLandmark = iris_sdk::IrisLandmark;
 using iris_sdk::LandmarkInjectionStore;
 using iris_sdk::deriveIrisResult;
 
@@ -55,12 +62,12 @@ constexpr float kEpsPix = 0.5f;
 // 결정적 포맷이라 순서대로 숫자 토큰을 읽어 4개씩 묶는다.
 struct GoldenResult {
     bool ok = false;
-    std::vector<IrisLandmark> mesh;  // 478점
+    std::vector<CppIrisLandmark> mesh;  // 478점
     int input_width = 0;
     int input_height = 0;
     // detector 파생 기준값
-    std::array<IrisLandmark, 5> left_iris{};
-    std::array<IrisLandmark, 5> right_iris{};
+    std::array<CppIrisLandmark, 5> left_iris{};
+    std::array<CppIrisLandmark, 5> right_iris{};
     float left_radius = 0.0f;
     float right_radius = 0.0f;
     float face_rect[4] = {0, 0, 0, 0};
@@ -108,7 +115,7 @@ bool extractBool(const std::string& s, const std::string& key, bool& out) {
 }
 
 // "face_mesh": [ ... ] 블록에서 478×4 숫자를 순서대로 추출.
-bool extractMesh(const std::string& s, std::vector<IrisLandmark>& mesh) {
+bool extractMesh(const std::string& s, std::vector<CppIrisLandmark>& mesh) {
     size_t key = s.find("\"face_mesh\"");
     if (key == std::string::npos) return false;
     size_t lb = s.find('[', key);
@@ -156,7 +163,7 @@ bool extractMesh(const std::string& s, std::vector<IrisLandmark>& mesh) {
 
 // left_iris / right_iris 배열(5점) 추출.
 bool extractIrisArray(const std::string& s, const std::string& key,
-                      std::array<IrisLandmark, 5>& out) {
+                      std::array<CppIrisLandmark, 5>& out) {
     std::string needle = "\"" + key + "\"";
     size_t k = s.find(needle);
     if (k == std::string::npos) return false;
@@ -241,7 +248,7 @@ GoldenResult loadGolden(const std::string& path) {
 }
 
 // face_mesh 478점 → 평탄 478×3 (x,y,z) 입력 버퍼.
-std::vector<float> meshToFlat(const std::vector<IrisLandmark>& mesh) {
+std::vector<float> meshToFlat(const std::vector<CppIrisLandmark>& mesh) {
     std::vector<float> pts(478 * 3);
     for (int i = 0; i < 478; ++i) {
         pts[i * 3 + 0] = mesh[i].x;
@@ -280,7 +287,7 @@ TEST_F(LandmarkAdapterGoldenTest, DerivesIrisGeometryMatchingDetector) {
     ASSERT_GT(g.input_height, 0);
 
     std::vector<float> pts = meshToFlat(g.mesh);
-    IrisResult r = deriveIrisResult(pts.data(), 478, g.input_width, g.input_height,
+    CppIrisResult r = deriveIrisResult(pts.data(), 478, g.input_width, g.input_height,
                                     /*timestamp_us=*/0);
 
     // detected: detector도 홍채 5점 [0,1] 범위 판정 — 일치해야 한다.
@@ -340,7 +347,7 @@ TEST(LandmarkAdapterValidityTest, RejectsOutOfRangeIrisAsUndetected) {
     std::vector<float> pts(478 * 3, 0.5f);
     // 좌안 경계점(인덱스 469) y를 1.5로 → left 미검출.
     pts[469 * 3 + 1] = 1.5f;
-    IrisResult r = deriveIrisResult(pts.data(), 478, 640, 480, 0);
+    CppIrisResult r = deriveIrisResult(pts.data(), 478, 640, 480, 0);
     EXPECT_FALSE(r.left_detected);
     EXPECT_TRUE(r.right_detected);  // 우안은 0.5로 모두 유효
 }
@@ -352,7 +359,7 @@ TEST(LandmarkAdapterValidityTest, RejectsOutOfRangeIrisAsUndetected) {
 TEST(LandmarkInjectionStoreTest, EmptyStoreReadFails) {
     LandmarkInjectionStore store;
     EXPECT_EQ(store.generation(), 0u);
-    IrisResult r;
+    CppIrisResult r;
     EXPECT_FALSE(store.readDerived(&r));
 }
 
@@ -375,7 +382,7 @@ TEST(LandmarkInjectionStoreTest, WriteThenReadRoundTrip) {
     EXPECT_EQ(gen, 2u);                 // 첫 write → 세대 2 (짝수)
     EXPECT_EQ(store.generation(), 2u);
 
-    IrisResult r;
+    CppIrisResult r;
     ASSERT_TRUE(store.readDerived(&r));
     EXPECT_TRUE(r.left_detected);
     EXPECT_EQ(r.frame_width, 640);
@@ -412,7 +419,7 @@ TEST(LandmarkInjectionStoreTest, RejectsWrongPointCountKeepsStale) {
     EXPECT_EQ(bad, 999u);                // out_generation 미변경
 
     // 직전 유효 세대를 여전히 읽을 수 있어야 한다.
-    IrisResult r;
+    CppIrisResult r;
     EXPECT_TRUE(store.readDerived(&r));
 }
 
@@ -500,7 +507,7 @@ TEST(LandmarkInjectionStoreTest, ConcurrentReadNeverTearsSnapshot) {
             if (std::chrono::steady_clock::now() >= deadline) {
                 break;  // 시간 예산 소진(과부하 환경 안전장치) — seed로 reads>0은 보장됨.
             }
-            IrisResult r;
+            CppIrisResult r;
             if (store.readDerived(&r)) {
                 reads.fetch_add(1, std::memory_order_relaxed);
                 bool expect200 = (r.frame_width == 200);
@@ -563,7 +570,7 @@ TEST(LandmarkInjectionStoreTest, DualWriterSerializedNoTearEvenGeneration) {
             std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (reads.load(std::memory_order_relaxed) < 50000) {
             if (std::chrono::steady_clock::now() >= deadline) break;
-            IrisResult r;
+            CppIrisResult r;
             if (store.readDerived(&r)) {
                 reads.fetch_add(1, std::memory_order_relaxed);
                 // fw=100 ↔ pts[0]=0.1, fw=200 ↔ pts[0]=0.2 결속(둘 중 하나여야 함).
@@ -592,7 +599,138 @@ TEST(LandmarkInjectionStoreTest, DualWriterSerializedNoTearEvenGeneration) {
         << "write 종료 후 generation이 홀수(쓰기 중 마커)로 잔류: " << final_gen;
     EXPECT_NE(final_gen, 0u) << "최소 seed write 한 번은 완결됐어야 한다";
     // 정지 후에는 reader가 항상 유효 세대를 읽을 수 있어야 한다(영구 false 아님).
-    IrisResult after;
+    CppIrisResult after;
     EXPECT_TRUE(store.readDerived(&after))
         << "정지 후 readDerived 실패 — generation 홀수 잔류로 영구 재시도 의심";
+}
+
+// ===========================================================================
+// 4. C API 표면 경유 왕복 E2E (③-3 §3-3 — sdk_api.h 공개 경계)
+// ===========================================================================
+//
+// ②가 store/deriveIrisResult를 직접 호출하는 단위 검증이라면, ④는 공개 C 경계를
+// 통과한다: iris_set_landmarks(주입) → iris_get_injected_result(파생 조회). C API는
+// 프로세스 전역 g_landmark_store를 공유하므로, 각 케이스는 자기 주입을 직전에 수행해
+// 결정적 상태(last-writer-wins, generation 단조 증가)를 보장한다.
+//
+// 전역 C IrisResult(::IrisResult)와 C++ iris_sdk::IrisResult(테스트 namespace의 별칭
+// CppIrisResult)는 별개 타입이다 — C API 호출에는 전역 타입(::IrisResult)을 명시한다.
+
+class LandmarkCApiRoundTripTest : public ::testing::Test {
+protected:
+    static std::string baselinePath(const std::string& stem) {
+        std::string dir = GOLDEN_BASELINE_DIR;
+        if (dir.empty()) {
+            dir = "../tests/golden/baseline";
+        }
+        return dir + "/" + stem + ".result.json";
+    }
+};
+
+// 골든 baseline 478점을 C API로 주입→조회하면 detector 파생값과 ε 일치해야 한다.
+TEST_F(LandmarkCApiRoundTripTest, InjectThenGetMatchesDetector) {
+    const std::string path = baselinePath("face_closeup__gamma05");
+    GoldenResult g = loadGolden(path);
+    ASSERT_TRUE(g.ok) << "골든 baseline 로드 실패: " << path;
+    ASSERT_EQ(g.mesh.size(), 478u);
+    ASSERT_GT(g.input_width, 0);
+    ASSERT_GT(g.input_height, 0);
+
+    std::vector<float> pts = meshToFlat(g.mesh);
+
+    // 주입: 공개 C 경계. generation은 전역이라 절대값이 아닌 '증가'만 검증한다.
+    const uint32_t gen_before = iris_get_landmark_generation();
+    uint32_t gen_after = 0;
+    ASSERT_EQ(iris_set_landmarks(pts.data(), 478, g.input_width, g.input_height,
+                                 /*timestamp_us=*/1000, &gen_after),
+              IRIS_SDK_OK);
+    EXPECT_GT(gen_after, gen_before) << "주입 후 generation이 증가하지 않음";
+    EXPECT_EQ(gen_after & 1u, 0u) << "공개 generation은 완결(짝수)이어야 함";
+    EXPECT_EQ(iris_get_landmark_generation(), gen_after);
+
+    // 조회: 공개 C 경계 (C IrisResult).
+    ::IrisResult c_out{};
+    ASSERT_EQ(iris_get_injected_result(&c_out), IRIS_SDK_OK);
+
+    // detected: detector도 홍채 5점 [0,1] 판정 — baseline과 일치.
+    EXPECT_EQ(c_out.left_detected, g.left_detected);
+    EXPECT_EQ(c_out.right_detected, g.right_detected);
+
+    // 홍채 5점 정규화 좌표: eps_norm.
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_NEAR(c_out.left_iris[i].x, g.left_iris[i].x, kEpsNorm) << "left_iris[" << i << "].x";
+        EXPECT_NEAR(c_out.left_iris[i].y, g.left_iris[i].y, kEpsNorm) << "left_iris[" << i << "].y";
+        EXPECT_NEAR(c_out.right_iris[i].x, g.right_iris[i].x, kEpsNorm) << "right_iris[" << i << "].x";
+        EXPECT_NEAR(c_out.right_iris[i].y, g.right_iris[i].y, kEpsNorm) << "right_iris[" << i << "].y";
+    }
+
+    // 반경(픽셀): eps_pix.
+    EXPECT_NEAR(c_out.left_radius, g.left_radius, kEpsPix) << "left_radius";
+    EXPECT_NEAR(c_out.right_radius, g.right_radius, kEpsPix) << "right_radius";
+
+    // face_rect(정규화): eps_norm.
+    EXPECT_NEAR(c_out.face_rect.x, g.face_rect[0], kEpsNorm) << "face_rect.x";
+    EXPECT_NEAR(c_out.face_rect.y, g.face_rect[1], kEpsNorm) << "face_rect.y";
+    EXPECT_NEAR(c_out.face_rect.width, g.face_rect[2], kEpsNorm) << "face_rect.width";
+    EXPECT_NEAR(c_out.face_rect.height, g.face_rect[3], kEpsNorm) << "face_rect.height";
+
+    // 주입 부가 필드: frame dims/timestamp가 한 세대에 결속돼 왕복 보존.
+    EXPECT_EQ(c_out.frame_width, g.input_width);
+    EXPECT_EQ(c_out.frame_height, g.input_height);
+    EXPECT_EQ(c_out.timestamp_ms, 1);  // 1000µs → 1ms
+
+    // face_mesh 478점 인라인 보존 + valid (조회 경로가 메시를 운반).
+    EXPECT_TRUE(c_out.face_mesh_valid);
+    EXPECT_NEAR(c_out.face_mesh[468].x, g.mesh[468].x, kEpsNorm);
+    EXPECT_NEAR(c_out.face_mesh[473].y, g.mesh[473].y, kEpsNorm);
+}
+
+// C API 표면이 deriveIrisResult 직접 호출과 동일 결과를 낸다(경계가 어댑터를 왜곡하지 않음).
+TEST_F(LandmarkCApiRoundTripTest, CApiResultEqualsDirectAdapter) {
+    const std::string path = baselinePath("face_closeup__gamma05");
+    GoldenResult g = loadGolden(path);
+    ASSERT_TRUE(g.ok);
+    std::vector<float> pts = meshToFlat(g.mesh);
+
+    // 직접 어댑터 (C++ 타입).
+    CppIrisResult direct = deriveIrisResult(pts.data(), 478, g.input_width, g.input_height,
+                                         /*timestamp_us=*/2000);
+
+    // C API 왕복 (C 타입).
+    uint32_t gen = 0;
+    ASSERT_EQ(iris_set_landmarks(pts.data(), 478, g.input_width, g.input_height, 2000, &gen),
+              IRIS_SDK_OK);
+    ::IrisResult capi{};
+    ASSERT_EQ(iris_get_injected_result(&capi), IRIS_SDK_OK);
+
+    // 두 경로의 파생값이 정확히 일치해야 한다(부동소수 동일 입력·동일 수식 — bit-exact 기대).
+    EXPECT_FLOAT_EQ(capi.left_iris[0].x, direct.left_iris[0].x);
+    EXPECT_FLOAT_EQ(capi.left_iris[0].y, direct.left_iris[0].y);
+    EXPECT_FLOAT_EQ(capi.left_radius, direct.left_radius);
+    EXPECT_FLOAT_EQ(capi.right_radius, direct.right_radius);
+    EXPECT_FLOAT_EQ(capi.face_rect.x, direct.face_rect.x);
+    EXPECT_FLOAT_EQ(capi.face_rect.width, direct.face_rect.width);
+    EXPECT_EQ(capi.left_detected, direct.left_detected);
+    EXPECT_EQ(capi.right_detected, direct.right_detected);
+    EXPECT_EQ(capi.frame_width, direct.frame_width);
+    EXPECT_EQ(capi.frame_height, direct.frame_height);
+}
+
+// C API 가드: NULL out은 IRIS_SDK_NULL_POINTER (전역 상태 무관 — 결정적).
+TEST_F(LandmarkCApiRoundTripTest, GetInjectedResultRejectsNull) {
+    EXPECT_EQ(iris_get_injected_result(nullptr), IRIS_SDK_NULL_POINTER);
+}
+
+// C API 주입 거부도 공개 경계에서 동작 불변 — 478 외/NULL/치수≤0.
+TEST_F(LandmarkCApiRoundTripTest, SetLandmarksRejectsInvalidInputs) {
+    std::vector<float> pts(478 * 3, 0.5f);
+    uint32_t gen = 0;
+    // 478 외 점 수.
+    EXPECT_EQ(iris_set_landmarks(pts.data(), 477, 640, 480, 0, &gen), IRIS_SDK_INVALID_PARAM);
+    // NULL pts.
+    EXPECT_EQ(iris_set_landmarks(nullptr, 478, 640, 480, 0, &gen), IRIS_SDK_NULL_POINTER);
+    // NULL out_generation.
+    EXPECT_EQ(iris_set_landmarks(pts.data(), 478, 640, 480, 0, nullptr), IRIS_SDK_NULL_POINTER);
+    // 치수 ≤ 0.
+    EXPECT_EQ(iris_set_landmarks(pts.data(), 478, 0, 480, 0, &gen), IRIS_SDK_INVALID_PARAM);
 }

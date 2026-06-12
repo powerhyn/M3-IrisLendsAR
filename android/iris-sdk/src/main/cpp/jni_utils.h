@@ -247,6 +247,99 @@ private:
 };
 
 /**
+ * @brief RAII 기반 JNI float 배열 래퍼
+ *
+ * GetFloatArrayElements/ReleaseFloatArrayElements 쌍을 자동으로 관리합니다.
+ * 랜드마크 주입(478×3 정규화 좌표)을 C API로 넘길 때 사용합니다.
+ * iris_set_landmarks가 호출 내에서 deep-copy하므로 기본 해제 모드는 JNI_ABORT
+ * (네이티브가 배열을 수정하지 않음 — 복사 비용 회피).
+ *
+ * @code
+ * ScopedFloatArray arr(env, jfloatArr);
+ * if (arr.valid()) {
+ *     iris_set_landmarks(arr.data(), 478, ...);
+ * }
+ * @endcode
+ */
+class ScopedFloatArray {
+public:
+    ScopedFloatArray(JNIEnv* env, jfloatArray arr, jint mode = JNI_ABORT) noexcept
+        : env_(env)
+        , arr_(arr)
+        , data_(nullptr)
+        , size_(0)
+        , mode_(mode) {
+        if (env_ && arr_) {
+            data_ = env_->GetFloatArrayElements(arr_, nullptr);
+            size_ = env_->GetArrayLength(arr_);
+        }
+    }
+
+    ~ScopedFloatArray() noexcept {
+        if (data_ && env_ && arr_) {
+            env_->ReleaseFloatArrayElements(arr_, data_, mode_);
+        }
+    }
+
+    // 복사 금지
+    ScopedFloatArray(const ScopedFloatArray&) = delete;
+    ScopedFloatArray& operator=(const ScopedFloatArray&) = delete;
+
+    // 이동 허용
+    ScopedFloatArray(ScopedFloatArray&& other) noexcept
+        : env_(other.env_)
+        , arr_(other.arr_)
+        , data_(other.data_)
+        , size_(other.size_)
+        , mode_(other.mode_) {
+        other.data_ = nullptr;
+        other.arr_ = nullptr;
+    }
+
+    ScopedFloatArray& operator=(ScopedFloatArray&& other) noexcept {
+        if (this != &other) {
+            if (data_ && env_ && arr_) {
+                env_->ReleaseFloatArrayElements(arr_, data_, mode_);
+            }
+            env_ = other.env_;
+            arr_ = other.arr_;
+            data_ = other.data_;
+            size_ = other.size_;
+            mode_ = other.mode_;
+            other.data_ = nullptr;
+            other.arr_ = nullptr;
+        }
+        return *this;
+    }
+
+    /**
+     * @brief 데이터 포인터 반환 (const float*)
+     */
+    [[nodiscard]] const float* data() const noexcept {
+        return reinterpret_cast<const float*>(data_);
+    }
+
+    /**
+     * @brief 배열 길이 반환 (요소 수)
+     */
+    [[nodiscard]] jsize size() const noexcept { return size_; }
+
+    /**
+     * @brief 데이터가 유효한지 확인
+     */
+    [[nodiscard]] bool valid() const noexcept { return data_ != nullptr; }
+
+    explicit operator bool() const noexcept { return valid(); }
+
+private:
+    JNIEnv* env_;
+    jfloatArray arr_;
+    jfloat* data_;
+    jsize size_;
+    jint mode_;
+};
+
+/**
  * @brief RAII 기반 JNI 로컬 참조 래퍼
  *
  * 로컬 참조를 자동으로 해제합니다.

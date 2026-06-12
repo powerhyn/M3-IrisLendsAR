@@ -2395,4 +2395,106 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetUseMeasuredLuma(
     iris_sdk_set_use_measured_luma(enabled ? 1 : 0);
 }
 
+// ============================================================================
+// 랜드마크 주입 경계 JNI (③-3 §3-2 — ADR-0001 §6 첫 외부 소비자)
+// ============================================================================
+
+/**
+ * Java: native int nativeSetLandmarks(float[] pts478x3, int frameWidth,
+ *                                     int frameHeight, long timestampUs);
+ * 478×3 정규화 좌표(upright, 비미러)를 코어로 주입한다(deep-copy). ADR §6.1.
+ * 배열 길이 == 478×3 이중 가드(C 경계와 바인딩 양쪽 — ADR §6.1).
+ * @return IrisSdkError 코드 (성공 시 IRIS_SDK_OK).
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLandmarks(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jfloatArray pts,
+    jint frameWidth,
+    jint frameHeight,
+    jlong timestampUs)
+{
+    constexpr int LANDMARK_COUNT = 478;
+    constexpr int EXPECTED_LEN = LANDMARK_COUNT * 3;
+
+    if (!pts) {
+        LOGE("nativeSetLandmarks: pts is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    // RAII로 float 배열 접근 (iris_set_landmarks가 deep-copy → JNI_ABORT).
+    ScopedFloatArray arr(env, pts);
+    if (!arr.valid()) {
+        LOGE("nativeSetLandmarks: failed to get float array");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // 바인딩 레벨 길이 이중 가드 (ADR §6.1 — C 경계 478 가드와 별개의 방어선).
+    if (arr.size() < EXPECTED_LEN) {
+        LOGE("nativeSetLandmarks: array length %d < expected %d",
+             static_cast<int>(arr.size()), EXPECTED_LEN);
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    uint32_t generation = 0;
+    IrisSdkError error = iris_set_landmarks(
+        arr.data(),
+        LANDMARK_COUNT,
+        static_cast<int32_t>(frameWidth),
+        static_cast<int32_t>(frameHeight),
+        static_cast<int64_t>(timestampUs),
+        &generation);
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("nativeSetLandmarks: rejected %d (%s)", error, iris_sdk_error_to_string(error));
+    }
+    return static_cast<jint>(error);
+}
+
+/**
+ * Java: native long nativeGetLandmarkGeneration();
+ * 현재 주입 세대 번호. uint32_t를 unsigned로 안전하게 담기 위해 long 반환.
+ * @return 세대 번호 (0 = 미주입).
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetLandmarkGeneration(
+    JNIEnv* /* env */,
+    jclass /* clazz */)
+{
+    // uint32_t → jlong: 상위 32비트 0 보장(부호 확장 방지).
+    return static_cast<jlong>(static_cast<uint64_t>(iris_get_landmark_generation()));
+}
+
+/**
+ * Java: native int nativeGetInjectedResult(IrisResult out);
+ * 주입 랜드마크 파생 IrisResult 조회. 미주입 시 IRIS_SDK_NO_FACE (out 미변경).
+ * @return IrisSdkError 코드.
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetInjectedResult(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jobject resultObj)
+{
+    if (!resultObj) {
+        LOGE("nativeGetInjectedResult: resultObj is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    IrisResult nativeResult = {};
+    IrisSdkError error = iris_get_injected_result(&nativeResult);
+    if (error != IRIS_SDK_OK) {
+        // 미주입(IRIS_SDK_NO_FACE) 등 — out 미변경, 에러 코드만 반환.
+        return static_cast<jint>(error);
+    }
+
+    if (!copyResultToJava(env, nativeResult, resultObj)) {
+        LOGE("nativeGetInjectedResult: failed to copy result to Java object");
+        return static_cast<jint>(IRIS_SDK_UNKNOWN);
+    }
+
+    return static_cast<jint>(IRIS_SDK_OK);
+}
+
 }  // extern "C"
