@@ -213,12 +213,18 @@ class CameraGLView @JvmOverloads constructor(
 
     /**
      * 홍채 검출 결과 설정 (렌즈 오버레이용)
+     *
+     * 주의: 호출자는 이후 변경하지 않을 인스턴스(프레임별 새 복사본)를 넘겨야 한다 —
+     * 공유 가변 인스턴스 재사용은 GL 스레드 torn read를 유발한다 (감사 finding).
      */
     fun setIrisResult(result: IrisResult?) {
         queueEvent {
             glRenderer.setIrisResult(result)
         }
     }
+
+    /** SDK 렌즈 렌더 실패 사유 (null = 정상) — HUD 표시용, 임의 스레드에서 읽기 가능. */
+    fun getSdkLensFailure(): String? = glRenderer.sdkLensFailure
 
     /**
      * 카메라 회전 설정 (0, 90, 180, 270)
