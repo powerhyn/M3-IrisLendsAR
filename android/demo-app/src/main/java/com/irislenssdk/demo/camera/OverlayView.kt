@@ -132,6 +132,10 @@ class OverlayView @JvmOverloads constructor(
     // 디버그 모드
     var debugMode: Boolean = false
 
+    // 이번 setIrisResult 호출의 실제 검출 여부 — debugMode 시각화는 게이트·홀드 없이 이 사실만 따른다
+    // (감사 finding: 자체 confidence 게이트·2초 홀드가 GL 출력과 다른 좌표를 그리는 독립 정책)
+    private var lastResultHadDetection: Boolean = false
+
     /**
      * 화면 매핑 정책.
      * - FIT: 이미지를 뷰 안에 맞춤 (레터박스 가능). CPU 모드에서 PreviewView FILL_CENTER와 사용.
@@ -333,6 +337,10 @@ class OverlayView @JvmOverloads constructor(
 
         val currentTime = System.currentTimeMillis()
 
+        // debugMode 시각화용 — 홀드 없는 즉답 사실 기록
+        lastResultHadDetection = result?.detected == true &&
+            (result.leftDetected || result.rightDetected)
+
         // One Euro Filter를 사용한 스무딩
         result?.let {
             // 깜빡임 방지: 홍채가 검출되면 타임아웃 리셋 (confidence와 무관)
@@ -363,7 +371,8 @@ class OverlayView @JvmOverloads constructor(
                 // 좌표 업데이트는 충분한 confidence가 있을 때만
                 // (낮은 confidence에서는 좌표가 부정확할 수 있음)
                 // 단, 첫 검출(radius=0)에서는 confidence 무관하게 업데이트 (렌즈 표시 위해)
-                val hasGoodConfidence = it.confidence >= MIN_RENDER_CONFIDENCE
+                // debugMode: confidence 게이트 우회 — GL에 전달되는 것과 동일한 raw 좌표를 그대로 반영
+                val hasGoodConfidence = debugMode || it.confidence >= MIN_RENDER_CONFIDENCE
 
                 // 왼쪽 눈 (SDK 코어 stabilization이 FrameAnalyzer에서 이미 적용됨)
                 if (it.leftDetected) {
@@ -482,9 +491,15 @@ class OverlayView @JvmOverloads constructor(
             (filteredLeftRadius > 0 || filteredRightRadius > 0) &&
             timeSinceLastValid < LENS_PERSISTENCE_TIMEOUT_MS
 
-        // Mesh/Debug 렌더링 조건 (기존 로직 유지)
-        val shouldRenderMeshAndDebug = hasValidDetection ||
-            (timeSinceLastValid < DETECTION_TIMEOUT_MS && (hasLeftEverDetected || hasRightEverDetected))
+        // Mesh/Debug 렌더링 조건
+        // debugMode: confidence 게이트·타임아웃 홀드 우회 — 이번 프레임 검출 사실만 표시
+        // (검증 도구가 동결/홀드된 좌표를 현재 상태처럼 그리지 않게 — 감사 finding)
+        val shouldRenderMeshAndDebug = if (debugMode) {
+            lastResultHadDetection
+        } else {
+            hasValidDetection ||
+                (timeSinceLastValid < DETECTION_TIMEOUT_MS && (hasLeftEverDetected || hasRightEverDetected))
+        }
 
         // 렌즈도 Mesh도 렌더링할 것이 없으면 리턴
         if (!shouldRenderLens && !shouldRenderMeshAndDebug) return

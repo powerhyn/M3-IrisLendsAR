@@ -44,7 +44,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         private const val TAG = "CameraGLRenderer"
 
         // FaceMesh 비유효 시 이전 눈꺼풀 클리핑 경계를 유지할 프레임 수
-        private const val EYELID_HOLD_FRAMES = 5
 
         // One Euro Filter 파라미터 (타원/눈꺼풀 파생 값 전용 — SDK 코어가 커버하지 않는 Kotlin 계산 값)
         private const val GL_FILTER_MIN_CUTOFF = 4.0f
@@ -66,12 +65,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         private val RIGHT_LOWER_EYELID_INDICES = intArrayOf(374, 373, 380)
 
         // 16점 눈 윤곽 랜드마크 (P4-W2-02: 비대칭 타원 Eye Mask)
-        private val LEFT_EYE_CONTOUR_INDICES = intArrayOf(33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7)
-        private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249)
-        private const val LEFT_INNER_CORNER = 33     // 좌안 내안각 (코 쪽)
-        private const val LEFT_OUTER_CORNER = 133    // 좌안 외안각 (귀 쪽)
-        private const val RIGHT_INNER_CORNER = 263   // 우안 내안각 (코 쪽)
-        private const val RIGHT_OUTER_CORNER = 362   // 우안 외안각 (귀 쪽)
 
         // 풀스크린 쿼드 좌표 (NDC + 텍스처 좌표)
         // SurfaceTexture.getTransformMatrix()가 필요한 변환을 포함하므로
@@ -150,294 +143,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             }
         """
 
-        // 렌즈 오버레이 프래그먼트 셰이더
-        private const val LENS_OVERLAY_FRAGMENT_SHADER = """
-            #version 310 es
-            precision highp float;
-
-            uniform sampler2D uCameraTexture;
-            uniform sampler2D uLensTexture;
-
-            // 왼쪽 눈 파라미터
-            uniform vec2 uLeftIrisCenter;   // 정규화된 좌표 (0~1)
-            uniform float uLeftIrisRadius;  // 정규화된 반경
-
-            // 오른쪽 눈 파라미터
-            uniform vec2 uRightIrisCenter;  // 정규화된 좌표 (0~1)
-            uniform float uRightIrisRadius; // 정규화된 반경
-
-            // 렌즈 설정
-            uniform float uOpacity;         // 투명도 (0~1)
-            uniform float uLensScale;       // 크기 배율 (uScale은 vertex shader에서 사용됨)
-            uniform float uEdgeFeather;     // 가장자리 페더링
-            uniform int uBlendMode;         // 블렌드 모드 (0-7: Normal/Multiply/Screen/Overlay/LumTint/LumTintLinear/SoftLight/ColorReplace)
-            uniform int uApplyLeft;         // 왼쪽 눈 적용 여부
-            uniform int uApplyRight;        // 오른쪽 눈 적용 여부
-            uniform float uFrameAspect;     // 프레임 비율 (width / height)
-
-            // 눈꺼풀 클리핑용 (정규화 좌표 0~1)
-            uniform float uLeftEyeTop;      // 왼쪽 눈 상단 Y
-            uniform float uLeftEyeBottom;   // 왼쪽 눈 하단 Y
-            uniform float uRightEyeTop;     // 오른쪽 눈 상단 Y
-            uniform float uRightEyeBottom;  // 오른쪽 눈 하단 Y
-            uniform float uEyelidFeather;   // 눈꺼풀 경계 페더링 (동적, 픽셀 기반)
-            uniform float uAvgIrisLum;      // 홍채 평균 밝기 (CPU EMA, 0.0~1.0)
-            uniform float uDetH;            // 검출 프레임 높이 (픽셀, shadow depth 계산용)
-
-            // Feature flags (P4-W2-01)
-            uniform int uScleraProtect;     // Sclera-Aware Alpha (0=OFF, 1=ON)
-            uniform int uContactShadow;     // Contact Shadow (0=OFF, 1=ON)
-            uniform float uShadowIntensity; // Shadow 강도 (0.0~0.25)
-            uniform float uMaxDetail;       // Color Replace 홍채 밝기 보정 상한 (0.9~1.2)
-
-            // P4-W2-02: 비대칭 타원 Eye Mask
-            uniform int uUseEllipseMask;        // 0=Y-slab, 1=ellipse
-            uniform vec2 uLeftEyeEllipseCenter; // 좌안 타원 중심
-            uniform vec3 uLeftEyeEllipseRadii;  // (rxInner, rxOuter, ry)
-            uniform float uLeftEyeEllipseRot;   // 좌안 회전 (rad)
-            uniform vec2 uRightEyeEllipseCenter;
-            uniform vec3 uRightEyeEllipseRadii;
-            uniform float uRightEyeEllipseRot;
-
-            in vec2 vTexCoord;
-            out vec4 fragColor;
-
-            // 블렌드 함수들
-            vec3 blendNormal(vec3 base, vec3 blend, float opacity) {
-                return mix(base, blend, opacity);
-            }
-
-            vec3 blendMultiply(vec3 base, vec3 blend, float opacity) {
-                return mix(base, base * blend, opacity);
-            }
-
-            vec3 blendScreen(vec3 base, vec3 blend, float opacity) {
-                return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
-            }
-
-            vec3 blendOverlay(vec3 base, vec3 blend, float opacity) {
-                vec3 result;
-                for (int i = 0; i < 3; i++) {
-                    if (base[i] < 0.5) {
-                        result[i] = 2.0 * base[i] * blend[i];
-                    } else {
-                        result[i] = 1.0 - 2.0 * (1.0 - base[i]) * (1.0 - blend[i]);
-                    }
-                }
-                return mix(base, result, opacity);
-            }
-
-            // Fast linearization helpers (pow(2.2) 대비 ~3-5x 빠름)
-            vec3 toLinearFast(vec3 srgb) { return srgb * srgb; }
-            vec3 toSRGBFast(vec3 linear) { return sqrt(max(linear, vec3(0.0))); }
-
-            // Mode 4: Luminance-preserving color tint (sRGB 근사)
-            vec3 blendLuminanceTint(vec3 base, vec3 blend, float opacity) {
-                float lum = dot(base, vec3(0.299, 0.587, 0.114));
-                float scale = clamp(0.5 / max(0.1, uAvgIrisLum), 0.8, 2.5);
-                vec3 tinted = blend * lum * scale;
-                return mix(base, tinted, opacity);
-            }
-
-            // Mode 5: Luminance-preserving color tint (fast linear space + specular 복원)
-            vec3 blendLuminanceTintLinear(vec3 base, vec3 blend, float opacity) {
-                vec3 baseL = toLinearFast(base);
-                float lum = dot(baseL, vec3(0.2126, 0.7152, 0.0722));
-                float avgLumLinear = uAvgIrisLum * uAvgIrisLum;  // ISS-005 EXP-C: sRGB→linear 근사
-                float scale = clamp(0.5 / max(0.01, avgLumLinear), 0.8, 5.0);
-                vec3 tinted = toLinearFast(blend) * lum * scale;
-                vec3 result = mix(baseL, tinted, opacity);
-                float realSpec = smoothstep(0.7, 0.95, lum);
-                result = mix(result, baseL, realSpec);
-                return toSRGBFast(result);
-            }
-
-            // Mode 6: Photoshop Soft Light
-            vec3 blendSoftLight(vec3 base, vec3 blend, float opacity) {
-                vec3 lo = base - (1.0 - 2.0 * blend) * base * (1.0 - base);
-                vec3 hi = base + (2.0 * blend - 1.0) * (sqrt(base) - base);
-                vec3 result = mix(lo, hi, step(vec3(0.5), blend));
-                return mix(base, result, opacity);
-            }
-
-            // Mode 7: Color Replace (홍채=빛반사 증폭 허용, 흰자위=최대 원본)
-            vec3 blendColorReplace(vec3 base, vec3 blend, float opacity, float maxDetail) {
-                float lum = dot(base, vec3(0.299, 0.587, 0.114));
-                float detail = lum / max(0.01, uAvgIrisLum);
-                detail = clamp(detail, 0.2, maxDetail);
-                vec3 colored = blend * detail;
-                return mix(base, colored, opacity);
-            }
-
-            // 비대칭 타원 Eye Mask (P4-W2-02)
-            // 내안각(d.x<0) vs 외안각(d.x>=0)에 다른 반경 적용
-            float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
-                vec2 d = uv - center;
-                // 회전 적용 (inner→outer 축 정렬)
-                float cosR = cos(rotation);
-                float sinR = sin(rotation);
-                d = vec2(d.x * cosR + d.y * sinR, -d.x * sinR + d.y * cosR);
-                // 비대칭 반경: 내안각(d.x<0) = radii.x, 외안각(d.x>=0) = radii.y
-                float rx = (d.x < 0.0) ? radii.x : radii.y;
-                float ry = radii.z;
-                float ellipseDist = length(vec2(d.x / max(rx, 1e-5), d.y / max(ry, 1e-5)));
-                return smoothstep(1.0, 1.0 - feather, ellipseDist);
-            }
-
-            // Sclera-Aware Alpha (P4-W2-01): 흰자위 영역에서 렌즈 alpha 감쇠
-            float calcScleraFactor(vec3 cameraColor) {
-                float brightness = dot(cameraColor, vec3(0.299, 0.587, 0.114));
-                float maxC = max(cameraColor.r, max(cameraColor.g, cameraColor.b));
-                float minC = min(cameraColor.r, min(cameraColor.g, cameraColor.b));
-                float saturation = (maxC - minC) / max(maxC, 1e-4);
-
-                // 흰자위/밝은 피부: 밝고(>0.3) 채도 낮음(<0.3) → 렌즈 alpha 감쇠
-                float brightFactor = smoothstep(0.3, 0.5, brightness);
-                float lowSatFactor = 1.0 - smoothstep(0.1, 0.3, saturation);
-                return brightFactor * lowSatFactor;
-            }
-
-            // Contact Shadow (P4-W2-01): 상안검 경계 아래 부드러운 그림자
-            float calcContactShadow(float fragY, float minY, float eyelidFeather, float eyeOpening) {
-                float shadowDepthPx = 4.0;
-                float shadowDepth = shadowDepthPx / max(uDetH, 1.0);
-                float shadowIntensity = clamp(uShadowIntensity, 0.0, 0.25);
-
-                // shadow는 mask 전이 끝점 이후에서 시작 (이중 감쇠 방지)
-                float shadowZone = smoothstep(
-                    minY + eyelidFeather,
-                    minY + eyelidFeather + shadowDepth,
-                    fragY
-                );
-                float shadowFactor = (1.0 - shadowZone) * shadowIntensity;
-
-                // 눈이 닫히면 shadow 자동 비활성화
-                float shadowEnable = smoothstep(0.015, 0.025, eyeOpening);
-                shadowFactor *= shadowEnable;
-
-                // mask alpha와 곱하여 전이 구간에서 중복 방지
-                float maskAlpha = smoothstep(minY, minY + eyelidFeather, fragY);
-                return shadowFactor * maskAlpha;
-            }
-
-            // 렌즈 합성 함수 (눈꺼풀 클리핑 + Sclera/Shadow 포함)
-            vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
-                           float eyeTop, float eyeBottom,
-                           vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot) {
-                if (irisRadius <= 0.0) return camera;
-
-                // 원형 유지를 위한 좌표 보정 (x를 aspectRatio로 스케일)
-                vec2 adjustedCoord = vec2(vTexCoord.x * aspectRatio, vTexCoord.y);
-                vec2 adjustedCenter = vec2(irisCenter.x * aspectRatio, irisCenter.y);
-
-                // 홍채 중심으로부터의 거리 계산 (스케일 적용)
-                float scaledRadius = irisRadius * uLensScale;
-                float dist = distance(adjustedCoord, adjustedCenter) / scaledRadius;
-
-                if (dist >= 1.0) return camera;
-
-                // 렌즈 텍스처 좌표 계산 (홍채 영역을 렌즈 전체에 매핑)
-                vec2 lensCoord = (adjustedCoord - adjustedCenter) / scaledRadius * 0.5 + 0.5;
-
-                // 렌즈 텍스처 샘플링 + unpremultiply (ISS-005 EXP-A)
-                // Android BitmapFactory는 premultiplied alpha로 디코딩하므로
-                // 셰이더에서 straight alpha를 복원하여 이중 곱셈을 방지
-                vec4 lens = texture(uLensTexture, lensCoord);
-                if (lens.a > 0.001) lens.rgb /= lens.a;
-
-                // 가장자리 페더링 (부드러운 경계)
-                float featherStart = 1.0 - uEdgeFeather;
-                float edgeAlpha = smoothstep(1.0, featherStart, dist);
-
-                // 눈꺼풀 클리핑
-                float eyelidFeather = uEyelidFeather;
-                float minY = min(eyeTop, eyeBottom);
-                float maxY = max(eyeTop, eyeBottom);
-                float eyelidMask;
-
-                if (uUseEllipseMask == 1 && ellipseRadii.z > 0.0) {
-                    // P4-W2-02: 비대칭 타원 마스크
-                    eyelidMask = asymmetricEllipseMask(vTexCoord, ellipseCenter, ellipseRadii, ellipseRot, eyelidFeather * 3.0);
-                } else {
-                    // 기존 Y-slab 마스킹
-                    float topClip = smoothstep(minY - eyelidFeather, minY + eyelidFeather, vTexCoord.y);
-                    float bottomClip = 1.0 - smoothstep(maxY - eyelidFeather, maxY + eyelidFeather, vTexCoord.y);
-                    eyelidMask = topClip * bottomClip;
-                }
-
-                // 최종 알파 계산 (눈꺼풀 마스크 적용)
-                float finalAlpha = lens.a * uOpacity * edgeAlpha * eyelidMask;
-
-                // Sclera Protection (P4-W2-01): 기하학적 + 색상 기반
-                // irisEdgeDist: 실제 홍채 경계 기준 (1.0 = 경계, >1.0 = 흰자위)
-                float irisEdgeDist = dist * uLensScale;
-                if (uScleraProtect == 1) {
-                    // 기하학적 감쇄: 홍채 경계(0.75)부터 점진적으로 렌즈 투명도 증가
-                    float geomFactor = smoothstep(0.75, 1.0, irisEdgeDist);
-                    float colorFactor = calcScleraFactor(camera.rgb);
-                    float scleraFade = 1.0 - geomFactor * (0.5 + 0.5 * colorFactor);
-                    finalAlpha *= scleraFade;
-                }
-
-                // Color Replace용: 홍채 내부 증폭 허용(uMaxDetail), 경계 밖 흰자위 증폭 차단(1.0)
-                float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
-
-                // 블렌드 모드에 따른 합성
-                vec3 blended;
-                if (uBlendMode == 0) {
-                    blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
-                } else if (uBlendMode == 1) {
-                    blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
-                } else if (uBlendMode == 2) {
-                    blended = blendScreen(camera.rgb, lens.rgb, finalAlpha);
-                } else if (uBlendMode == 3) {
-                    blended = blendOverlay(camera.rgb, lens.rgb, finalAlpha);
-                } else if (uBlendMode == 4) {
-                    blended = blendLuminanceTint(camera.rgb, lens.rgb, finalAlpha);
-                } else if (uBlendMode == 5) {
-                    blended = blendLuminanceTintLinear(camera.rgb, lens.rgb, finalAlpha);
-                } else if (uBlendMode == 6) {
-                    blended = blendSoftLight(camera.rgb, lens.rgb, finalAlpha);
-                } else if (uBlendMode == 7) {
-                    blended = blendColorReplace(camera.rgb, lens.rgb, finalAlpha, maxDetail);
-                } else {
-                    blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
-                }
-
-                // Contact Shadow (P4-W2-01): 상안검 아래 그림자
-                if (uContactShadow == 1) {
-                    float eyeOpening = abs(maxY - minY);
-                    float shadow = calcContactShadow(vTexCoord.y, minY, eyelidFeather, eyeOpening);
-                    blended *= (1.0 - shadow);
-                }
-
-                return vec4(blended, camera.a);
-            }
-
-            void main() {
-                vec4 camera = texture(uCameraTexture, vTexCoord);
-                vec4 result = camera;
-
-                // 화면 비율 보정 (프레임 width/height)
-                float aspectRatio = uFrameAspect;
-
-                // 왼쪽 눈 렌즈 적용
-                if (uApplyLeft == 1 && uLeftIrisRadius > 0.0) {
-                    result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio,
-                                       uLeftEyeTop, uLeftEyeBottom,
-                                       uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot);
-                }
-
-                // 오른쪽 눈 렌즈 적용
-                if (uApplyRight == 1 && uRightIrisRadius > 0.0) {
-                    result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio,
-                                       uRightEyeTop, uRightEyeBottom,
-                                       uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot);
-                }
-
-                fragColor = result;
-            }
-        """
     }
 
     // SurfaceTexture (카메라 출력)
@@ -448,7 +153,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     // 셰이더 프로그램
     private var oesToRgbProgram: Int = 0
     private var passthroughProgram: Int = 0
-    private var lensProgram: Int = 0
 
     // Uniform locations (OES → RGBA)
     private var uSTMatrixLocation: Int = -1
@@ -458,40 +162,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uOESTextureLocation: Int = -1
     private var uTextureLocation: Int = -1
 
-    // Uniform locations (렌즈 셰이더)
-    private var uLensCameraTextureLocation: Int = -1
-    private var uLensTextureLocation: Int = -1
-    private var uLeftIrisCenterLocation: Int = -1
-    private var uLeftIrisRadiusLocation: Int = -1
-    private var uRightIrisCenterLocation: Int = -1
-    private var uRightIrisRadiusLocation: Int = -1
-    private var uLensOpacityLocation: Int = -1
-    private var uLensScaleLocation: Int = -1
-    private var uLensEdgeFeatherLocation: Int = -1
-    private var uLensBlendModeLocation: Int = -1
-    private var uApplyLeftLocation: Int = -1
-    private var uApplyRightLocation: Int = -1
-    private var uFrameAspectLocation: Int = -1
-    private var uLeftEyeTopLocation: Int = -1
-    private var uLeftEyeBottomLocation: Int = -1
-    private var uRightEyeTopLocation: Int = -1
-    private var uRightEyeBottomLocation: Int = -1
-    private var uEyelidFeatherLocation: Int = -1
-    private var uAvgIrisLumLocation: Int = -1
-    private var uDetHLocation: Int = -1
-    private var uScleraProtectLocation: Int = -1
-    private var uContactShadowLocation: Int = -1
-    private var uShadowIntensityLocation: Int = -1
-    private var uMaxDetailLocation: Int = -1
-
-    // P4-W2-02: 비대칭 타원 Eye Mask uniform locations
-    private var uUseEllipseMaskLocation: Int = -1
-    private var uLeftEyeEllipseCenterLocation: Int = -1
-    private var uLeftEyeEllipseRadiiLocation: Int = -1
-    private var uLeftEyeEllipseRotLocation: Int = -1
-    private var uRightEyeEllipseCenterLocation: Int = -1
-    private var uRightEyeEllipseRadiiLocation: Int = -1
-    private var uRightEyeEllipseRotLocation: Int = -1
 
     // 풀스크린 쿼드 VAO/VBO
     private var quadVao: Int = 0
@@ -539,12 +209,21 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     // 홍채 검출 결과 (렌즈 오버레이용)
     private var irisResult: IrisResult? = null
 
+    // SDK 렌즈 렌더 실패 상태 (KT 폴백 제거 — 실패는 무음 폴백 대신 명시 신호)
+    // null = 정상. 비-null = 마지막 실패 사유 (HUD 표시용, UI 스레드에서 읽음)
+    @Volatile var sdkLensFailure: String? = null
+        private set
+    private var sdkLensFailureLogFrames: Int = 0
+
+    // 검출 결과 수신 시각 (렌더 시점 랜드마크 age 정량화용 — 프레임-랜드마크 시차 로깅)
+    @Volatile private var resultReceivedAtMs: Long = 0L
+    private var landmarkAgeLogCounter: Int = 0
+
     // 눈꺼풀 클리핑 temporal hold (FaceMesh 비유효 시 이전 값 유지)
     private var cachedLeftEyeTop: Float = 0.0f
     private var cachedLeftEyeBottom: Float = 1.0f
     private var cachedRightEyeTop: Float = 0.0f
     private var cachedRightEyeBottom: Float = 1.0f
-    private var eyelidCacheValidFrames: Int = 0  // 캐시 유효 잔여 프레임 수
 
     // === Adaptive Iris Luminance: EMA (P4-W1-03) ===
     private var avgIrisLum = 0.35f           // EMA 평균 (어두운 홍채 기본값, 한국인 평균 근사)
@@ -583,13 +262,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private val glRightEllipseRotFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA, GL_FILTER_D_CUTOFF)
 
     // P4-W2-02: 타원 파라미터 캐시 (temporal hold, eyelid 캐시와 동일 패턴)
-    private var cachedLeftEllipseCx = 0f; private var cachedLeftEllipseCy = 0f
-    private var cachedLeftEllipseRxI = 0f; private var cachedLeftEllipseRxO = 0f
-    private var cachedLeftEllipseRy = 0f; private var cachedLeftEllipseRot = 0f
-    private var cachedRightEllipseCx = 0f; private var cachedRightEllipseCy = 0f
-    private var cachedRightEllipseRxI = 0f; private var cachedRightEllipseRxO = 0f
-    private var cachedRightEllipseRy = 0f; private var cachedRightEllipseRot = 0f
-    private var ellipseCacheValidFrames: Int = 0
 
     // GPU FPS 측정
     private var gpuFrameCount = 0
@@ -631,7 +303,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 셰이더 프로그램 생성
         oesToRgbProgram = createProgram(VERTEX_SHADER, OES_TO_2D_FRAGMENT_SHADER)
         passthroughProgram = createProgram(VERTEX_SHADER, PASSTHROUGH_FRAGMENT_SHADER)
-        lensProgram = createProgram(VERTEX_SHADER, LENS_OVERLAY_FRAGMENT_SHADER)
 
         // Uniform locations 캐시 (OES → RGBA)
         uSTMatrixLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uSTMatrix")
@@ -640,39 +311,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uScaleLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uScale")
         uOESTextureLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uOESTexture")
         uTextureLocation = GLES31.glGetUniformLocation(passthroughProgram, "uTexture")
-
-        // Uniform locations 캐시 (렌즈 셰이더)
-        uLensCameraTextureLocation = GLES31.glGetUniformLocation(lensProgram, "uCameraTexture")
-        uLensTextureLocation = GLES31.glGetUniformLocation(lensProgram, "uLensTexture")
-        uLeftIrisCenterLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftIrisCenter")
-        uLeftIrisRadiusLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftIrisRadius")
-        uRightIrisCenterLocation = GLES31.glGetUniformLocation(lensProgram, "uRightIrisCenter")
-        uRightIrisRadiusLocation = GLES31.glGetUniformLocation(lensProgram, "uRightIrisRadius")
-        uLensOpacityLocation = GLES31.glGetUniformLocation(lensProgram, "uOpacity")
-        uLensScaleLocation = GLES31.glGetUniformLocation(lensProgram, "uLensScale")
-        uLensEdgeFeatherLocation = GLES31.glGetUniformLocation(lensProgram, "uEdgeFeather")
-        uLensBlendModeLocation = GLES31.glGetUniformLocation(lensProgram, "uBlendMode")
-        uApplyLeftLocation = GLES31.glGetUniformLocation(lensProgram, "uApplyLeft")
-        uApplyRightLocation = GLES31.glGetUniformLocation(lensProgram, "uApplyRight")
-        uFrameAspectLocation = GLES31.glGetUniformLocation(lensProgram, "uFrameAspect")
-        uLeftEyeTopLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeTop")
-        uLeftEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeBottom")
-        uRightEyeTopLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeTop")
-        uRightEyeBottomLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeBottom")
-        uEyelidFeatherLocation = GLES31.glGetUniformLocation(lensProgram, "uEyelidFeather")
-        uAvgIrisLumLocation = GLES31.glGetUniformLocation(lensProgram, "uAvgIrisLum")
-        uDetHLocation = GLES31.glGetUniformLocation(lensProgram, "uDetH")
-        uScleraProtectLocation = GLES31.glGetUniformLocation(lensProgram, "uScleraProtect")
-        uContactShadowLocation = GLES31.glGetUniformLocation(lensProgram, "uContactShadow")
-        uShadowIntensityLocation = GLES31.glGetUniformLocation(lensProgram, "uShadowIntensity")
-        uMaxDetailLocation = GLES31.glGetUniformLocation(lensProgram, "uMaxDetail")
-        uUseEllipseMaskLocation = GLES31.glGetUniformLocation(lensProgram, "uUseEllipseMask")
-        uLeftEyeEllipseCenterLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeEllipseCenter")
-        uLeftEyeEllipseRadiiLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeEllipseRadii")
-        uLeftEyeEllipseRotLocation = GLES31.glGetUniformLocation(lensProgram, "uLeftEyeEllipseRot")
-        uRightEyeEllipseCenterLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeEllipseCenter")
-        uRightEyeEllipseRadiiLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeEllipseRadii")
-        uRightEyeEllipseRotLocation = GLES31.glGetUniformLocation(lensProgram, "uRightEyeEllipseRot")
 
         // 풀스크린 쿼드 설정
         setupFullscreenQuad()
@@ -747,7 +385,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 0f, 0f, 0f, 0f, 0f, 0f,
                 0f, 0f, 0f, 0f, 0f, 0f,
                 0f, 1f, 0f, 1f,
-                eyelidCacheValidFrames > 0, eyelidCacheValidFrames, 0L
+                false, 0, 0L  // KT 폴백 셰이더 제거로 eyelid hold 캐시 없음
             )
         }
 
@@ -764,6 +402,16 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // 5단계: 화면에 렌더링
         renderToScreen(outputTexture, beautyApplied)
+
+        // 프레임-랜드마크 시차 정량화 (감사: Preview/ImageAnalysis 별도 스트림 — 구조 개선은 ④ 주입 설계에서)
+        if (++landmarkAgeLogCounter >= 120) {
+            landmarkAgeLogCounter = 0
+            val receivedAt = resultReceivedAtMs
+            if (receivedAt > 0L) {
+                val ageMs = android.os.SystemClock.elapsedRealtime() - receivedAt
+                Log.i(TAG, "Landmark age at render: ${ageMs}ms (검출 결과 수신→렌더 시차)")
+            }
+        }
 
         // GPU FPS 측정
         updateGpuFps()
@@ -873,305 +521,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         Log.d(TAG, "Lens texture uploaded: ${bitmap.width}x${bitmap.height}, id=$lensImageTextureId")
     }
 
-    /**
-     * 렌즈 오버레이 렌더링
-     *
-     * @param inputTexture 입력 텍스처 (카메라/뷰티 필터 출력)
-     * @return 출력 텍스처 ID
-     */
-    private fun renderLensOverlay(inputTexture: Int): Int {
-        val renderStartNs = if (stabilityLogEnabled) System.nanoTime() else 0L
-        val result = irisResult ?: return inputTexture
-
-        // 렌즈 FBO가 없으면 생성
-        if (lensFboId == 0 || lensOutputTextureId == 0) {
-            createLensFbo()
-            // FBO 생성 실패 시 입력 텍스처 반환
-            if (lensFboId == 0 || lensOutputTextureId == 0) {
-                Log.w(TAG, "Lens FBO creation failed, passing through")
-                return inputTexture
-            }
-        }
-
-        // FBO 바인딩
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, lensFboId)
-
-        val fboWidth = if (frameWidth > 0) frameWidth else viewWidth
-        val fboHeight = if (frameHeight > 0) frameHeight else viewHeight
-        GLES31.glViewport(0, 0, fboWidth, fboHeight)
-
-        // 렌즈 셰이더 사용
-        GLES31.glUseProgram(lensProgram)
-
-        // 변환 행렬 설정 (단위 행렬 - 이미 변환 완료된 텍스처)
-        val identityMatrix = FloatArray(16)
-        Matrix.setIdentityM(identityMatrix, 0)
-        val stLocation = GLES31.glGetUniformLocation(lensProgram, "uSTMatrix")
-        val mirrorLocation = GLES31.glGetUniformLocation(lensProgram, "uMirror")
-        val flipYLocation = GLES31.glGetUniformLocation(lensProgram, "uFlipY")
-        val scaleLocation = GLES31.glGetUniformLocation(lensProgram, "uScale")
-        GLES31.glUniformMatrix4fv(stLocation, 1, false, identityMatrix, 0)
-        GLES31.glUniform1i(mirrorLocation, 0)
-        GLES31.glUniform1i(flipYLocation, 0)
-        GLES31.glUniform2f(scaleLocation, 1.0f, 1.0f)
-
-        // 카메라 텍스처 바인딩 (unit 0)
-        GLES31.glActiveTexture(GLES31.GL_TEXTURE0)
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, inputTexture)
-        GLES31.glUniform1i(uLensCameraTextureLocation, 0)
-
-        // 렌즈 텍스처 바인딩 (unit 1)
-        GLES31.glActiveTexture(GLES31.GL_TEXTURE1)
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, lensImageTextureId)
-        GLES31.glUniform1i(uLensTextureLocation, 1)
-
-        // 홍채 위치/크기 설정 (IrisResult는 이미 정규화된 좌표 0~1)
-        // 좌표 계약: result.frameWidth/Height가 검출기의 좌표 기준 (회전 적용 후)
-        val (detW, detH) = resolveCoordinateSpace(result)
-        val detHf = detH.toFloat()
-        // ISS-004 Fix-B: 셰이더의 adjusted 좌표계(높이 기준)에 맞춰 detH로 정규화
-        val normalizedLeftRadius = result.leftRadius / detHf
-        val normalizedRightRadius = result.rightRadius / detHf
-
-        // 좌표 변환: renderOESToRgba()에서 적용한 변환과 동일하게 적용
-        var leftX = result.leftIrisX
-        var leftY = result.leftIrisY
-        var rightX = result.rightIrisX
-        var rightY = result.rightIrisY
-
-        // Y축 뒤집기
-        leftY = 1.0f - leftY
-        rightY = 1.0f - rightY
-
-        // 미러링 (전면 카메라)
-        if (isMirror) {
-            leftX = 1.0f - leftX
-            rightX = 1.0f - rightX
-            val tempX = leftX; val tempY = leftY
-            leftX = rightX; leftY = rightY
-            rightX = tempX; rightY = tempY
-        }
-
-        // SDK 코어 TemporalStabilizer가 FrameAnalyzer에서 이미 적용됨 — 직접 사용
-        val now = System.currentTimeMillis()
-        val filteredLeftX = leftX
-        val filteredLeftY = leftY
-        val filteredLeftR = if (isMirror) normalizedRightRadius else normalizedLeftRadius
-        val filteredRightX = rightX
-        val filteredRightY = rightY
-        val filteredRightR = if (isMirror) normalizedLeftRadius else normalizedRightRadius
-
-        GLES31.glUniform2f(uLeftIrisCenterLocation, filteredLeftX, filteredLeftY)
-        GLES31.glUniform1f(uLeftIrisRadiusLocation, filteredLeftR)
-        GLES31.glUniform2f(uRightIrisCenterLocation, filteredRightX, filteredRightY)
-        GLES31.glUniform1f(uRightIrisRadiusLocation, filteredRightR)
-
-        // 렌즈 설정 전달
-        GLES31.glUniform1f(uLensOpacityLocation, lensConfig.opacity)
-        GLES31.glUniform1f(uLensScaleLocation, lensConfig.scale)
-        GLES31.glUniform1f(uLensEdgeFeatherLocation, lensConfig.edgeFeather)
-        GLES31.glUniform1i(uLensBlendModeLocation, lensConfig.blendMode)
-        GLES31.glUniform1i(uApplyLeftLocation, if (lensConfig.applyLeft) 1 else 0)
-        GLES31.glUniform1i(uApplyRightLocation, if (lensConfig.applyRight) 1 else 0)
-        GLES31.glUniform1f(uAvgIrisLumLocation, avgIrisLum)
-        GLES31.glUniform1f(uDetHLocation, detHf)
-        GLES31.glUniform1i(uScleraProtectLocation, if (scleraProtectEnabled) 1 else 0)
-        GLES31.glUniform1i(uContactShadowLocation, if (contactShadowEnabled) 1 else 0)
-        GLES31.glUniform1f(uShadowIntensityLocation, shadowIntensity)
-        GLES31.glUniform1f(uMaxDetailLocation, maxDetailValue)
-
-        // 프레임 비율 전달
-        val frameAspect = detW.toFloat() / detHf
-        GLES31.glUniform1f(uFrameAspectLocation, frameAspect)
-
-        // === 동적 eyelidFeather 계산 (픽셀 기반) ===
-        val featherPx = EYELID_FEATHER_MIN_PX.coerceAtLeast(
-            EYELID_FEATHER_MAX_PX.coerceAtMost(4.0f)
-        )
-        val eyelidFeatherNorm = featherPx / detHf
-        GLES31.glUniform1f(uEyelidFeatherLocation, eyelidFeatherNorm)
-
-        // === 눈꺼풀 클리핑: 다중 랜드마크 (SDK 코어 stabilization 적용됨) ===
-        // StabilityLogger용: 필터 후 눈꺼풀 값 보존
-        var logEyelidLt = 0.0f
-        var logEyelidLb = 1.0f
-        var logEyelidRt = 0.0f
-        var logEyelidRb = 1.0f
-        var logHoldActive = false
-        var logHoldRemaining = 0
-
-        val faceMesh = result.faceMesh
-        if (result.faceMeshValid && faceMesh != null) {
-            // 다중 랜드마크에서 median Y 추출 (노이즈 내성 향상)
-            var leftEyeTop = medianLandmarkY(faceMesh, LEFT_UPPER_EYELID_INDICES)
-            var leftEyeBottom = medianLandmarkY(faceMesh, LEFT_LOWER_EYELID_INDICES)
-            var rightEyeTop = medianLandmarkY(faceMesh, RIGHT_UPPER_EYELID_INDICES)
-            var rightEyeBottom = medianLandmarkY(faceMesh, RIGHT_LOWER_EYELID_INDICES)
-
-            // Y축 뒤집기 적용
-            leftEyeTop = 1.0f - leftEyeTop
-            leftEyeBottom = 1.0f - leftEyeBottom
-            rightEyeTop = 1.0f - rightEyeTop
-            rightEyeBottom = 1.0f - rightEyeBottom
-
-            // 미러링 시 좌/우 교환
-            if (isMirror) {
-                val tT = leftEyeTop; val tB = leftEyeBottom
-                leftEyeTop = rightEyeTop; leftEyeBottom = rightEyeBottom
-                rightEyeTop = tT; rightEyeBottom = tB
-            }
-
-            // 눈꺼풀 경계 OneEuro 스무딩 (다중 랜드마크 평균값 — Kotlin 파생)
-            val eyelidTs = System.currentTimeMillis()
-            leftEyeTop = glLeftEyeTopFilter.filter(leftEyeTop, eyelidTs)
-            leftEyeBottom = glLeftEyeBottomFilter.filter(leftEyeBottom, eyelidTs)
-            rightEyeTop = glRightEyeTopFilter.filter(rightEyeTop, eyelidTs)
-            rightEyeBottom = glRightEyeBottomFilter.filter(rightEyeBottom, eyelidTs)
-
-            // 캐시 갱신 (temporal hold용)
-            cachedLeftEyeTop = leftEyeTop
-            cachedLeftEyeBottom = leftEyeBottom
-            cachedRightEyeTop = rightEyeTop
-            cachedRightEyeBottom = rightEyeBottom
-            eyelidCacheValidFrames = EYELID_HOLD_FRAMES
-
-            GLES31.glUniform1f(uLeftEyeTopLocation, leftEyeTop)
-            GLES31.glUniform1f(uLeftEyeBottomLocation, leftEyeBottom)
-            GLES31.glUniform1f(uRightEyeTopLocation, rightEyeTop)
-            GLES31.glUniform1f(uRightEyeBottomLocation, rightEyeBottom)
-
-            logEyelidLt = leftEyeTop
-            logEyelidLb = leftEyeBottom
-            logEyelidRt = rightEyeTop
-            logEyelidRb = rightEyeBottom
-        } else if (eyelidCacheValidFrames > 0) {
-            // FaceMesh 비유효: temporal hold + 점진적 감쇠(fade)
-            eyelidCacheValidFrames--
-            // 감쇠 비율: 잔여 프레임 / 전체 → 0에 가까워질수록 클리핑 해제
-            val fadeAlpha = eyelidCacheValidFrames.toFloat() / EYELID_HOLD_FRAMES.toFloat()
-            // 캐시 값 → 전체 허용(0.0/1.0) 방향으로 lerp
-            GLES31.glUniform1f(uLeftEyeTopLocation, lerp(0.0f, cachedLeftEyeTop, fadeAlpha))
-            GLES31.glUniform1f(uLeftEyeBottomLocation, lerp(1.0f, cachedLeftEyeBottom, fadeAlpha))
-            GLES31.glUniform1f(uRightEyeTopLocation, lerp(0.0f, cachedRightEyeTop, fadeAlpha))
-            GLES31.glUniform1f(uRightEyeBottomLocation, lerp(1.0f, cachedRightEyeBottom, fadeAlpha))
-
-            logEyelidLt = lerp(0.0f, cachedLeftEyeTop, fadeAlpha)
-            logEyelidLb = lerp(1.0f, cachedLeftEyeBottom, fadeAlpha)
-            logEyelidRt = lerp(0.0f, cachedRightEyeTop, fadeAlpha)
-            logEyelidRb = lerp(1.0f, cachedRightEyeBottom, fadeAlpha)
-            logHoldActive = true
-            logHoldRemaining = eyelidCacheValidFrames
-        } else {
-            // 캐시 소진: 클리핑 비활성화 (전체 영역 허용)
-            GLES31.glUniform1f(uLeftEyeTopLocation, 0.0f)
-            GLES31.glUniform1f(uLeftEyeBottomLocation, 1.0f)
-            GLES31.glUniform1f(uRightEyeTopLocation, 0.0f)
-            GLES31.glUniform1f(uRightEyeBottomLocation, 1.0f)
-        }
-
-        // === P4-W2-02: 비대칭 타원 Eye Mask ===
-        GLES31.glUniform1i(uUseEllipseMaskLocation, if (ellipseMaskEnabled) 1 else 0)
-
-        if (ellipseMaskEnabled) {
-            val faceMeshE = result.faceMesh
-            if (result.faceMeshValid && faceMeshE != null) {
-                // CPU 측 16점 → 타원 피팅
-                var leftEllipse = fitEyeEllipse(faceMeshE, LEFT_EYE_CONTOUR_INDICES, LEFT_INNER_CORNER, LEFT_OUTER_CORNER)
-                var rightEllipse = fitEyeEllipse(faceMeshE, RIGHT_EYE_CONTOUR_INDICES, RIGHT_INNER_CORNER, RIGHT_OUTER_CORNER)
-
-                // Y-flip (FaceMesh는 top=0, GL은 top=1)
-                leftEllipse[1] = 1.0f - leftEllipse[1]   // cy
-                rightEllipse[1] = 1.0f - rightEllipse[1]
-                // rotation도 Y-flip에 의해 부호 반전
-                leftEllipse[5] = -leftEllipse[5]
-                rightEllipse[5] = -rightEllipse[5]
-
-                // 미러링 시 좌/우 교환
-                if (isMirror) {
-                    leftEllipse[0] = 1.0f - leftEllipse[0]  // cx mirror
-                    rightEllipse[0] = 1.0f - rightEllipse[0]
-                    // rotation mirror: pi - rot
-                    leftEllipse[5] = Math.PI.toFloat() - leftEllipse[5]
-                    rightEllipse[5] = Math.PI.toFloat() - rightEllipse[5]
-                    // 미러 시 내/외안각 반경 스왑
-                    val tmpRxI = leftEllipse[2]; leftEllipse[2] = leftEllipse[3]; leftEllipse[3] = tmpRxI
-                    val tmpRxI2 = rightEllipse[2]; rightEllipse[2] = rightEllipse[3]; rightEllipse[3] = tmpRxI2
-                    // 좌/우 교환
-                    val tmp = leftEllipse; leftEllipse = rightEllipse; rightEllipse = tmp
-                }
-
-                // 타원 파라미터 OneEuro 스무딩 (Kotlin 파생 값 — SDK 코어 미커버)
-                val ts = System.currentTimeMillis()
-                val fLCx = glLeftEllipseCxFilter.filter(leftEllipse[0], ts)
-                val fLCy = glLeftEllipseCyFilter.filter(leftEllipse[1], ts)
-                val fLRxI = glLeftEllipseRxIFilter.filter(leftEllipse[2], ts)
-                val fLRxO = glLeftEllipseRxOFilter.filter(leftEllipse[3], ts)
-                val fLRy = glLeftEllipseRyFilter.filter(leftEllipse[4], ts)
-                val fLRot = glLeftEllipseRotFilter.filter(leftEllipse[5], ts)
-
-                val fRCx = glRightEllipseCxFilter.filter(rightEllipse[0], ts)
-                val fRCy = glRightEllipseCyFilter.filter(rightEllipse[1], ts)
-                val fRRxI = glRightEllipseRxIFilter.filter(rightEllipse[2], ts)
-                val fRRxO = glRightEllipseRxOFilter.filter(rightEllipse[3], ts)
-                val fRRy = glRightEllipseRyFilter.filter(rightEllipse[4], ts)
-                val fRRot = glRightEllipseRotFilter.filter(rightEllipse[5], ts)
-
-                // 캐시 갱신
-                cachedLeftEllipseCx = fLCx; cachedLeftEllipseCy = fLCy
-                cachedLeftEllipseRxI = fLRxI; cachedLeftEllipseRxO = fLRxO
-                cachedLeftEllipseRy = fLRy; cachedLeftEllipseRot = fLRot
-                cachedRightEllipseCx = fRCx; cachedRightEllipseCy = fRCy
-                cachedRightEllipseRxI = fRRxI; cachedRightEllipseRxO = fRRxO
-                cachedRightEllipseRy = fRRy; cachedRightEllipseRot = fRRot
-                ellipseCacheValidFrames = EYELID_HOLD_FRAMES
-
-                // Uniform 전달
-                GLES31.glUniform2f(uLeftEyeEllipseCenterLocation, fLCx, fLCy)
-                GLES31.glUniform3f(uLeftEyeEllipseRadiiLocation, fLRxI, fLRxO, fLRy)
-                GLES31.glUniform1f(uLeftEyeEllipseRotLocation, fLRot)
-                GLES31.glUniform2f(uRightEyeEllipseCenterLocation, fRCx, fRCy)
-                GLES31.glUniform3f(uRightEyeEllipseRadiiLocation, fRRxI, fRRxO, fRRy)
-                GLES31.glUniform1f(uRightEyeEllipseRotLocation, fRRot)
-
-            } else if (ellipseCacheValidFrames > 0) {
-                // FaceMesh 비유효: temporal hold (캐시 사용)
-                ellipseCacheValidFrames--
-                GLES31.glUniform2f(uLeftEyeEllipseCenterLocation, cachedLeftEllipseCx, cachedLeftEllipseCy)
-                GLES31.glUniform3f(uLeftEyeEllipseRadiiLocation, cachedLeftEllipseRxI, cachedLeftEllipseRxO, cachedLeftEllipseRy)
-                GLES31.glUniform1f(uLeftEyeEllipseRotLocation, cachedLeftEllipseRot)
-                GLES31.glUniform2f(uRightEyeEllipseCenterLocation, cachedRightEllipseCx, cachedRightEllipseCy)
-                GLES31.glUniform3f(uRightEyeEllipseRadiiLocation, cachedRightEllipseRxI, cachedRightEllipseRxO, cachedRightEllipseRy)
-                GLES31.glUniform1f(uRightEyeEllipseRotLocation, cachedRightEllipseRot)
-            } else {
-                // 캐시 소진: 타원 비활성화 (ry=0 → 셰이더에서 Y-slab fallback)
-                GLES31.glUniform3f(uLeftEyeEllipseRadiiLocation, 0f, 0f, 0f)
-                GLES31.glUniform3f(uRightEyeEllipseRadiiLocation, 0f, 0f, 0f)
-            }
-        }
-
-        // 풀스크린 쿼드 렌더링
-        renderFullscreenQuad()
-
-        // FBO 언바인딩
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
-
-        // === StabilityLogger 콜백 (P4-W1-02) ===
-        if (stabilityLogEnabled) {
-            val renderTimeUs = (System.nanoTime() - renderStartNs) / 1000L
-            onStabilityFrame?.invoke(
-                result.detected,
-                leftX, leftY, filteredLeftR,
-                filteredLeftX, filteredLeftY, filteredLeftR,
-                rightX, rightY, filteredRightR,
-                filteredRightX, filteredRightY, filteredRightR,
-                logEyelidLt, logEyelidLb, logEyelidRt, logEyelidRb,
-                logHoldActive, logHoldRemaining,
-                renderTimeUs
-            )
-        }
-
-        return lensOutputTextureId
-    }
 
     /**
      * 렌즈 FBO 생성
@@ -1229,12 +578,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * SDK GPULensRenderer를 통한 렌즈 렌더링
      *
      * SDK C++ 코어의 GPULensRenderer를 호출하여 렌즈를 합성합니다.
-     * SDK 초기화 실패 시 기존 Kotlin 셰이더(renderLensOverlay)로 폴백합니다.
+     * 실패 시 무음 폴백 없이 렌즈 미적용 + sdkLensFailure 신호로 명시 처리합니다
+     * (감사 finding: KT fallback 셰이더 blendMode 의미 불일치 + 프레임 단위 무음 폴백 제거).
      */
     private fun applyGpuLensRenderer(inputTexture: Int): Int {
         if (!IrisLensSDK.isGpuLensInitialized()) {
-            Log.w(TAG, "GPU Lens not initialized, fallback to Kotlin shader")
-            return renderLensOverlay(inputTexture)
+            reportSdkLensFailure("GPU Lens 미초기화")
+            return inputTexture
         }
 
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
@@ -1258,11 +608,23 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 Log.i(TAG, "SDK C++ GPULensRenderer active (out=$outputTexture, ${texWidth}x${texHeight})")
                 sdkLensLoggedOnce = true
             }
+            sdkLensFailure = null
             outputTexture
         } else {
-            // SDK 렌더링 실패 시 기존 Kotlin 셰이더로 폴백
-            Log.w(TAG, "SDK lens render failed (output=$outputTexture), fallback to Kotlin shader")
-            renderLensOverlay(inputTexture)
+            // 무음 폴백 금지: 렌즈 미적용으로 명시 실패 (검증 통로가 거짓말하지 않게)
+            reportSdkLensFailure("렌즈 렌더 실패 (output=$outputTexture)")
+            inputTexture
+        }
+    }
+
+    /** SDK 렌즈 실패를 기록한다 — HUD 신호 설정 + 스로틀 로그(60프레임당 1회). */
+    private fun reportSdkLensFailure(reason: String) {
+        sdkLensFailure = reason
+        if (sdkLensFailureLogFrames <= 0) {
+            Log.e(TAG, "SDK lens render FAILED — 렌즈 미적용 (무음 폴백 제거됨): $reason")
+            sdkLensFailureLogFrames = 60
+        } else {
+            sdkLensFailureLogFrames--
         }
     }
 
@@ -1461,62 +823,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         }
     }
 
-    /**
-     * P4-W2-02: 16점 눈 윤곽 랜드마크 → 비대칭 타원 파라미터 피팅
-     *
-     * @param mesh faceMesh FloatArray (468 × 3)
-     * @param contourIndices 16점 눈 윤곽 인덱스
-     * @param innerCornerIdx 내안각 랜드마크 인덱스
-     * @param outerCornerIdx 외안각 랜드마크 인덱스
-     * @return FloatArray(6): [cx, cy, rxInner, rxOuter, ry, rotation]
-     *         좌표는 FaceMesh 원본 (0~1), Y-flip/mirror는 호출부에서 처리
-     */
-    private fun fitEyeEllipse(
-        mesh: FloatArray,
-        contourIndices: IntArray,
-        innerCornerIdx: Int,
-        outerCornerIdx: Int
-    ): FloatArray {
-        // 1. 16점의 중심 (mean)
-        var sumX = 0f; var sumY = 0f
-        for (idx in contourIndices) {
-            sumX += mesh[idx * 3]
-            sumY += mesh[idx * 3 + 1]
-        }
-        val cx = sumX / contourIndices.size
-        val cy = sumY / contourIndices.size
-
-        // 2. inner/outer corner로 회전각 결정
-        val innerX = mesh[innerCornerIdx * 3]
-        val innerY = mesh[innerCornerIdx * 3 + 1]
-        val outerX = mesh[outerCornerIdx * 3]
-        val outerY = mesh[outerCornerIdx * 3 + 1]
-        val rotation = kotlin.math.atan2(outerY - innerY, outerX - innerX)
-
-        // 3. 비대칭 반경 계산
-        //    내안각 쪽: center → innerCorner 거리 × 0.85 (caruncle 보호)
-        //    외안각 쪽: center → outerCorner 거리 × 1.0
-        val dxI = innerX - cx; val dyI = innerY - cy
-        val rxInner = kotlin.math.sqrt(dxI * dxI + dyI * dyI) * 0.85f
-
-        val dxO = outerX - cx; val dyO = outerY - cy
-        val rxOuter = kotlin.math.sqrt(dxO * dxO + dyO * dyO) * 1.0f
-
-        // 4. Y 반경: 상/하 랜드마크의 median Y 편차
-        val cosR = kotlin.math.cos(rotation); val sinR = kotlin.math.sin(rotation)
-        var maxAbsLocalY = 0f
-        for (idx in contourIndices) {
-            val dx = mesh[idx * 3] - cx
-            val dy = mesh[idx * 3 + 1] - cy
-            // 회전 좌표계에서 y성분만 추출
-            val localY = -dx * sinR + dy * cosR
-            val absY = kotlin.math.abs(localY)
-            if (absY > maxAbsLocalY) maxAbsLocalY = absY
-        }
-        val ry = maxAbsLocalY
-
-        return floatArrayOf(cx, cy, rxInner, rxOuter, ry, rotation)
-    }
 
     /**
      * 선형 보간 (a → b, t=0이면 a, t=1이면 b)
@@ -1530,6 +836,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setIrisResult(result: IrisResult?) {
         this.irisResult = result
+        this.resultReceivedAtMs = android.os.SystemClock.elapsedRealtime()
     }
 
     /**
@@ -1919,10 +1226,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glDeleteProgram(passthroughProgram)
         }
 
-        // 렌즈 관련 리소스 해제
-        if (lensProgram != 0) {
-            GLES31.glDeleteProgram(lensProgram)
-        }
         if (lensImageTextureId != 0) {
             GLES31.glDeleteTextures(1, intArrayOf(lensImageTextureId), 0)
         }

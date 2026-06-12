@@ -149,10 +149,10 @@ class GpuRenderActivity : AppCompatActivity() {
     private var currentPreset = BeautyPreset.CUSTOM
     private var isUpdatingSliders = false
 
-    // 홍채 검출 (스레드별 불변 스냅샷 사용)
+    // 홍채 검출 — Analyzer 스레드 전용 작업 인스턴스.
+    // GL/UI 전달은 프레임별 새 복사본으로 소유권을 넘긴다 (공유 가변 스냅샷 재사용은
+    // 수신 스레드가 읽는 중 analyzer가 덮어쓰는 torn read를 유발 — 감사 finding으로 제거)
     private val irisResult = IrisResult()       // Analyzer 스레드 전용 (JNI 결과 수신)
-    private val glIrisResult = IrisResult()     // GL 스레드 전달용 스냅샷
-    private val uiIrisResult = IrisResult()     // UI 스레드 전달용 스냅샷
 
     // Temporal Stabilizer (SDK 코어 스무딩)
     private var stabilizerHandle: Long = 0
@@ -995,8 +995,9 @@ class GpuRenderActivity : AppCompatActivity() {
             }
 
             // GPU 렌더러에 스무딩된 결과 전달 (매 프레임, 미검출 포함)
-            glIrisResult.copyFrom(irisResult)
-            cameraGLView.setIrisResult(glIrisResult)
+            // 프레임별 새 복사본으로 소유권 이전 — torn read 방지
+            val glSnapshot = IrisResult().also { it.copyFrom(irisResult) }
+            cameraGLView.setIrisResult(glSnapshot)
 
             // P4-W1-03: 홍채 밝기 샘플링 → EMA (Luminance Tint 블렌드용)
             val rawLum = sampleIrisLuminanceNv21(
@@ -1023,10 +1024,10 @@ class GpuRenderActivity : AppCompatActivity() {
             } else {
                 if (isRotated) imageProxy.width else imageProxy.height
             }
-            uiIrisResult.copyFrom(irisResult)
+            val uiSnapshot = IrisResult().also { it.copyFrom(irisResult) }
             runOnUiThread {
                 overlayView.setIrisResult(
-                    uiIrisResult,
+                    uiSnapshot,
                     overlayFrameW,
                     overlayFrameH,
                     lensFacing == CameraSelector.LENS_FACING_FRONT
@@ -1042,45 +1043,63 @@ class GpuRenderActivity : AppCompatActivity() {
     }
 
     /**
-     * YUV_420_888 → NV21 변환
+     * YUV_420_888 → NV21 변환 (stride-aware)
+     *
+     * 감사 finding: 기존 구현은 rowStride/패딩을 무시해 stride != width 기기에서
+     * 검출 입력이 오염됐다. FrameAnalyzer.imageProxyToNV21과 동일 의미의 stride 처리로
+     * 교체 (공용 유틸 추출은 ③-2 이월).
      */
     private fun yuvToNv21(imageProxy: androidx.camera.core.ImageProxy): ByteArray {
+        val width = imageProxy.width
+        val height = imageProxy.height
+        val ySize = width * height
+        val uvSize = width * height / 2
+        val totalSize = ySize + uvSize
+
+        // 버퍼 재사용
+        if (nv21Buffer == null || nv21Buffer!!.size != totalSize) {
+            nv21Buffer = ByteArray(totalSize)
+        }
+        val nv21 = nv21Buffer!!
+
         val yPlane = imageProxy.planes[0]
         val uPlane = imageProxy.planes[1]
         val vPlane = imageProxy.planes[2]
 
+        // Y 평면 (rowStride 패딩 처리)
         val yBuffer = yPlane.buffer
+        val yRowStride = yPlane.rowStride
+        if (yRowStride == width) {
+            yBuffer.get(nv21, 0, ySize)
+        } else {
+            var yOffset = 0
+            for (row in 0 until height) {
+                yBuffer.position(row * yRowStride)
+                yBuffer.get(nv21, yOffset, width)
+                yOffset += width
+            }
+        }
+
+        // UV 평면 (NV21: VUVU...)
         val uBuffer = uPlane.buffer
         val vBuffer = vPlane.buffer
+        val uvPixelStride = uPlane.pixelStride
+        val uvRowStride = uPlane.rowStride
 
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
-
-        val nv21Size = imageProxy.width * imageProxy.height * 3 / 2
-
-        // 버퍼 재사용
-        if (nv21Buffer == null || nv21Buffer!!.size != nv21Size) {
-            nv21Buffer = ByteArray(nv21Size)
-        }
-        val nv21 = nv21Buffer!!
-
-        // Y plane 복사
-        yBuffer.get(nv21, 0, ySize)
-
-        // UV interleaved (NV21: VUVU...)
-        val uvOffset = imageProxy.width * imageProxy.height
-        val pixelStride = uPlane.pixelStride
-
-        if (pixelStride == 2) {
-            // 이미 interleaved (대부분의 기기)
-            vBuffer.get(nv21, uvOffset, vSize.coerceAtMost(nv21Size - uvOffset))
+        if (uvPixelStride == 2 && uvRowStride == width) {
+            // 이미 인터리브(VU). V 평면 remaining은 uvSize-1이므로 마지막 U 바이트 보충
+            val vAvailable = vBuffer.remaining().coerceAtMost(uvSize - 1)
+            vBuffer.get(nv21, ySize, vAvailable)
+            nv21[totalSize - 1] = uBuffer.get(uBuffer.limit() - 1)
         } else {
-            // Planar → interleaved 변환
-            var uvIndex = uvOffset
-            for (i in 0 until uSize) {
-                if (uvIndex < nv21Size) nv21[uvIndex++] = vBuffer.get(i)
-                if (uvIndex < nv21Size) nv21[uvIndex++] = uBuffer.get(i)
+            // 패딩/평면형 — 행별 수동 인터리브
+            var uvOffset = ySize
+            for (row in 0 until height / 2) {
+                for (col in 0 until width / 2) {
+                    val uvIndex = row * uvRowStride + col * uvPixelStride
+                    nv21[uvOffset++] = vBuffer.get(uvIndex)
+                    nv21[uvOffset++] = uBuffer.get(uvIndex)
+                }
             }
         }
 
@@ -1157,7 +1176,13 @@ class GpuRenderActivity : AppCompatActivity() {
             lastFpsTime = currentTime
 
             runOnUiThread {
-                tvFps.text = "Detect FPS: $fps"
+                // SDK 렌즈 실패 시 명시 표시 (무음 폴백 제거 — 검증 통로가 거짓말하지 않게)
+                val lensFailure = cameraGLView.getSdkLensFailure()
+                tvFps.text = if (lensFailure != null) {
+                    "Detect FPS: $fps  ⚠ SDK 렌즈 실패: $lensFailure"
+                } else {
+                    "Detect FPS: $fps"
+                }
             }
         }
     }
