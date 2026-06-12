@@ -25,6 +25,7 @@
 #include <mutex>
 #include <set>
 #include <cstring>
+#include <cstddef>
 #include <algorithm>
 
 namespace {
@@ -34,6 +35,43 @@ namespace {
 // ============================================================================
 
 std::mutex g_gpu_mutex;
+
+// ③-2 B3 (감사 finding): sizeof 단일 가드는 '동일 크기를 유지하는 필드 순서 교환·타입
+// 치환'을 잡지 못한다 — 필드별 offset 일치를 컴파일 타임에 강제한다. 한쪽 정의에만
+// 필드를 추가/이동/치환하면 아래에서 즉시 실패한다 (types.h / sdk_api.h 수동 복제 규율의
+// 기계 가드. 단일 정의 공유로의 통합은 ④ 표면 정리에서).
+// GLES 가드 밖에 둔다 — macOS 데스크톱 빌드에서도 레이아웃 드리프트를 잡기 위함.
+static_assert(sizeof(::IrisLandmark) == sizeof(iris_sdk::IrisLandmark),
+              "C/C++ IrisLandmark layout must match for reinterpret_cast");
+static_assert(offsetof(::IrisLandmark, z) == offsetof(iris_sdk::IrisLandmark, z) &&
+              offsetof(::IrisLandmark, visibility) == offsetof(iris_sdk::IrisLandmark, visibility),
+              "C/C++ IrisLandmark field offsets must match");
+#define IRIS_SDK_ASSERT_RESULT_FIELD(f)                                              \
+    static_assert(offsetof(::IrisResult, f) == offsetof(iris_sdk::IrisResult, f),    \
+                  "C/C++ IrisResult field offset mismatch: " #f)
+IRIS_SDK_ASSERT_RESULT_FIELD(detected);
+IRIS_SDK_ASSERT_RESULT_FIELD(left_detected);
+IRIS_SDK_ASSERT_RESULT_FIELD(right_detected);
+IRIS_SDK_ASSERT_RESULT_FIELD(confidence);
+IRIS_SDK_ASSERT_RESULT_FIELD(left_iris);
+IRIS_SDK_ASSERT_RESULT_FIELD(left_radius);
+IRIS_SDK_ASSERT_RESULT_FIELD(right_iris);
+IRIS_SDK_ASSERT_RESULT_FIELD(right_radius);
+IRIS_SDK_ASSERT_RESULT_FIELD(face_rect);
+IRIS_SDK_ASSERT_RESULT_FIELD(face_rotation);
+IRIS_SDK_ASSERT_RESULT_FIELD(face_mesh);
+IRIS_SDK_ASSERT_RESULT_FIELD(face_mesh_valid);
+IRIS_SDK_ASSERT_RESULT_FIELD(timestamp_ms);
+IRIS_SDK_ASSERT_RESULT_FIELD(frame_width);
+IRIS_SDK_ASSERT_RESULT_FIELD(frame_height);
+IRIS_SDK_ASSERT_RESULT_FIELD(iris_quality_left);
+IRIS_SDK_ASSERT_RESULT_FIELD(iris_quality_right);
+IRIS_SDK_ASSERT_RESULT_FIELD(eyelid_ratio_left);
+IRIS_SDK_ASSERT_RESULT_FIELD(eyelid_ratio_right);
+IRIS_SDK_ASSERT_RESULT_FIELD(eye_refiner_used);
+IRIS_SDK_ASSERT_RESULT_FIELD(avg_iris_luma_left);
+IRIS_SDK_ASSERT_RESULT_FIELD(avg_iris_luma_right);
+#undef IRIS_SDK_ASSERT_RESULT_FIELD
 
 #ifdef IRIS_SDK_HAS_GLES
 // P7-W2: 이 파일은 C IrisResult ↔ C++ iris_sdk::IrisResult를 reinterpret_cast로

@@ -411,6 +411,11 @@ bool GPUBeautyBackend::initializeFreqSepShaders() {
 
 void GPUBeautyBackend::cacheUniformLocations() {
 #if IRIS_SDK_GPU_AVAILABLE
+    // Passthrough Uniforms (B2 idx18: renderSkinBasePasses 매 프레임 조회 제거)
+    if (passthrough_program_ != 0) {
+        passthrough_u_texture_ = glGetUniformLocation(passthrough_program_, "uTexture");
+    }
+
     // Smoothing (Bilateral Filter) Uniforms
     smoothing_uniforms_.uTexture = glGetUniformLocation(smoothing_program_, "uTexture");
     smoothing_uniforms_.uTexelSize = glGetUniformLocation(smoothing_program_, "uTexelSize");
@@ -659,6 +664,34 @@ void GPUBeautyBackend::resetTemporalFilters() {
     mask_center_y_filter_.reset();
 }
 
+void GPUBeautyBackend::releasePreviousFrameResources() {
+    // [B2 idx20] 이전 프레임이 이월한 출력 ping/pong과 GPU fence를 정리한다.
+    // fence는 GL 객체이므로 GPU 가드로 분리하고, 풀 텍스처 반환은 GL 무관 로직이다.
+#if IRIS_SDK_GPU_AVAILABLE
+    if (previous_output_ping_ != nullptr || previous_output_pong_ != nullptr) {
+        if (previous_fence_ != nullptr) {
+            // 펜스가 시그널될 때까지 대기 (최대 16ms = 1프레임)
+            GLenum waitResult = glClientWaitSync(previous_fence_, GL_SYNC_FLUSH_COMMANDS_BIT, 16000000);
+            if (waitResult == GL_TIMEOUT_EXPIRED) {
+                LOGW("GPU fence wait timeout - previous frame still rendering");
+            }
+            glDeleteSync(previous_fence_);
+            previous_fence_ = nullptr;
+        }
+    }
+#endif
+    if (texture_pool_) {
+        if (previous_output_ping_ != nullptr) {
+            texture_pool_->releaseTexture(previous_output_ping_);
+        }
+        if (previous_output_pong_ != nullptr) {
+            texture_pool_->releaseTexture(previous_output_pong_);
+        }
+    }
+    previous_output_ping_ = nullptr;
+    previous_output_pong_ = nullptr;
+}
+
 bool GPUBeautyBackend::isInitialized() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return initialized_;
@@ -730,6 +763,21 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     // native_handle는 GLuint* 타입
     GLuint input_tex = *static_cast<GLuint*>(input.native_handle);
     BeautyFilterConfigV2 effective_config = buildEffectiveConfig(config);
+
+    // [B2 idx2] 이전 프레임의 출력 ping/pong을 먼저 반환한다.
+    // 이전 구현은 acquirePingPongPair만 하고 release/이월이 전혀 없어 4회 호출 후
+    // 풀(최대 8개)이 영구 고갈되었다(applyTextureId와 동일한 이월 반환 패턴 적용).
+    if (previous_output_ping_ != nullptr) {
+        texture_pool_->releaseTexture(previous_output_ping_);
+        previous_output_ping_ = nullptr;
+    }
+    if (previous_output_pong_ != nullptr) {
+        texture_pool_->releaseTexture(previous_output_pong_);
+        previous_output_pong_ = nullptr;
+    }
+
+    // [B2 idx5] portrait/고해상도 입력에서도 silent 실패하지 않도록 상한 보장.
+    texture_pool_->ensureCapacity(width, height);
 
     // Ping-Pong 버퍼 획득
     TexturePool::TextureInfo* ping = nullptr;
@@ -803,15 +851,25 @@ IrisSdkError GPUBeautyBackend::applyTexture(
 
     // 출력 텍스처 핸들 설정
     if (current_input == input_tex) {
-        // 아무 패스도 실행되지 않음 — 입력을 그대로 반환
+        // 아무 패스도 실행되지 않음 — 입력을 그대로 반환.
+        // 이 경우 ping/pong은 이번 프레임에 쓰이지 않았으므로 즉시 반환한다.
         output = input;
+        texture_pool_->releaseTexture(ping);
+        texture_pool_->releaseTexture(pong);
+        ping = nullptr;
+        pong = nullptr;
     } else {
-        TexturePool::TextureInfo* result_info = (current_input == ping->texture_id) ? ping : pong;
-        output.native_handle = &result_info->texture_id;
+        // [B2 idx2] 풀 내부 TextureInfo 멤버 주소 노출(댕글링 위험) 대신
+        // 백엔드 수명에 묶인 멤버 버퍼에 GLuint 값을 복사하고 그 주소를 노출한다.
+        applytexture_output_id_ = current_input;
+        output.native_handle = &applytexture_output_id_;
         output.type = TextureHandle::Type::OpenGLES;
         output.width = width;
         output.height = height;
         output.format = input.format;
+        // 출력 텍스처가 살아있도록 ping/pong을 다음 프레임에 반환(이월).
+        previous_output_ping_ = ping;
+        previous_output_pong_ = pong;
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1116,10 +1174,6 @@ void GPUBeautyBackend::executeCombinedColorPass(
 
     renderFullscreenQuad();
 
-    // Cleanup: TEXTURE1 해제
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_3D, 0);
-
 #ifndef NDEBUG
     // 렌더링 후 에러 체크
     GLenum glErr = glGetError();
@@ -1128,6 +1182,13 @@ void GPUBeautyBackend::executeCombinedColorPass(
     }
 #endif
 
+    // Cleanup (B2 idx4): unit1의 3D, unit0의 2D를 각각 해제하고
+    // active unit을 TEXTURE0으로 복귀시켜 종료한다.
+    // 이전 구현은 unit1에서 2D unbind를 실행해 unit0의 input_tex 바인딩이 남고
+    // active unit이 TEXTURE1인 채 종료되어 후속 패스/호스트 상태를 오염시켰다.
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_3D, 0);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, 0);
 #else
     (void)input_tex;
@@ -1867,7 +1928,7 @@ void GPUBeautyBackend::renderSkinBasePasses(GLuint input_tex, int width, int hei
     glBindFramebuffer(GL_FRAMEBUFFER, skin_target_fbo_[kSkinLow]);
     glViewport(0, 0, skin_low_w_, skin_low_h_);
     glUseProgram(passthrough_program_);
-    glUniform1i(glGetUniformLocation(passthrough_program_, "uTexture"), 0);
+    glUniform1i(passthrough_u_texture_, 0);  // B2 idx18: 캐시된 location 사용
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
     renderFullscreenQuad();
@@ -1964,6 +2025,18 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
     bool needsVivid = config.vividIntensity > 0.01f;
     if (!config.enabled && !needsVivid) {
+        // [B2 idx20-(3)] 필터를 끄는 프레임에서도 이전 프레임이 이월한 풀 텍스처
+        // 2장과 fence를 즉시 정리한다. 이전 구현은 이 조기 반환이 정리 블록보다
+        // 앞서 있어, 필터 비활성 동안 풀 텍스처 2장이 in_use로, fence 1개가 미삭제로
+        // 다음 활성화 시점까지 잔류했다(상한 고정이라 누수는 아니나 점유 낭비).
+        // 헬퍼가 fence(GL 객체)를 삭제하므로 자체 컨텍스트 모드에서는 GL 컨텍스트를
+        // 먼저 current로 만들어야 한다(GLSurfaceView 모드는 이미 current).
+#if IRIS_SDK_GPU_AVAILABLE
+        if (render_context_) {
+            render_context_->makeCurrent();
+        }
+#endif
+        releasePreviousFrameResources();
         *output_texture = input_texture;
         return IRIS_SDK_OK;
     }
@@ -1974,14 +2047,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         render_context_->makeCurrent();
     }
 
-    // TextureHandle 생성 (입력)
+    // 입력 텍스처 ID (B2 idx11: 미사용 input_handle 데드코드 제거)
     GLuint input_tex_id = static_cast<GLuint>(input_texture);
-    TextureHandle input_handle;
-    input_handle.native_handle = &input_tex_id;
-    input_handle.type = TextureHandle::Type::OpenGLES;
-    input_handle.width = width;
-    input_handle.height = height;
-    input_handle.format = TextureFormat::RGBA8;
 
     // ROI 생성 (detection이 있는 경우)
     BeautyROI roi;
@@ -2020,27 +2087,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         roi_ptr = &roi;
     }
 
-    // 이전 프레임의 출력 텍스처 반환 (텍스처 풀 관리)
-    // GPU 동기화: glFenceSync로 이전 프레임 렌더링 완료 대기 (non-blocking)
-    if (previous_output_ping_ != nullptr || previous_output_pong_ != nullptr) {
-        if (previous_fence_ != nullptr) {
-            // 펜스가 시그널될 때까지 대기 (최대 16ms = 1프레임)
-            GLenum waitResult = glClientWaitSync(previous_fence_, GL_SYNC_FLUSH_COMMANDS_BIT, 16000000);
-            if (waitResult == GL_TIMEOUT_EXPIRED) {
-                LOGW("GPU fence wait timeout - previous frame still rendering");
-            }
-            glDeleteSync(previous_fence_);
-            previous_fence_ = nullptr;
-        }
-    }
-    if (previous_output_ping_ != nullptr) {
-        texture_pool_->releaseTexture(previous_output_ping_);
-        previous_output_ping_ = nullptr;
-    }
-    if (previous_output_pong_ != nullptr) {
-        texture_pool_->releaseTexture(previous_output_pong_);
-        previous_output_pong_ = nullptr;
-    }
+    // 이전 프레임의 출력 텍스처 반환 + GPU fence 정리 (B2 idx20: 헬퍼로 일원화)
+    releasePreviousFrameResources();
 
     BeautyFilterConfigV2 effective_config = buildEffectiveConfig(config);
 
@@ -2072,6 +2120,10 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // 필터 1개: 단일 텍스처, 2개+: ping-pong 버퍼
     TexturePool::TextureInfo* ping = nullptr;
     TexturePool::TextureInfo* pong = nullptr;
+
+    // [B2 idx5] portrait/고해상도 입력에서도 풀 상한이 부족해 silent 실패하지
+    // 않도록 acquire 전에 상한을 입력 크기까지 보장한다 (GL 무관, lazy 할당).
+    texture_pool_->ensureCapacity(width, height);
 
     if (active_filter_count == 1) {
         ping = texture_pool_->acquireRenderTarget(width, height);
@@ -2375,7 +2427,6 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // (현재 프레임에서 즉시 반환하면 출력 텍스처가 사라짐)
     previous_output_ping_ = ping;
     previous_output_pong_ = pong;
-    previous_output_texture_ = current_input;
 
     // 프레임 종료 처리 (프로파일링 결과 수집)
     if (profiling) {

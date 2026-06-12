@@ -7,6 +7,15 @@
 
 #include <chrono>
 #include <algorithm>
+#include <mutex>
+
+// ============================================================================
+// ③-2 B1 주석: BufferPool / ScopedBuffer는 현재 실제 파이프라인에서 미사용이다.
+// (카메라→추론→렌더 핸드오프는 InferenceThread의 딥카피 슬롯을 사용한다.)
+// 유일한 참조처는 단위 테스트(test_profiler.cpp)뿐이다.
+// 표면 정리(파일 삭제 등)는 ④ 단계에서 다룬다. 여기서는 move-assign의 잠재
+// ABBA 데드락만 수리한다. — refactor/p32-core-quality
+// ============================================================================
 
 namespace iris_sdk {
 
@@ -35,8 +44,10 @@ BufferPool& BufferPool::operator=(BufferPool&& other) noexcept {
     if (this != &other) {
         release();
 
-        std::lock_guard<std::mutex> lock(other.mutex_);
-        std::lock_guard<std::mutex> lock2(mutex_);
+        // ③-2 B1: std::scoped_lock으로 두 뮤텍스를 deadlock-free 순서로 동시 잠근다.
+        // 기존엔 other.mutex_ → mutex_ 고정 순서로 잠가, 두 풀을 서로 반대 방향으로
+        // 동시에 move-assign하면 ABBA 데드락이 이론상 가능했다.
+        std::scoped_lock lock(other.mutex_, mutex_);
 
         width_ = other.width_;
         height_ = other.height_;

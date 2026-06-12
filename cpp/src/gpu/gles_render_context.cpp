@@ -57,11 +57,18 @@ void GLESRenderContext::release() {
     std::lock_guard<std::mutex> lock(mutex_);
 
     // 모든 텍스처 삭제
+    // [B2 idx1] eglMakeCurrent 반환값을 검사한다. 다른 스레드에 컨텍스트가 current면
+    // EGL_BAD_ACCESS로 실패하는데, 이를 무시하고 glDeleteTextures를 진행하면 '현재
+    // 바인딩된 임의 컨텍스트'(예: 호스트 컨텍스트)의 동일 숫자 id 텍스처를 삭제할 수
+    // 있다. makeCurrent 성공 시에만 GL 삭제를 수행하고, 실패 시엔 핸들만 폐기한다.
     if (display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT) {
-        eglMakeCurrent(display_, surface_, surface_, context_);
-
-        for (auto& pair : textures_) {
-            glDeleteTextures(1, &pair.second.gl_id);
+        if (eglMakeCurrent(display_, surface_, surface_, context_) == EGL_TRUE) {
+            for (auto& pair : textures_) {
+                glDeleteTextures(1, &pair.second.gl_id);
+            }
+        } else {
+            LOGE("release: eglMakeCurrent failed (0x%x); skipping GL texture deletion "
+                 "to avoid deleting another context's objects", eglGetError());
         }
     }
     textures_.clear();
@@ -388,7 +395,11 @@ bool GLESRenderContext::makeCurrent() {
 void GLESRenderContext::doneCurrent() {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (display_ != EGL_NO_DISPLAY) {
+    // [B2 idx1] 자체 컨텍스트가 current인 경우에만 해제한다. 이전 구현은 무조건
+    // EGL_NO_CONTEXT로 바꿔, 호스트 컨텍스트가 current였더라도 풀어버려(호스트
+    // 렌더링 중단) 자체 EGL 모드에서 교차 컨텍스트 오염을 일으킬 수 있었다.
+    if (display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT &&
+        eglGetCurrentContext() == context_) {
         eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
 }
@@ -460,12 +471,16 @@ bool GLESRenderContext::isExtensionSupported(const char* extension_name) const {
 }
 
 bool GLESRenderContext::checkGLError(const char* operation) const {
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
+    // [B2 idx19] GL 에러는 큐에 누적될 수 있으므로 GL_NO_ERROR가 될 때까지
+    // 전부 소비한다. 이전 구현은 glGetError를 1회만 호출해, 다중 에러 상황에서
+    // 일부만 소비되고 남은 에러가 다음 무관한 체크를 오염시켰다.
+    bool ok = true;
+    GLenum error;
+    while ((error = glGetError()) != GL_NO_ERROR) {
         LOGE("GL error after %s: 0x%x", operation, error);
-        return false;
+        ok = false;
     }
-    return true;
+    return ok;
 }
 
 bool GLESRenderContext::dumpTexture(const TextureHandle& handle,

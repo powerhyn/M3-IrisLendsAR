@@ -573,6 +573,14 @@ IRIS_SDK_EXPORT bool iris_sdk_is_using_inference_thread(void);
  *
  * @param policy Eye Refiner 실행 정책
  * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ *
+ * @warning NO-OP STUB (③-2 B1 문서화): 현재 구현은 본문이 비어 있어 어떤 정책도
+ *          실제로 적용되지 않으며, 그럼에도 IRIS_SDK_OK를 반환한다(조용한 성공).
+ *          내부 기본값은 EyeRefinerPolicy::Never이다. 호출자가 정책을 설정해도
+ *          검출 동작은 바뀌지 않는다.
+ * @todo (④ 표면 정리) SDKManager 경유로 실제 연결하거나, 미지원을 정직하게
+ *       알리는 에러 코드(IRIS_SDK_NOT_SUPPORTED 류)를 반환하도록 변경할 것.
+ *       반환값/시그니처 변경은 ③-2 범위 밖이므로 보류한다.
  */
 IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_eye_refiner_policy(IrisEyeRefinerPolicy policy);
 

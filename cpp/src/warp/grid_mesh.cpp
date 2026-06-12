@@ -79,7 +79,11 @@ bool GridMesh::initialize(int grid_size, const Rect& face_rect) {
 
     // 랜드마크-정점 매핑 테이블 초기화
     landmark_to_vertex_.clear();
-    landmark_to_vertex_.resize(468, -1);  // MediaPipe Face Mesh = 468 landmarks
+    // ③-2 B3 주의: 프로젝트 표준은 478(IrisResult::FACE_MESH_LANDMARK_COUNT)이나,
+    // 이 테이블을 478로 확장하면 현재 addControlPoints의 크기 가드에서 조용히 탈락하던
+    // iris center(468/473) 컨트롤 포인트 등록이 활성화되어 워프 출력이 변한다.
+    // 동작 불변 원칙상 ⑤(geometry 수리)에서 의도 변경과 함께 확장할 것 — 감사 finding.
+    landmark_to_vertex_.resize(468, -1);
 
     initialized_ = true;
     return true;

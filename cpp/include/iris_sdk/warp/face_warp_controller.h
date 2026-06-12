@@ -179,7 +179,12 @@ public:
      */
     bool applyWarp(GridMesh& mesh,
                    const IrisLandmark* face_mesh,
-                   const WarpConfig& config);
+                   const WarpConfig& config,
+                   int landmark_count = 478);
+
+    /// applyWarp가 접근하는 최대 랜드마크 인덱스(RIGHT_IRIS_CENTER=473) 기준 최소 배열 길이.
+    /// 이보다 짧은 face_mesh는 거부된다 (기존: 무검증 OOB 읽기 — 감사 finding).
+    static constexpr int kMinWarpLandmarkCount = 474;
 
     /**
      * @brief Calculate face width from landmarks (for displacement scaling)

@@ -86,6 +86,9 @@ public:
      * @brief 추론 스레드 중지
      *
      * 진행 중인 작업 완료 후 스레드를 종료합니다.
+     *
+     * @note 스레드-안전: lifecycle_mutex_로 직렬화되므로 여러 스레드가 동시에
+     *       stop()을 호출해도 이중 join(UB) 없이 안전하다.
      */
     void stop();
 
@@ -201,6 +204,29 @@ private:
      */
     IrisResult submitAndWait(const uint8_t* data, int width, int height, int format);
 
+    /**
+     * @brief stop()의 실제 중지 로직 (lifecycle_mutex_ 보유 가정)
+     *
+     * NOTE(③-2 B1): start()의 재시작 정리 경로가 stop()을 호출하면 lifecycle_mutex_를
+     * 이미 보유한 상태에서 재진입해 재귀 데드락(std::mutex는 비재귀)이 발생한다.
+     * 따라서 락을 잡지 않는 stopLocked()로 실제 로직을 분리하고, public stop()은
+     * 락을 잡은 뒤 위임하는 얇은 래퍼로 둔다. 호출자는 반드시 lifecycle_mutex_를
+     * 보유한 채로 호출해야 한다.
+     */
+    void stopLocked();
+
+    // ========================================
+    // 스레드 제어 직렬화 (③-2 B1)
+    // ========================================
+    // NOTE(③-2 B1): thread_ / model_path_ / gpu_enabled_ 는 제어 스레드(start/stop)
+    //               전용 상태다. 이 뮤텍스로 start()의 thread_ move-대입과 stop()의
+    //               joinable()/join()을 직렬화해 데이터 레이스와 이중 join(UB)을 막는다.
+    //               ★ 락 순서 규약: 워커 스레드(threadLoop)는 이 뮤텍스를 절대 잡지
+    //                 않는다. lifecycle_mutex_는 항상 slot_mutex_/async_*_mutex_/
+    //                 landmark_mutex_보다 바깥(먼저 획득)에 위치하며, 제어 스레드만
+    //                 사용하므로 워커가 잡는 락들과 교착 사이클을 형성하지 않는다.
+    std::mutex lifecycle_mutex_;
+
     // ========================================
     // 스레드 상태 (단일 원자적 변수)
     // ========================================
@@ -219,13 +245,22 @@ private:
     std::condition_variable slot_cv_;
 
     // 입력 슬롯 (slot_mutex_로 보호)
-    const uint8_t* pending_data_{nullptr};
+    // NOTE(③-2 B1): 호출자 raw 포인터를 그대로 워커가 읽으면 타임아웃 후 호출자
+    //               버퍼가 재사용/재할당될 때 데이터 레이스 또는 UAF가 발생한다.
+    //               따라서 제출 시점에 입력을 딥카피해 워커에 전달한다.
+    std::vector<uint8_t> pending_data_;
     int pending_width_{0};
     int pending_height_{0};
     int pending_format_{0};
 
     // 출력 슬롯 (slot_mutex_로 보호)
     IrisResult pending_result_;
+
+    // 동기 요청 세대 번호 (slot_mutex_로 보호)
+    // NOTE(③-2 B1): detectSync 타임아웃 후 뒤늦게 완료된 워커가 ResultReady로
+    //               상태를 고착시키지 못하도록, 요청마다 세대를 부여하고 워커는
+    //               자신이 처리한 세대가 여전히 유효할 때만 결과를 기록한다.
+    uint64_t sync_request_seq_{0};
 
     // ========================================
     // 검출기 및 설정
@@ -243,8 +278,9 @@ private:
     // ========================================
 
     // 비동기 입력 슬롯 (async_input_mutex_로 보호)
+    // NOTE(③-2 B1): 비동기/동기 wakeup은 slot_cv_ 단일 cv로 통합되었으므로
+    //               별도의 async_cv_는 제거되었다(죽은 대기자 제거).
     std::mutex async_input_mutex_;
-    std::condition_variable async_cv_;
     std::vector<uint8_t> async_frame_buffer_;  ///< 딥카피된 프레임 데이터
     int async_width_{0};
     int async_height_{0};

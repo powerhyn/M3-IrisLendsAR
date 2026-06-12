@@ -645,6 +645,25 @@ TEST_F(EyeEnlargementTest, EffectParametersReasonable) {
     EXPECT_LE(FaceWarpController::EYEBROW_LIFT_RATIO, 1.0f);
 }
 
+// ③-2 B3: applyWarp 랜드마크 개수 가드 — 474 미만 배열은 명시 거부 (기존: OOB 읽기 UB)
+TEST_F(EyeEnlargementTest, ApplyWarpRejectsShortLandmarkArray) {
+    WarpConfig config;
+    config.enlargeEyes = 0.5f;
+
+    // 468짜리 배열(구 Face Mesh 규약)은 RIGHT_IRIS_CENTER(473) 접근이 OOB였다 — 거부돼야 함
+    EXPECT_FALSE(controller_.applyWarp(mesh_, face_mesh_.data(), config, 468));
+    EXPECT_FALSE(controller_.applyWarp(mesh_, face_mesh_.data(), config,
+                                       FaceWarpController::kMinWarpLandmarkCount - 1));
+
+    // 경계값과 표준 478은 통과
+    EXPECT_TRUE(controller_.applyWarp(mesh_, face_mesh_.data(), config,
+                                      FaceWarpController::kMinWarpLandmarkCount));
+    EXPECT_TRUE(controller_.applyWarp(mesh_, face_mesh_.data(), config, 478));
+
+    // 디폴트 인자(478) 경로 — 기존 호출 형태 불변
+    EXPECT_TRUE(controller_.applyWarp(mesh_, face_mesh_.data(), config));
+}
+
 } // namespace test
 } // namespace warp
 } // namespace iris_sdk

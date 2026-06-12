@@ -185,6 +185,120 @@ TEST_F(TexturePoolTest, RejectsOversizedTextures) {
     EXPECT_EQ(tex, nullptr);
 }
 
+// [B2 idx6] findAvailable는 '정확한 크기'만 재사용한다.
+// 이전 구현은 더 큰 유휴 텍스처를 작은 요청에 그대로 반환해 해상도 전환 시
+// 출력이 좌하단으로 축소·왜곡되었다. 정확 크기 매칭이면 큰 텍스처는 재사용되지 않고
+// 요청 크기의 새 텍스처가 생성되어야 한다.
+TEST_F(TexturePoolTest, ExactSizeMatchOnly) {
+    // 큰 텍스처 1장 획득 후 반환 (유휴 상태로 풀에 남음)
+    auto* big = pool_->acquireRenderTarget(800, 600);
+    ASSERT_NE(big, nullptr);
+    GLuint big_id = big->texture_id;
+    pool_->releaseTexture(big);
+
+    // 더 작은 크기 요청 → 큰 유휴 텍스처를 재사용하면 안 됨 (새 텍스처여야 함)
+    auto* small = pool_->acquireRenderTarget(640, 480);
+    ASSERT_NE(small, nullptr);
+    EXPECT_EQ(small->width, 640);
+    EXPECT_EQ(small->height, 480);
+    EXPECT_NE(small->texture_id, big_id);  // 큰 텍스처 재사용 금지
+
+    // 풀에는 이제 800x600(유휴) + 640x480(사용) 2장이 있어야 함
+    auto stats = pool_->getStats();
+    EXPECT_EQ(stats.total_textures, 2);
+
+    pool_->releaseTexture(small);
+
+    // 동일 크기 재요청은 정확히 같은 텍스처를 재사용
+    auto* small2 = pool_->acquireRenderTarget(640, 480);
+    ASSERT_NE(small2, nullptr);
+    EXPECT_EQ(small2->texture_id, small->texture_id);
+    pool_->releaseTexture(small2);
+}
+
+// [B2 idx6 후속] 풀 만석 + 불일치 유휴 텍스처 존재 시, 새 크기 요청은
+// 유휴 텍스처 1장을 evict하고 성공해야 한다. 정확 크기 매칭 전환 이후
+// trim 호출처(onMemoryPressure)가 죽은 경로라 불일치 유휴가 영구 잔류하면
+// 해상도 전환 반복 시 만석으로 acquire가 영구 실패하던 회귀를 막는다.
+TEST_F(TexturePoolTest, EvictsIdleMismatchWhenFull) {
+    // 풀 크기 2로 축소하여 만석 시나리오를 단순화
+    pool_->resizePool(2);
+
+    // 구해상도 텍스처 2장으로 만석 (모두 유휴 상태로 반환)
+    auto* a = pool_->acquireRenderTarget(320, 240);
+    auto* b = pool_->acquireRenderTarget(320, 240);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    GLuint id_a = a->texture_id;
+    pool_->releaseTexture(a);
+    pool_->releaseTexture(b);
+
+    // 풀은 만석(2/2), 둘 다 유휴. 신해상도(640x480) 요청은 정확 매칭 실패 →
+    // 유휴 불일치 1장을 evict하고 새 텍스처 생성으로 성공해야 한다.
+    auto* fresh = pool_->acquireRenderTarget(640, 480);
+    ASSERT_NE(fresh, nullptr);  // 회귀 시 nullptr ("TexturePool full")
+    EXPECT_EQ(fresh->width, 640);
+    EXPECT_EQ(fresh->height, 480);
+
+    // 가장 오래 유휴인(LRU) a가 evict 대상이어야 한다.
+    EXPECT_NE(fresh->texture_id, id_a);
+
+    // 총 텍스처 수는 여전히 상한(2) 이하여야 한다 (1장 evict로 슬롯 회수).
+    auto stats = pool_->getStats();
+    EXPECT_LE(stats.total_textures, 2);
+
+    pool_->releaseTexture(fresh);
+}
+
+// [B2 idx6 후속] 풀 만석이지만 모든 텍스처가 사용 중이면 evict 불가 → nullptr.
+// 사용 중 텍스처를 잘못 회수하지 않음을 보장한다.
+TEST_F(TexturePoolTest, RejectsWhenFullAndAllInUse) {
+    pool_->resizePool(2);
+
+    auto* a = pool_->acquireRenderTarget(320, 240);
+    auto* b = pool_->acquireRenderTarget(320, 240);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    // 둘 다 사용 중인 상태에서 신규 크기 요청 → evict 대상 없음 → 거부
+    auto* fresh = pool_->acquireRenderTarget(640, 480);
+    EXPECT_EQ(fresh, nullptr);
+
+    pool_->releaseTexture(a);
+    pool_->releaseTexture(b);
+}
+
+// [B2 idx5] ensureCapacity는 상한을 입력 크기까지 끌어올려 portrait/고해상도
+// 입력의 silent 실패(매 프레임 nullptr 반환)를 막는다.
+TEST_F(TexturePoolTest, EnsureCapacityRaisesLimit) {
+    // 초기 상한(1920x1080) 초과 portrait 버퍼는 거부됨
+    EXPECT_EQ(pool_->acquireRenderTarget(1080, 1920), nullptr);
+
+    // 상한 확장 후에는 통과
+    EXPECT_TRUE(pool_->ensureCapacity(1080, 1920));
+    auto* tex = pool_->acquireRenderTarget(1080, 1920);
+    ASSERT_NE(tex, nullptr);
+    EXPECT_EQ(tex->width, 1080);
+    EXPECT_EQ(tex->height, 1920);
+    pool_->releaseTexture(tex);
+}
+
+// [B2 idx5] ensureCapacity는 상한을 줄이지 않으며, 현재 상한 이하 요청에는
+// 변경(true)을 보고하지 않는다 (불필요한 재설정 방지).
+TEST_F(TexturePoolTest, EnsureCapacityDoesNotShrink) {
+    // 현재 상한(1920x1080) 이하 → 변경 없음
+    EXPECT_FALSE(pool_->ensureCapacity(960, 720));
+    EXPECT_FALSE(pool_->ensureCapacity(1920, 1080));
+
+    // 현 데모 해상도(960x720)는 상한 변경 없이 그대로 통과해야 함 (동작 불변)
+    auto* tex = pool_->acquireRenderTarget(960, 720);
+    ASSERT_NE(tex, nullptr);
+    pool_->releaseTexture(tex);
+
+    // 음수/0 입력은 무시 (변경 없음)
+    EXPECT_FALSE(pool_->ensureCapacity(0, 0));
+    EXPECT_FALSE(pool_->ensureCapacity(-1, 100));
+}
+
 TEST_F(TexturePoolTest, ResizesPool) {
     // 여러 텍스처 할당
     std::vector<TexturePool::TextureInfo*> textures;
