@@ -15,9 +15,11 @@ import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.graphics.PixelFormat
 import android.opengl.GLES31
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import android.view.KeyEvent
@@ -44,10 +46,14 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.tabs.TabLayout
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
+import com.irislenssdk.demo.tracking.AbMeasure
+import com.irislenssdk.demo.tracking.FaceTracker
+import com.irislenssdk.demo.tracking.TasksToIrisResult
 import com.irislenssdk.demo.beauty.BeautyPreset
 import com.irislenssdk.demo.beauty.BeautyPresetFactory
 import com.irislenssdk.demo.camera.OverlayView
@@ -154,6 +160,37 @@ class GpuRenderActivity : AppCompatActivity() {
     // 수신 스레드가 읽는 중 analyzer가 덮어쓰는 torn read를 유발 — 감사 finding으로 제거)
     private val irisResult = IrisResult()       // Analyzer 스레드 전용 (JNI 결과 수신)
 
+    //=========================================================================
+    // ③-3 A/B 인프라 (REFACTOR-3-3 §4) — LEGACY 경로는 한 줄도 변경하지 않는다 (§5-5)
+    //=========================================================================
+
+    /** 추적 공급자 (§4.1). LEGACY=자체 TFLite(detectWithRotation), TASKS=MediaPipe Tasks */
+    private enum class TrackerMode { LEGACY, TASKS }
+
+    @Volatile private var trackerMode = TrackerMode.LEGACY
+    private var faceTracker: FaceTracker? = null      // 분석 스레드 전용 (생성·detect·close 동일 스레드)
+    private val tasksIrisResult = IrisResult()        // 분석 스레드 전용 (TASKS 변환 수신)
+
+    /**
+     * TASKS 전용 stabilizer 핸들 — 분석 스레드 전용.
+     * LEGACY [stabilizerHandle]의 생성/소멸 수명(processFrame lazy + onDestroy)을
+     * 건드리지 않기 위해 분리한다 (§5-5). 같은 코어 stabilize 함수를 쓰므로
+     * '동일 스무딩' 계약(§4.1)은 유지되고, 모드 전환 시 교차 추적기 필터 상태
+     * 오염(잔상 글라이드)도 차단된다.
+     */
+    private var tasksStabilizerHandle: Long = 0
+    @Volatile private var tasksUsingGpu = false
+    @Volatile private var lastTasksInferMs = 0f
+    private var tasksHudCounter = 0                   // 분석 스레드 전용
+
+    /** 듀얼 비교 측정 (§4.2) — 기본 OFF (OFF면 LEGACY 라이브 경로 비용 0) */
+    @Volatile private var abMeasureEnabled = false
+    private var abMeasure: AbMeasure? = null          // 분석 스레드에서만 measure/flush/close
+
+    private lateinit var btnTrackerMode: Button
+    private lateinit var btnAbMeasure: Button
+    private lateinit var tvAbHud: TextView
+
     // Temporal Stabilizer (SDK 코어 스무딩)
     private var stabilizerHandle: Long = 0
 
@@ -224,6 +261,11 @@ class GpuRenderActivity : AppCompatActivity() {
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
+        // ③-3: 추적 공급자 토글 + 듀얼 A/B 측정 (REFACTOR-3-3 §4)
+        btnTrackerMode = findViewById(R.id.btnTrackerMode)
+        btnAbMeasure = findViewById(R.id.btnAbMeasure)
+        tvAbHud = findViewById(R.id.tvAbHud)
+
         // 뷰티 탭 UI
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
         btnPresetNaturalGlow = findViewById(R.id.btnPresetNaturalGlow)
@@ -289,6 +331,7 @@ class GpuRenderActivity : AppCompatActivity() {
         setupLensControls()
         setupBeautyControls()
         setupDebugControls()
+        setupTrackingAbControls()
 
         // OverlayView 초기 설정: 렌즈는 GPU에서 렌더링하므로 OverlayView에서는 비활성화
         overlayView.showLens = false
@@ -927,14 +970,32 @@ class GpuRenderActivity : AppCompatActivity() {
             }
 
         // ImageAnalysis (MediaPipe 추론용)
+        // ③-3 §5 주의 2: TASKS는 YUV 직접 입력 불가(함정 #2) → RGBA_8888 직접 스트림.
+        // CameraX는 ImageAnalysis 2개 동시 바인딩을 보장하지 않으므로, 모드 전환 시
+        // 같은 use case를 모드별 출력 포맷으로 재바인딩한다. LEGACY 모드 값은 기존과
+        // 동일(YUV_420_888) — LEGACY 경로 동작 불변 (§5-5).
         val imageAnalysis = ImageAnalysis.Builder()
             .setResolutionSelector(resolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .setOutputImageFormat(
+                if (trackerMode == TrackerMode.TASKS) {
+                    ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888
+                } else {
+                    ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888
+                }
+            )
             .build()
             .apply {
                 setAnalyzer(analysisExecutor) { imageProxy ->
-                    processFrame(imageProxy)
+                    // ③-3: '모드'와 '실제 버퍼 포맷'이 일치할 때만 라우팅 — 전환 직후
+                    // 잔존 프레임(이전 포맷)은 폐기해 두 경로가 슬롯/스테빌라이저를
+                    // 섞지 않게 한다. LEGACY 프레임은 기존 processFrame 그대로.
+                    val isRgba = imageProxy.format == PixelFormat.RGBA_8888
+                    when {
+                        trackerMode == TrackerMode.TASKS && isRgba -> processFrameTasks(imageProxy)
+                        trackerMode == TrackerMode.LEGACY && !isRgba -> processFrame(imageProxy)
+                        else -> imageProxy.close()
+                    }
                 }
             }
 
@@ -973,6 +1034,9 @@ class GpuRenderActivity : AppCompatActivity() {
             // YUV → NV21 변환
             val nv21 = yuvToNv21(imageProxy)
 
+            // ③-3 §4.2: 듀얼 측정용 검출 지연 캡처 (기본 OFF — OFF면 비용 0)
+            val abT0 = if (abMeasureEnabled) SystemClock.elapsedRealtimeNanos() else 0L
+
             // 홍채 검출 (CPU)
             val detectResult = IrisLensSDK.detectWithRotation(
                 nv21,
@@ -982,6 +1046,15 @@ class GpuRenderActivity : AppCompatActivity() {
                 imageProxy.imageInfo.rotationDegrees,
                 irisResult
             )
+
+            // ③-3 §4.2: 듀얼 비교 측정 — stabilize 전 raw 결과로 같은 NV21 프레임을
+            // Tasks IMAGE 모드와 양쪽 실행한다. 기본 OFF, LEGACY 라이브 경로 동작 불변.
+            if (abT0 != 0L) {
+                val legacyMs = (SystemClock.elapsedRealtimeNanos() - abT0) / 1e6f
+                abMeasure?.measureFrame(
+                    nv21, imageProxy.width, imageProxy.height, rotation, irisResult, legacyMs
+                )
+            }
 
             // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요)
             if (detectResult == IrisLensSDK.OK || detectResult == IrisLensSDK.NO_FACE) {
@@ -1040,6 +1113,216 @@ class GpuRenderActivity : AppCompatActivity() {
         } finally {
             imageProxy.close()
         }
+    }
+
+    //=========================================================================
+    // ③-3: TASKS 공급자 경로 + 공급자 토글 + 듀얼 측정 제어 (REFACTOR-3-3 §4)
+    //=========================================================================
+
+    /**
+     * TASKS 공급자 프레임 처리 (§4.1) — 분석 스레드 전용.
+     *
+     * FaceTracker(MediaPipe Tasks, RGBA_8888 직접 입력)가 detect 후
+     * [onTasksRawResult]를 같은 스레드에서 동기 호출한다.
+     * imageProxy의 close는 FaceTracker.analyze가 책임진다.
+     */
+    private fun processFrameTasks(imageProxy: androidx.camera.core.ImageProxy) {
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        if (rotation != lastRotation) {
+            lastRotation = rotation
+            cameraGLView.setFrameRotation(rotation)
+            Log.d(TAG, "Camera rotation (TASKS): $rotation")
+        }
+        ensureFaceTracker().analyze(imageProxy)
+    }
+
+    /** 분석 스레드 전용 — FaceTracker는 생성 스레드에서만 detect/close (스레드 친화성). */
+    private fun ensureFaceTracker(): FaceTracker {
+        faceTracker?.let { return it }
+        val tracker = FaceTracker(
+            context = applicationContext,
+            preferGpu = true,
+            // ⚠️ mirror=false 필수: 변환 계약은 비미러(센서 원본 upright) 공간 —
+            // ADR §7.4 '미러는 렌더 단일 책임'. LEGACY 검출 결과와 동일 공간이어야
+            // 같은 DetectionSlot/렌더 경로에서 A/B가 정합한다.
+            mirror = false,
+            // 내장 One-Euro 경로(onSnapshot)는 소비하지 않는다 — 이중 필터 금지
+            // (§5 주의 3 '우회'). 스무딩은 LEGACY와 동일하게 코어 stabilize 단일 적용.
+            onSnapshot = { },
+            onInferenceStats = { ms, gpu ->
+                lastTasksInferMs = ms
+                tasksUsingGpu = gpu
+            },
+            onError = { msg -> Log.w(TAG, "③-3 FaceTracker: $msg") },
+        )
+        tracker.onRawResult = ::onTasksRawResult
+        faceTracker = tracker
+        return tracker
+    }
+
+    /**
+     * TASKS 원시 478점 → IrisResult 변환 → 코어 stabilize → DetectionSlot (§4.1).
+     *
+     * LEGACY processFrame과 단계별 1:1 대응 — 동일 stabilize·동일 슬롯 채널·동일
+     * 슬롯 갱신 정책(stabilize 후 결과를 매 프레임 무조건 갱신 — 미검출 hold/fade
+     * 포함, LEGACY 실동작과 동일)·동일 GL/Overlay 전달 정책.
+     * 비교 변인은 추적기뿐이다. 분석 스레드 동기 실행.
+     */
+    private fun onTasksRawResult(
+        result: FaceLandmarkerResult,
+        rotation: Int,
+        srcWidth: Int,
+        srcHeight: Int,
+        rgba: java.nio.ByteBuffer,
+        rowStride: Int,
+    ) {
+        if (trackerMode != TrackerMode.TASKS) return // 전환 직후 잔존 콜백 방어
+
+        val faces = result.faceLandmarks()
+        val lm = if (faces.isNotEmpty()) faces[0] else null
+        val converted = lm != null && TasksToIrisResult.convert(
+            lm, rotation, srcWidth, srcHeight, result.timestampMs(), tasksIrisResult
+        )
+        if (!converted) {
+            TasksToIrisResult.fillNoFace(
+                rotation, srcWidth, srcHeight, result.timestampMs(), tasksIrisResult
+            )
+        } else {
+            // P7-W2(avg_iris_luma)·패리티 측정 — RGBA 센서 버퍼에서 직접.
+            // 비용: 눈당 디스크 스캔(분석 스레드) — 검출 지연(onInferenceStats)과 분리.
+            TasksToIrisResult.fillIrisLuma(
+                rgba, rowStride, srcWidth, srcHeight, lm!!, tasksIrisResult
+            )
+        }
+
+        // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요, LEGACY 동일)
+        // TASKS 전용 핸들 — 같은 코어 stabilize, LEGACY 핸들 수명 불간섭 (§5-5)
+        if (tasksStabilizerHandle == 0L) {
+            tasksStabilizerHandle = IrisLensSDK.createStabilizer()
+        }
+        if (tasksStabilizerHandle != 0L) {
+            val timestampSec = System.nanoTime() / 1_000_000_000.0
+            IrisLensSDK.stabilize(tasksStabilizerHandle, tasksIrisResult, timestampSec)
+        }
+
+        // GPU 렌더러에 스무딩된 결과 전달 (매 프레임, 미검출 포함 — 새 복사본, LEGACY 동일)
+        val glSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
+        cameraGLView.setIrisResult(glSnapshot)
+
+        // P4-W1-03 패리티: 홍채 5점 크로스 휘도 (LEGACY sampleIrisLuminanceNv21 대응)
+        val rawLum = if (lm != null) {
+            TasksToIrisResult.sampleCrossLuma(
+                rgba, rowStride, srcWidth, srcHeight, lm, tasksIrisResult
+            )
+        } else {
+            -1f
+        }
+        cameraGLView.setRawIrisLuminance(rawLum)
+
+        // Detection Slot 업데이트 — LEGACY와 동일 채널 공유 (렌더 경로 완전 동일).
+        // LEGACY processFrame은 detectWithRotation이 미검출(detected=false)에도 항상
+        // IRIS_SDK_OK를 반환하므로 `if (detectResult == OK)` 게이트가 매 프레임 참이 되어
+        // stabilize 후 결과(hold/fade-out 궤적·detected=false 포함)를 무조건 슬롯에 넣는다
+        // (nativeUpdateDetectionSlot도 detected 무관 무조건 복사). TASKS도 동일하게
+        // stabilize 후 결과를 무조건 갱신해야 검출 손실 구간에서 슬롯 정본(getDetectionSlotPtr
+        // 소비 — 네이티브 렌더/뷰티)이 양 모드 동일하게 게이트된다 (plan §4.1 비교 변인=추적기뿐).
+        // fillNoFace 프레임(detected=false)도 그대로 들어가야 LEGACY 미검출 동작과 일치.
+        IrisLensSDK.updateDetectionSlot(tasksIrisResult)
+
+        // OverlayView 전달 (LEGACY와 동일 정책 — 변환 결과의 upright frame dims 사용)
+        val uiSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
+        val frameW = uiSnapshot.frameWidth
+        val frameH = uiSnapshot.frameHeight
+        runOnUiThread {
+            overlayView.setIrisResult(
+                uiSnapshot, frameW, frameH,
+                lensFacing == CameraSelector.LENS_FACING_FRONT
+            )
+        }
+
+        // HUD 1줄 (30프레임 스로틀)
+        if (++tasksHudCounter >= 30) {
+            tasksHudCounter = 0
+            val hud = String.format(
+                java.util.Locale.US, "TRK:TASKS(%s) infer≈%.0fms",
+                if (tasksUsingGpu) "gpu" else "cpu", lastTasksInferMs
+            )
+            runOnUiThread { tvAbHud.text = hud }
+        }
+
+        updateFps()
+    }
+
+    /** ③-3 §4 UI: 공급자 토글 + 듀얼 측정 토글 */
+    private fun setupTrackingAbControls() {
+        tvAbHud.text = "TRK:LEGACY"
+        btnTrackerMode.setOnClickListener {
+            switchTrackerMode(
+                if (trackerMode == TrackerMode.LEGACY) TrackerMode.TASKS else TrackerMode.LEGACY
+            )
+        }
+        btnAbMeasure.setOnClickListener {
+            setAbMeasureEnabled(!abMeasureEnabled)
+        }
+    }
+
+    /**
+     * 추적 공급자 전환 (§4.1). 모드별 출력 포맷으로 카메라 재바인딩 + 코어 stabilizer
+     * 상태 초기화(공급자 잔상 글라이드 방지). LEGACY 코드 경로 자체는 무변경 —
+     * 라우팅만 신설 분기를 거친다.
+     */
+    private fun switchTrackerMode(mode: TrackerMode) {
+        if (trackerMode == mode) return
+        if (mode == TrackerMode.TASKS && abMeasureEnabled) {
+            // 듀얼 측정은 NV21(LEGACY 바인딩) 전제 (§4.2) — TASKS 전환 시 자동 종료
+            setAbMeasureEnabled(false)
+        }
+        trackerMode = mode
+        // 분석 스레드에서 직렬 정리 — stabilize/detect 호출과의 경합 금지.
+        // LEGACY stabilizerHandle 수명은 건드리지 않는다 (§5-5).
+        analysisExecutor.execute {
+            if (mode == TrackerMode.LEGACY) {
+                val old = tasksStabilizerHandle
+                tasksStabilizerHandle = 0L
+                if (old != 0L) {
+                    IrisLensSDK.destroyStabilizer(old)
+                }
+                faceTracker?.close() // GPU delegate 생성 스레드에서 close (스레드 친화성)
+                faceTracker = null
+            }
+        }
+        bindCameraUseCases() // 모드별 ImageAnalysis 출력 포맷으로 재바인딩 (§5 주의 2)
+        btnTrackerMode.text = if (mode == TrackerMode.TASKS) "trk:tasks" else "trk:leg"
+        btnTrackerMode.setBackgroundColor(
+            if (mode == TrackerMode.TASKS) 0xCC2196F3.toInt() else 0x66555555.toInt()
+        )
+        tvAbHud.text = if (mode == TrackerMode.TASKS) "TRK:TASKS" else "TRK:LEGACY"
+        Toast.makeText(this, "Tracker: $mode", Toast.LENGTH_SHORT).show()
+        Log.i(TAG, "③-3 tracker mode → $mode")
+    }
+
+    /** 듀얼 비교 측정 토글 (§4.2). ON은 LEGACY 바인딩 전제 — TASKS면 자동 복귀. */
+    private fun setAbMeasureEnabled(enabled: Boolean) {
+        if (abMeasureEnabled == enabled) return
+        if (enabled && trackerMode == TrackerMode.TASKS) {
+            switchTrackerMode(TrackerMode.LEGACY)
+            Toast.makeText(this, "AB 측정: LEGACY 모드로 전환", Toast.LENGTH_SHORT).show()
+        }
+        if (enabled && abMeasure == null) {
+            abMeasure = AbMeasure(applicationContext) { line ->
+                runOnUiThread { tvAbHud.text = line }
+            }
+        }
+        abMeasureEnabled = enabled
+        if (!enabled) {
+            // 잔여 누적분 요약 — 분석 스레드에서 (measure 호출과 직렬)
+            analysisExecutor.execute { abMeasure?.flush() }
+        }
+        btnAbMeasure.text = if (enabled) "ab:on" else "ab:off"
+        btnAbMeasure.setBackgroundColor(
+            if (enabled) 0xCCFF5722.toInt() else 0x66555555.toInt()
+        )
+        Log.i(TAG, "③-3 AB measure → $enabled")
     }
 
     /**
@@ -1326,6 +1609,19 @@ class GpuRenderActivity : AppCompatActivity() {
         }
         cameraGLView.release()
         lensManager.release()
+        // ③-3: 분석 스레드 소유 자원 정리 — GPU delegate 스레드 친화성(§5 주의 1)상
+        // 같은 스레드에서 close해야 한다. shutdown은 큐 잔여 작업 완료 후 종료된다.
+        runCatching {
+            analysisExecutor.execute {
+                faceTracker?.close()
+                faceTracker = null
+                abMeasure?.close()
+                if (tasksStabilizerHandle != 0L) {
+                    IrisLensSDK.destroyStabilizer(tasksStabilizerHandle)
+                    tasksStabilizerHandle = 0L
+                }
+            }
+        }
         analysisExecutor.shutdown()
         IrisLensSDK.releaseDetectionSlot()
         IrisLensSDK.releaseGpuBeauty()
