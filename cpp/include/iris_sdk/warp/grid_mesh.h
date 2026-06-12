@@ -173,7 +173,8 @@ public:
 
     /**
      * @brief 얼굴 랜드마크로 컨트롤 포인트 설정
-     * @param face_mesh MediaPipe Face Mesh 랜드마크 배열 (468개)
+     * @param face_mesh MediaPipe Face Mesh 랜드마크 배열 (프로젝트 표준 478개 — 단,
+     *        내부 매핑 테이블은 0~467만 수용하며 468~477 등록은 현재 탈락함. grid_mesh.cpp 참고)
      * @param landmark_count 랜드마크 개수
      * @param image_width 원본 이미지 너비 (픽셀)
      * @param image_height 원본 이미지 높이 (픽셀)

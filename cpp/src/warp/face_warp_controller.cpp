@@ -21,13 +21,20 @@ namespace warp {
 
 bool FaceWarpController::applyWarp(GridMesh& mesh,
                                    const IrisLandmark* face_mesh,
-                                   const WarpConfig& config) {
+                                   const WarpConfig& config,
+                                   int landmark_count) {
     // Validate input
     if (!mesh.isInitialized()) {
         return false;
     }
 
     if (face_mesh == nullptr) {
+        return false;
+    }
+
+    // ③-2 B3: 사용 최대 인덱스가 RIGHT_IRIS_CENTER(473)이므로 그보다 짧은 배열은
+    // 기존에 out-of-bounds 읽기(UB)였다 — 명시 거부로 전환 (정상 478 호출자는 불변).
+    if (landmark_count < kMinWarpLandmarkCount) {
         return false;
     }
 
