@@ -640,6 +640,22 @@ target_link_libraries(test_skin_mask_geometry PRIVATE
 gtest_discover_tests(test_skin_mask_geometry DISCOVERY_TIMEOUT 60)
 
 # ============================================================
+# ③-1: 랜드마크 주입 경계 — 파생 어댑터 + seqlock 더블버퍼 테스트 (ADR-0001 §6)
+# ============================================================
+add_executable(test_landmark_injection test_landmark_injection.cpp)
+target_include_directories(test_landmark_injection PRIVATE ${TEST_COMMON_INCLUDES})
+# 골든 baseline JSON 경로를 컴파일 타임 매크로로 주입(어댑터 동작 불변 대조용).
+target_compile_definitions(test_landmark_injection PRIVATE
+    GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden/baseline")
+target_link_libraries(test_landmark_injection PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_landmark_injection DISCOVERY_TIMEOUT 60)
+
+# ============================================================
 # P4-W3-04: DeviceTier 분류 + FreqSep 매핑 테스트
 # ============================================================
 add_executable(test_device_tier test_device_tier.cpp)

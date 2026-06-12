@@ -153,7 +153,58 @@ if(OpenCV_FOUND)
     endif()
 
     message(STATUS "image_demo: Enabled (OpenCV ${OpenCV_VERSION})")
+
+    # ============================================
+    # Golden Capture (골든 베이스라인 캡처 도구, 계획 2-2)
+    # ============================================
+    # 표준 입력 세트에 대해 검출 결과(JSON) + 렌즈 렌더/CPU beauty(PNG)를
+    # 결정적으로 캡처한다. 회전 경로(blocker)를 골든이 커버하기 위해
+    # 이미지를 실제 회전시킨 뒤 iris_sdk_detect_with_rotation에 전달한다.
+    #
+    # 사용법:
+    #   golden_capture --input <png> --models <dir> --texture <png> --out <dir>
+    #                  [--rotation {0|90|180|270}] [--mirror {0|1}] [--gamma <float>]
+    #                  [--out-stem <name>] [--no-beauty]
+
+    add_executable(golden_capture golden_capture.cpp)
+
+    target_link_libraries(golden_capture
+        PRIVATE
+            iris_sdk
+            ${OpenCV_LIBS}
+    )
+
+    target_include_directories(golden_capture
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/include
+            ${OpenCV_INCLUDE_DIRS}
+    )
+
+    # C++17 필요 (std::filesystem)
+    target_compile_features(golden_capture PRIVATE cxx_std_17)
+
+    # macOS 특화 설정
+    if(APPLE)
+        target_link_options(golden_capture PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+
+    # 모델 파일 복사 (빌드 후) — image_demo와 동일 패턴
+    if(EXISTS "${MODEL_SOURCE_DIR}")
+        add_custom_command(TARGET golden_capture POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:golden_capture>/models
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${MODEL_SOURCE_DIR}"
+                $<TARGET_FILE_DIR:golden_capture>/models
+            COMMENT "Copying model files for golden_capture..."
+        )
+    endif()
+
+    message(STATUS "golden_capture: Enabled (OpenCV ${OpenCV_VERSION})")
 else()
     message(STATUS "camera_demo: Disabled (OpenCV not found)")
     message(STATUS "image_demo: Disabled (OpenCV not found)")
+    message(STATUS "golden_capture: Disabled (OpenCV not found)")
 endif()
