@@ -81,8 +81,10 @@ dependencies {
     // IrisLensSDK (로컬 모듈)
     implementation(project(":iris-sdk"))
 
-    // MediaPipe Tasks Vision (Face Landmarker for benchmark comparison)
-    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    // MediaPipe Tasks Vision (Face Landmarker — ③-3 추적 A/B + benchmark)
+    // ⚠️ 0.10.35 고정 (ADR-0001 §5): latest.release 금지(레거시 0.20230731로 해석),
+    //    <0.10.26 금지(16KB page size 미정렬 — Play 제출 불가)
+    implementation("com.google.mediapipe:tasks-vision:0.10.35")
 
     // AndroidX Core
     implementation("androidx.core:core-ktx:1.12.0")
