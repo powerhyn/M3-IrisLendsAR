@@ -73,6 +73,9 @@ internal class FaceTracker(
         srcHeight: Int,
         rgba: ByteBuffer,
         rowStride: Int,
+        // 분석 프레임의 센서 타임스탬프(ns) — frame-sync 렌더링이 화면측 SurfaceTexture.timestamp와
+        // 매칭한다 (같은 센서 클럭). 트래킹 지연 핸드오프 §3-b.
+        frameTimestampNs: Long,
     ) -> Unit)? = null
 
     @Volatile private var usingGpu = false
@@ -146,6 +149,7 @@ internal class FaceTracker(
 
         // 분석 프레임의 센서 타임스탬프 (ns) — 프레임 동기 렌더링이 같은 클럭의
         // SurfaceTexture.timestamp와 매칭한다 (MediaPipe용 ts(uptime ms)와 별개 도메인).
+        // 클럭 게이트 실기기 검증 완료(06-15): 화면측 SurfaceTexture.timestamp와 동일 클럭.
         val frameTimestampNs = imageProxy.imageInfo.timestamp
 
         val width = imageProxy.width
@@ -192,7 +196,7 @@ internal class FaceTracker(
             // 소비자 예외는 격리한다 — detect 오류 처리(handleDetectError)로 흘러가면
             // GPU 폴백을 오판하기 때문.
             try {
-                onRawResult?.invoke(result, rotation, width, height, src, plane.rowStride)
+                onRawResult?.invoke(result, rotation, width, height, src, plane.rowStride, frameTimestampNs)
             } catch (e: RuntimeException) {
                 onError("onRawResult 소비자 오류: ${e.message}")
             }
@@ -276,7 +280,13 @@ internal class FaceTracker(
         val options = FaceLandmarker.FaceLandmarkerOptions.builder()
             .setBaseOptions(baseOptions)
             .setRunningMode(RunningMode.VIDEO)
-            .setNumFaces(1)
+            // ③-3: numFaces=2로 MediaPipe face_landmarker 그래프의 내부
+            // LandmarksSmoothingCalculator(One-Euro 0.05/80) 노드를 우회한다 —
+            // 이 노드는 num_faces==1 + 스트림 모드(VIDEO)에서만 활성화되며
+            // (face_landmarker_graph.cc), 활성 시 코어 stabilize와 직렬 이중 필터가
+            // 되어 추적 위상 지연이 누적된다(§5 주의 3 '이중 필터 금지' 위반).
+            // 소비자는 전경(최대) 얼굴 1개만 사용하므로 2번째 슬롯은 미사용.
+            .setNumFaces(2)
             .setMinFaceDetectionConfidence(0.5f)
             .setMinTrackingConfidence(0.5f)
             .setMinFacePresenceConfidence(0.5f)

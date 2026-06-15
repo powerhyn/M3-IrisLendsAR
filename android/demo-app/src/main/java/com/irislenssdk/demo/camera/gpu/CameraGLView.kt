@@ -95,6 +95,21 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * frame-sync(트래킹 지연 핸드오프 §3-b): 분석 스레드가 매 검출마다 호출 — 최신 랜드마크가
+     * 계산된 프레임의 센서 ns. 렌더가 이 ts와 |Δ| 최소인 링 슬롯을 골라 그린다. volatile 직접 set.
+     */
+    fun setLandmarkFrameTimestamp(ns: Long) {
+        glRenderer.setLandmarkFrameTimestamp(ns)
+    }
+
+    /** frame-sync 킬스위치 토글 (UI 스레드 → GL 스레드에서 강등 상태 리셋). */
+    fun setFrameSyncEnabled(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setFrameSyncEnabled(enabled)
+        }
+    }
+
+    /**
      * Temporal 상태 리셋 (onResume 시 호출)
      */
     fun resetTemporalState() {

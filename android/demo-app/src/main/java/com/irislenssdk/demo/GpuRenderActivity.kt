@@ -189,6 +189,8 @@ class GpuRenderActivity : AppCompatActivity() {
 
     private lateinit var btnTrackerMode: Button
     private lateinit var btnAbMeasure: Button
+    private lateinit var btnFrameSync: Button
+    @Volatile private var frameSyncEnabled = false  // frame-sync 킬스위치 (트래킹 지연 핸드오프 §3-b)
     private lateinit var tvAbHud: TextView
 
     // Temporal Stabilizer (SDK 코어 스무딩)
@@ -264,6 +266,7 @@ class GpuRenderActivity : AppCompatActivity() {
         // ③-3: 추적 공급자 토글 + 듀얼 A/B 측정 (REFACTOR-3-3 §4)
         btnTrackerMode = findViewById(R.id.btnTrackerMode)
         btnAbMeasure = findViewById(R.id.btnAbMeasure)
+        btnFrameSync = findViewById(R.id.btnFrameSync)
         tvAbHud = findViewById(R.id.tvAbHud)
 
         // 뷰티 탭 UI
@@ -776,7 +779,7 @@ class GpuRenderActivity : AppCompatActivity() {
                 if (overlayView.debugMode) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt()
             )
             btnToggleIris.setTextColor(
-                if (overlayView.showFaceRect) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt()
+                if (overlayView.showRawIris) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt()
             )
             btnToggleLog.setTextColor(
                 if (stabilityLogger?.isActive == true) 0xFFFF4444.toInt() else 0xFFAAAAAA.toInt()
@@ -801,10 +804,12 @@ class GpuRenderActivity : AppCompatActivity() {
             Toast.makeText(this, "FreqSep Debug: ${debugModeNames[freqSepDebugMode]}", Toast.LENGTH_SHORT).show()
         }
 
+        // 진단(트래킹 지연 핸드오프 §2): raw(stabilize 이전, 마젠타) + 필터(녹색) 홍채 중심 오버레이.
+        // 움직임 중 마젠타가 화면 눈보다 늦으면 = 픽셀-랜드마크 프레임 불일치(필터 무관) → frame-sync 필요.
         btnToggleIris.setOnClickListener {
-            overlayView.showFaceRect = !overlayView.showFaceRect
+            overlayView.showRawIris = !overlayView.showRawIris
             updateButtonColors()
-            Toast.makeText(this, "Face Rect: ${if (overlayView.showFaceRect) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Raw 홍채 오버레이(진단): ${if (overlayView.showRawIris) "ON (마젠타=raw, 녹색=필터)" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
 
         // StabilityLogger 토글 (P4-W1-02)
@@ -1056,6 +1061,9 @@ class GpuRenderActivity : AppCompatActivity() {
                 )
             }
 
+            // 진단(트래킹 지연 핸드오프 §2): stabilize 이전 raw 홍채 사본 — OverlayView 마젠타 오버레이용
+            val rawDiagSnapshot = IrisResult().also { it.copyFrom(irisResult) }
+
             // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요)
             if (detectResult == IrisLensSDK.OK || detectResult == IrisLensSDK.NO_FACE) {
                 if (stabilizerHandle == 0L) {
@@ -1066,6 +1074,10 @@ class GpuRenderActivity : AppCompatActivity() {
                     IrisLensSDK.stabilize(stabilizerHandle, irisResult, timestampSec)
                 }
             }
+
+            // frame-sync: 이 검출이 수행된 분석 프레임의 센서 ns를 렌더러에 전달 (LEGACY도 대칭 적용 —
+            // frame-sync는 렌더 경로 공통이라 양 모드 동일 적용해야 A/B 변인 격리 유지, plan §4.1)
+            cameraGLView.setLandmarkFrameTimestamp(imageProxy.imageInfo.timestamp)
 
             // GPU 렌더러에 스무딩된 결과 전달 (매 프레임, 미검출 포함)
             // 프레임별 새 복사본으로 소유권 이전 — torn read 방지
@@ -1099,6 +1111,7 @@ class GpuRenderActivity : AppCompatActivity() {
             }
             val uiSnapshot = IrisResult().also { it.copyFrom(irisResult) }
             runOnUiThread {
+                overlayView.setRawIris(rawDiagSnapshot)
                 overlayView.setIrisResult(
                     uiSnapshot,
                     overlayFrameW,
@@ -1175,11 +1188,36 @@ class GpuRenderActivity : AppCompatActivity() {
         srcHeight: Int,
         rgba: java.nio.ByteBuffer,
         rowStride: Int,
+        frameTimestampNs: Long,
     ) {
         if (trackerMode != TrackerMode.TASKS) return // 전환 직후 잔존 콜백 방어
 
+        // frame-sync: 이 랜드마크가 계산된 분석 프레임의 센서 ns를 렌더러에 전달 (링버퍼 매칭 키)
+        cameraGLView.setLandmarkFrameTimestamp(frameTimestampNs)
+
         val faces = result.faceLandmarks()
-        val lm = if (faces.isNotEmpty()) faces[0] else null
+        // numFaces=2(MP 내부 스무딩 우회, FaceTracker)면 배경 얼굴/포스터가 섞일 수 있어
+        // 전경(최대 bbox) 얼굴을 고른다 — MediaPipe는 faces[0]가 주 피사체라고 보장하지 않는다.
+        // 단일 얼굴이면 bbox 계산 없이 그대로 사용.
+        val lm = when (faces.size) {
+            0 -> null
+            1 -> faces[0]
+            else -> faces.maxByOrNull { f ->
+                var minX = Float.MAX_VALUE
+                var maxX = -Float.MAX_VALUE
+                var minY = Float.MAX_VALUE
+                var maxY = -Float.MAX_VALUE
+                for (p in f) {
+                    val x = p.x()
+                    val y = p.y()
+                    if (x < minX) minX = x
+                    if (x > maxX) maxX = x
+                    if (y < minY) minY = y
+                    if (y > maxY) maxY = y
+                }
+                (maxX - minX) * (maxY - minY)
+            }
+        }
         val converted = lm != null && TasksToIrisResult.convert(
             lm, rotation, srcWidth, srcHeight, result.timestampMs(), tasksIrisResult
         )
@@ -1194,6 +1232,10 @@ class GpuRenderActivity : AppCompatActivity() {
                 rgba, rowStride, srcWidth, srcHeight, lm!!, tasksIrisResult
             )
         }
+
+        // 진단(트래킹 지연 핸드오프 §2): stabilize 이전 raw 홍채 사본 — OverlayView 마젠타 오버레이용.
+        // 변환만 거친(필터 없음) 좌표라 '필터 이전부터 늦는가' 확인의 정본.
+        val rawDiagSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
 
         // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요, LEGACY 동일)
         // TASKS 전용 핸들 — 같은 코어 stabilize, LEGACY 핸들 수명 불간섭 (§5-5)
@@ -1234,6 +1276,7 @@ class GpuRenderActivity : AppCompatActivity() {
         val frameW = uiSnapshot.frameWidth
         val frameH = uiSnapshot.frameHeight
         runOnUiThread {
+            overlayView.setRawIris(rawDiagSnapshot)
             overlayView.setIrisResult(
                 uiSnapshot, frameW, frameH,
                 lensFacing == CameraSelector.LENS_FACING_FRONT
@@ -1264,6 +1307,27 @@ class GpuRenderActivity : AppCompatActivity() {
         btnAbMeasure.setOnClickListener {
             setAbMeasureEnabled(!abMeasureEnabled)
         }
+
+        // frame-sync 킬스위치 (트래킹 지연 핸드오프 §3-b): 렌더가 '랜드마크가 계산된 프레임'을
+        // 그린다. ON이면 렌즈-눈 어긋남 제거(양 모드), 대신 거울 지연 +2~3프레임. 양 모드 공통 적용.
+        btnFrameSync.setOnClickListener {
+            setFrameSyncEnabled(!frameSyncEnabled)
+        }
+    }
+
+    private fun setFrameSyncEnabled(enabled: Boolean) {
+        frameSyncEnabled = enabled
+        cameraGLView.setFrameSyncEnabled(enabled)
+        btnFrameSync.text = if (enabled) "fsync:on" else "fsync:off"
+        btnFrameSync.setBackgroundColor(
+            if (enabled) 0xCC2196F3.toInt() else 0x66555555.toInt()
+        )
+        Toast.makeText(
+            this,
+            "Frame-sync: ${if (enabled) "ON (렌즈 정합↑, 거울 지연↑)" else "OFF (현행)"}",
+            Toast.LENGTH_SHORT
+        ).show()
+        Log.i(TAG, "frame-sync → $enabled")
     }
 
     /**
