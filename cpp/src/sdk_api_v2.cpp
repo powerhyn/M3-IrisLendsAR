@@ -73,12 +73,15 @@ IRIS_SDK_ASSERT_RESULT_FIELD(avg_iris_luma_left);
 IRIS_SDK_ASSERT_RESULT_FIELD(avg_iris_luma_right);
 #undef IRIS_SDK_ASSERT_RESULT_FIELD
 
-#ifdef IRIS_SDK_HAS_GLES
 // P7-W2: 이 파일은 C IrisResult ↔ C++ iris_sdk::IrisResult를 reinterpret_cast로
-// 교환한다(렌더/ROI 경로). 두 구조체 레이아웃이 어긋나면 UB → 컴파일 타임에 차단.
+// 교환한다(렌더/ROI 경로, GLES 블록 내). 두 구조체 레이아웃이 어긋나면 UB.
+// ④ W4-B2: sizeof 가드를 GLES 밖으로 이동 — 기존엔 #ifdef 안이라 non-GLES(데스크톱)
+// 빌드에서 죽어, offsetof가 못 잡는 trailing-padding 드리프트가 미검출됐다. 레이아웃
+// 일치는 컴파일타임 불변이라 위 offsetof 가드와 동일하게 양쪽 빌드 모두에서 검사한다.
 static_assert(sizeof(::IrisResult) == sizeof(iris_sdk::IrisResult),
               "C/C++ IrisResult layout must match for reinterpret_cast (P7-W2 field add)");
 
+#ifdef IRIS_SDK_HAS_GLES
 std::unique_ptr<iris_sdk::GPUBeautyBackend> g_gpu_beauty;
 std::unique_ptr<iris_sdk::GPULensRenderer> g_gpu_lens;
 // P6-W7: SKU 메타 레지스트리. g_gpu_lens->setSkuRegistry()에 raw 포인터를 넘기므로

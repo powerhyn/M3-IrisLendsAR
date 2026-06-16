@@ -103,6 +103,10 @@ typedef enum IrisFrameFormat {
  * @brief Eye Refiner 실행 정책
  *
  * 2차 눈 정밀화 모델(iris_landmark)의 실행 조건을 지정합니다.
+ *
+ * @deprecated ④ W4-D에서 삭제 예정 — C++ 미러 EyeRefinerPolicy(types.h)와 함께. 추적
+ *   외부화로 Eye Refiner(iris_landmark 2차 추론) 소멸(ADR §6.2). iris_sdk_set_eye_refiner_policy는
+ *   이미 no-op(detector 미연결). 호출자 0이라 W4-E deprecation 마킹 후 2.0 삭제(ADR §8.2 패턴).
  */
 typedef enum IrisEyeRefinerPolicy {
     IRIS_EYE_REFINER_ALWAYS = 0,        /**< 항상 실행 (HQ 모드) */
@@ -200,12 +204,14 @@ typedef struct IrisResult {
     int32_t frame_width;        /**< 원본 프레임 너비 */
     int32_t frame_height;       /**< 원본 프레임 높이 */
 
-    /* Eye Refiner 메타데이터 */
-    float iris_quality_left;    /**< 왼쪽 홍채 품질 점수 (0.0~1.0) */
-    float iris_quality_right;   /**< 오른쪽 홍채 품질 점수 (0.0~1.0) */
+    /* Eye Refiner 메타데이터.
+       @deprecated iris_quality_left/right, eye_refiner_used: ④ W4-D 삭제(ADR §6.2, C++ 미러
+       types.h와 동반). 골든 재캡처+JNI 매핑 동시 변경이라 W4-B2 이월. eyelid_ratio는 W3용 별도. */
+    float iris_quality_left;    /**< [W4-D 삭제] 왼쪽 홍채 품질 점수 (0.0~1.0) */
+    float iris_quality_right;   /**< [W4-D 삭제] 오른쪽 홍채 품질 점수 (0.0~1.0) */
     float eyelid_ratio_left;    /**< 왼쪽 눈꺼풀 가림 비율 (0.0~1.0) */
     float eyelid_ratio_right;   /**< 오른쪽 눈꺼풀 가림 비율 (0.0~1.0) */
-    bool eye_refiner_used;      /**< Eye Refiner 사용 여부 */
+    bool eye_refiner_used;      /**< [W4-D 삭제] Eye Refiner 사용 여부 */
 
     /* P7-W2: iris ROI 실측 평균 luma (srgb²+Rec.709 linear, 0~1, -1=미측정).
        C++ iris_sdk::IrisResult와 동일 레이아웃 유지(sdk_api_v2.cpp reinterpret_cast). */
@@ -578,9 +584,11 @@ IRIS_SDK_EXPORT bool iris_sdk_is_using_inference_thread(void);
  *          실제로 적용되지 않으며, 그럼에도 IRIS_SDK_OK를 반환한다(조용한 성공).
  *          내부 기본값은 EyeRefinerPolicy::Never이다. 호출자가 정책을 설정해도
  *          검출 동작은 바뀌지 않는다.
- * @todo (④ 표면 정리) SDKManager 경유로 실제 연결하거나, 미지원을 정직하게
- *       알리는 에러 코드(IRIS_SDK_NOT_SUPPORTED 류)를 반환하도록 변경할 것.
- *       반환값/시그니처 변경은 ③-2 범위 밖이므로 보류한다.
+ * @todo (④ W4-B2 결정) 실제 연결은 폐기한다 — 추적 외부화로 Eye Refiner 자체가
+ *       소멸하므로(ADR §6.2) 연결할 대상이 없다. enum(IrisEyeRefinerPolicy/C++ 미러
+ *       EyeRefinerPolicy)과 함께 W4-D 삭제 대상이며, 호출자 0이라 시그니처는 W4-E에서
+ *       IRIS_SDK_DEPRECATED 마킹 후 2.0 제거(ADR §8.2 패턴). 그때까지 no-op stub 유지
+ *       (반환값 변경도 surface 호환을 위해 보류).
  */
 IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_eye_refiner_policy(IrisEyeRefinerPolicy policy);
 
@@ -1098,7 +1106,10 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_render_with_result(
 // ============================================================================
 //
 // 추적(코어 밖)이 478점 랜드마크를 코어로 주입한다. 프레임 픽셀은 경계를 넘지 않는다.
-// ③-1 단계: 신규 부가 채널로 가동(기존 detect 경로는 무변경). 완전 단일화는 ④.
+// ③-1: 신규 부가 채널로 가동 → ④ W4-B2: **정식 랜드마크 공급 경계로 승격**. generation
+// 검증 + §6.1 입력 유효성 가드(num_points 478/NULL/치수/NaN·Inf) 완비, detect 경로와 동일
+// 저장소(g_landmark_store, feed_landmark_store) 공유로 writer 직렬화. 완전 단일화(detect
+// 경로 제거로 본 함수가 유일 공급자가 됨)는 W4-D(추적 코어 제거)에서.
 //
 // 좌표 계약(ADR §7): 주입 478점은 회전 보정 완료(upright) 프레임 기준 정규화 좌표
 //   [0,1] (x,y) + z. 항상 비미러(센서 원본). 미러는 렌더 단일 책임. 홍채 z 기하 사용 금지.
