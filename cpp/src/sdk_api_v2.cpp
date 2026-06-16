@@ -259,7 +259,7 @@ IrisSdkError iris_sdk_apply_beauty_v2_c(
 
     // CPU 백엔드 사용
     if (!ensureCpuBackend()) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     // C++ 설정으로 변환
@@ -315,7 +315,7 @@ IrisSdkError iris_sdk_init_gpu_beauty(void) {
     g_gpu_beauty = std::make_unique<iris_sdk::GPUBeautyBackend>();
     if (!g_gpu_beauty->initialize(nullptr)) {
         g_gpu_beauty.reset();
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     return IRIS_SDK_OK;
@@ -365,7 +365,7 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
 
     if (!g_gpu_beauty || !g_gpu_beauty->isInitialized()) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     if (!config || !output_texture) {
@@ -499,7 +499,7 @@ IrisSdkError iris_sdk_apply_face_warp(
 
     if (!g_gpu_beauty || !g_gpu_beauty->isInitialized()) {
         *output_texture = input_texture;
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     // Face Warp 적용
@@ -580,7 +580,7 @@ IrisSdkError iris_sdk_init_gpu_lens(void) {
     g_gpu_lens = std::make_unique<iris_sdk::GPULensRenderer>();
     if (!g_gpu_lens->initialize(nullptr)) {
         g_gpu_lens.reset();
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     // P6-W7: 메타가 init 이전에 등록된 경우 새 렌더러에 다시 연결.
@@ -617,7 +617,7 @@ IrisSdkError iris_sdk_load_lens_texture(const uint8_t* data, int width, int heig
 #ifdef IRIS_SDK_HAS_GLES
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
     if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
     if (!data || width <= 0 || height <= 0) {
         return IRIS_SDK_INVALID_PARAM;
@@ -661,7 +661,7 @@ IrisSdkError iris_sdk_load_lens_texture_with_sku(
 #ifdef IRIS_SDK_HAS_GLES
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
     if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
     if (!data || width <= 0 || height <= 0) {
         return IRIS_SDK_INVALID_PARAM;
@@ -697,7 +697,7 @@ IrisSdkError iris_sdk_render_lens_texture(
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
 
     if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
     if (!output_texture || !detection) {
         return IRIS_SDK_NULL_POINTER;
@@ -729,7 +729,8 @@ IrisSdkError iris_sdk_render_lens_texture(
     // C++ ErrorCode → C IrisSdkError 변환
     switch (err) {
         case iris_sdk::ErrorCode::Success: return IRIS_SDK_OK;
-        case iris_sdk::ErrorCode::NotInitialized: return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        // NotInitialized 정본은 IRIS_SDK_NOT_INITIALIZED=100 (굳은 ABI 계약). v1 convert_error_code와 동일 매핑. (W4-A 정정)
+        case iris_sdk::ErrorCode::NotInitialized: return IRIS_SDK_NOT_INITIALIZED;
         case iris_sdk::ErrorCode::NullPointer: return IRIS_SDK_NULL_POINTER;
         case iris_sdk::ErrorCode::NoTextureLoaded: return IRIS_SDK_NO_TEXTURE;
         default: return IRIS_SDK_RENDER_FAILED;
@@ -792,7 +793,7 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_env_map(const uint8_t* data, int widt
 #ifdef IRIS_SDK_HAS_GLES
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
     if (!g_gpu_lens || !g_gpu_lens->isInitialized()) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
     if (!data || width <= 0 || height <= 0) {
         return IRIS_SDK_INVALID_PARAM;

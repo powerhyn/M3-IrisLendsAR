@@ -874,6 +874,9 @@ const char* iris_sdk_error_to_string(IrisSdkError error) {
             return "IRIS_SDK_RENDER_FAILED";
         case IRIS_SDK_NO_TEXTURE:
             return "IRIS_SDK_NO_TEXTURE";
+        case IRIS_SDK_ERROR_NOT_INITIALIZED:
+            // deprecated alias(501) — 정본 100과 동일 문자열. alias가 들어와도 Unknown 안 되게. (W4-A 정정)
+            return "IRIS_SDK_NOT_INITIALIZED";
         case IRIS_SDK_UNKNOWN:
         default:
             return "IRIS_SDK_UNKNOWN";

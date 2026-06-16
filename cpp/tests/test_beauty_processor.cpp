@@ -114,7 +114,8 @@ TEST(CPUBeautyBackendTest, Apply_NotInitialized_ReturnsError) {
     IrisSdkError result = backend.apply(
         frame.data(), 640, 480, IRIS_FORMAT_RGB, config, nullptr);
 
-    EXPECT_EQ(result, IRIS_SDK_ERROR_NOT_INITIALIZED);
+    // NotInitialized 정본은 IRIS_SDK_NOT_INITIALIZED=100 (W4-A 정정).
+    EXPECT_EQ(result, IRIS_SDK_NOT_INITIALIZED);
 }
 
 TEST(CPUBeautyBackendTest, Apply_NullFrameData_ReturnsError) {
@@ -304,8 +305,9 @@ TEST(BeautyProcessorTest, Process_NotInitialized_ReturnsError) {
 
     auto frame = createTestFrame(640, 480, 3);
 
+    // NotInitialized 정본은 IRIS_SDK_NOT_INITIALIZED=100 (W4-A 정정).
     EXPECT_EQ(processor.process(frame.data(), 640, 480, IRIS_FORMAT_RGB, nullptr),
-              IRIS_SDK_ERROR_NOT_INITIALIZED);
+              IRIS_SDK_NOT_INITIALIZED);
 }
 
 TEST(BeautyProcessorTest, Process_DisabledConfig_NoChange) {

@@ -132,7 +132,7 @@ IrisSdkError BeautyProcessor::process(
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_ || !backend_) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     if (!config_.enabled) {
@@ -172,7 +172,7 @@ IrisSdkError BeautyProcessor::processTexture(
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_ || !backend_) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     if (!config_.enabled) {

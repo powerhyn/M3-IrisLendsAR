@@ -1,7 +1,7 @@
 # REFACTOR-4: 추적 레이어 주입형 전환 (④) — 실행 계획
 
 > 새 세션이 이 문서 + ADR-0001만 읽고 ④를 실행할 수 있도록 작성. 작성: 2026-06-15.
-> 상태: 🔄 **④ 진행 중** — 게이트0 승인(2026-06-16). **W4-B1 완료**(방향 A) + **W4-B2 완료**(축소 — enum/메타 물리 제거는 W4-D 이월). **검출 폴백(Eye-Only)=글루 책임 결정**(ADR §3, 2026-06-16). 다음=W4-A(§6.4 표면 정리) 또는 W4-B3(DetectionSlot 재설계+ts 원자성).
+> 상태: 🔄 **④ 진행 중** — **W4-B1**(방향 A)+**W4-B2**(축소, enum/메타 W4-D 이월)+**W4-A**(internal 헤더 776302f + 에러코드 501→100; 기본값은 P8 이월) 완료. 검출 폴백(Eye-Only)=글루 결정(ADR §3). 다음=**W4-B3**(DetectionSlot 재설계+ts원자성) → W4-C/D/E. **④ 완료 후 P8 뷰티**(사용자 확정 2026-06-16: 핵심=① 피부 skin smoothing[P8-W1 구현됨] + ② 턱깎기 형태워프[미구현, grid_mesh substrate 보존]; 곁가지 LUT/레거시FreqSep/색보정/vivid 제거).
 > 근거: ADR-0001(승인 2026-06-11) §3/§6/§8/§9/§12, REFACTOR-3-3 §9 이월, 스코핑 워크플로(wf_207a105f-dcc 수확 + wf_4f1249e6-81a 연속), **Codex 외부 검증 + critical-review(2026-06-15)**.
 
 ## 0. 핵심 사실 (스코핑 실측 2026-06-15)
@@ -28,11 +28,11 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 
 ## 3. 단계 (W4-A → E, 의존 순서)
 
-### W4-A — §6.4 표면 정리 (동작 불변, 게이트=골든 일치)
-신규 주입 함수를 정식 승격하기 **전에** 기존 C API 표면 결함 정리(ADR §6.4):
-- **에러코드 정본 단일화**: `IRIS_SDK_NOT_INITIALIZED=100`(sdk_api.h:41) ↔ `IRIS_SDK_ERROR_NOT_INITIALIZED=501`(:73) 이중 변환을 단일 정본으로, sdk_api.cpp/sdk_api_v2.cpp 변환 일원화.
-- **BeautyFilterConfigV2 기본값 단일소스화**: C++(beauty_filter.h) / Java(`BeautyFilterConfigV2.java:217-240` DEFAULT_) / 문서 3원 분기 → 단일 파생(현재 값 우연 일치하나 드리프트 무검출 구조).
-- **internal 9종 헤더 선언화**: `iris_jni.cpp:2238-2348` 수동 extern 9종(sclera_veto, env_map 3종, reflection 2종, blink_up, gate_threshold, detail_reinject, use_measured_luma)을 내부 헤더로 정식화.
+### W4-A — §6.4 표면 정리 — 🔶 부분 완료 (2026-06-16; internal+에러코드 완료, 기본값 뷰티 이월)
+신규 주입 함수 승격 전 기존 C API 표면 결함 정리(ADR §6.4). 3축 조사(wf_3ab20fa3)로 각 항목이 ABI/언어/제품 제약으로 일부 축소·이월됨.
+- **internal 9종 헤더 선언화 — ✅ 완료 (776302f)**: `iris_jni.cpp` 수동 extern 9종(sclera_veto, env_map/reflection 4종, blink/gate/detail/luma 4종)을 `cpp/include/iris_sdk/internal/bench_toggles.h`로 정식화. 정의(sdk_api_v2.cpp)+소비(JNI) 양쪽 include로 시그니처 강제, install에서 internal/ 제외. 순수 선언 정리(동작·ABI 불변). 검증: 빌드/골든/ctest/assembleDebug 통과.
+- **에러코드 정본 단일화 — ✅ 완료 (커밋 예정)**: NotInitialized 정본을 `IRIS_SDK_NOT_INITIALIZED=100`으로 일원화 — v2/beauty/gpu 16곳 `=501`→100, v2 switch/errorToString/NotInitialized 테스트 2개 정합. `IRIS_SDK_ERROR_NOT_INITIALIZED=501`은 deprecated alias로 **ABI 보존**(2.0 삭제). 효과: v2 GPU 경로의 Kotlin Unknown-오분류 잠복결함 해소. 소비처 0이라 '의도된 surface 정정'(W4-B1 류, 동작 불변 아님). 검증: 빌드/골든(에러코드 미검증→무영향)/ctest 회귀0(pre-existing 5)/assembleDebug exit0.
+- **BeautyFilterConfigV2 기본값 단일소스화 — ⏭️ P8 뷰티 트랙 이월**: 실제 4원 분기(C++ Helper/Java DEFAULT_/C 미러/문서) + 드리프트 실재(문서 smoothing 0.5/softFocus 0.3 vs 정본 0.0; **enabled 충돌** C미러=1 vs Java/C++=false). 핵심인 enabled 정본 통일이 'P8 뷰티 기본값 재정의'(skin smoothing이 enabled 게이트 의존)에 묶이므로 P8 뷰티 트랙에서 곁가지 정리와 함께 처리. 진짜 단일정의는 언어 경계로 불가 → 현실 해법=정본 명문화+드리프트 가드+문서 정정.
 
 ### W4-B — types.h 정리 + 주입 승격 (Codex 권고로 B1~B4 분할, 회귀 원인 분리)
 한 PR로 묶지 않고 독립 PR 4개로 — 각 단계 동작 불변(게이트=골든 일치), 단 B1의 confidence 수정은 의도된 동작 변경(주입 경로 한정).

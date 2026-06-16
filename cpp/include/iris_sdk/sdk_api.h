@@ -69,7 +69,11 @@ typedef enum IrisSdkError {
     /* 기능 에러 (500-599) */
     /** @brief 지원하지 않는 기능 */
     IRIS_SDK_ERROR_NOT_SUPPORTED = 500,
-    /** @brief 초기화되지 않음 */
+    /**
+     * @brief 초기화되지 않음 (deprecated alias)
+     * @deprecated NotInitialized 정본은 IRIS_SDK_NOT_INITIALIZED=100.
+     *             이 alias(501)는 ABI 호환을 위해 1.x에서 유지하며 2.0에서 삭제 예정. (W4-A 정정)
+     */
     IRIS_SDK_ERROR_NOT_INITIALIZED = 501,
 
     /** @brief 알 수 없는 에러 */
@@ -761,7 +765,7 @@ IRIS_SDK_EXPORT int iris_sdk_is_gpu_beauty_initialized(void);
  * @param detection 얼굴 검출 결과 (NULL 가능)
  * @param lut_texture_id LUT 3D 텍스처 ID (0이면 LUT 비활성)
  * @param lut_intensity LUT 적용 강도 (0.0~1.0)
- * @return IRIS_SDK_OK 성공, IRIS_SDK_ERROR_NOT_INITIALIZED GPU 미초기화
+ * @return IRIS_SDK_OK 성공, IRIS_SDK_NOT_INITIALIZED GPU 미초기화 (W4-A: 501 alias→100 정본)
  */
 IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
     uint32_t input_texture,

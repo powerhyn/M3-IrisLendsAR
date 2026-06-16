@@ -385,7 +385,8 @@ TEST_F(GPUBeautyBackendTest, ApplyReturnsErrorWhenNotInitialized) {
     IrisSdkError err = backend_->apply(
         frame.data(), 640, 480, IRIS_FORMAT_RGBA, config, nullptr);
 
-    EXPECT_EQ(err, IRIS_SDK_ERROR_NOT_INITIALIZED);
+    // NotInitialized 정본은 IRIS_SDK_NOT_INITIALIZED=100 (W4-A 정정).
+    EXPECT_EQ(err, IRIS_SDK_NOT_INITIALIZED);
 }
 
 TEST_F(GPUBeautyBackendTest, ApplyTextureReturnsErrorWhenNotInitialized) {
@@ -401,7 +402,8 @@ TEST_F(GPUBeautyBackendTest, ApplyTextureReturnsErrorWhenNotInitialized) {
 
     IrisSdkError err = backend_->applyTexture(input, output, config, nullptr);
 
-    EXPECT_EQ(err, IRIS_SDK_ERROR_NOT_INITIALIZED);
+    // NotInitialized 정본은 IRIS_SDK_NOT_INITIALIZED=100 (W4-A 정정).
+    EXPECT_EQ(err, IRIS_SDK_NOT_INITIALIZED);
 
     delete static_cast<GLuint*>(input.native_handle);
 }
