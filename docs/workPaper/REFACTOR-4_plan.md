@@ -51,6 +51,7 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 **W4-C로 SDK가 추적을 책임진 후에만 안전**(현 LEGACY 기본 — 먼저 지우면 데모·골든 깨짐). iOS/Web은 소스 0개 빈 스텁이라 코어 제거에 영향받는 활성 소비자 없음(§0):
 - 코어: mediapipe_detector(150KB)+.h, inference_thread, iris_detector, frame_processor(검출/NV21·NV12/비동기 submitFrame).
 - sdk_api detect 계열, sdk_manager createDetector, JNI nativeDetect*/confidence 계열.
+- **types.h enum/메타 (W4-B2에서 이월 — W4-B2 조사 2026-06-16)**: `DetectorType`(types.h:88)/`EyeRefinerPolicy`(:99) enum + detector 전용 메타(`iris_quality_*`/`eye_refiner_used`) 필드. 소비처(iris_detector 죽은 팩토리·mediapipe_detector·frame_processor·sdk_manager createDetector + 테스트 5종)가 전부 이 단계 제거 대상이라 **동작 불변(W4-B2)으로 못 지움** → detector 인프라와 원자 삭제. 메타 필드 제거는 IrisResult 레이아웃 변경(offsetof 가드/JNI 매핑/Java IrisResult/골든 18벌 동시 수정)이라 **골든 재캡처 동반**. **코어 폴백 미보유 확정**(ADR §3 검출 폴백 결정 2026-06-16 — Eye-Only는 글루 책임)이라 EyeOnly/Hybrid 자리표시(구현 0)까지 완전 삭제. C enum `IrisEyeRefinerPolicy`+no-op `iris_sdk_set_eye_refiner_policy`(호출자 0)는 SDK surface라 W4-E deprecation(ADR §8.2 패턴).
 - TFLite CMake 블록(cpp/CMakeLists.txt:224-537) + cpp/third_party/tflite/ + .tflite/.task 에셋.
 - 추적 의존 테스트 12파일(test_mediapipe_detector*/test_iris_detector/test_frame_processor/test_integration 등) + examples 2종.
 - **좌표 canonical left/right 라벨 정정 (ADR §7.3 — Codex 지적, ⑤에서 이동)**: 코어 'left'=468-472=MediaPipe FACEMESH_RIGHT 반전 + 내/외안각 인덱스 반전 + beauty_roi_manager 명명 반전을 canonical(피험자 해부학) 기준으로 일괄 정정, LensSimulator LandmarkIndices.kt를 명명 정본으로. **출력이 바뀌므로 아래 재기준선과 한 묶음**(동작 불변 아님이라 W4-B 아닌 여기).
@@ -72,7 +73,7 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 - 게이트0 미기록(§1) — 착수 전 해소. 코어 삭제 시점(W4-D)이 글루 승격 완료에 종속.
 
 ## 6. 이월 (④ 범위 밖)
-⑤: grid_mesh resize(468)→478 확장 + geometry 수식 수리. (좌표 canonical 라벨 정정은 ADR §7.3 따라 ④ W4-D로 이동 — Codex 지적 반영.) 2.0: cpu-render 물리 삭제, 코어 TFLite 잔재 최종 삭제. 후속: iOS(Swift 글루)/Web(TS 글루) 전환 — 현재 빈 스텁이라 ④ 코어 제거에 무영향, 구현 시 각자 Tasks 글루로 추적(ADR §3).
+⑤: grid_mesh resize(468)→478 확장 + geometry 수식 수리. (좌표 canonical 라벨 정정은 ADR §7.3 따라 ④ W4-D로 이동 — Codex 지적 반영.) 2.0: cpu-render 물리 삭제, 코어 TFLite 잔재 최종 삭제. 후속: iOS(Swift 글루)/Web(TS 글루) 전환 — 현재 빈 스텁이라 ④ 코어 제거에 무영향, 구현 시 각자 Tasks 글루로 추적(ADR §3). **Eye-Only 검출 폴백(글루 트랙, Phase 9+)**: MediaPipe Tasks 얼굴 검출 실패(눈만 클로즈업/극단 각도) 시 Eye-Only `.tflite` 폴백 — ADR §3 결정(2026-06-16)으로 **플랫폼 글루 책임**(코어 밖, TFLite 글루 위임해 코어 .so TFLite-free 유지). 코어는 추적 미보유 유지. Eye-Only 모델 출력(눈 주변 점)→478 주입 계약 변환 설계 동반.
 
 ## 7. 견적
 **20~28 사람·일 (1인 4~6주)**. ADR §13 원견적(18~25인일+cpu-render 2~4일)에 W4-B 분할·confidence 정정·AAR 패키징·재캡처 manifest·16KB 전수검증 부담 반영(Codex 권고로 상향 — 초안 15~22는 낙관적).
