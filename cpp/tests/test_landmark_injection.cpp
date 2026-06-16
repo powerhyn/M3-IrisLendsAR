@@ -20,6 +20,7 @@
 #include "iris_sdk/landmark_injection.h"
 #include "iris_sdk/sdk_api.h"
 #include "iris_sdk/types.h"
+#include "iris_sdk/gpu/eye_render_packet_adapter.h"  // W4-B1: 어댑터 통과 visibility 검증
 
 #include <gtest/gtest.h>
 
@@ -338,6 +339,42 @@ TEST_F(LandmarkAdapterGoldenTest, ComputesEarInNormalizedSpace) {
     EXPECT_GT(right_ear, 0.0f);
 }
 
+// W4-B1 핵심 회귀 가드: 주입 결과가 어댑터를 통과하면 검출된 눈의 visibility > 0이어야 한다
+// (렌즈 렌더 가능). confidence=0을 두던 시절 어댑터(eye_render_packet_adapter.cpp:89)
+// visibility = 0 * (1 - eyelid) = 0 → 렌즈 미렌더였다(주입 경로 확정 결함). 방향 A로
+// deriveIrisResult가 detected 시 confidence=1.0(게이트 통과 상수)을 두어 게이트를 연다.
+TEST_F(LandmarkAdapterGoldenTest, InjectedDetectedEyeYieldsPositiveVisibility) {
+    const std::string path = baselinePath("face_closeup__gamma05");
+    GoldenResult g = loadGolden(path);
+    ASSERT_TRUE(g.ok) << "골든 baseline 로드 실패: " << path;
+    ASSERT_EQ(g.mesh.size(), 478u);
+
+    std::vector<float> pts = meshToFlat(g.mesh);
+    CppIrisResult r = deriveIrisResult(pts.data(), 478, g.input_width, g.input_height,
+                                       /*timestamp_us=*/0);
+
+    // 방향 A 직접 검증: 검출 시 confidence는 게이트 통과 상수 1.0(측정값 아님).
+    ASSERT_TRUE(r.detected) << "baseline 프레임은 최소 한쪽 눈이 검출돼야 한다";
+    EXPECT_FLOAT_EQ(r.confidence, 1.0f);
+
+    // 주입 경로 eyelid_ratio=0(W3 미구현) → visibility = 1.0 * (1 - 0) = 1.0.
+    // 어댑터는 side별 detected로 게이팅하므로 검출된 눈만 검사한다.
+    if (r.left_detected) {
+        const auto p = iris_sdk::gpu::adaptIrisResult(
+            r, iris_sdk::gpu::EyeSide::Left, r.frame_width, r.frame_height);
+        EXPECT_GT(p.visibility, 0.0f) << "주입 좌안 visibility=0 → 렌즈 미렌더 회귀";
+        EXPECT_FLOAT_EQ(p.visibility, 1.0f)
+            << "주입 eyelid=0 + confidence=1.0 → visibility=1.0 계약";
+    }
+    if (r.right_detected) {
+        const auto p = iris_sdk::gpu::adaptIrisResult(
+            r, iris_sdk::gpu::EyeSide::Right, r.frame_width, r.frame_height);
+        EXPECT_GT(p.visibility, 0.0f) << "주입 우안 visibility=0 → 렌즈 미렌더 회귀";
+        EXPECT_FLOAT_EQ(p.visibility, 1.0f)
+            << "주입 eyelid=0 + confidence=1.0 → visibility=1.0 계약";
+    }
+}
+
 // ===========================================================================
 // 2. 입력 유효성 (ADR §6.1) — deriveIrisResult 방어 + 어댑터 직접
 // ===========================================================================
@@ -350,6 +387,40 @@ TEST(LandmarkAdapterValidityTest, RejectsOutOfRangeIrisAsUndetected) {
     CppIrisResult r = deriveIrisResult(pts.data(), 478, 640, 480, 0);
     EXPECT_FALSE(r.left_detected);
     EXPECT_TRUE(r.right_detected);  // 우안은 0.5로 모두 유효
+}
+
+// W4-B1 대칭 가드: confidence=1.0 변경이 "미검출 눈까지 게이트를 여는" 과잉을 내지 않는다.
+// 미검출 눈은 어댑터(eye_render_packet_adapter.cpp:43) side별 early-return으로 visibility=0,
+// 검출 눈은 visibility>0. presence 게이트가 confidence와 독립임을 고정한다.
+TEST(LandmarkAdapterValidityTest, UndetectedEyeYieldsZeroVisibility) {
+    std::vector<float> pts(478 * 3, 0.5f);
+    pts[469 * 3 + 1] = 1.5f;  // 좌안 경계점(469) y 범위 밖 → left 미검출 (위 케이스와 동형)
+    CppIrisResult r = deriveIrisResult(pts.data(), 478, 640, 480, 0);
+    ASSERT_FALSE(r.left_detected);
+    ASSERT_TRUE(r.right_detected);
+    EXPECT_FLOAT_EQ(r.confidence, 1.0f);  // 전체 detected(우안)=true → 게이트 통과 상수
+
+    const auto pl = iris_sdk::gpu::adaptIrisResult(
+        r, iris_sdk::gpu::EyeSide::Left, 640, 480);
+    EXPECT_FLOAT_EQ(pl.visibility, 0.0f) << "미검출 좌안은 어댑터 early-return으로 차단";
+
+    const auto pr = iris_sdk::gpu::adaptIrisResult(
+        r, iris_sdk::gpu::EyeSide::Right, 640, 480);
+    EXPECT_GT(pr.visibility, 0.0f) << "검출 우안은 visibility>0";
+}
+
+// W4-B1: 양쪽 모두 미검출이면 confidence=0(게이트 통과 상수 미부여). 방향 A의
+// `detected ? 1.0f : 0.0f` 삼항 분기를 양 끝에서 고정한다.
+TEST(LandmarkAdapterValidityTest, AllUndetectedYieldsZeroConfidence) {
+    std::vector<float> pts(478 * 3, 0.5f);
+    // 좌·우 홍채 경계점을 모두 [0,1] 밖으로 → 양안 미검출.
+    pts[iris_sdk::landmark_indices::kLeftIris[1] * 3 + 1] = 1.5f;
+    pts[iris_sdk::landmark_indices::kRightIris[1] * 3 + 1] = 1.5f;
+    CppIrisResult r = deriveIrisResult(pts.data(), 478, 640, 480, 0);
+    ASSERT_FALSE(r.left_detected);
+    ASSERT_FALSE(r.right_detected);
+    EXPECT_FALSE(r.detected);
+    EXPECT_FLOAT_EQ(r.confidence, 0.0f);
 }
 
 // ===========================================================================

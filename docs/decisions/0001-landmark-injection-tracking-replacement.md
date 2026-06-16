@@ -130,7 +130,7 @@ IrisSdkStatus iris_render(uint64_t target_texture, int width, int height);
 | generation | **경계 신설 필드** (코어 발급, 노출 필수) | §6.1. 감사 torn-read finding |
 | 홍채 중심·반경 | **코어 내 파생 어댑터** | 인덱스 468~477에서 유도, 픽셀 변환 후 거리 계산(§7.0). LensSimulator `IrisGeometry.kt`가 참조 구현 (감사 §6.3) |
 | eyelid_ratio → visibility | **코어 내 파생 어댑터** | EAR 재계산 — 수식은 `temporal_stabilizer.cpp:315 computeEAR`에 이미 존재(감사 §6.2 pt6). 단 픽셀 공간 환산 후 계산으로 수정 (정규화 EAR 결함 finding 반영) |
-| confidence | **경계에서 제거** | MediaPipe Tasks는 per-face confidence를 노출하지 않음. '검출 실패 = 주입 부재'로 표현하고, 게이팅은 visibility(EAR 파생)로 일원화 |
+| confidence | **경계에서 제거**(게이팅 무력화) | MediaPipe Tasks는 per-face confidence를 노출하지 않음. '검출 실패 = 주입 부재'로 표현하고, 게이팅은 visibility(EAR 파생)로 일원화. **구현 노트(W4-B1)**: 어댑터 수식 `visibility = confidence·(1-eyelid_ratio)`이 detector 경로와 공유되어 confidence=0이면 게이트가 닫힌다. 주입 경로는 detector 골든 불변을 위해 어댑터를 건드리지 않고, `deriveIrisResult`가 검출 시 confidence를 **게이트 통과 상수 1.0(곱셈 항등원)** 으로 고정한다 → visibility가 (1-eyelid_ratio)로 환원되어 'EAR 일원화' 효과를 달성(measurement로서의 confidence는 제거, 게이팅에서 중립화). presence 게이트는 detected(어댑터 side별 early-return)가 담당. 데모 Kotlin 형제 `TasksToIrisResult.kt`도 동일하게 confidence=1.0 고정 |
 | avg_iris_luma | **GPU self-measure로 이전** (1순위) + 주입 옵션 필드(보조) | 감사 §6.2 pt5: gpu_lens_renderer.cpp:898, 1121에 'W6 이관' 주석으로 계획 기존재. P7-W2 default ON 실측이 fallback 상수 체인으로 후퇴하지 않도록 **경계 도입과 동시 처리** (§6.6 리스크 3) |
 | face_rect | **코어 내 파생 어댑터** | 478점 메시 바운딩 박스 (감사 §6.3) |
 | iris_quality_*, eye_refiner_used 등 detector 전용 메타 | **삭제** | Eye Refiner는 활성화 자체가 불가능한 결함 상태(좌표 폭주 finding) — 추적 외부화로 존재 이유 소멸 |

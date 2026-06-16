@@ -163,8 +163,11 @@ struct IrisResult {
     bool left_detected;     ///< 왼쪽 눈 검출 여부
     bool right_detected;    ///< 오른쪽 눈 검출 여부
     float confidence;       ///< 전체 신뢰도 (0.0~1.0)
-                            ///<   주입 경로(§6.2): confidence는 경계에서 제거(MediaPipe Tasks
-                            ///<   미노출). 검출 실패=주입 부재, 게이팅은 visibility(EAR 파생)로 일원화.
+                            ///<   detector 경로: face_confidence * eye_factor (측정값).
+                            ///<   주입 경로(§6.2): MediaPipe Tasks가 score 미노출 → 측정값 부재.
+                            ///<   게이팅을 visibility(EAR 파생)로 일원화하기 위해 detected 시 게이트
+                            ///<   통과 상수 1.0(곱셈 항등원), 미검출 시 0.0으로 고정한다. presence
+                            ///<   게이트는 detected/visibility가 담당(deriveIrisResult 참조).
 
     // 왼쪽 눈 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 468 (§7.3 계약)
     IrisLandmark left_iris[5];

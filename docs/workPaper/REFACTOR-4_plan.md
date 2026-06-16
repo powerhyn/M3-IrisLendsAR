@@ -1,7 +1,7 @@
 # REFACTOR-4: 추적 레이어 주입형 전환 (④) — 실행 계획
 
 > 새 세션이 이 문서 + ADR-0001만 읽고 ④를 실행할 수 있도록 작성. 작성: 2026-06-15.
-> 상태: ⏳ **게이트0(전환 확정 선언 + ④ 승인) 대기** — 승인 후 W4-A(또는 B1 confidence 선결) 착수.
+> 상태: 🔄 **④ 진행 중** — 게이트0 승인(2026-06-16 W4-B1 착수로 부여). **W4-B1 완료**(방향 A). 다음=W4-B2(layout/API 단일화) 또는 W4-A(§6.4 표면 정리).
 > 근거: ADR-0001(승인 2026-06-11) §3/§6/§8/§9/§12, REFACTOR-3-3 §9 이월, 스코핑 워크플로(wf_207a105f-dcc 수확 + wf_4f1249e6-81a 연속), **Codex 외부 검증 + critical-review(2026-06-15)**.
 
 ## 0. 핵심 사실 (스코핑 실측 2026-06-15)
@@ -36,7 +36,7 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 
 ### W4-B — types.h 정리 + 주입 승격 (Codex 권고로 B1~B4 분할, 회귀 원인 분리)
 한 PR로 묶지 않고 독립 PR 4개로 — 각 단계 동작 불변(게이트=골든 일치), 단 B1의 confidence 수정은 의도된 동작 변경(주입 경로 한정).
-- **B1 — confidence/visibility 계약 정정 (선결 critical)**: 주입 경로 visibility 게이팅을 confidence 곱(`eye_render_packet_adapter.cpp:89`)에서 ADR §6.2 의도대로 **EAR/visibility 직접 산출**로 정정(또는 deriveIrisResult가 EAR 파생 confidence를 채움). 데모 TASKS의 confidence=1.0 우회 제거. **이게 안 되면 주입 승격 시 렌즈 미렌더** → B2 이후의 전제.
+- **B1 — confidence/visibility 계약 정정 (선결 critical) — ✅ 완료 (2026-06-16, 방향 A)**: 주입 경로 visibility=0(렌즈 미렌더) 결함 정정. **방향 A 채택**(cpp-pro 기술검토 + 적대검증 5종 반증 실패로 일치): 어댑터(`eye_render_packet_adapter.cpp:89`)·detector를 건드리지 않고, `deriveIrisResult`가 검출 시 `confidence = detected ? 1.0f : 0.0f`(게이트 통과 상수)를 설정 → 어댑터 `visibility = confidence·(1-eyelid_ratio)`가 (1-eyelid_ratio)로 환원되어 ADR §6.2 'visibility 일원화'를 곱셈 항등원으로 달성. detector 경로 무수정이라 **골든 비트 불변 자명**. 방향 B/C(어댑터 분기·sentinel)는 detector 공유 수식이라 골든 위험·표면 확대로 배제. **데모 `TasksToIrisResult.kt:122` confidence=1.0은 건드리지 않음**(킥오프 정정: DetectionSlot 경로용이며 제거는 W4-C 몫 — 데모는 주입 경로 미사용이라 B1은 C-API surface latent 결함 정정 + Kotlin 형제와의 일관화). **검증**: 골든 PASS(JSON 18/PNG 19, 불일치 0, detector ε 불변) + `test_landmark_injection` 신규 3케이스(InjectedDetectedEyeYieldsPositiveVisibility 등, visibility>0 회귀가드) 통과 + ctest 회귀 0(pre-existing 5건만: TFLite NOT_BUILT 2 + GPUBeauty 1 + FreqSep 2) + assembleDebug exit0(데모 무영향). ADR §6.2 구현 노트 정합 + types.h confidence 주석 정정.
 - **B2 — layout/API 단일화**: DetectorType(types.h:88)/EyeRefinerPolicy(:99) enum 제거, IrisResult C/C++ 2벌 → 단일정의 공유(types.h:42, ADR §6.3), detector 전용 메타 강등(eye_refiner_used:196/iris_quality_*:192-193). `iris_set_landmarks`(③-1) 정식 공급자 승격(generation 검증+§6.1 가드).
 - **B3 — JNI/Java/Kotlin result + 슬롯 원자성**: Java/Kotlin 2벌 → JNI 필드매핑 생성/검증, **IrisResultKt 정리**(detector 메타 잔존+avg_luma/faceMesh 부재 — ADR §47-53 removalScope, Codex 놓침 지적), faceRect 좌표 단위 문서 드리프트 정정(Java=pixel vs 데모=normalized). **DetectionSlot 정식 재설계 + ts-슬롯 원자 번들링**(frame-sync 1프레임 스큐 해결, 후속문서 §3) — **W4-C A/B의 선결**(스큐 남으면 A/B가 추적기/동기버그 분리 불가, Codex critical).
 - **B4 — boundary/visibility 운반 + avg_iris_luma 승격**: `copyResultFromJava` boundary[1..4]/visibility 정식 운반. **avg_iris_luma를 SDK AAR 계약으로 정식 승격**(GPU self-measure 이전 또는 글루 측정-주입 — '또는'이 아니라 **필수**, 미승격 시 W4-D서 P7-W2 default ON 조용히 퇴화, Codex HIGH).
