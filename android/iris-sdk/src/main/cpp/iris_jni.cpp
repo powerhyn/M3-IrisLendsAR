@@ -15,6 +15,7 @@
 #include "iris_sdk/beauty_filter.h"
 
 #include <atomic>
+#include <cstdint>  // W4-B3: DetectionSlot.frame_ts_ns (int64_t) 정식 포함
 #include <cstring>
 #include <mutex>
 
@@ -559,7 +560,13 @@ namespace {
 
 struct DetectionSlot {
     IrisResult data{};
+    // 이 검출이 계산된 분석 프레임의 센서 타임스탬프(ns). data와 함께
+    // g_active_slot_index release store로 원자 publish (W4-B3, frame-sync 스큐 제거).
+    // ⚠️ 반드시 active_slot_index store '이전'에 기록할 것 — plain 멤버라 컴파일러가
+    //    순서를 강제하지 않는다. 뒤로 옮기면 즉시 data race(UB).
+    int64_t frame_ts_ns{0};
     std::atomic<bool> valid{false};
+    // (현재 미사용 — 미래 seqlock torn-read 가드 자리, 보존)
     std::atomic<uint64_t> generation{0};
 };
 
@@ -1866,13 +1873,17 @@ Java_com_irislenssdk_IrisLensSDK_nativeIsTextureManaged(
  * 비활성 슬롯에 덮어쓰기 후 atomic swap으로 활성 슬롯 전환.
  * Lock-free, wait-free writer.
  *
- * Java: native void nativeUpdateDetectionSlot(IrisResult result);
+ * W4-B3: 분석 프레임의 센서 타임스탬프(frameTsNs, ns)를 data와 함께 단일
+ * g_active_slot_index release store로 원자 publish하여 frame-sync 1프레임 스큐 제거.
+ *
+ * Java: native void nativeUpdateDetectionSlot(IrisResult result, long frameTsNs);
  */
 JNIEXPORT void JNICALL
 Java_com_irislenssdk_IrisLensSDK_nativeUpdateDetectionSlot(
     JNIEnv* env,
     jclass /* clazz */,
-    jobject resultObj) {
+    jobject resultObj,
+    jlong frameTsNs) {
 
     if (!resultObj) {
         LOGW("nativeUpdateDetectionSlot: resultObj is null");
@@ -1889,6 +1900,10 @@ Java_com_irislenssdk_IrisLensSDK_nativeUpdateDetectionSlot(
         return;
     }
 
+    // frame_ts_ns는 아래 active_slot_index release store '이전'에 기록 — release/acquire가
+    // 이 plain 쓰기를 data와 함께 원자 publish.
+    g_detection_slots[write_idx].frame_ts_ns = static_cast<int64_t>(frameTsNs);
+
     // generation 증가 → valid 설정 → active swap (release ordering)
     g_detection_slots[write_idx].generation.fetch_add(1, std::memory_order_release);
     g_detection_slots[write_idx].valid.store(true, std::memory_order_release);
@@ -1901,6 +1916,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeUpdateDetectionSlot(
  * 반환된 포인터는 applyBeautyFilterTextureV2()의 detectionPtr로 사용.
  * Lock-free, wait-free reader. Generation 검증은 호출측에서 수행.
  *
+ * @deprecated W4-B3: ts·detected 원자 동반이 필요하면 nativeGetActiveDetectionSlot 사용.
+ *             이 함수는 active index를 단독 재읽기하므로 ts/게이트와 결합 시 race 가능.
  * Java: native long nativeGetDetectionSlotPtr();
  * @return 활성 슬롯의 IrisResult 포인터 (jlong), 유효하지 않으면 0L
  */
@@ -1922,6 +1939,48 @@ Java_com_irislenssdk_IrisLensSDK_nativeGetDetectionSlotPtr(
     }
 
     return reinterpret_cast<jlong>(&g_detection_slots[read_idx].data);
+}
+
+/**
+ * @brief 활성 Detection 슬롯의 data 포인터 + 메타(ts·detected)를 단일 스냅샷으로 반환
+ *        (GL 스레드에서 호출)
+ *
+ * g_active_slot_index를 단 한 번만 acquire load하여 그 read_idx로 ptr·frame_ts_ns·detected를
+ * 모두 읽으므로 일관된 스냅샷이 보장된다 (두 번 load하면 그 사이 writer swap으로 ptr·ts가
+ * 서로 다른 슬롯이 될 수 있음). Lock-free, wait-free reader.
+ *
+ * outMeta는 길이 ≥ 2 long 배열: outMeta[0]=frame_ts_ns, outMeta[1]=detected?1:0.
+ * 슬롯이 유효하지 않으면 ptr=0L, outMeta={0,0}.
+ *
+ * 참고: generation 기반 torn-read 가드는 미사용 — 기존 reader와 동일한 pre-existing 한계.
+ *
+ * Java: native long nativeGetActiveDetectionSlot(long[] outMeta);
+ * @return 활성 슬롯의 IrisResult 포인터 (jlong), 유효하지 않으면 0L
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetActiveDetectionSlot(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jlongArray outMeta) {
+
+    jlong meta[2] = {0, 0};
+    jlong ptr = 0L;
+
+    // active index는 단 한 번만 acquire load → 동일 read_idx로 ptr/ts/detected 일관 스냅샷
+    int read_idx = g_active_slot_index.load(std::memory_order_acquire);
+    if (read_idx >= 0 && read_idx <= 1 &&
+        g_detection_slots[read_idx].valid.load(std::memory_order_acquire)) {
+        ptr = reinterpret_cast<jlong>(&g_detection_slots[read_idx].data);
+        meta[0] = static_cast<jlong>(g_detection_slots[read_idx].frame_ts_ns);
+        meta[1] = g_detection_slots[read_idx].data.detected ? 1 : 0;
+    }
+
+    // outMeta null/길이 가드 (SetLongArrayRegion ArrayIndexOutOfBounds 예외 표면 방지)
+    if (outMeta != nullptr && env->GetArrayLength(outMeta) >= 2) {
+        env->SetLongArrayRegion(outMeta, 0, 2, meta);
+    }
+
+    return ptr;
 }
 
 /**

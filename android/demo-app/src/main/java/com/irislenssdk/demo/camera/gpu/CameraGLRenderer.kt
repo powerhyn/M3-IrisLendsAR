@@ -180,7 +180,8 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var ringWrite = 0       // 이번 프레임이 쓸 슬롯
     private var ringCount = 0       // 유효 슬롯 수 (워밍업 중 ringSize보다 작을 수 있음)
     @Volatile private var frameSyncActive: Boolean = false   // 킬스위치 상태 (setFrameSyncEnabled로만 변경)
-    @Volatile private var latestLandmarkFrameTsNs: Long = 0L  // 분석 스레드가 갱신하는 최신 랜드마크 프레임 센서 ns
+    // W4-B3: 검출 슬롯 단일 스냅샷 메타 수신용 재사용 배열 [0]=frameTsNs, [1]=detected?1:0 (GL 스레드 전용)
+    private val detSlotMeta = LongArray(2)
     // 클럭 도메인 검증 (LensSim selectCamSource 정본 가드 2종):
     private var clockDomainStreak = 0          // 연속 |Δ|>1s 카운트
     private var clockDomainChecked = false     // 검증 완료(일치/불일치 무관) — 이후 재평가 영구 중단
@@ -398,13 +399,20 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         if (ringCount < ringSize) ringCount++
         ringWrite = (ringWrite + 1) % ringSize
 
-        // frame-sync: 랜드마크가 계산된 프레임과 |Δ| 최소인 슬롯 선택 (OFF/강등 시 최신 슬롯).
-        val sourceIdx = selectFrameSyncSlot(writtenIdx)
+        // W4-B3: 검출 슬롯을 단일 스냅샷으로 취득 — 렌즈 좌표 포인터·센서 ts·detected를
+        // 모두 같은 슬롯에서 읽어 배경(ts)과 렌즈(좌표)가 서로 다른 프레임이 되는 스큐를 원천 제거.
+        // (active index 1회 read 보장 — getDetectionSlotPtr 다중 호출 race 대체)
+        val detectionHandle = IrisLensSDK.getActiveDetectionSlot(detSlotMeta)
+        val slotTsNs = if (detectionHandle != 0L) detSlotMeta[0] else 0L
+        val slotDetected = detectionHandle != 0L && detSlotMeta[1] != 0L
 
-        // 2단계: 렌즈 오버레이 (홍채 위치에 렌즈 합성)
+        // frame-sync: 슬롯과 동반된 센서 ts와 |Δ| 최소인 슬롯 선택 (OFF/강등 시 최신 슬롯).
+        val sourceIdx = selectFrameSyncSlot(writtenIdx, slotTsNs)
+
+        // 2단계: 렌즈 오버레이 (홍채 위치에 렌즈 합성). 게이트는 슬롯 detected(좌표와 동일 스냅샷).
         var currentTexture = ringTex[sourceIdx]
-        if (lensEnabled && lensImageTextureId != 0 && irisResult?.detected == true) {
-            currentTexture = applyGpuLensRenderer(currentTexture)
+        if (lensEnabled && lensImageTextureId != 0 && slotDetected) {
+            currentTexture = applyGpuLensRenderer(currentTexture, detectionHandle)
         } else if (stabilityLogEnabled && lensEnabled && lensImageTextureId != 0) {
             // 렌즈 파이프라인 활성 상태에서 검출 실패 시에만 기록
             // (렌즈 미선택/텍스처 미준비 시에는 기록하지 않음)
@@ -423,7 +431,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 4단계: GPU Beauty + LUT 통합 적용 (C++ Combined Color Pass에서 LUT 포함)
         val beautyApplied = beautyEnabled && beautyConfig.enabled
         var outputTexture = if (beautyApplied) {
-            applyGpuBeautyFilter(currentTexture)
+            applyGpuBeautyFilter(currentTexture, detectionHandle)
         } else {
             currentTexture
         }
@@ -512,9 +520,8 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * (= 현행 동작). ON이면 분석측 랜드마크 프레임 ts와 |Δ| 최소 슬롯(FrameRingSelector).
      * 클럭 도메인 불일치가 연속 확정되면 영구 강등(최신 슬롯)한다.
      */
-    private fun selectFrameSyncSlot(latestIdx: Int): Int {
+    private fun selectFrameSyncSlot(latestIdx: Int, snapTs: Long): Int {
         if (!frameSyncActive) return latestIdx
-        val snapTs = latestLandmarkFrameTsNs
         if (snapTs <= 0L) return latestIdx  // 아직 랜드마크 없음 — 최신, 평가 안 함
 
         // 클럭 도메인 검증 (LensSim 정본 가드): '검증 미완 && 새 스냅샷 ts'일 때만 1표 집계.
@@ -544,17 +551,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         return if (sel < 0) latestIdx else sel
     }
 
-    /**
-     * 분석 스레드가 매 검출마다 갱신 — 최신 랜드마크가 계산된 프레임의 센서 ns.
-     *
-     * 알려진 한계(#4, important): 이 ts(배경 슬롯 선택)와 네이티브 DetectionSlot(렌즈 좌표)은 별도
-     * 채널이라 happens-before 미보장 — onDrawFrame이 두 쓰기 사이에 읽으면 배경=프레임N·렌즈=N-1의
-     * 간헐 1프레임 스큐 가능(비크래시·다음 프레임 자가수정·양 모드 대칭이라 A/B 무오염). 근본 해결은
-     * ts를 검출 결과 스냅샷/슬롯에 묶어 단일 채널로 전달하는 것(④ 주입 채널 공식화 범위).
-     */
-    fun setLandmarkFrameTimestamp(ns: Long) {
-        latestLandmarkFrameTsNs = ns
-    }
+    // W4-B3: setLandmarkFrameTimestamp(별도 volatile ts 사이드채널)는 제거됨. 분석 프레임 센서 ns는
+    // 이제 updateDetectionSlot(result, frameTsNs)로 렌즈 좌표와 한 슬롯에 원자 결속되고, GL 스레드는
+    // getActiveDetectionSlot 단일 스냅샷으로 ts·좌표·detected를 함께 읽어 1프레임 스큐를 원천 제거한다.
 
     /** 킬스위치 — frame-sync ON 시 클럭 도메인 검증/강등 상태를 리셋해 재시도를 허용한다. */
     fun setFrameSyncEnabled(enabled: Boolean) {
@@ -669,7 +668,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 실패 시 무음 폴백 없이 렌즈 미적용 + sdkLensFailure 신호로 명시 처리합니다
      * (감사 finding: KT fallback 셰이더 blendMode 의미 불일치 + 프레임 단위 무음 폴백 제거).
      */
-    private fun applyGpuLensRenderer(inputTexture: Int): Int {
+    private fun applyGpuLensRenderer(inputTexture: Int, detectionHandle: Long): Int {
         if (!IrisLensSDK.isGpuLensInitialized()) {
             reportSdkLensFailure("GPU Lens 미초기화")
             return inputTexture
@@ -678,8 +677,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
         val texHeight = if (frameHeight > 0) frameHeight else viewHeight
 
-        // Detection Slot에서 최신 검출 결과 포인터 취득
-        val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
+        // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3)
 
         lensConfig.isMirror = isMirror
 
@@ -722,7 +720,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * @param inputTexture 입력 텍스처 ID
      * @return 출력 텍스처 ID
      */
-    private fun applyGpuBeautyFilter(inputTexture: Int): Int {
+    private fun applyGpuBeautyFilter(inputTexture: Int, detectionHandle: Long): Int {
         // 프레임 크기 사용
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
         val texHeight = if (frameHeight > 0) frameHeight else viewHeight
@@ -731,8 +729,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val lutTextureId = if (lutEnabled && lut3dTextureId != 0) lut3dTextureId else 0
         val lutIntensityVal = if (lutTextureId != 0) lutIntensity else 0.0f
 
-        // Detection Slot에서 최신 검출 결과 포인터 취득 (lock-free)
-        val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
+        // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3, lock-free)
 
         // 디버그: 뷰티+LUT 설정 확인
         Log.d(

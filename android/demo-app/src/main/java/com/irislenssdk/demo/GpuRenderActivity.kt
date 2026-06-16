@@ -1075,10 +1075,6 @@ class GpuRenderActivity : AppCompatActivity() {
                 }
             }
 
-            // frame-sync: 이 검출이 수행된 분석 프레임의 센서 ns를 렌더러에 전달 (LEGACY도 대칭 적용 —
-            // frame-sync는 렌더 경로 공통이라 양 모드 동일 적용해야 A/B 변인 격리 유지, plan §4.1)
-            cameraGLView.setLandmarkFrameTimestamp(imageProxy.imageInfo.timestamp)
-
             // GPU 렌더러에 스무딩된 결과 전달 (매 프레임, 미검출 포함)
             // 프레임별 새 복사본으로 소유권 이전 — torn read 방지
             val glSnapshot = IrisResult().also { it.copyFrom(irisResult) }
@@ -1090,9 +1086,10 @@ class GpuRenderActivity : AppCompatActivity() {
             )
             cameraGLView.setRawIrisLuminance(rawLum)
 
-            // Detection Slot 업데이트 (lock-free → GL 스레드에서 읽음)
+            // Detection Slot 업데이트 (lock-free → GL 스레드에서 읽음). W4-B3: 분석 프레임 센서 ns를
+            // 좌표와 한 슬롯에 원자 결속 (frame-sync 배경/렌즈 1프레임 스큐 제거 — 별도 ts 채널 폐기).
             if (detectResult == IrisLensSDK.OK) {
-                IrisLensSDK.updateDetectionSlot(irisResult)
+                IrisLensSDK.updateDetectionSlot(irisResult, imageProxy.imageInfo.timestamp)
             }
 
             // OverlayView에도 검출 결과 전달 (디버그 시각화용, 별도 스냅샷)
@@ -1192,9 +1189,6 @@ class GpuRenderActivity : AppCompatActivity() {
     ) {
         if (trackerMode != TrackerMode.TASKS) return // 전환 직후 잔존 콜백 방어
 
-        // frame-sync: 이 랜드마크가 계산된 분석 프레임의 센서 ns를 렌더러에 전달 (링버퍼 매칭 키)
-        cameraGLView.setLandmarkFrameTimestamp(frameTimestampNs)
-
         val faces = result.faceLandmarks()
         // numFaces=2(MP 내부 스무딩 우회, FaceTracker)면 배경 얼굴/포스터가 섞일 수 있어
         // 전경(최대 bbox) 얼굴을 고른다 — MediaPipe는 faces[0]가 주 피사체라고 보장하지 않는다.
@@ -1266,10 +1260,11 @@ class GpuRenderActivity : AppCompatActivity() {
         // IRIS_SDK_OK를 반환하므로 `if (detectResult == OK)` 게이트가 매 프레임 참이 되어
         // stabilize 후 결과(hold/fade-out 궤적·detected=false 포함)를 무조건 슬롯에 넣는다
         // (nativeUpdateDetectionSlot도 detected 무관 무조건 복사). TASKS도 동일하게
-        // stabilize 후 결과를 무조건 갱신해야 검출 손실 구간에서 슬롯 정본(getDetectionSlotPtr
-        // 소비 — 네이티브 렌더/뷰티)이 양 모드 동일하게 게이트된다 (plan §4.1 비교 변인=추적기뿐).
+        // stabilize 후 결과를 무조건 갱신해야 검출 손실 구간에서 슬롯 정본(getActiveDetectionSlot
+        // 소비 — 네이티브 렌더/뷰티 + GL 렌즈 게이트)이 양 모드 동일하게 게이트된다 (plan §4.1 비교 변인=추적기뿐).
         // fillNoFace 프레임(detected=false)도 그대로 들어가야 LEGACY 미검출 동작과 일치.
-        IrisLensSDK.updateDetectionSlot(tasksIrisResult)
+        // W4-B3: 분석 프레임 센서 ns(frameTimestampNs)를 좌표와 한 슬롯에 원자 결속 — 별도 ts 채널 폐기.
+        IrisLensSDK.updateDetectionSlot(tasksIrisResult, frameTimestampNs)
 
         // OverlayView 전달 (LEGACY와 동일 정책 — 변환 결과의 upright frame dims 사용)
         val uiSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }

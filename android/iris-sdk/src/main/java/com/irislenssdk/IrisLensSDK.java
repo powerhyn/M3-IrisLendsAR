@@ -1131,16 +1131,21 @@ public final class IrisLensSDK {
     // ========================================================================
 
     /**
-     * Detection 슬롯에 최신 검출 결과를 기록합니다.
+     * Detection 슬롯에 최신 검출 결과 + 분석 프레임 센서 타임스탬프(ns)를 기록합니다.
      *
      * <p>Analyzer 스레드에서 검출 완료 후 호출합니다.
      * 내부적으로 더블 버퍼를 사용하여 GL 스레드와 lock-free로 데이터를 공유합니다.</p>
      *
+     * <p>frameTsNs는 검출 좌표와 한 슬롯에 원자 결속되어, GL 스레드가
+     * {@link #getActiveDetectionSlot(long[])}로 좌표·ts·detected를 단일 스냅샷으로
+     * 읽을 수 있게 한다 — frame-sync 배경/렌즈 1프레임 스큐 제거 (W4-B3).</p>
+     *
      * @param result 검출 결과
+     * @param frameTsNs 이 검출이 계산된 분석 프레임의 센서 타임스탬프 (ns)
      */
-    public static void updateDetectionSlot(@NonNull IrisResult result) {
+    public static void updateDetectionSlot(@NonNull IrisResult result, long frameTsNs) {
         if (sLibraryLoaded) {
-            nativeUpdateDetectionSlot(result);
+            nativeUpdateDetectionSlot(result, frameTsNs);
         }
     }
 
@@ -1152,12 +1157,34 @@ public final class IrisLensSDK {
      * detectionHandle 파라미터에 전달합니다.</p>
      *
      * @return 네이티브 IrisResult 포인터 (유효하지 않으면 0L)
+     * @deprecated W4-B3: ts·detected 원자 동반이 필요하면 {@link #getActiveDetectionSlot(long[])}
+     *             사용. 이 함수는 active index를 단독 재읽기하므로 ts/렌즈 게이트와 결합 시 race 가능.
      */
+    @Deprecated
     public static long getDetectionSlotPtr() {
         if (!sLibraryLoaded) {
             return 0L;
         }
         return nativeGetDetectionSlotPtr();
+    }
+
+    /**
+     * Detection 슬롯의 data 포인터 + 메타(센서 ts·detected)를 단일 스냅샷으로 가져옵니다.
+     *
+     * <p>GL 스레드에서 프레임당 1회 호출하여 배경 슬롯 선택용 ts, 렌즈 게이트용 detected,
+     * 렌즈 렌더용 좌표 포인터를 <b>모두 같은 슬롯</b>에서 얻습니다. active index를 1회만
+     * 읽으므로 좌표·ts·detected가 서로 다른 프레임이 되는 frame-sync 스큐가 원천 제거됩니다.</p>
+     *
+     * @param outMeta 길이 ≥ 2 배열(호출자 재사용 권장) — outMeta[0]=frameTsNs, outMeta[1]=detected?1:0
+     * @return 활성 슬롯 IrisResult 네이티브 포인터 (유효하지 않으면 0L, outMeta={0,0})
+     */
+    public static long getActiveDetectionSlot(@NonNull long[] outMeta) {
+        if (!sLibraryLoaded) {
+            outMeta[0] = 0L;
+            outMeta[1] = 0L;
+            return 0L;
+        }
+        return nativeGetActiveDetectionSlot(outMeta);
     }
 
     /**
@@ -1563,15 +1590,27 @@ public final class IrisLensSDK {
     // ========================================================================
 
     /**
-     * Detection 슬롯에 검출 결과 기록 (Analyzer → GL 더블 버퍼)
+     * Detection 슬롯에 검출 결과 + 분석 프레임 센서 ns 기록 (Analyzer → GL 더블 버퍼).
+     * frameTsNs는 슬롯 좌표와 원자 결속되어 frame-sync 1프레임 스큐를 제거한다 (W4-B3).
      */
-    private static native void nativeUpdateDetectionSlot(IrisResult result);
+    private static native void nativeUpdateDetectionSlot(IrisResult result, long frameTsNs);
 
     /**
      * Detection 슬롯에서 활성 IrisResult 포인터 반환
      * @return 네이티브 포인터 (jlong), 유효하지 않으면 0L
+     * @deprecated W4-B3: ts·detected 원자 동반이 필요하면 {@link #nativeGetActiveDetectionSlot(long[])}
+     *             사용. 이 함수는 active index를 단독 재읽기하므로 ts/게이트와 결합 시 race 가능.
      */
+    @Deprecated
     private static native long nativeGetDetectionSlotPtr();
+
+    /**
+     * Detection 슬롯의 data 포인터 + 메타(ts·detected)를 단일 스냅샷으로 반환.
+     * active index를 1회만 읽어 ptr·ts·detected가 같은 슬롯에서 오는 것을 보장한다 (W4-B3).
+     * @param outMeta 길이 ≥ 2 배열 — outMeta[0]=frameTsNs, outMeta[1]=detected?1:0
+     * @return 활성 슬롯 IrisResult 포인터 (jlong), 유효하지 않으면 0L (outMeta={0,0})
+     */
+    private static native long nativeGetActiveDetectionSlot(long[] outMeta);
 
     /**
      * Detection 슬롯 해제

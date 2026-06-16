@@ -94,13 +94,9 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
-    /**
-     * frame-sync(트래킹 지연 핸드오프 §3-b): 분석 스레드가 매 검출마다 호출 — 최신 랜드마크가
-     * 계산된 프레임의 센서 ns. 렌더가 이 ts와 |Δ| 최소인 링 슬롯을 골라 그린다. volatile 직접 set.
-     */
-    fun setLandmarkFrameTimestamp(ns: Long) {
-        glRenderer.setLandmarkFrameTimestamp(ns)
-    }
+    // W4-B3: setLandmarkFrameTimestamp 제거 — 분석 프레임 센서 ns는 이제 IrisLensSDK.updateDetectionSlot(
+    // result, frameTsNs)로 렌즈 좌표와 한 슬롯에 원자 결속된다. 별도 ts 사이드채널 폐기로 frame-sync
+    // 배경/렌즈 1프레임 스큐 제거.
 
     /** frame-sync 킬스위치 토글 (UI 스레드 → GL 스레드에서 강등 상태 리셋). */
     fun setFrameSyncEnabled(enabled: Boolean) {

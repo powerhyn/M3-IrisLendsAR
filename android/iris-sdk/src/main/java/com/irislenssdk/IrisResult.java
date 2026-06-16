@@ -116,25 +116,30 @@ public class IrisResult {
 
     // ========================================================================
     // 얼굴 영역 정보
+    //
+    // 모든 faceRect 좌표는 upright 프레임 기준 정규화 [0.0~1.0] 값이다 (ADR-0001 §7.1).
+    // 코어 어댑터(deriveIrisResult)가 478점 메시 바운딩 박스를 정규화 좌표로 채우며,
+    // JNI·데모 소비측 모두 정규화로 전달·소비한다. 픽셀로 환산하려면 frameWidth/frameHeight를
+    // 곱한다. (W4-B3 정정: 이전 "픽셀" 주석은 문서 드리프트였음 — 런타임 값은 무변경.)
     // ========================================================================
 
     /**
-     * 얼굴 바운딩 박스 X 좌표 (픽셀).
+     * 얼굴 바운딩 박스 X 좌표 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectX;
 
     /**
-     * 얼굴 바운딩 박스 Y 좌표 (픽셀).
+     * 얼굴 바운딩 박스 Y 좌표 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectY;
 
     /**
-     * 얼굴 바운딩 박스 너비 (픽셀).
+     * 얼굴 바운딩 박스 너비 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectWidth;
 
     /**
-     * 얼굴 바운딩 박스 높이 (픽셀).
+     * 얼굴 바운딩 박스 높이 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectHeight;
 
@@ -187,14 +192,17 @@ public class IrisResult {
     // ========================================================================
 
     /**
-     * 왼쪽 홍채 품질 점수 (0.0 ~ 1.0).
+     * [W4-D 삭제 예정] 왼쪽 홍채 품질 점수 (0.0 ~ 1.0).
      * Eye Refiner 사용 시에만 유효합니다.
+     * ④ W4-D에서 detector 전용 메타 삭제(ADR §6.2) — C++ types.h/sdk_api.h·JNI 매핑·
+     * 골든 baseline 18벌과 동시 제거(골든 재캡처 동반). W4-B3는 C++ types.h 마커와 문서 정합까지.
      */
     public float irisQualityLeft;
 
     /**
-     * 오른쪽 홍채 품질 점수 (0.0 ~ 1.0).
+     * [W4-D 삭제 예정] 오른쪽 홍채 품질 점수 (0.0 ~ 1.0).
      * Eye Refiner 사용 시에만 유효합니다.
+     * ④ W4-D에서 detector 전용 메타 삭제(ADR §6.2). W4-B3는 문서 정합까지.
      */
     public float irisQualityRight;
 
@@ -211,8 +219,9 @@ public class IrisResult {
     public float eyelidRatioRight;
 
     /**
-     * Eye Refiner 사용 여부.
+     * [W4-D 삭제 예정] Eye Refiner 사용 여부.
      * true이면 2차 정밀화가 적용된 결과입니다.
+     * ④ W4-D에서 detector 전용 메타 삭제(ADR §6.2). W4-B3는 C++ types.h 마커와 문서 정합까지.
      */
     public boolean eyeRefinerUsed;
 

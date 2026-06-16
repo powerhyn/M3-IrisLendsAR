@@ -103,6 +103,15 @@ data class FaceRotation(
  * @property frameWidth 프레임 너비 (픽셀)
  * @property frameHeight 프레임 높이 (픽셀)
  * @property timestampMs 타임스탬프 (밀리초)
+ * @property irisQualityLeft [W4-D 삭제 예정] detector 전용 메타 (ADR §6.2)
+ * @property irisQualityRight [W4-D 삭제 예정] detector 전용 메타 (ADR §6.2)
+ * @property eyeRefinerUsed [W4-D 삭제 예정] detector 전용 메타 (ADR §6.2)
+ *
+ * 부재 필드(의도적 — Java IrisResult/C++에는 존재, Kotlin 경량 DTO는 미포함):
+ * - faceMesh[478]: 디버그/시각화용 코어·JNI 보유 필드. Kotlin 호출자 요구 발생 시 W4-C(글루 AAR
+ *   승격) 때 데모 렌더 로직과 함께 재검토.
+ * - avgIrisLumaLeft/Right(P7-W2): 렌더 라운드트립용 C/JNI/Java 필드. SDK AAR 계약 정식 승격은
+ *   W4-B4(GPU self-measure 또는 글루 측정-주입). 둘 다 부재는 결함이 아니라 API 면적 최소화 선택.
  */
 data class IrisResultKt(
     val isDetected: Boolean,
@@ -118,10 +127,12 @@ data class IrisResultKt(
     val frameWidth: Int,
     val frameHeight: Int,
     val timestampMs: Long,
+    // [W4-D 삭제 예정] detector 전용 메타 (iris_quality_*/eye_refiner_used) — C++ types.h 마커와 정합.
+    //   ④ W4-D에서 detector 인프라·골든 18벌과 동시 제거(ADR §6.2). W4-B3는 문서 정합까지.
     val irisQualityLeft: Float = 0f,
     val irisQualityRight: Float = 0f,
-    val eyelidRatioLeft: Float = 0f,
-    val eyelidRatioRight: Float = 0f,
+    val eyelidRatioLeft: Float = 0f,   // W3용 별도 트랙 (W4-D 삭제 묶음 아님)
+    val eyelidRatioRight: Float = 0f,  // W3용 별도 트랙
     val eyeRefinerUsed: Boolean = false
 ) {
     /**
