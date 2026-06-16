@@ -10,6 +10,7 @@
  */
 
 #include "iris_sdk/sdk_api.h"
+#include "iris_sdk/internal/bench_toggles.h"  // W4-A §6.4: internal 벤치 토글 선언↔정의 시그니처 일치 강제
 #include "iris_sdk/beauty_filter.h"
 #include "iris_sdk/cpu_beauty_backend.h"
 #include "iris_sdk/beauty_roi_manager.h"

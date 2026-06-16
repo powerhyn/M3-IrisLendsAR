@@ -11,6 +11,7 @@
 
 #include "jni_utils.h"
 #include "iris_sdk/sdk_api.h"
+#include "iris_sdk/internal/bench_toggles.h"  // W4-A §6.4: 수동 extern 정식화 (벤치 토글 9종)
 #include "iris_sdk/beauty_filter.h"
 
 #include <atomic>
@@ -2233,10 +2234,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensScleraProtect(
     iris_sdk_set_lens_sclera_protect(enabled ? 1 : 0);
 }
 
-// P6-W5 §5.9: B1/B8 4조합 벤치용 sclera veto 수식 토글.
-// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
-extern void iris_sdk_set_lens_sclera_veto_mode(int mode);
-
+// P6-W5 §5.9: sclera veto 토글. internal 선언은 iris_sdk/internal/bench_toggles.h.
 /**
  * Java: native void nativeSetScleraVetoMode(int mode);
  * P6-W5 §5.9: mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini).
@@ -2272,13 +2270,9 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensHighlight(
 }
 
 // ============================================================================
-// P6-W4 §5.7/§5.11: 환경 반사 internal C API forward declare.
-// sdk_api_v2.cpp에 정의됨. 공개 sdk_api.h 미노출 (W4 Phase 벤치 internal 경로).
+// P6-W4 §5.7/§5.11: 환경 반사 internal C API.
+// 선언은 iris_sdk/internal/bench_toggles.h (정의는 sdk_api_v2.cpp).
 // ============================================================================
-extern IrisSdkError iris_sdk_load_env_map(const uint8_t* data, int width, int height);
-extern void iris_sdk_unload_env_map(void);
-extern void iris_sdk_set_reflection_mode(int mode);
-extern void iris_sdk_set_reflection_intensity(float intensity);
 
 /**
  * Java: native int nativeLoadEnvMap(byte[] data, int width, int height);
@@ -2338,14 +2332,10 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionIntensity(
 }
 
 // ============================================================================
-// P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글.
-// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
+// P6-W6 / P7-W2: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) /
+// avg_iris_luma 실측↔fallback A/B 벤치 토글.
+// 선언은 iris_sdk/internal/bench_toggles.h (정의는 sdk_api_v2.cpp).
 // ============================================================================
-extern void iris_sdk_set_lens_blink_up_ms(float ms);
-extern void iris_sdk_set_lens_gate_threshold(float threshold);
-extern void iris_sdk_set_lens_detail_reinject(int enabled);
-// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (internal).
-extern void iris_sdk_set_use_measured_luma(int enabled);
 
 /**
  * Java: native void nativeSetBlinkUpMs(float ms);

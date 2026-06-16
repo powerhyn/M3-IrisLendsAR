@@ -613,5 +613,7 @@ install(TARGETS iris_sdk
 
 install(DIRECTORY include/
     DESTINATION include
-    FILES_MATCHING PATTERN "*.h"
+    FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "internal" EXCLUDE  # W4-A §6.4: internal/ 벤치 토글 헤더는 공개 패키징 표면이 아님 (JNI 전용 경계)
 )
