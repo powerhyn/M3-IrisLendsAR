@@ -21,9 +21,24 @@
  *   golden_capture --input <png> --models <dir> --texture <png> --out <dir>
  *                  [--rotation {0|90|180|270}] [--mirror {0|1}] [--gamma <float>]
  *                  [--no-beauty] [--no-render] [--lens-mirror {0|1}]
+ *                  [--inject-from <baseline.result.json>]
  *
  *   --no-render   : 렌즈 렌더 PNG 생략 (JSON 전용 변형 — 용량 규율)
  *   --lens-mirror : IrisLensConfig.is_mirror=true 로 렌더 (전면 카메라 렌더 분기 커버)
+ *   --inject-from : ④ W4-D 주입 모드. detector(iris_sdk_detect_with_rotation) 대신
+ *                   소스 baseline의 face_mesh 478점을 iris_set_landmarks로 주입하고
+ *                   iris_get_injected_result로 결과를 재파생한다. detector 코어 제거 후
+ *                   골든 재캡처용 경로. 렌더 배경(gamma→mirror→rotation 전처리)은 유지하되
+ *                   검출만 주입으로 대체한다. 주입 치수는 회전 스왑 보정(아래 §주입 치수).
+ *
+ * §주입 치수(중요 — rot90/270 radius 정합):
+ *   deriveIrisResult는 홍채 반경을 픽셀 공간(정규화좌표×frame_dim)에서 계산한다.
+ *   detector는 내부적으로 "회전 후(upright)" 치수로 반경을 산출하는데, rot90/270은
+ *   회전으로 W↔H가 스왑된다. baseline JSON의 input_width/input_height는 "회전 적용 후"
+ *   캡처 치수(rot90이면 W·H가 이미 스왑된 값)이므로, 주입 시에는 이를 다시 upright로
+ *   되돌려야 한다: rotation∈{90,270} → (frame_w,frame_h) = (input_height,input_width),
+ *   그 외 → (input_width,input_height). 스왑하지 않으면 rot90/270 반경이 0.04~0.34px
+ *   어긋난다(스왑 시 ~2e-4px ε). 검증: test_golden_injection_derive.
  *
  * 출력(--out 디렉토리):
  *   <stem>.result.json   결정적 검출 필드 전체
@@ -36,9 +51,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -67,6 +84,10 @@ struct Args {
     bool beauty = true;       // CPU beauty PNG 생성 여부
     bool render = true;       // 렌즈 렌더 PNG 생성 여부 (--no-render로 생략)
     int lens_mirror = 0;      // 0|1 — IrisLensConfig.is_mirror (렌더 분기 커버)
+    // ④ W4-D: injection 모드. 비어 있으면 detector 경로(detect), 지정 시 주입 경로.
+    // 소스 baseline result.json에서 face_mesh 478점 + rotation + input dims를 읽어
+    // iris_set_landmarks(upright dims) → iris_get_injected_result로 재파생한다.
+    std::string inject_from;  // <baseline.result.json> 경로 (빈 문자열 = detect 모드)
 };
 
 bool parseArgs(int argc, char* argv[], Args& a) {
@@ -101,6 +122,8 @@ bool parseArgs(int argc, char* argv[], Args& a) {
             a.render = false;
         } else if (key == "--lens-mirror") {
             a.lens_mirror = std::stoi(next("--lens-mirror"));
+        } else if (key == "--inject-from") {
+            a.inject_from = next("--inject-from");
         } else {
             std::cerr << "[Error] 알 수 없는 인자: " << key << "\n";
             return false;
@@ -186,6 +209,138 @@ private:
     std::ostream& os_;
 };
 
+// ---------------------------------------------------------------------------
+// ④ W4-D 주입 모드용 경량 JSON 파서 (baseline result.json 전용)
+//
+// 외부 의존성 추가 금지(헤더 docstring): nlohmann 등 미사용. baseline JSON은
+// golden_capture 자신이 쓴 평탄·결정적 포맷이라 토큰 파서로 충분하다. test_landmark_
+// injection.cpp의 추출기와 동일 전략(키 검색 후 숫자 토큰 스캔)을 거울 구현한다.
+// 추출 대상은 재파생에 필요한 최소 필드: rotation, input_width/height, face_mesh 478×3.
+// ---------------------------------------------------------------------------
+
+// face_mesh 478점을 평탄 478×3 (x,y,z) 버퍼로 추출. golden_capture 출력 포맷은
+// {"x": <n>, "y": <n>, "z": <n>} (visibility 미포함, landmarkToStr include_vis=false).
+struct GoldenSource {
+    bool ok = false;
+    int rotation = 0;
+    int input_width = 0;
+    int input_height = 0;
+    std::vector<float> mesh_flat;  // 478×3 (x,y,z)
+};
+
+// "key": <number> 형태의 스칼라를 추출(정수/실수 공통). 실패 시 false.
+bool jsonExtractScalar(const std::string& s, const char* key, double& out) {
+    std::string needle = std::string("\"") + key + "\"";
+    size_t p = s.find(needle);
+    if (p == std::string::npos) {
+        return false;
+    }
+    p = s.find(':', p);
+    if (p == std::string::npos) {
+        return false;
+    }
+    ++p;
+    while (p < s.size() && (s[p] == ' ' || s[p] == '\t' || s[p] == '\n')) {
+        ++p;
+    }
+    size_t start = p;
+    while (p < s.size() &&
+           (std::isdigit(static_cast<unsigned char>(s[p])) || s[p] == '-' ||
+            s[p] == '+' || s[p] == '.' || s[p] == 'e' || s[p] == 'E')) {
+        ++p;
+    }
+    if (p == start) {
+        return false;
+    }
+    try {
+        out = std::stod(s.substr(start, p - start));
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+
+// "face_mesh": [ {"x":..,"y":..,"z":..}, ... ] 블록에서 478×3 숫자를 순서대로 추출.
+// '['는 face_mesh 하나뿐(다른 배열 left_iris/right_iris는 객체 직전에 등장하지만 키로 식별).
+bool jsonExtractMesh(const std::string& s, std::vector<float>& mesh_flat) {
+    size_t key = s.find("\"face_mesh\"");
+    if (key == std::string::npos) {
+        return false;
+    }
+    size_t lb = s.find('[', key);
+    if (lb == std::string::npos) {
+        return false;
+    }
+    size_t rb = s.find(']', lb);
+    if (rb == std::string::npos) {
+        return false;
+    }
+    const std::string block = s.substr(lb + 1, rb - lb - 1);
+    std::vector<double> nums;
+    nums.reserve(478 * 3);
+    size_t i = 0;
+    while (i < block.size()) {
+        const char c = block[i];
+        if (c == '-' || c == '+' || c == '.' ||
+            std::isdigit(static_cast<unsigned char>(c))) {
+            size_t start = i;
+            while (i < block.size() &&
+                   (std::isdigit(static_cast<unsigned char>(block[i])) ||
+                    block[i] == '-' || block[i] == '+' || block[i] == '.' ||
+                    block[i] == 'e' || block[i] == 'E')) {
+                ++i;
+            }
+            try {
+                nums.push_back(std::stod(block.substr(start, i - start)));
+            } catch (...) {
+                return false;
+            }
+        } else {
+            ++i;
+        }
+    }
+    if (nums.size() < static_cast<size_t>(478 * 3)) {
+        return false;
+    }
+    mesh_flat.resize(478 * 3);
+    for (int k = 0; k < 478 * 3; ++k) {
+        mesh_flat[k] = static_cast<float>(nums[k]);
+    }
+    return true;
+}
+
+// baseline result.json을 읽어 주입 재파생에 필요한 필드를 추출한다.
+GoldenSource loadGoldenSource(const fs::path& path) {
+    GoldenSource g;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        std::cerr << "[Error] --inject-from 소스 열기 실패: " << path << "\n";
+        return g;
+    }
+    std::string s((std::istreambuf_iterator<char>(f)),
+                  std::istreambuf_iterator<char>());
+
+    double rot = 0, w = 0, h = 0;
+    if (!jsonExtractScalar(s, "rotation", rot)) {
+        std::cerr << "[Error] 소스 JSON에 rotation 없음: " << path << "\n";
+        return g;
+    }
+    if (!jsonExtractScalar(s, "input_width", w) ||
+        !jsonExtractScalar(s, "input_height", h)) {
+        std::cerr << "[Error] 소스 JSON에 input_width/height 없음: " << path << "\n";
+        return g;
+    }
+    if (!jsonExtractMesh(s, g.mesh_flat)) {
+        std::cerr << "[Error] 소스 JSON face_mesh 478점 파싱 실패: " << path << "\n";
+        return g;
+    }
+    g.rotation = static_cast<int>(rot);
+    g.input_width = static_cast<int>(w);
+    g.input_height = static_cast<int>(h);
+    g.ok = true;
+    return g;
+}
+
 // IrisLandmark 1개를 "{x,y,z,visibility}" 형태로 직렬화
 std::string landmarkToStr(const IrisLandmark& lm, bool include_vis) {
     char buf[256];
@@ -228,6 +383,13 @@ void writeResultJson(const fs::path& path,
     // 회전 적용 후 SDK에 들어간 유효 해상도
     w.intField("input_width", eff_width);
     w.intField("input_height", eff_height);
+
+    // ④ W4-D: deriveIrisResult가 반경을 픽셀 환산한 frame 치수(upright). detect 모드에서는
+    // result.frame_width/height(=SDK가 detect에 받은 치수)이며, injection 모드에서는
+    // 주입 시 사용한 upright 치수(rot90/270은 input과 W↔H 스왑)다. 향후 재캡처가 input_*만
+    // 보고 치수를 잘못 추론(rot90/270 radius 어긋남)하지 않도록 명시 저장(Codex 권고).
+    w.intField("frame_width", r.frame_width);
+    w.intField("frame_height", r.frame_height);
 
     // ---- 검출 상태 ----
     w.boolField("detected", r.detected);
@@ -365,17 +527,59 @@ int main(int argc, char* argv[]) {
     const int eff_w = image.cols;
     const int eff_h = image.rows;
 
-    // ---- 검출: 회전 각도를 SDK에 전달 (blocker 커버 핵심) ----
+    // ---- 검출 ----
+    // detect 모드(기본): 이미지를 회전 각도와 함께 detector에 전달(blocker 커버 핵심).
+    // injection 모드(--inject-from): detector 대신 소스 baseline의 face_mesh 478점을
+    //   iris_set_landmarks(upright 치수)로 주입하고 iris_get_injected_result로 재파생.
+    //   detector 코어 제거(W4-D 다음 단계) 후 골든 재캡처가 이 경로를 쓴다.
     IrisResult result;
     std::memset(&result, 0, sizeof(result));
-    err = iris_sdk_detect_with_rotation(
-        image.data, eff_w, eff_h, IRIS_FORMAT_BGR, a.rotation, &result);
-    if (err != IRIS_SDK_OK) {
-        std::cerr << "[Error] detect 실패: " << iris_sdk_error_to_string(err)
-                  << " — " << iris_sdk_get_last_error() << "\n";
-        iris_sdk_free_result(&result);
-        iris_sdk_destroy();
-        return 1;
+
+    if (a.inject_from.empty()) {
+        // ----- detect 모드(detector 경로 — 아직 detector 살아있음) -----
+        err = iris_sdk_detect_with_rotation(
+            image.data, eff_w, eff_h, IRIS_FORMAT_BGR, a.rotation, &result);
+        if (err != IRIS_SDK_OK) {
+            std::cerr << "[Error] detect 실패: " << iris_sdk_error_to_string(err)
+                      << " — " << iris_sdk_get_last_error() << "\n";
+            iris_sdk_free_result(&result);
+            iris_sdk_destroy();
+            return 1;
+        }
+    } else {
+        // ----- injection 모드(주입 경로 — detector 미사용) -----
+        const GoldenSource src = loadGoldenSource(fs::absolute(a.inject_from));
+        if (!src.ok) {
+            // loadGoldenSource가 구체 사유를 stderr로 보고함.
+            iris_sdk_destroy();
+            return 1;
+        }
+        // 주입 치수 = upright. baseline JSON의 input_*은 "회전 적용 후" 치수이므로
+        // rot90/270은 W↔H가 이미 스왑돼 있다 → 다시 되돌려 detector가 반경 산출에 쓴
+        // upright 공간으로 맞춘다(§주입 치수 — 미스왑 시 rot90/270 반경 0.04~0.34px 오차).
+        const bool rot_swaps = (src.rotation == 90 || src.rotation == 270);
+        const int upright_w = rot_swaps ? src.input_height : src.input_width;
+        const int upright_h = rot_swaps ? src.input_width : src.input_height;
+
+        uint32_t generation = 0;
+        err = iris_set_landmarks(
+            src.mesh_flat.data(), 478, upright_w, upright_h,
+            /*timestamp_us=*/0, &generation);
+        if (err != IRIS_SDK_OK) {
+            std::cerr << "[Error] iris_set_landmarks 실패: "
+                      << iris_sdk_error_to_string(err) << " — "
+                      << iris_sdk_get_last_error() << "\n";
+            iris_sdk_destroy();
+            return 1;
+        }
+        err = iris_get_injected_result(&result);
+        if (err != IRIS_SDK_OK) {
+            std::cerr << "[Error] iris_get_injected_result 실패: "
+                      << iris_sdk_error_to_string(err) << " — "
+                      << iris_sdk_get_last_error() << "\n";
+            iris_sdk_destroy();
+            return 1;
+        }
     }
 
     // ---- 덤프 ①: JSON ----
@@ -427,6 +631,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "[golden_capture] " << stem
+              << " mode=" << (a.inject_from.empty() ? "detect" : "inject")
               << " detected=" << (result.detected ? 1 : 0)
               << " conf=" << result.confidence
               << " rot=" << a.rotation

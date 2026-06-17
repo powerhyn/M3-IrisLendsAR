@@ -683,6 +683,48 @@ endif()
 gtest_discover_tests(test_landmark_injection DISCOVERY_TIMEOUT 60)
 
 # ============================================================
+# ④ W4-D 안전망: 18골든 전체 injection-derive 회전 정합 검증
+# (detector 제거 前 — golden_capture --inject-from 재캡처 경로가 detector 베이스라인과
+#  ε 일치함을, 회전 케이스 포함 전체에서 증명. test_landmark_injection과 동일 링크 처리:
+#  C API(iris_set_landmarks/iris_get_injected_result) 경유라 sdk_api.cpp.o가 끌려오며
+#  g_processor→mediapipe_detector(TFLite) 심볼이 필요해진다.)
+# ============================================================
+add_executable(test_golden_injection_derive test_golden_injection_derive.cpp)
+target_include_directories(test_golden_injection_derive PRIVATE ${TEST_COMMON_INCLUDES})
+target_compile_definitions(test_golden_injection_derive PRIVATE
+    GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden/baseline")
+target_link_libraries(test_golden_injection_derive PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+if(OpenCV_FOUND)
+    target_link_libraries(test_golden_injection_derive PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(test_golden_injection_derive PRIVATE IRIS_SDK_HAS_OPENCV)
+endif()
+if(TFLITE_FOUND OR TARGET tensorflow-lite)
+    target_compile_definitions(test_golden_injection_derive PRIVATE IRIS_SDK_HAS_TFLITE)
+    if(APPLE)
+        target_link_options(test_golden_injection_derive PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+elseif(EXISTS "${CMAKE_BINARY_DIR}/lib/libtensorflow-lite.a")
+    target_compile_definitions(test_golden_injection_derive PRIVATE IRIS_SDK_HAS_TFLITE)
+    target_link_libraries(test_golden_injection_derive PRIVATE
+        ${TFLITE_DEPS}
+        ${ABSEIL_LIBS}
+    )
+    if(APPLE)
+        target_link_options(test_golden_injection_derive PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
+endif()
+
+gtest_discover_tests(test_golden_injection_derive DISCOVERY_TIMEOUT 60)
+
+# ============================================================
 # P4-W3-04: DeviceTier 분류 + FreqSep 매핑 테스트
 # ============================================================
 add_executable(test_device_tier test_device_tier.cpp)

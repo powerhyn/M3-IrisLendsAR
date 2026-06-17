@@ -52,6 +52,12 @@ BIN="${BUILD_DIR}/bin/golden_capture"
 MODELS="${MODELS:-${BUILD_DIR}/bin/models}"
 TEXTURE="${TEXTURE:-${REPO_ROOT}/shared/textures/2. KYOTO BROWN 1.png}"
 
+# ④ W4-D: injection 재캡처 모드. INJECT_BASELINE=<dir> 설정 시, 각 캡처가 detect 대신
+#   --inject-from <INJECT_BASELINE>/<stem>.result.json 으로 동결 478점을 주입한다
+#   (golden_capture가 회전 case는 upright 치수 W↔H 스왑 처리). detector 제거 후 재캡처용
+#   + 제거 전 sanity diff(같은 baseline을 source로 주입해 render ε-동일 확인)에 공용.
+INJECT_BASELINE="${INJECT_BASELINE:-}"
+
 # 알려진 render 실패 stem (IRIS_SDK_RENDER_FAILED — 회전 변형에서 detect 좌표공간과
 # render 버퍼 공간 불일치로 좌표가 프레임 폭을 벗어남. README '알려진 현재 동작' 참조).
 # 이 stem들은 render.png 부재가 "기대 동작"이며, 생성되면 오히려 동작 변화다.
@@ -120,6 +126,9 @@ capture() {
   local args=(--input "${input}" --models "${MODELS}" --texture "${TEXTURE}"
               --out "${OUT_DIR}" --out-stem "${stem}"
               --rotation "${rot}" --mirror "${mirror}" --gamma "${gamma}")
+  if [[ -n "${INJECT_BASELINE}" ]]; then
+    args+=(--inject-from "${INJECT_BASELINE}/${stem}.result.json")
+  fi
   if [[ "${beauty}" -eq 0 ]]; then
     args+=(--no-beauty)
   fi
