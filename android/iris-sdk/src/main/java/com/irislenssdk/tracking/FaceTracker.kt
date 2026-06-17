@@ -1,12 +1,12 @@
-package com.irislenssdk.demo.tracking
+package com.irislenssdk.tracking
 
 import android.content.Context
 import android.os.SystemClock
 import androidx.camera.core.ImageProxy
-import com.irislenssdk.demo.tracking.math.CoordMapper
-import com.irislenssdk.demo.tracking.math.IrisGeometry
-import com.irislenssdk.demo.tracking.math.IrisLumaSampler
-import com.irislenssdk.demo.tracking.math.OneEuroFilter
+import com.irislenssdk.tracking.math.CoordMapper
+import com.irislenssdk.tracking.math.IrisGeometry
+import com.irislenssdk.tracking.math.IrisLumaSampler
+import com.irislenssdk.tracking.math.OneEuroFilter
 import com.google.mediapipe.framework.image.ByteBufferImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
@@ -41,7 +41,7 @@ import java.nio.ByteOrder
  * 입력 경로 (ADR-0002): CameraX RGBA_8888 단일 플레인 → ByteBufferImageBuilder 직접
  * (Bitmap 경유 금지 — 복사 1회 낭비). rowStride 패딩이 있으면 width*4로 압축 복사.
  */
-internal class FaceTracker(
+class FaceTracker(
     private val context: Context,
     private val preferGpu: Boolean,
     private val mirror: Boolean,

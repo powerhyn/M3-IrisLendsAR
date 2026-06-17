@@ -1,4 +1,4 @@
-package com.irislenssdk.demo.tracking
+package com.irislenssdk.tracking
 
 import android.os.Build
 
@@ -6,7 +6,7 @@ import android.os.Build
  * 에뮬레이터 감지 — MediaPipe GPU delegate가 에뮬레이터에서 EGL 초기화 실패(0x300c 등)를
  * 일으키는 사례가 많아 CPU 강제 폴백에 사용한다 (docs/research/mediapipe-android.md §3).
  */
-internal object EmulatorDetector {
+object EmulatorDetector {
     val isEmulator: Boolean by lazy {
         val fingerprint = Build.FINGERPRINT ?: ""
         fingerprint.startsWith("generic") ||

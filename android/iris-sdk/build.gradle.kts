@@ -205,6 +205,14 @@ dependencies {
     // Kotlin 코루틴 (비동기 처리)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
+    // 추적 글루 (W4-C: demo-app tracking/ → SDK AAR 승격).
+    // api()로 노출: FaceTracker가 androidx.camera.core.ImageProxy(analyze 입력)와
+    // com.google.mediapipe.tasks.* (onRawResult 콜백)를 public 시그니처에 노출하므로
+    // 소비자(데모/외부)가 transitive로 사용. tasks-vision은 ADR-0001 §5로 0.10.35 고정
+    // (0.10.26 미만 금지 — 16KB 페이지 정렬). camera-core는 demo와 동일 1.3.1.
+    api("com.google.mediapipe:tasks-vision:0.10.35")
+    api("androidx.camera:camera-core:1.3.1")
+
     // 테스트
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

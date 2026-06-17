@@ -1,4 +1,4 @@
-package com.irislenssdk.demo.tracking
+package com.irislenssdk.tracking
 
 /**
  * 추론 1회 결과의 불변 스냅샷 — 추론 스레드에서 생성, 렌더 스레드에서 소비.
@@ -8,7 +8,7 @@ package com.irislenssdk.demo.tracking
  *
  * 이 타입은 SDK 내부 전용이다 — 랜드마크를 SDK 밖으로 노출하지 않는다 (CLAUDE.md 불변 조건).
  */
-internal class TrackingSnapshot private constructor(
+class TrackingSnapshot private constructor(
     val detected: Boolean,
     val timestampMs: Long,
     /**

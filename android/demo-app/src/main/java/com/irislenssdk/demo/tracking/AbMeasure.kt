@@ -11,6 +11,8 @@ import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.irislenssdk.IrisResult
+import com.irislenssdk.tracking.EmulatorDetector
+import com.irislenssdk.tracking.TasksToIrisResult
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale

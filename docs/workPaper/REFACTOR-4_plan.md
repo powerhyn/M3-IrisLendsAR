@@ -1,7 +1,7 @@
 # REFACTOR-4: 추적 레이어 주입형 전환 (④) — 실행 계획
 
 > 새 세션이 이 문서 + ADR-0001만 읽고 ④를 실행할 수 있도록 작성. 작성: 2026-06-15.
-> 상태: 🔄 **④ 진행 중** — **W4-B1**(방향 A)+**W4-B2**(축소, enum/메타 W4-D 이월)+**W4-A**(internal 헤더 776302f + 에러코드 501→100; 기본값은 P8 이월)+**W4-B3**(DetectionSlot ts 원자 번들 + JNI/Java/Kotlin 정합) 완료. 검출 폴백(Eye-Only)=글루 결정(ADR §3). 다음=**W4-C**(글루 AAR 승격 — B3 ts 원자성이 선결) → W4-D/E. **④ 완료 후 P8 뷰티**(사용자 확정 2026-06-16: 핵심=① 피부 skin smoothing[P8-W1 구현됨] + ② 턱깎기 형태워프[미구현, grid_mesh substrate 보존]; 곁가지 LUT/레거시FreqSep/색보정/vivid 제거).
+> 상태: 🔄 **④ 진행 중** — **W4-B1**(방향 A)+**W4-B2**(축소, enum/메타 W4-D 이월)+**W4-A**(internal 헤더 776302f + 에러코드 501→100; 기본값은 P8 이월)+**W4-B3**(DetectionSlot ts 원자 번들)+**W4-C**(글루 9파일 → iris-sdk AAR 승격, Option A) 완료. 검출 폴백(Eye-Only)=글루 결정(ADR §3). 다음=**W4-D**(자체 추적 코어 제거 + LEGACY 제거 + enum/메타 물리삭제 + 좌표 canonical, 골든 재캡처) → W4-E. **W4-B4**(boundary/visibility 운반 + avg_iris_luma 승격)는 W4-D 전 또는 병행. **④ 완료 후 P8 뷰티**(사용자 확정 2026-06-16: 핵심=① 피부 skin smoothing[P8-W1 구현됨] + ② 턱깎기 형태워프[미구현, grid_mesh substrate 보존]; 곁가지 LUT/레거시FreqSep/색보정/vivid 제거).
 > 근거: ADR-0001(승인 2026-06-11) §3/§6/§8/§9/§12, REFACTOR-3-3 §9 이월, 스코핑 워크플로(wf_207a105f-dcc 수확 + wf_4f1249e6-81a 연속), **Codex 외부 검증 + critical-review(2026-06-15)**.
 
 ## 0. 핵심 사실 (스코핑 실측 2026-06-15)
@@ -47,11 +47,17 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
   - **이월 명문화**: pre-existing torn-read 윈도우(LEGACY ~11ms<GL ~16ms 구간, dead generation 가드 미사용) — ts 번들이 악화 안 시킴(찢겨도 동일 슬롯=정합), generation 필드는 미래 seqlock 자리로 보존. W4-D/별도 트랙 후보.
 - **B4 — boundary/visibility 운반 + avg_iris_luma 승격**: `copyResultFromJava` boundary[1..4]/visibility 정식 운반. **avg_iris_luma를 SDK AAR 계약으로 정식 승격**(GPU self-measure 이전 또는 글루 측정-주입 — '또는'이 아니라 **필수**, 미승격 시 W4-D서 P7-W2 default ON 조용히 퇴화, Codex HIGH).
 
-### W4-C — 글루 iris-sdk AAR 승격 (게이트=A/B + 재캡처 + AAR 패키징)
-- demo-app `tracking/` 12파일 → iris-sdk AAR로 승격(현재 iris-sdk에 FaceTracker/CoordMapper/TasksToIrisResult 없음). **복사 아님 — public API·lifecycle·model asset·의존 publishing·ProGuard·ABI까지 동반하는 API 전환**(Codex).
-- tasks-vision 0.10.35 → iris-sdk `build.gradle.kts`(현재 demo만), face_landmarker.task → SDK 번들(현 데모 assets 중복 해소).
-- 데모는 SDK 추적 API 소비로 전환, **TASKS 단일 경로**(LEGACY 토글은 A/B 검증 종료 후 제거 가능). **선결: B3 ts 원자성**(A/B 채널 오염 방지).
-- **AAR 패키징 게이트(Codex 놓침, ADR T4)**: model asset SHA/버전 고정, consumer ProGuard 규칙, 의존성 충돌 점검, AAR/APK 크기 회귀(T4 후퇴 트리거).
+### W4-C — 글루 iris-sdk AAR 승격 — ✅ 완료 (2026-06-17, Option A)
+4축 조사(wf_ae07efae) + 사용자 결정 = **Option A(글루 이관 + 데모 오케스트레이션 유지)**. 완전 캡슐화(analyze→IrisResult 자동 슬롯)는 LEGACY 제거하는 **W4-D**로(LEGACY/A/B 공존 중엔 대칭 오케스트레이션 필요). 실수행:
+- **글루 9파일 → iris-sdk `com.irislenssdk.tracking[.math]`**(git mv): FaceTracker·TasksToIrisResult·TrackingSnapshot·LandmarkIndices·**EmulatorDetector**(FaceTracker가 의존 → SDK가 데모 역의존 불가라 동반 이동, 조사 분류 정정)·math/{CoordMapper·IrisGeometry·IrisLumaSampler·OneEuroFilter}. **데모 잔존**: AbMeasure(A/B 하니스, SDK import 추가)·math/FrameRingSelector(렌더 글루, CameraGLRenderer 전용). 가시성: 데모 소비 4종(FaceTracker·TasksToIrisResult·TrackingSnapshot·EmulatorDetector) `internal`→`public`, LandmarkIndices+math 4종 `internal` 유지(SDK 표면 최소화, 컴파일러가 공개-노출 누수 0 확인).
+- **의존성**: iris-sdk += `api("com.google.mediapipe:tasks-vision:0.10.35")` + `api("androidx.camera:camera-core:1.3.1")`(FaceTracker가 ImageProxy·FaceLandmarkerResult를 public 시그니처 노출 → api 필수). demo -= tasks-vision(전이 제공). 버전 핀 SDK 단일 관리.
+- **모델 에셋**: `face_landmarker.task` → iris-sdk `assets/models/`(git mv, SHA `64184e22…`), 데모 중복 2벌(assets/·assets/models/) 제거, MediaPipeBenchmarkActivity 경로 "models/"로 정합. AAR 병합으로 APK에 단일 제공(이전 2벌 → 1벌, **APK ~3.6MB 감소**).
+- **consumer-rules.pro**: `com.irislenssdk.tracking.**` + `com.google.mediapipe.**` keep + dontwarn 추가.
+- **데모 전환**: GpuRenderActivity/AbMeasure가 SDK tracking 패키지 import. **LEGACY/TASKS 토글·오케스트레이션·frame-sync(FrameRingSelector) 보존**(Option A, 무회귀). LEGACY 제거는 W4-D.
+- **검증**: assembleDebug BUILD SUCCESSFUL(exit0) + APK 모델 단일 병합·.so 중복 0(ABI당 1) + 골든 PASS(불일치 0, detector ε 불변 — cpp/ 무변경) + ctest 회귀 0(pre-existing 5) + AAR 패키징 게이트(T4: model SHA·의존성 충돌 0·크기 회귀=감소). **실기기 A/B 무회귀는 사용자 육안 잔여**(추적 글루 모듈 재배치).
+- **이월**: LEGACY 제거·완전 캡슐화·canonical 라벨·메타 물리삭제 → W4-D / 16KB 전수검증(OpenCV+MP Tasks .so) → W4-E / publishing(maven-publish)·재캡처 manifest 도구화 → 2.0.
+
+**원안(참고)**: demo-app `tracking/` → iris-sdk AAR 승격(복사 아님 — public API·lifecycle·model asset·의존·ProGuard·ABI 동반 API 전환). tasks-vision·모델 SDK 이동. TASKS 단일 경로는 A/B 종료 후(LEGACY 제거 W4-D). AAR 패키징 게이트(ADR T4).
 
 ### W4-D — removalScope 자체 추적 제거 + 좌표 canonical 정정 (게이트=A/B + 명시적 재기준선)
 **W4-C로 SDK가 추적을 책임진 후에만 안전**(현 LEGACY 기본 — 먼저 지우면 데모·골든 깨짐). iOS/Web은 소스 0개 빈 스텁이라 코어 제거에 영향받는 활성 소비자 없음(§0):

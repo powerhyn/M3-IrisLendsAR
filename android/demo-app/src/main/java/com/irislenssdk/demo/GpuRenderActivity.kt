@@ -52,8 +52,8 @@ import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
 import com.irislenssdk.demo.tracking.AbMeasure
-import com.irislenssdk.demo.tracking.FaceTracker
-import com.irislenssdk.demo.tracking.TasksToIrisResult
+import com.irislenssdk.tracking.FaceTracker
+import com.irislenssdk.tracking.TasksToIrisResult
 import com.irislenssdk.demo.beauty.BeautyPreset
 import com.irislenssdk.demo.beauty.BeautyPresetFactory
 import com.irislenssdk.demo.camera.OverlayView

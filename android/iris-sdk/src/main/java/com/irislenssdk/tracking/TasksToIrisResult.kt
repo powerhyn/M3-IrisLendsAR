@@ -1,9 +1,9 @@
-package com.irislenssdk.demo.tracking
+package com.irislenssdk.tracking
 
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.irislenssdk.IrisResult
-import com.irislenssdk.demo.tracking.math.CoordMapper
-import com.irislenssdk.demo.tracking.math.IrisGeometry
+import com.irislenssdk.tracking.math.CoordMapper
+import com.irislenssdk.tracking.math.IrisGeometry
 import java.nio.ByteBuffer
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -42,7 +42,7 @@ import kotlin.math.min
  *
  * 스레드: 분석 executor 스레드 전용 (내부 재사용 버퍼 — 동시 호출 금지).
  */
-internal object TasksToIrisResult {
+object TasksToIrisResult {
 
     /** IrisResult.left* 필드 소스 — 인덱스 468그룹 (코어 레거시 시맨틱, 위 ⚠️ 참조) */
     private val RESULT_LEFT_IRIS = intArrayOf(468, 469, 470, 471, 472)

@@ -1,4 +1,4 @@
-package com.irislenssdk.demo.tracking.math
+package com.irislenssdk.tracking.math
 
 /**
  * 좌표 매핑 순수 함수 모음 — 분석 프레임(정규화) ↔ 렌더 뷰포트 변환.

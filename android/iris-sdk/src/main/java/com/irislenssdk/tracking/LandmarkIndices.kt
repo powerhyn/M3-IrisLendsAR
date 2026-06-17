@@ -1,4 +1,4 @@
-package com.irislenssdk.demo.tracking
+package com.irislenssdk.tracking
 
 /**
  * MediaPipe FaceLandmarker 478점 인덱스 규약.

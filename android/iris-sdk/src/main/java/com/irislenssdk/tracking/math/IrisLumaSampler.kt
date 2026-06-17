@@ -1,4 +1,4 @@
-package com.irislenssdk.demo.tracking.math
+package com.irislenssdk.tracking.math
 
 /**
  * 홍채 평균 휘도(avgIrisLuma) 측정용 샘플 좌표 계산 순수 함수 (ADR-0004 노출 매칭).
