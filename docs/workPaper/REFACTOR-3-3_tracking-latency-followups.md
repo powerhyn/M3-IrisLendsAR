@@ -34,7 +34,7 @@ LensSim ADR-0002/0005, 적대 리뷰(워크플로 wf_fa34ea2c-9e3).
 
 ## 3. ts ↔ DetectionSlot 번들링 — 1프레임 스큐 제거 (④ 범위) — ✅ 해소 (W4-B3, 2026-06-16)
 
-> **해소됨**: `DetectionSlot`(iris_jni.cpp 내부 구조체)에 `frame_ts_ns` 추가 + `nativeUpdateDetectionSlot(result, frameTsNs)`로 ts 동반 주입 + 단일 스냅샷 reader `nativeGetActiveDetectionSlot`로 GL이 배경 ts·렌즈 좌표·게이트(detected)를 한 슬롯에서 원자 취득. volatile `latestLandmarkFrameTsNs` 사이드채널 폐기로 1프레임 스큐 원천 제거. 공개 ABI/골든 무영향. (REFACTOR-4_plan.md W4-B3 참조. 실기기 fsync 무회귀 육안 잔여.) 이하 원 분석 보존:
+> **해소됨**: `DetectionSlot`(iris_jni.cpp 내부 구조체)에 `frame_ts_ns` 추가 + `nativeUpdateDetectionSlot(result, frameTsNs)`로 ts 동반 주입 + 단일 스냅샷 reader `nativeGetActiveDetectionSlot`로 GL이 배경 ts·렌즈 좌표·게이트(detected)를 한 슬롯에서 원자 취득. volatile `latestLandmarkFrameTsNs` 사이드채널 폐기로 1프레임 스큐 원천 제거. 공개 ABI/골든 무영향. (REFACTOR-4_plan.md W4-B3 참조. 실기기 fsync 무회귀 통과 — 2026-06-17 SM-S916N, LEGACY/TASKS 양 모드.) 이하 원 분석 보존:
 
 
 - **무엇**: frame-sync 배경 슬롯 키(`latestLandmarkFrameTsNs`, volatile 사이드 채널)와 렌즈 좌표

@@ -43,7 +43,7 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
   - **(③) faceRect 단위 주석 정정** — C++/JNI/데모 모두 normalized[0,1]인데 `IrisResult.java` 주석만 "픽셀" 오기(드리프트, TasksToIrisResult.kt:128이 이미 감사 finding 기록). 4필드+클래스 주석 정규화로 정정(런타임 무변경, ADR §7.1).
   - **(②) IrisResultKt 정리** — detector 메타(iris_quality_*/eye_refiner_used)에 `[W4-D 삭제 예정]` 문서 주석을 C++ types.h 마커와 정합(Java IrisResult에도 누락분 추가). faceMesh·avg_iris_luma 부재는 의도적 경량 DTO 선택(faceMesh→W4-C, avg_luma→W4-B4 승격)임을 KDoc 명문화. **물리 삭제 없음**(W4-D). 어노테이션 미사용(C++ Doxygen 패턴 미러, 내부 소비처 경고 회피).
   - **(①) JNI 매핑 검증** — C/C++/Java/JNI 4면 매핑 정확 일치 + offsetof/sizeof static_assert 완비 확인(sdk_api_v2.cpp:40-84), 신규 getActiveDetectionSlot이 detected 매핑 행사. 자동 검증기는 2.0 이월.
-  - **검증**: assembleDebug BUILD SUCCESSFUL(exit0, JNI 시그니처 정합) + 골든 PASS(불일치 0, JSON18/PNG19, detector ε 불변) + ctest 회귀 0(pre-existing 5: NOT_BUILT 2+GPUBeauty 1+FreqSep 2) + cpp 코어 빌드 신규 err/warn 0. **실기기 fsync ON 렌즈 정합 무회귀는 사용자 육안 잔여**(렌더 경로 변경).
+  - **검증**: assembleDebug BUILD SUCCESSFUL(exit0, JNI 시그니처 정합) + 골든 PASS(불일치 0, JSON18/PNG19, detector ε 불변) + ctest 회귀 0(pre-existing 5: NOT_BUILT 2+GPUBeauty 1+FreqSep 2) + cpp 코어 빌드 신규 err/warn 0. **실기기 fsync ON 렌즈 정합 무회귀 통과(2026-06-17, SM-S916N — LEGACY/TASKS 양 모드 잘 따라옴, 회귀 없음).**
   - **이월 명문화**: pre-existing torn-read 윈도우(LEGACY ~11ms<GL ~16ms 구간, dead generation 가드 미사용) — ts 번들이 악화 안 시킴(찢겨도 동일 슬롯=정합), generation 필드는 미래 seqlock 자리로 보존. W4-D/별도 트랙 후보.
 - **B4 — boundary/visibility 운반 + avg_iris_luma 승격**: `copyResultFromJava` boundary[1..4]/visibility 정식 운반. **avg_iris_luma를 SDK AAR 계약으로 정식 승격**(GPU self-measure 이전 또는 글루 측정-주입 — '또는'이 아니라 **필수**, 미승격 시 W4-D서 P7-W2 default ON 조용히 퇴화, Codex HIGH).
 
