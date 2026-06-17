@@ -54,7 +54,7 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 - **모델 에셋**: `face_landmarker.task` → iris-sdk `assets/models/`(git mv, SHA `64184e22…`), 데모 중복 2벌(assets/·assets/models/) 제거, MediaPipeBenchmarkActivity 경로 "models/"로 정합. AAR 병합으로 APK에 단일 제공(이전 2벌 → 1벌, **APK ~3.6MB 감소**).
 - **consumer-rules.pro**: `com.irislenssdk.tracking.**` + `com.google.mediapipe.**` keep + dontwarn 추가.
 - **데모 전환**: GpuRenderActivity/AbMeasure가 SDK tracking 패키지 import. **LEGACY/TASKS 토글·오케스트레이션·frame-sync(FrameRingSelector) 보존**(Option A, 무회귀). LEGACY 제거는 W4-D.
-- **검증**: assembleDebug BUILD SUCCESSFUL(exit0) + APK 모델 단일 병합·.so 중복 0(ABI당 1) + 골든 PASS(불일치 0, detector ε 불변 — cpp/ 무변경) + ctest 회귀 0(pre-existing 5) + AAR 패키징 게이트(T4: model SHA·의존성 충돌 0·크기 회귀=감소). **실기기 A/B 무회귀는 사용자 육안 잔여**(추적 글루 모듈 재배치).
+- **검증**: assembleDebug BUILD SUCCESSFUL(exit0) + APK 모델 단일 병합·.so 중복 0(ABI당 1) + 골든 PASS(불일치 0, detector ε 불변 — cpp/ 무변경) + ctest 회귀 0(pre-existing 5) + AAR 패키징 게이트(T4: model SHA·의존성 충돌 0·크기 회귀=감소). **실기기 A/B 무회귀 통과(2026-06-17, SM-A235N — LEGACY/TASKS 양 모드 잘 따라옴, 추적 글루 모듈 재배치 무회귀).**
 - **이월**: LEGACY 제거·완전 캡슐화·canonical 라벨·메타 물리삭제 → W4-D / 16KB 전수검증(OpenCV+MP Tasks .so) → W4-E / publishing(maven-publish)·재캡처 manifest 도구화 → 2.0.
 
 **원안(참고)**: demo-app `tracking/` → iris-sdk AAR 승격(복사 아님 — public API·lifecycle·model asset·의존·ProGuard·ABI 동반 API 전환). tasks-vision·모델 SDK 이동. TASKS 단일 경로는 A/B 종료 후(LEGACY 제거 W4-D). AAR 패키징 게이트(ADR T4).
