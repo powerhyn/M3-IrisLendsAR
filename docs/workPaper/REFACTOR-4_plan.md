@@ -87,7 +87,7 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 - **재캡처 manifest 강제 (Codex HIGH, 무언의 재기준선 차단)**: Tasks 버전·model SHA·기기·입력 corpus·before/after 메트릭·luma/visibility/timestamp invariant·승인자를 파일로 기록해야 재기준선 인정.
 
 ### W4-E — cpu-render deprecation + 16KB 재정렬 (게이트=objdump/zipalign)
-- **cpu-render(옵션 B, §8.2)**: iris_sdk_render_lens(sdk_api.h:428)·iris_sdk_process(:376) 등 공개 CPU 픽셀 API에 `IRIS_SDK_DEPRECATED` 마킹 + 구현 동결 + '2.0 제거' 고지. **파일 삭제 금지(2.0)**, OpenCV 잔존은 1.x 정상.
+- **cpu-render(옵션 B, §8.2)**: `iris_sdk_render_lens`(sdk_api.h:362, W4-D 후 실측)·`iris_sdk_render_with_result`(:979)·`iris_sdk_load_texture`(:331/343) 등 공개 CPU 픽셀 API에 `IRIS_SDK_DEPRECATED`(export.h:25 기존 매크로) 마킹 + 구현 동결 + '2.0 제거' 고지. ⚠️ **`iris_sdk_process`는 W4-D에서 이미 물리 제거됨**(plan 원문 :376 스테일). **파일 삭제 금지(2.0)**, OpenCV 잔존은 1.x 정상. **착수 진입점=`docs/workPaper/REFACTOR-4_W4-E_kickoff.md`**(검증된 현황·게이트·남은 ④ 로드맵).
 - **16KB(§9 대응1)**: AGP 8.5.0→8.5.1+(android/build.gradle.kts:10-11), ndkVersion r27+ 핀(현재 미고정), `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` 또는 `-Wl,-z,max-page-size=16384`. 검증 게이트 신설: **최종 AAR/APK의 전 .so 전수** objdump --private-headers align 2**14 + zipalign -c -P 16. TFLite prebuilt 2종은 W4-D 제거로 자동 해소되나, **OpenCV(.so) — iris-sdk CMakeLists:136 `find_package(OpenCV REQUIRED)` — 와 MediaPipe Tasks transitive native lib는 잔존하므로 별도 검증 대상**(Codex 검증, '자동 해소' 가정 금지).
 
 ## 4. 머지 게이트 (PR별, ADR §12)
