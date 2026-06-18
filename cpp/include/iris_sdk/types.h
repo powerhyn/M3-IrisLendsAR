@@ -81,37 +81,11 @@ enum class ErrorCode : int {
     Unknown = 999               ///< 알 수 없는 에러
 };
 
-/**
- * @brief 검출기 타입 열거형
- * 홍채 검출에 사용할 검출기 종류
- *
- * @deprecated ④ W4-D에서 detector 인프라(iris_detector·mediapipe_detector·
- *   frame_processor·sdk_manager createDetector)와 함께 완전 삭제 예정.
- *   EyeOnly/Hybrid는 구현 0인 빈 껍데기(iris_detector.cpp createDetector 전 분기 nullptr).
- *   Eye-Only 폴백은 코어 밖(플랫폼 글루) 책임으로 결정됨(ADR §3 검출 폴백, 2026-06-16)
- *   → 코어는 추적/검출 미보유 확정이라 보존 가치 없음. W4-B2에서 소비처가 W4-D 제거
- *   대상이라 동작 불변으로 못 지워 이월.
- */
-enum class DetectorType : int {
-    Unknown = 0,    ///< 알 수 없음
-    MediaPipe = 1,  ///< MediaPipe Face Mesh + Iris
-    EyeOnly = 2,    ///< 눈 영역 전용 커스텀 모델
-    Hybrid = 3      ///< MediaPipe + EyeOnly 하이브리드
-};
-
-/**
- * @brief Eye Refiner 실행 정책
- * 2차 눈 정밀화 모델의 실행 조건
- *
- * @deprecated ④ W4-D에서 mediapipe_detector(유일 소비처)와 함께 삭제 예정.
- *   추적 외부화로 Eye Refiner(iris_landmark 2차 추론) 자체가 소멸(ADR §6.2).
- *   C 미러 IrisEyeRefinerPolicy(sdk_api.h)도 동반 삭제 대상.
- */
-enum class EyeRefinerPolicy : int {
-    Always = 0,       ///< 항상 실행 (HQ 모드: 사진 촬영, 녹화)
-    Conditional = 1,  ///< 조건부 실행 (기본값: confidence < 0.7 또는 iris_radius 작을 때)
-    Never = 2         ///< 비활성화 (저사양 기기)
-};
+// ④ W4-D: enum class DetectorType / EyeRefinerPolicy 제거.
+//   검출 인프라(iris_detector·mediapipe_detector·inference_thread) 물리 제거에 동반.
+//   추적 외부화로 코어는 검출/추적·Eye Refiner를 보유하지 않는다(ADR §3/§6.2).
+//   C 미러 IrisEyeRefinerPolicy(sdk_api.h) + no-op stub iris_sdk_set_eye_refiner_policy는
+//   ABI 호환을 위해 W4-E deprecation까지 보존된다.
 
 // ============================================================
 // 기본 데이터 구조체
@@ -202,16 +176,11 @@ struct IrisResult {
     int32_t frame_width;    ///< 원본 프레임 너비
     int32_t frame_height;   ///< 원본 프레임 높이
 
-    // Eye Refiner 메타데이터
-    // @deprecated iris_quality_*/eye_refiner_used: ④ W4-D에서 detector 전용 메타 삭제(ADR §6.2).
-    //   생산자 mediapipe_detector + 골든 baseline 18벌 + JNI 매핑(iris_jni.cpp) + C 미러(sdk_api.h)
-    //   동시 제거(골든 재캡처 동반)라 W4-B2 동작 불변으로 못 지워 이월. ※ eyelid_ratio_*는 W3용
-    //   별도 트랙, avg_iris_luma_*(아래)는 P7-W2 활성 필드 — 이 삭제 묶음 아님.
-    float iris_quality_left;    ///< [W4-D 삭제] 왼쪽 홍채 품질 점수 (0.0~1.0, Eye Refiner 사용시)
-    float iris_quality_right;   ///< [W4-D 삭제] 오른쪽 홍채 품질 점수 (0.0~1.0, Eye Refiner 사용시)
+    // 눈꺼풀 가림 비율 (W3 트랙)
+    // ④ W4-D: detector 전용 메타 iris_quality_*/eye_refiner_used 제거(ADR §6.2).
+    //   eyelid_ratio_*는 W3용 별도 트랙, avg_iris_luma_*(아래)는 P7-W2 활성 필드 — 보존.
     float eyelid_ratio_left;    ///< 왼쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
     float eyelid_ratio_right;   ///< 오른쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
-    bool eye_refiner_used;      ///< [W4-D 삭제] Eye Refiner 사용 여부 (디버그용)
 
     // P7-W2 §5.5: iris ROI 실측 평균 luma (srgb²+Rec.709 linear, 0~1).
     // 미측정/미검출 시 -1.0f sentinel. C IrisResult(sdk_api.h)와 reinterpret_cast로

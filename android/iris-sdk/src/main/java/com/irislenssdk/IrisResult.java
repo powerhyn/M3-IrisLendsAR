@@ -27,8 +27,8 @@ import androidx.annotation.NonNull;
  * <p>사용 예:</p>
  * <pre>{@code
  * IrisResult result = new IrisResult();
- * int error = IrisLensSDK.detect(frameData, width, height, format, result);
- * if (error == IrisLensSDK.OK && result.detected) {
+ * // 추적 글루(MediaPipe Tasks)가 검출한 478점을 주입한 뒤 결과를 읽습니다.
+ * if (result.detected) {
  *     float leftX = result.leftIrisX;
  *     float leftY = result.leftIrisY;
  *     // 홍채 위치 사용
@@ -192,21 +192,6 @@ public class IrisResult {
     // ========================================================================
 
     /**
-     * [W4-D 삭제 예정] 왼쪽 홍채 품질 점수 (0.0 ~ 1.0).
-     * Eye Refiner 사용 시에만 유효합니다.
-     * ④ W4-D에서 detector 전용 메타 삭제(ADR §6.2) — C++ types.h/sdk_api.h·JNI 매핑·
-     * 골든 baseline 18벌과 동시 제거(골든 재캡처 동반). W4-B3는 C++ types.h 마커와 문서 정합까지.
-     */
-    public float irisQualityLeft;
-
-    /**
-     * [W4-D 삭제 예정] 오른쪽 홍채 품질 점수 (0.0 ~ 1.0).
-     * Eye Refiner 사용 시에만 유효합니다.
-     * ④ W4-D에서 detector 전용 메타 삭제(ADR §6.2). W4-B3는 문서 정합까지.
-     */
-    public float irisQualityRight;
-
-    /**
      * 왼쪽 눈꺼풀 가림 비율 (0.0 ~ 1.0).
      * 향후 구현 예정 (W3).
      */
@@ -217,13 +202,6 @@ public class IrisResult {
      * 향후 구현 예정 (W3).
      */
     public float eyelidRatioRight;
-
-    /**
-     * [W4-D 삭제 예정] Eye Refiner 사용 여부.
-     * true이면 2차 정밀화가 적용된 결과입니다.
-     * ④ W4-D에서 detector 전용 메타 삭제(ADR §6.2). W4-B3는 C++ types.h 마커와 문서 정합까지.
-     */
-    public boolean eyeRefinerUsed;
 
     /**
      * 왼쪽 홍채 ROI 실측 평균 luma (P7-W2, srgb²+Rec.709 linear, 0~1).
@@ -300,11 +278,8 @@ public class IrisResult {
         faceYaw = 0.0f;
         faceRoll = 0.0f;
 
-        irisQualityLeft = 0.0f;
-        irisQualityRight = 0.0f;
         eyelidRatioLeft = 0.0f;
         eyelidRatioRight = 0.0f;
-        eyeRefinerUsed = false;
 
         // P7-W2: 미측정 sentinel(-1).
         avgIrisLumaLeft = -1.0f;
@@ -375,11 +350,8 @@ public class IrisResult {
         this.faceYaw = src.faceYaw;
         this.faceRoll = src.faceRoll;
 
-        this.irisQualityLeft = src.irisQualityLeft;
-        this.irisQualityRight = src.irisQualityRight;
         this.eyelidRatioLeft = src.eyelidRatioLeft;
         this.eyelidRatioRight = src.eyelidRatioRight;
-        this.eyeRefinerUsed = src.eyeRefinerUsed;
 
         // P7-W2: iris ROI 실측 luma 보존.
         this.avgIrisLumaLeft = src.avgIrisLumaLeft;
@@ -435,8 +407,6 @@ public class IrisResult {
                 faceRectWidth + ", " + faceRectHeight + ")" +
                 ", faceRotation=(pitch=" + facePitch + ", yaw=" + faceYaw +
                 ", roll=" + faceRoll + ")" +
-                ", eyeRefiner=" + eyeRefinerUsed +
-                ", irisQuality=(" + irisQualityLeft + ", " + irisQualityRight + ")" +
                 ", frame=" + frameWidth + "x" + frameHeight +
                 ", timestamp=" + timestampMs +
                 '}';

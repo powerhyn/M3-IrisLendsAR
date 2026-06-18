@@ -300,7 +300,7 @@
 
     </LinearLayout>
 
-    <!-- ③-3: 추적 공급자 토글(LEGACY/TASKS) + 듀얼 A/B 측정 패널 (REFACTOR-3-3 §4) -->
+    <!-- W4-D: TASKS 단일 경로 — frame-sync 킬스위치만 유지 (추적 공급자 토글/듀얼 A/B 측정 제거) -->
     <LinearLayout
         android:id="@+id/p33AbPanel"
         android:layout_width="wrap_content"
@@ -312,31 +312,6 @@
         android:background="#80000000"
         app:layout_constraintTop_toBottomOf="@id/w6BenchPanel"
         app:layout_constraintEnd_toEndOf="parent">
-
-        <Button
-            android:id="@+id/btnTrackerMode"
-            android:layout_width="80dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="2dp"
-            android:text="trk:leg"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnAbMeasure"
-            android:layout_width="64dp"
-            android:layout_height="36dp"
-            android:text="ab:off"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
 
         <Button
             android:id="@+id/btnFrameSync"

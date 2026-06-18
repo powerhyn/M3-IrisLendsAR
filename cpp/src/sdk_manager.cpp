@@ -5,7 +5,6 @@
 
 #include "iris_sdk/sdk_manager.h"
 #include "iris_sdk/frame_processor.h"
-#include "iris_sdk/iris_detector.h"
 #include "iris_sdk/lens_renderer.h"
 
 #include <atomic>
@@ -144,9 +143,9 @@ public:
             return nullptr;
         }
 
-        // config_를 안전하게 사용 (lock 보유 중)
+        // ④ W4-D: render-only 초기화 (검출 인프라 제거, 모델 경로/detector 타입 인자 불필요)
         auto processor = std::make_unique<FrameProcessor>();
-        if (!processor->initialize(config_.model_path, config_.detector_type)) {
+        if (!processor->initialize()) {
             logInternalUnlocked(LogLevel::Error, "SDKManager",
                                "Failed to initialize FrameProcessor");
             return nullptr;
@@ -154,35 +153,6 @@ public:
 
         logInternalUnlocked(LogLevel::Debug, "SDKManager", "FrameProcessor created");
         return processor;
-    }
-
-    std::unique_ptr<IrisDetector> createDetector(DetectorType type) {
-        // 스레드 안전: 뮤텍스로 config_ 접근 보호
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        if (!isReadyUnlocked()) {
-            logInternalUnlocked(LogLevel::Error, "SDKManager",
-                               "SDK not initialized, cannot create IrisDetector");
-            return nullptr;
-        }
-
-        auto detector = detail::createDetector(type);
-        if (!detector) {
-            logInternalUnlocked(LogLevel::Error, "SDKManager",
-                               "Failed to create IrisDetector (type=%d)",
-                               static_cast<int>(type));
-            return nullptr;
-        }
-
-        if (!detector->initialize(config_.model_path)) {
-            logInternalUnlocked(LogLevel::Error, "SDKManager",
-                               "Failed to initialize IrisDetector");
-            return nullptr;
-        }
-
-        logInternalUnlocked(LogLevel::Debug, "SDKManager",
-                           "IrisDetector created (type=%d)", static_cast<int>(type));
-        return detector;
     }
 
     std::unique_ptr<LensRenderer> createRenderer() {
@@ -380,10 +350,6 @@ SDKState SDKManager::getState() const noexcept {
 
 std::unique_ptr<FrameProcessor> SDKManager::createFrameProcessor() {
     return impl_->createFrameProcessor();
-}
-
-std::unique_ptr<IrisDetector> SDKManager::createDetector(DetectorType type) {
-    return impl_->createDetector(type);
 }
 
 std::unique_ptr<LensRenderer> SDKManager::createRenderer() {

@@ -19,7 +19,6 @@
 namespace iris_sdk {
 
 // 전방 선언
-class IrisDetector;
 class LensRenderer;
 class FrameProcessor;
 
@@ -62,8 +61,7 @@ struct IRIS_SDK_EXPORT SDKConfig {
     // 모델 경로 (필수)
     std::string model_path;
 
-    // 검출기 설정
-    DetectorType detector_type = DetectorType::MediaPipe;
+    // 검출기 설정 (④ W4-D: detector_type 제거 — 코어 검출 미보유)
     float min_detection_confidence = 0.5f;  ///< 최소 검출 신뢰도 (0.0~1.0)
     float min_tracking_confidence = 0.5f;   ///< 최소 추적 신뢰도 (0.0~1.0)
     int max_faces = 1;                      ///< 최대 얼굴 수
@@ -189,18 +187,6 @@ public:
      * @return 새 FrameProcessor 인스턴스 또는 nullptr
      */
     [[nodiscard]] std::unique_ptr<FrameProcessor> createFrameProcessor();
-
-    /**
-     * @brief IrisDetector 생성
-     *
-     * 지정된 타입의 새 IrisDetector 인스턴스를 생성합니다.
-     * SDK가 초기화되지 않은 경우 nullptr을 반환합니다.
-     *
-     * @param type 검출기 종류 (기본: MediaPipe)
-     * @return 새 IrisDetector 인스턴스 또는 nullptr
-     */
-    [[nodiscard]] std::unique_ptr<IrisDetector> createDetector(
-        DetectorType type = DetectorType::MediaPipe);
 
     /**
      * @brief LensRenderer 생성

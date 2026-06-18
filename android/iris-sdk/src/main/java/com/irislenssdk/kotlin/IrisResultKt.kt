@@ -103,9 +103,6 @@ data class FaceRotation(
  * @property frameWidth 프레임 너비 (픽셀)
  * @property frameHeight 프레임 높이 (픽셀)
  * @property timestampMs 타임스탬프 (밀리초)
- * @property irisQualityLeft [W4-D 삭제 예정] detector 전용 메타 (ADR §6.2)
- * @property irisQualityRight [W4-D 삭제 예정] detector 전용 메타 (ADR §6.2)
- * @property eyeRefinerUsed [W4-D 삭제 예정] detector 전용 메타 (ADR §6.2)
  *
  * 부재 필드(의도적 — Java IrisResult/C++에는 존재, Kotlin 경량 DTO는 미포함):
  * - faceMesh[478]: 디버그/시각화용 코어·JNI 보유 필드. Kotlin 호출자 요구 발생 시 W4-C(글루 AAR
@@ -127,13 +124,8 @@ data class IrisResultKt(
     val frameWidth: Int,
     val frameHeight: Int,
     val timestampMs: Long,
-    // [W4-D 삭제 예정] detector 전용 메타 (iris_quality_*/eye_refiner_used) — C++ types.h 마커와 정합.
-    //   ④ W4-D에서 detector 인프라·골든 18벌과 동시 제거(ADR §6.2). W4-B3는 문서 정합까지.
-    val irisQualityLeft: Float = 0f,
-    val irisQualityRight: Float = 0f,
-    val eyelidRatioLeft: Float = 0f,   // W3용 별도 트랙 (W4-D 삭제 묶음 아님)
-    val eyelidRatioRight: Float = 0f,  // W3용 별도 트랙
-    val eyeRefinerUsed: Boolean = false
+    val eyelidRatioLeft: Float = 0f,   // W3용 별도 트랙
+    val eyelidRatioRight: Float = 0f   // W3용 별도 트랙
 ) {
     /**
      * 양쪽 눈 모두 검출되었는지 확인합니다.
@@ -191,11 +183,8 @@ data class IrisResultKt(
             frameWidth = 0,
             frameHeight = 0,
             timestampMs = 0,
-            irisQualityLeft = 0f,
-            irisQualityRight = 0f,
             eyelidRatioLeft = 0f,
-            eyelidRatioRight = 0f,
-            eyeRefinerUsed = false
+            eyelidRatioRight = 0f
         )
 
         /**
@@ -240,11 +229,8 @@ data class IrisResultKt(
                 frameWidth = java.frameWidth,
                 frameHeight = java.frameHeight,
                 timestampMs = java.timestampMs,
-                irisQualityLeft = java.irisQualityLeft,
-                irisQualityRight = java.irisQualityRight,
                 eyelidRatioLeft = java.eyelidRatioLeft,
-                eyelidRatioRight = java.eyelidRatioRight,
-                eyeRefinerUsed = java.eyeRefinerUsed
+                eyelidRatioRight = java.eyelidRatioRight
             )
         }
     }

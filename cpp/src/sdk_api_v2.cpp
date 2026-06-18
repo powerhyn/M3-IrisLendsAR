@@ -65,11 +65,9 @@ IRIS_SDK_ASSERT_RESULT_FIELD(face_mesh_valid);
 IRIS_SDK_ASSERT_RESULT_FIELD(timestamp_ms);
 IRIS_SDK_ASSERT_RESULT_FIELD(frame_width);
 IRIS_SDK_ASSERT_RESULT_FIELD(frame_height);
-IRIS_SDK_ASSERT_RESULT_FIELD(iris_quality_left);
-IRIS_SDK_ASSERT_RESULT_FIELD(iris_quality_right);
+// ④ W4-D: iris_quality_left/right, eye_refiner_used 필드 제거(detector 전용 메타).
 IRIS_SDK_ASSERT_RESULT_FIELD(eyelid_ratio_left);
 IRIS_SDK_ASSERT_RESULT_FIELD(eyelid_ratio_right);
-IRIS_SDK_ASSERT_RESULT_FIELD(eye_refiner_used);
 IRIS_SDK_ASSERT_RESULT_FIELD(avg_iris_luma_left);
 IRIS_SDK_ASSERT_RESULT_FIELD(avg_iris_luma_right);
 #undef IRIS_SDK_ASSERT_RESULT_FIELD

@@ -53,9 +53,6 @@ std::mutex g_mutex;
 /// GPU 가속 요청 플래그 (init 전에 설정)
 bool g_gpu_request = false;
 
-/// InferenceThread 사용 여부 요청 플래그 (init 전에 설정)
-bool g_use_inference_thread_request = true;  // 기본값: InferenceThread 사용
-
 /// Temporal Stabilizer 인스턴스 관리
 std::unordered_map<int64_t, std::unique_ptr<iris_sdk::TemporalStabilizer>> g_stabilizers;
 int64_t g_next_stabilizer_handle = 1;
@@ -79,7 +76,10 @@ iris_sdk::LandmarkInjectionStore g_landmark_store;
  *       공개 주입 경로 iris_set_landmarks(g_mutex 미보유)와 동시 진입해도 store의
  *       writer_mutex_가 두 writer를 직렬화하므로 seqlock generation 규율이 보존된다.
  */
-void feed_landmark_store(const iris_sdk::IrisResult& cpp_result) {
+// ④ W4-D: detector 직접 경로(iris_sdk_detect*)가 제거되어 현재 호출처는 없으나,
+//   "detector 내부 공급" writer 경로의 정본 구현으로 보존한다(ADR §6.4, 절대 보존 대상).
+//   호출처 부재로 인한 -Wunused-function을 억제하기 위해 [[maybe_unused]] 부여.
+[[maybe_unused]] void feed_landmark_store(const iris_sdk::IrisResult& cpp_result) {
     if (!cpp_result.face_mesh_valid) {
         return;  // 미검출 — 직전 유효 주입 유지(스테일).
     }
@@ -111,8 +111,10 @@ void set_last_error(const char* message) {
 
 /**
  * @brief C++ ErrorCode를 C IrisSdkError로 변환
+ * @note ④ W4-D: detect/process 경로 제거로 현재 호출처 0. render-only/injection 경로
+ *       확장 시 재사용 가능하므로 매핑 정본으로 보존한다([[maybe_unused]]).
  */
-IrisSdkError convert_error_code(iris_sdk::ErrorCode code) {
+[[maybe_unused]] IrisSdkError convert_error_code(iris_sdk::ErrorCode code) {
     switch (code) {
         case iris_sdk::ErrorCode::Success:
             return IRIS_SDK_OK;
@@ -269,12 +271,9 @@ void convert_to_c_iris_result(const iris_sdk::IrisResult& cpp_result, IrisResult
     c_result->frame_width = cpp_result.frame_width;
     c_result->frame_height = cpp_result.frame_height;
 
-    // Eye Refiner 메타데이터
-    c_result->iris_quality_left = cpp_result.iris_quality_left;
-    c_result->iris_quality_right = cpp_result.iris_quality_right;
+    // 눈꺼풀 가림 비율 (W3 트랙)
     c_result->eyelid_ratio_left = cpp_result.eyelid_ratio_left;
     c_result->eyelid_ratio_right = cpp_result.eyelid_ratio_right;
-    c_result->eye_refiner_used = cpp_result.eye_refiner_used;
 
     // P7-W2: iris ROI 실측 luma 전달 (없으면 -1 sentinel).
     c_result->avg_iris_luma_left = cpp_result.avg_iris_luma_left;
@@ -337,12 +336,9 @@ iris_sdk::IrisResult convert_to_cpp_iris_result(const IrisResult* c_result) {
     cpp_result.frame_width = c_result->frame_width;
     cpp_result.frame_height = c_result->frame_height;
 
-    // Eye Refiner 메타데이터
-    cpp_result.iris_quality_left = c_result->iris_quality_left;
-    cpp_result.iris_quality_right = c_result->iris_quality_right;
+    // 눈꺼풀 가림 비율 (W3 트랙)
     cpp_result.eyelid_ratio_left = c_result->eyelid_ratio_left;
     cpp_result.eyelid_ratio_right = c_result->eyelid_ratio_right;
-    cpp_result.eye_refiner_used = c_result->eye_refiner_used;
 
     // P7-W2: iris ROI 실측 luma 전달 (없으면 -1 sentinel).
     cpp_result.avg_iris_luma_left = c_result->avg_iris_luma_left;
@@ -387,20 +383,13 @@ IrisSdkError iris_sdk_init(const char* model_path) {
         return IRIS_SDK_UNKNOWN;
     }
 
-    // InferenceThread 사용 여부 설정 적용 (init 전에 setUseInferenceThread() 호출한 경우)
-    LOGI("iris_sdk_init: applying g_use_inference_thread_request=%s",
-         g_use_inference_thread_request ? "true" : "false");
-    g_processor->setUseInferenceThread(g_use_inference_thread_request);
-
     // GPU 가속 설정 적용 (init 전에 setGpuEnabled() 호출한 경우)
     if (g_gpu_request) {
         g_processor->setGpuEnabled(true);
     }
 
-    LOGI("iris_sdk_init: calling g_processor->initialize() with useInferenceThread=%s",
-         g_processor->isUsingInferenceThread() ? "true" : "false");
-
-    if (!g_processor->initialize(model_path)) {
+    // ④ W4-D: render-only 초기화 (검출 인프라 제거, 모델 경로 인자 불필요)
+    if (!g_processor->initialize()) {
         g_processor.reset();
         manager.shutdown();
         set_last_error("Failed to initialize FrameProcessor");
@@ -452,29 +441,17 @@ IrisSdkError iris_sdk_init_with_config(const IrisSdkConfig* config) {
         return IRIS_SDK_UNKNOWN;
     }
 
-    // InferenceThread 사용 여부 설정 적용
-    LOGI("iris_sdk_init_with_config: applying g_use_inference_thread_request=%s",
-         g_use_inference_thread_request ? "true" : "false");
-    g_processor->setUseInferenceThread(g_use_inference_thread_request);
-
     // GPU 가속 설정 적용
     if (g_gpu_request) {
         g_processor->setGpuEnabled(true);
     }
 
-    LOGI("iris_sdk_init_with_config: calling g_processor->initialize() with useInferenceThread=%s",
-         g_processor->isUsingInferenceThread() ? "true" : "false");
-
-    if (!g_processor->initialize(config->model_path)) {
+    // ④ W4-D: render-only 초기화 (검출 인프라 제거, 모델 경로 인자 불필요)
+    if (!g_processor->initialize()) {
         g_processor.reset();
         manager.shutdown();
         set_last_error("Failed to initialize FrameProcessor");
         return IRIS_SDK_MODEL_LOAD_FAILED;
-    }
-
-    // 신뢰도 설정
-    if (config->min_confidence > 0.0f) {
-        g_processor->setMinConfidence(config->min_confidence);
     }
 
     set_last_error(nullptr);
@@ -492,170 +469,6 @@ void iris_sdk_destroy(void) {
 bool iris_sdk_is_ready(void) {
     std::lock_guard<std::mutex> lock(g_mutex);
     return iris_sdk::SDKManager::getInstance().isReady() && g_processor && g_processor->isInitialized();
-}
-
-// ============================================================================
-// 검출 함수 구현
-// ============================================================================
-
-IrisSdkError iris_sdk_detect(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    IrisResult* result) {
-
-    if (!frame_data) {
-        set_last_error("frame_data is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    if (!result) {
-        set_last_error("result is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    if (width <= 0 || height <= 0) {
-        set_last_error("Invalid frame dimensions");
-        return IRIS_SDK_INVALID_PARAM;
-    }
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (!g_processor || !g_processor->isInitialized()) {
-        set_last_error("SDK not initialized");
-        return IRIS_SDK_NOT_INITIALIZED;
-    }
-
-    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
-    iris_sdk::IrisResult cpp_result = g_processor->detectOnly(frame_data, width, height, cpp_format);
-
-    convert_to_c_iris_result(cpp_result, result);
-    feed_landmark_store(cpp_result);  // ADR §6.4: detector 결과 478점을 주입 저장소에 내부 공급(동작 불변)
-
-    if (!cpp_result.detected) {
-        // 검출은 성공했지만 얼굴이 없음
-        set_last_error(nullptr);
-        return IRIS_SDK_OK;
-    }
-
-    set_last_error(nullptr);
-    return IRIS_SDK_OK;
-}
-
-IrisSdkError iris_sdk_detect_with_rotation(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    int rotation_degrees,
-    IrisResult* result) {
-
-    if (!frame_data) {
-        set_last_error("frame_data is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    if (!result) {
-        set_last_error("result is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    if (width <= 0 || height <= 0) {
-        set_last_error("Invalid frame dimensions");
-        return IRIS_SDK_INVALID_PARAM;
-    }
-
-    // 회전 각도 정규화 (0, 90, 180, 270)
-    int normalized_rotation = ((rotation_degrees % 360) + 360) % 360;
-    if (normalized_rotation != 0 && normalized_rotation != 90 &&
-        normalized_rotation != 180 && normalized_rotation != 270) {
-        set_last_error("Invalid rotation degrees (must be 0, 90, 180, or 270)");
-        return IRIS_SDK_INVALID_PARAM;
-    }
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (!g_processor || !g_processor->isInitialized()) {
-        set_last_error("SDK not initialized");
-        return IRIS_SDK_NOT_INITIALIZED;
-    }
-
-    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
-
-    // 회전이 필요 없는 경우 기존 로직 사용
-    if (normalized_rotation == 0) {
-        iris_sdk::IrisResult cpp_result = g_processor->detectOnly(frame_data, width, height, cpp_format);
-        convert_to_c_iris_result(cpp_result, result);
-        feed_landmark_store(cpp_result);  // ADR §6.4: 478점 내부 공급(동작 불변)
-        set_last_error(nullptr);
-        return IRIS_SDK_OK;
-    }
-
-    // 회전이 필요한 경우: 회전 파라미터를 포함하여 검출
-    iris_sdk::IrisResult cpp_result = g_processor->detectOnlyWithRotation(
-        frame_data, width, height, cpp_format, normalized_rotation);
-
-    convert_to_c_iris_result(cpp_result, result);
-    feed_landmark_store(cpp_result);  // ADR §6.4: 478점 내부 공급(동작 불변)
-
-    set_last_error(nullptr);
-    return IRIS_SDK_OK;
-}
-
-// ============================================================================
-// 처리 함수 구현
-// ============================================================================
-
-IrisSdkError iris_sdk_process(
-    uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    const IrisLensConfig* config,
-    IrisResult* result) {
-
-    if (!frame_data) {
-        set_last_error("frame_data is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    if (width <= 0 || height <= 0) {
-        set_last_error("Invalid frame dimensions");
-        return IRIS_SDK_INVALID_PARAM;
-    }
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (!g_processor || !g_processor->isInitialized()) {
-        set_last_error("SDK not initialized");
-        return IRIS_SDK_NOT_INITIALIZED;
-    }
-
-    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
-
-    // LensConfig 변환 (nullptr이면 검출만 수행)
-    const iris_sdk::LensConfig* cpp_config_ptr = nullptr;
-    iris_sdk::LensConfig cpp_config;
-    if (config) {
-        cpp_config = convert_to_cpp_lens_config(config);
-        cpp_config_ptr = &cpp_config;
-    }
-
-    iris_sdk::ProcessResult process_result = g_processor->process(
-        frame_data, width, height, cpp_format, cpp_config_ptr);
-
-    if (result) {
-        convert_to_c_iris_result(process_result.iris_result, result);
-    }
-
-    if (!process_result.success) {
-        set_last_error("Processing failed");
-        return convert_error_code(process_result.error_code);
-    }
-
-    set_last_error(nullptr);
-    return IRIS_SDK_OK;
 }
 
 // ============================================================================
@@ -788,24 +601,11 @@ IrisSdkError iris_sdk_set_config(const char* key, const char* value) {
     std::string key_str(key);
     std::string value_str(value);
 
-    if (key_str == "min_confidence") {
-        try {
-            float confidence = std::stof(value_str);
-            if (confidence < 0.0f || confidence > 1.0f) {
-                set_last_error("min_confidence must be between 0.0 and 1.0");
-                return IRIS_SDK_INVALID_PARAM;
-            }
-            g_processor->setMinConfidence(confidence);
-        } catch (const std::invalid_argument&) {
-            set_last_error("Invalid confidence value format");
-            return IRIS_SDK_INVALID_PARAM;
-        } catch (const std::out_of_range&) {
-            set_last_error("Confidence value out of range");
-            return IRIS_SDK_INVALID_PARAM;
-        }
-    } else if (key_str == "face_tracking") {
-        bool enable = (value_str == "true" || value_str == "1" || value_str == "yes");
-        g_processor->setFaceTracking(enable);
+    // ④ W4-D: 검출 인프라 제거 — min_confidence/face_tracking은 코어 검출 파라미터였으나
+    //   이제 추적 외부화로 코어가 검출을 보유하지 않는다. ABI 호환을 위해 키는 인식하되
+    //   no-op으로 무시한다(에러 미반환).
+    if (key_str == "min_confidence" || key_str == "face_tracking") {
+        // no-op (deprecated, 추적 글루 책임)
     } else {
         set_last_error("Unknown config key");
         return IRIS_SDK_INVALID_PARAM;
@@ -936,57 +736,27 @@ bool iris_sdk_is_using_gpu(void) {
     return g_processor->isUsingGpu();
 }
 
-void iris_sdk_set_min_detection_confidence(float min_confidence) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (g_processor) {
-        g_processor->setMinDetectionConfidence(min_confidence);
-    }
+// ④ W4-D: 검출 인프라 제거 — 아래 설정 API는 코어 검출 파라미터였으나
+//   추적 외부화로 코어가 검출을 보유하지 않는다. ABI 호환을 위해 선언/심볼은
+//   유지하되 본문은 no-op / 상수 반환 stub으로 둔다.
+void iris_sdk_set_min_detection_confidence(float /*min_confidence*/) {
+    // no-op (deprecated, 추적 글루 책임)
 }
 
-void iris_sdk_set_min_tracking_confidence(float min_confidence) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (g_processor) {
-        g_processor->setMinTrackingConfidence(min_confidence);
-    }
+void iris_sdk_set_min_tracking_confidence(float /*min_confidence*/) {
+    // no-op (deprecated, 추적 글루 책임)
 }
 
-void iris_sdk_set_min_presence_confidence(float min_confidence) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (g_processor) {
-        g_processor->setMinPresenceConfidence(min_confidence);
-    }
+void iris_sdk_set_min_presence_confidence(float /*min_confidence*/) {
+    // no-op (deprecated, 추적 글루 책임)
 }
 
-void iris_sdk_set_use_inference_thread(bool enable) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    LOGI("iris_sdk_set_use_inference_thread: %s (current g_use_inference_thread_request=%s)",
-         enable ? "true" : "false",
-         g_use_inference_thread_request ? "true" : "false");
-
-    // 이미 초기화된 경우 경고
-    if (g_processor && g_processor->isInitialized()) {
-        set_last_error("setUseInferenceThread() must be called before init()");
-        LOGW("setUseInferenceThread called after init - ignored");
-        return;
-    }
-
-    // 전역 플래그 설정 (init()에서 적용됨)
-    g_use_inference_thread_request = enable;
-    LOGI("g_use_inference_thread_request set to: %s", enable ? "true" : "false");
+void iris_sdk_set_use_inference_thread(bool /*enable*/) {
+    // no-op (deprecated, ④ W4-D에서 InferenceThread 제거)
 }
 
 bool iris_sdk_is_using_inference_thread(void) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    if (!g_processor || !g_processor->isInitialized()) {
-        return g_use_inference_thread_request;  // 설정된 요청 값 반환
-    }
-
-    return g_processor->isUsingInferenceThread();
+    return false;  // 검출 인프라 제거 — InferenceThread 미보유
 }
 
 // ============================================================================
@@ -1094,100 +864,6 @@ void iris_sdk_stabilizer_reset(int64_t handle) {
     if (it != g_stabilizers.end()) {
         it->second->reset();
     }
-}
-
-// ============================================================================
-// Async Frame API (P5-W1-04)
-// ============================================================================
-
-IrisSdkError iris_sdk_submit_frame(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format) {
-
-    if (frame_data == nullptr) {
-        set_last_error("frame_data is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    if (width <= 0 || height <= 0) {
-        set_last_error("Invalid frame dimensions");
-        return IRIS_SDK_INVALID_PARAM;
-    }
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_processor || !g_processor->isInitialized()) {
-        set_last_error("SDK not initialized");
-        return IRIS_SDK_NOT_INITIALIZED;
-    }
-
-    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
-    g_processor->submitFrame(frame_data, width, height, cpp_format);
-
-    return IRIS_SDK_OK;
-}
-
-IrisSdkError iris_sdk_submit_frame_with_rotation(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    int rotation_degrees) {
-
-    if (frame_data == nullptr) {
-        set_last_error("frame_data is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    if (width <= 0 || height <= 0) {
-        set_last_error("Invalid frame dimensions");
-        return IRIS_SDK_INVALID_PARAM;
-    }
-
-    // 회전 각도 정규화
-    int normalized_rotation = ((rotation_degrees % 360) + 360) % 360;
-    if (normalized_rotation != 0 && normalized_rotation != 90 &&
-        normalized_rotation != 180 && normalized_rotation != 270) {
-        set_last_error("Invalid rotation degrees (must be 0, 90, 180, or 270)");
-        return IRIS_SDK_INVALID_PARAM;
-    }
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_processor || !g_processor->isInitialized()) {
-        set_last_error("SDK not initialized");
-        return IRIS_SDK_NOT_INITIALIZED;
-    }
-
-    iris_sdk::FrameFormat cpp_format = convert_frame_format(format);
-    g_processor->submitFrameWithRotation(frame_data, width, height,
-                                          cpp_format, normalized_rotation);
-
-    return IRIS_SDK_OK;
-}
-
-IrisSdkError iris_sdk_get_latest_result(IrisResult* result) {
-    if (result == nullptr) {
-        set_last_error("result is null");
-        return IRIS_SDK_NULL_POINTER;
-    }
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_processor || !g_processor->isInitialized()) {
-        set_last_error("SDK not initialized");
-        return IRIS_SDK_NOT_INITIALIZED;
-    }
-
-    iris_sdk::IrisResult cpp_result;
-    if (!g_processor->getLatestResult(cpp_result)) {
-        // 아직 결과 없음
-        std::memset(result, 0, sizeof(IrisResult));
-        result->detected = false;
-        return IRIS_SDK_NO_FACE;
-    }
-
-    convert_to_c_iris_result(cpp_result, result);
-    return IRIS_SDK_OK;
 }
 
 IrisSdkError iris_sdk_render_with_result(

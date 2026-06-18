@@ -21,7 +21,6 @@
 
 #include "iris_sdk/sdk_manager.h"
 #include "iris_sdk/frame_processor.h"
-#include "iris_sdk/iris_detector.h"
 #include "iris_sdk/lens_renderer.h"
 #include "iris_sdk/types.h"
 
@@ -253,7 +252,7 @@ TEST_F(SDKManagerTest, Initialize_AfterShutdown_Succeeds) {
 TEST_F(SDKManagerTest, GetConfig_ReturnsConfiguredValues) {
     SDKConfig config;
     config.model_path = model_path_.getPath();
-    config.detector_type = DetectorType::MediaPipe;
+    // ④ W4-D: detector_type 제거 (코어 검출 미보유)
     config.min_detection_confidence = 0.75f;
     config.max_faces = 2;
     config.enable_gpu = false;
@@ -264,7 +263,6 @@ TEST_F(SDKManagerTest, GetConfig_ReturnsConfiguredValues) {
 
     const SDKConfig& retrieved = SDKManager::getInstance().getConfig();
     EXPECT_EQ(retrieved.model_path, config.model_path);
-    EXPECT_EQ(retrieved.detector_type, DetectorType::MediaPipe);
     EXPECT_FLOAT_EQ(retrieved.min_detection_confidence, 0.75f);
     EXPECT_EQ(retrieved.max_faces, 2);
     EXPECT_FALSE(retrieved.enable_gpu);
@@ -397,12 +395,8 @@ TEST_F(SDKManagerTest, CreateFrameProcessor_WhenNotInitialized_ReturnsNull) {
     EXPECT_EQ(processor, nullptr);
 }
 
-TEST_F(SDKManagerTest, CreateDetector_WhenNotInitialized_ReturnsNull) {
-    EXPECT_EQ(SDKManager::getInstance().getState(), SDKState::Uninitialized);
-
-    auto detector = SDKManager::getInstance().createDetector();
-    EXPECT_EQ(detector, nullptr);
-}
+// ④ W4-D: CreateDetector 테스트 제거 — SDKManager::createDetector가 검출 인프라
+//   제거에 동반하여 삭제됨.
 
 TEST_F(SDKManagerTest, CreateRenderer_WhenNotInitialized_ReturnsNull) {
     EXPECT_EQ(SDKManager::getInstance().getState(), SDKState::Uninitialized);
@@ -538,7 +532,7 @@ TEST_F(SDKManagerTest, SDKConfig_HasCorrectDefaults) {
     SDKConfig config;
 
     EXPECT_TRUE(config.model_path.empty());
-    EXPECT_EQ(config.detector_type, DetectorType::MediaPipe);
+    // ④ W4-D: detector_type 제거 (코어 검출 미보유)
     EXPECT_FLOAT_EQ(config.min_detection_confidence, 0.5f);
     EXPECT_FLOAT_EQ(config.min_tracking_confidence, 0.5f);
     EXPECT_EQ(config.max_faces, 1);

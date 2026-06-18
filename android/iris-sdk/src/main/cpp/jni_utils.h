@@ -437,12 +437,9 @@ struct JniCache {
     jfieldID irisResult_faceMeshValid = nullptr;
     jfieldID irisResult_faceMesh = nullptr;
 
-    // Eye Refiner 메타데이터
-    jfieldID irisResult_irisQualityLeft = nullptr;
-    jfieldID irisResult_irisQualityRight = nullptr;
+    // 눈꺼풀 가림 비율 메타데이터 (W3)
     jfieldID irisResult_eyelidRatioLeft = nullptr;
     jfieldID irisResult_eyelidRatioRight = nullptr;
-    jfieldID irisResult_eyeRefinerUsed = nullptr;
 
     // P7-W2: iris ROI 실측 평균 luma (디텍트→렌더 round-trip 시 보존 필요)
     jfieldID irisResult_avgIrisLumaLeft = nullptr;

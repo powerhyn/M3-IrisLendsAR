@@ -1,7 +1,7 @@
 # REFACTOR-4: 추적 레이어 주입형 전환 (④) — 실행 계획
 
 > 새 세션이 이 문서 + ADR-0001만 읽고 ④를 실행할 수 있도록 작성. 작성: 2026-06-15.
-> 상태: 🔄 **④ 진행 중** — **W4-B1**(방향 A)+**W4-B2**(축소, enum/메타 W4-D 이월)+**W4-A**(internal 헤더 776302f + 에러코드 501→100; 기본값은 P8 이월)+**W4-B3**(DetectionSlot ts 원자 번들)+**W4-C**(글루 9파일 → iris-sdk AAR 승격, Option A) 완료. 검출 폴백(Eye-Only)=글루 결정(ADR §3). 다음=**W4-D**(자체 추적 코어 제거 + LEGACY 제거 + enum/메타 물리삭제 + 좌표 canonical, 골든 재캡처) → W4-E. **W4-B4**(boundary/visibility 운반 + avg_iris_luma 승격)는 W4-D 전 또는 병행. **④ 완료 후 P8 뷰티**(사용자 확정 2026-06-16: 핵심=① 피부 skin smoothing[P8-W1 구현됨] + ② 턱깎기 형태워프[미구현, grid_mesh substrate 보존]; 곁가지 LUT/레거시FreqSep/색보정/vivid 제거).
+> 상태: 🔄 **④ 진행 중** — **W4-B1**(방향 A)+**W4-B2**(축소, enum/메타 W4-D 이월)+**W4-A**(internal 헤더 776302f + 에러코드 501→100; 기본값은 P8 이월)+**W4-B3**(DetectionSlot ts 원자 번들)+**W4-C**(글루 9파일 → iris-sdk AAR 승격, Option A)+**W4-D**(자체 추적 코어 제거: mediapipe_detector/inference_thread/iris_detector + detect surface + LEGACY 데모 + enum/메타 물리삭제 + TFLite 제거 + injection 골든 재캡처; 코어 TFLite-free) 완료. 검출 폴백(Eye-Only)=글루 결정(ADR §3). 다음=**W4-E**(cpu-render deprecation + 16KB). **좌표 canonical relabeling(§7.3)은 W4-D에서 분리해 별도 후속 슬라이스로 이월.** **W4-B4**(boundary/visibility 운반 + avg_iris_luma 승격)는 W4-D 전 또는 병행. **④ 완료 후 P8 뷰티**(사용자 확정 2026-06-16: 핵심=① 피부 skin smoothing[P8-W1 구현됨] + ② 턱깎기 형태워프[미구현, grid_mesh substrate 보존]; 곁가지 LUT/레거시FreqSep/색보정/vivid 제거).
 > 근거: ADR-0001(승인 2026-06-11) §3/§6/§8/§9/§12, REFACTOR-3-3 §9 이월, 스코핑 워크플로(wf_207a105f-dcc 수확 + wf_4f1249e6-81a 연속), **Codex 외부 검증 + critical-review(2026-06-15)**.
 
 ## 0. 핵심 사실 (스코핑 실측 2026-06-15)
@@ -61,6 +61,21 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 **원안(참고)**: demo-app `tracking/` → iris-sdk AAR 승격(복사 아님 — public API·lifecycle·model asset·의존·ProGuard·ABI 동반 API 전환). tasks-vision·모델 SDK 이동. TASKS 단일 경로는 A/B 종료 후(LEGACY 제거 W4-D). AAR 패키징 게이트(ADR T4).
 
 ### W4-D — removalScope 자체 추적 제거 + 좌표 canonical 정정 (게이트=A/B + 명시적 재기준선)
+
+> **실행 상태 (2026-06-18)**: ✅ **W4-D 코어 제거 완료** — 1~3단계(골든 injection 재배선/회전치수/18골든 검증, c2104e2 선커밋) + 5~9단계(leaf-first 제거) + 11단계(injection 재캡처 + manifest) 완료. **10단계=좌표 canonical relabeling은 별도 후속 슬라이스로 분리 이월**(출력 의미 변경·조사 미흡으로 de-risk; 이번 재캡처는 현 라벨 유지). 잔여: 실기기 TASKS 단일경로 무회귀(사용자 육안) + W4-E.
+> **11단계 재캡처 (2026-06-18)**: detector 제거로 detect-mode 캡처 불가 → injection 모드로 baseline 18 JSON+19 PNG 재생성(동결 478점 재주입, 현 라벨). diff=메타3 제거+confidence→1.0+avg_luma→-1+frame_w/h 추가, geometry·render 시각 ε-동일. manifest: `cpp/tests/golden/W4-D_RECAPTURE_MANIFEST.md`. **golden 게이트 idempotency PASS**(injection vs injection byte-identical). `golden_capture_all.sh` `INJECT_BASELINE` 모드가 재생성 도구.
+>
+> **이번 제거 내역(5~9단계)**:
+> - **5단계 (detect 표면 4면)**: JNI `nativeDetect`/`nativeDetectWithRotation`/`nativeProcess` 제거. `IrisLensSDK.java` public `detect`/`detectWithRotation`/`process` + native 선언 제거. Kotlin `IrisLensSDKKt` `detect`/`process`/`detectOnly` + `Extensions.kt` `detectIris` 확장 제거(미사용 import/`reusableResult` 정리).
+> - **6단계 (C API + sdk_manager)**: `sdk_api.cpp`에서 `iris_sdk_detect`/`_detect_with_rotation`/`_process`/`submit_frame`×2/`get_latest_result` 하드 제거, `init`/`init_with_config`를 render-only(`FrameProcessor::initialize()` 인자 없음)로 정정. `set_min_*_confidence`/`set_use_inference_thread`/`is_using_inference_thread`는 **no-op stub 보존(ABI)**. `convert_error_code`는 `[[maybe_unused]]`로 매핑 정본 보존. `sdk_api.h` 선언 정리(`IrisEyeRefinerPolicy`/`set_eye_refiner_policy` 보존). `sdk_manager` `createDetector` 제거, `createFrameProcessor` 보존.
+> - **7단계 (FrameProcessor 절제, render-only)**: detector 멤버(`inference_thread_`/`direct_detector_`/`detector_type_`/`use_inference_thread_`/min*Confidence/`face_tracking_`/cache) + 메서드(`process`×2/`detectOnly`*/`submitFrame`*/`getLatestResult`/setMin*/`setFaceTracking`/`setUseInferenceThread`/`isUsingInferenceThread`/getFaceLandmark*/getModelVersion) 제거 + `ProcessResult` 구조체 제거. **보존**: `renderer_`/`work_buffer_`/`renderOnly`/`renderWithResult`/`loadLensTexture`/`hasLensTexture`/convert*/`setGpuEnabled`/`isUsingGpu`.
+> - **8단계 (코어 삭제 + 메타 4면)**: `mediapipe_detector`/`inference_thread`/`iris_detector` `.{cpp,h}` 6파일 삭제. `types.h` `DetectorType`/`EyeRefinerPolicy` enum + `iris_quality_*`/`eye_refiner_used` 제거. `sdk_api.h` C 미러 동일 3필드 제거. `sdk_api_v2.cpp` offsetof assert 3줄 제거. JNI(jni_utils.h/iris_jni.cpp field-id+Set/GetField)·`IrisResult.java`(필드/reset/copyFrom/toString)·`IrisResultKt.kt`(생성자/디폴트/fromJava) 메타 3필드 제거. **`eyelid_ratio_*`(W3)·`avg_iris_luma_*`(P7-W2) 전면 보존**. 최종 필드 순서 C++/C 동일(offsetof+sizeof assert 통과).
+> - **9단계 (테스트/예제/CMake/TFLite)**: detector 의존 테스트 8종 삭제(`test_lens_renderer_integration` 포함 — SetUp부터 MediaPipeDetector 의존이라 보존 불가, 순수 단위 `test_lens_renderer`가 커버). `test_sdk_api`/`test_sdk_manager`/`test_types` 제거 API/enum 케이스 정리. examples `camera_demo`/`image_demo` 삭제(`golden_capture`는 **injection 전용**으로 정정, `hello_iris` 보존). `cpp/CMakeLists.txt` TFLite 블록 + detector 소스 제거, `cpp/tests/CMakeLists.txt` dead TFLite 블록 5개 제거.
+>
+> **게이트 결과 (전부 통과)**: ① 데스크톱 빌드 exit 0, 신규 error/warning 0, **코어 .a TFLite/tensorflow 심볼 0개(TFLite-free 확정)**, injection 심볼(`iris_set_landmarks`/`iris_get_injected_result`/`deriveIrisResult`) 생존. ② **`test_golden_injection_derive` 19/19 PASS**(geometry 보존 핵심 증거 — injection 경로 무손상). ③ ctest 683개 중 FAIL 3건=pre-existing만(GPUBeauty#531 + FreqSep#698/699), **회귀 0**(TFLite NOT_BUILT 2건은 테스트 삭제로 소멸). ④ **Android `assembleDebug` BUILD SUCCESSFUL**(`--rerun-tasks` 강제 재빌드 포함 — 메타 4면 정합). ⑤ offsetof/sizeof static_assert 데스크톱 통과.
+>
+> **미처리(사용자 검증 단계)**: `cpp/third_party/tflite/`(32MB) = **git 미추적**이라 `git rm` 불가(커밋 무관). 안드로이드 JNI CMake는 주석 처리된 참조뿐(활성 링크 0, assembleDebug 통과)이라 물리 삭제 가능하나 안드로이드 클린 빌드 영향 우려로 11단계와 함께 처리 권장. **baseline 재캡처는 미수행**(11단계, 사용자 검증 후).
+
 **W4-C로 SDK가 추적을 책임진 후에만 안전**(현 LEGACY 기본 — 먼저 지우면 데모·골든 깨짐). iOS/Web은 소스 0개 빈 스텁이라 코어 제거에 영향받는 활성 소비자 없음(§0):
 - 코어: mediapipe_detector(150KB)+.h, inference_thread, iris_detector, frame_processor(검출/NV21·NV12/비동기 submitFrame).
 - sdk_api detect 계열, sdk_manager createDetector, JNI nativeDetect*/confidence 계열.

@@ -427,12 +427,10 @@ void writeResultJson(const fs::path& path,
         f << "  \"face_rotation\": " << buf << ",\n";
     }
 
-    // ---- Eye Refiner / 품질 메타 ----
-    w.floatField("iris_quality_left", r.iris_quality_left);
-    w.floatField("iris_quality_right", r.iris_quality_right);
+    // ---- 품질 메타 ----
+    // ④ W4-D: iris_quality_*/eye_refiner_used 필드 제거(detector 전용 메타).
     w.floatField("eyelid_ratio_left", r.eyelid_ratio_left);
     w.floatField("eyelid_ratio_right", r.eyelid_ratio_right);
-    w.boolField("eye_refiner_used", r.eye_refiner_used);
     w.floatField("avg_iris_luma_left", r.avg_iris_luma_left);
     w.floatField("avg_iris_luma_right", r.avg_iris_luma_right);
 
@@ -528,25 +526,20 @@ int main(int argc, char* argv[]) {
     const int eff_h = image.rows;
 
     // ---- 검출 ----
-    // detect 모드(기본): 이미지를 회전 각도와 함께 detector에 전달(blocker 커버 핵심).
-    // injection 모드(--inject-from): detector 대신 소스 baseline의 face_mesh 478점을
-    //   iris_set_landmarks(upright 치수)로 주입하고 iris_get_injected_result로 재파생.
-    //   detector 코어 제거(W4-D 다음 단계) 후 골든 재캡처가 이 경로를 쓴다.
+    // ④ W4-D: detector 코어가 제거되어 detect 모드(iris_sdk_detect_with_rotation)는
+    //   더 이상 존재하지 않는다. golden 재캡처는 injection 모드(--inject-from)만 사용한다:
+    //   소스 baseline의 face_mesh 478점을 iris_set_landmarks(upright 치수)로 주입하고
+    //   iris_get_injected_result로 재파생한다.
     IrisResult result;
     std::memset(&result, 0, sizeof(result));
 
     if (a.inject_from.empty()) {
-        // ----- detect 모드(detector 경로 — 아직 detector 살아있음) -----
-        err = iris_sdk_detect_with_rotation(
-            image.data, eff_w, eff_h, IRIS_FORMAT_BGR, a.rotation, &result);
-        if (err != IRIS_SDK_OK) {
-            std::cerr << "[Error] detect 실패: " << iris_sdk_error_to_string(err)
-                      << " — " << iris_sdk_get_last_error() << "\n";
-            iris_sdk_free_result(&result);
-            iris_sdk_destroy();
-            return 1;
-        }
-    } else {
+        std::cerr << "[Error] ④ W4-D: detector 제거 — --inject-from <baseline.json> 필수.\n"
+                  << "        golden 재캡처는 주입 경로(iris_set_landmarks)만 지원합니다.\n";
+        iris_sdk_destroy();
+        return 1;
+    }
+    {
         // ----- injection 모드(주입 경로 — detector 미사용) -----
         const GoldenSource src = loadGoldenSource(fs::absolute(a.inject_from));
         if (!src.ok) {

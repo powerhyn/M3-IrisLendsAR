@@ -72,12 +72,9 @@ bool JniCache::init(JNIEnv* env) {
     irisResult_faceMeshValid = env->GetFieldID(irisResultClass, "faceMeshValid", "Z");
     irisResult_faceMesh = env->GetFieldID(irisResultClass, "faceMesh", "[F");
 
-    // Eye Refiner 메타데이터 필드 ID 캐시
-    irisResult_irisQualityLeft = env->GetFieldID(irisResultClass, "irisQualityLeft", "F");
-    irisResult_irisQualityRight = env->GetFieldID(irisResultClass, "irisQualityRight", "F");
+    // 눈꺼풀 가림 비율 메타데이터 필드 ID 캐시 (W3)
     irisResult_eyelidRatioLeft = env->GetFieldID(irisResultClass, "eyelidRatioLeft", "F");
     irisResult_eyelidRatioRight = env->GetFieldID(irisResultClass, "eyelidRatioRight", "F");
-    irisResult_eyeRefinerUsed = env->GetFieldID(irisResultClass, "eyeRefinerUsed", "Z");
 
     // P7-W2: iris ROI 실측 평균 luma 필드 ID 캐시
     irisResult_avgIrisLumaLeft = env->GetFieldID(irisResultClass, "avgIrisLumaLeft", "F");
@@ -92,9 +89,7 @@ bool JniCache::init(JNIEnv* env) {
         !irisResult_faceRectHeight || !irisResult_facePitch || !irisResult_faceYaw ||
         !irisResult_faceRoll || !irisResult_timestampMs || !irisResult_frameWidth ||
         !irisResult_frameHeight || !irisResult_faceMeshValid || !irisResult_faceMesh ||
-        !irisResult_irisQualityLeft || !irisResult_irisQualityRight ||
         !irisResult_eyelidRatioLeft || !irisResult_eyelidRatioRight ||
-        !irisResult_eyeRefinerUsed ||
         !irisResult_avgIrisLumaLeft || !irisResult_avgIrisLumaRight) {
         LOGE("Failed to get IrisResult field IDs");
         return false;
@@ -270,12 +265,9 @@ bool copyResultToJava(JNIEnv* env, const IrisResult& src, jobject dest) {
     env->SetIntField(dest, g_jniCache.irisResult_frameWidth, src.frame_width);
     env->SetIntField(dest, g_jniCache.irisResult_frameHeight, src.frame_height);
 
-    // Eye Refiner 메타데이터
-    env->SetFloatField(dest, g_jniCache.irisResult_irisQualityLeft, src.iris_quality_left);
-    env->SetFloatField(dest, g_jniCache.irisResult_irisQualityRight, src.iris_quality_right);
+    // 눈꺼풀 가림 비율 메타데이터 (W3)
     env->SetFloatField(dest, g_jniCache.irisResult_eyelidRatioLeft, src.eyelid_ratio_left);
     env->SetFloatField(dest, g_jniCache.irisResult_eyelidRatioRight, src.eyelid_ratio_right);
-    env->SetBooleanField(dest, g_jniCache.irisResult_eyeRefinerUsed, src.eye_refiner_used);
 
     // P7-W2: iris ROI 실측 luma (디텍트→렌더 round-trip 보존).
     env->SetFloatField(dest, g_jniCache.irisResult_avgIrisLumaLeft, src.avg_iris_luma_left);
@@ -354,12 +346,9 @@ bool copyResultFromJava(JNIEnv* env, jobject src, IrisResult& dest) {
     dest.frame_width = env->GetIntField(src, g_jniCache.irisResult_frameWidth);
     dest.frame_height = env->GetIntField(src, g_jniCache.irisResult_frameHeight);
 
-    // Eye Refiner 메타데이터
-    dest.iris_quality_left = env->GetFloatField(src, g_jniCache.irisResult_irisQualityLeft);
-    dest.iris_quality_right = env->GetFloatField(src, g_jniCache.irisResult_irisQualityRight);
+    // 눈꺼풀 가림 비율 메타데이터 (W3)
     dest.eyelid_ratio_left = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioLeft);
     dest.eyelid_ratio_right = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioRight);
-    dest.eye_refiner_used = env->GetBooleanField(src, g_jniCache.irisResult_eyeRefinerUsed);
 
     // P7-W2: iris ROI 실측 luma (Java→native, 렌더 패스가 소비). 미측정=-1.
     dest.avg_iris_luma_left = env->GetFloatField(src, g_jniCache.irisResult_avgIrisLumaLeft);
@@ -723,235 +712,6 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadTexture(
     }
 
     return static_cast<jint>(result);
-}
-
-/**
- * @brief 홍채 검출
- *
- * Java: native int nativeDetect(byte[] frameData, int width, int height,
- *                               int format, IrisResult result);
- */
-JNIEXPORT jint JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeDetect(
-    JNIEnv* env,
-    jclass /* clazz */,
-    jbyteArray frameData,
-    jint width,
-    jint height,
-    jint format,
-    jobject resultObj) {
-
-    LOGV("nativeDetect called: %dx%d, format=%d", width, height, format);
-
-    // 파라미터 검증
-    if (!frameData) {
-        LOGE("nativeDetect: frameData is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (!resultObj) {
-        LOGE("nativeDetect: resultObj is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (width <= 0 || height <= 0) {
-        LOGE("nativeDetect: invalid dimensions %dx%d", width, height);
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // RAII로 바이트 배열 접근
-    ScopedByteArray frame(env, frameData, JNI_ABORT);
-    if (!frame.valid()) {
-        LOGE("nativeDetect: failed to get frame data");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // 버퍼 크기 검증
-    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
-        LOGE("nativeDetect: frame buffer size mismatch");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // C API 호출
-    IrisResult nativeResult = {};
-    IrisSdkError error = iris_sdk_detect(
-        frame.data(),
-        static_cast<int>(width),
-        static_cast<int>(height),
-        static_cast<IrisFrameFormat>(format),
-        &nativeResult);
-
-    if (error != IRIS_SDK_OK) {
-        LOGW("Detection failed: %d (%s)", error, iris_sdk_error_to_string(error));
-        return static_cast<jint>(error);
-    }
-
-    // 결과를 Java 객체로 복사
-    if (!copyResultToJava(env, nativeResult, resultObj)) {
-        LOGE("Failed to copy result to Java object");
-        return static_cast<jint>(IRIS_SDK_UNKNOWN);
-    }
-
-    LOGV("Detection completed: detected=%d, confidence=%.2f",
-         nativeResult.detected, nativeResult.confidence);
-
-    return static_cast<jint>(IRIS_SDK_OK);
-}
-
-/**
- * @brief 홍채 검출 (회전 지원)
- *
- * Java: native int nativeDetectWithRotation(byte[] frameData, int width, int height,
- *                                           int format, int rotationDegrees, IrisResult result);
- */
-JNIEXPORT jint JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeDetectWithRotation(
-    JNIEnv* env,
-    jclass /* clazz */,
-    jbyteArray frameData,
-    jint width,
-    jint height,
-    jint format,
-    jint rotationDegrees,
-    jobject resultObj) {
-
-    LOGV("nativeDetectWithRotation called: %dx%d, format=%d, rotation=%d",
-         width, height, format, rotationDegrees);
-
-    // 파라미터 검증
-    if (!frameData) {
-        LOGE("nativeDetectWithRotation: frameData is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (!resultObj) {
-        LOGE("nativeDetectWithRotation: resultObj is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (width <= 0 || height <= 0) {
-        LOGE("nativeDetectWithRotation: invalid dimensions %dx%d", width, height);
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // RAII로 바이트 배열 접근
-    ScopedByteArray frame(env, frameData, JNI_ABORT);
-    if (!frame.valid()) {
-        LOGE("nativeDetectWithRotation: failed to get frame data");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // 버퍼 크기 검증
-    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
-        LOGE("nativeDetectWithRotation: frame buffer size mismatch");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // C API 호출 (회전 지원)
-    IrisResult nativeResult = {};
-    IrisSdkError error = iris_sdk_detect_with_rotation(
-        frame.data(),
-        static_cast<int>(width),
-        static_cast<int>(height),
-        static_cast<IrisFrameFormat>(format),
-        static_cast<int>(rotationDegrees),
-        &nativeResult);
-
-    if (error != IRIS_SDK_OK) {
-        LOGW("Detection with rotation failed: %d (%s)", error, iris_sdk_error_to_string(error));
-        return static_cast<jint>(error);
-    }
-
-    // 결과를 Java 객체로 복사
-    if (!copyResultToJava(env, nativeResult, resultObj)) {
-        LOGE("Failed to copy result to Java object");
-        return static_cast<jint>(IRIS_SDK_UNKNOWN);
-    }
-
-    LOGV("Detection with rotation completed: detected=%d, confidence=%.2f",
-         nativeResult.detected, nativeResult.confidence);
-
-    return static_cast<jint>(IRIS_SDK_OK);
-}
-
-/**
- * @brief 프레임 처리 (검출 + 렌더링)
- *
- * Java: native int nativeProcess(byte[] frameData, int width, int height,
- *                                int format, LensConfig config, IrisResult result);
- */
-JNIEXPORT jint JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeProcess(
-    JNIEnv* env,
-    jclass /* clazz */,
-    jbyteArray frameData,
-    jint width,
-    jint height,
-    jint format,
-    jobject configObj,
-    jobject resultObj) {
-
-    LOGV("nativeProcess called: %dx%d, format=%d", width, height, format);
-
-    // 파라미터 검증
-    if (!frameData) {
-        LOGE("nativeProcess: frameData is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (width <= 0 || height <= 0) {
-        LOGE("nativeProcess: invalid dimensions %dx%d", width, height);
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // RAII로 바이트 배열 접근 (쓰기 가능)
-    ScopedByteArray frame(env, frameData, 0);  // mode=0: 변경사항 복사
-    if (!frame.valid()) {
-        LOGE("nativeProcess: failed to get frame data");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // 버퍼 크기 검증
-    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
-        LOGE("nativeProcess: frame buffer size mismatch");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // LensConfig 변환 (configObj가 null이면 검출만 수행)
-    IrisLensConfig nativeConfig = {};
-    IrisLensConfig* configPtr = nullptr;
-
-    if (configObj) {
-        if (copyConfigFromJava(env, configObj, nativeConfig)) {
-            configPtr = &nativeConfig;
-        } else {
-            LOGW("Failed to copy config from Java, proceeding with detection only");
-        }
-    }
-
-    // C API 호출
-    IrisResult nativeResult = {};
-    IrisResult* resultPtr = resultObj ? &nativeResult : nullptr;
-
-    IrisSdkError error = iris_sdk_process(
-        frame.data(),
-        static_cast<int>(width),
-        static_cast<int>(height),
-        static_cast<IrisFrameFormat>(format),
-        configPtr,
-        resultPtr);
-
-    if (error != IRIS_SDK_OK) {
-        LOGW("Process failed: %d (%s)", error, iris_sdk_error_to_string(error));
-        return static_cast<jint>(error);
-    }
-
-    // 결과를 Java 객체로 복사
-    if (resultObj && resultPtr) {
-        if (!copyResultToJava(env, nativeResult, resultObj)) {
-            LOGE("Failed to copy result to Java object");
-            return static_cast<jint>(IRIS_SDK_UNKNOWN);
-        }
-    }
-
-    LOGV("Process completed: detected=%d", resultPtr ? resultPtr->detected : -1);
-
-    return static_cast<jint>(IRIS_SDK_OK);
 }
 
 /**

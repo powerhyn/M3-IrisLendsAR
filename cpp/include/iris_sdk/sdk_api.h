@@ -208,14 +208,11 @@ typedef struct IrisResult {
     int32_t frame_width;        /**< 원본 프레임 너비 */
     int32_t frame_height;       /**< 원본 프레임 높이 */
 
-    /* Eye Refiner 메타데이터.
-       @deprecated iris_quality_left/right, eye_refiner_used: ④ W4-D 삭제(ADR §6.2, C++ 미러
-       types.h와 동반). 골든 재캡처+JNI 매핑 동시 변경이라 W4-B2 이월. eyelid_ratio는 W3용 별도. */
-    float iris_quality_left;    /**< [W4-D 삭제] 왼쪽 홍채 품질 점수 (0.0~1.0) */
-    float iris_quality_right;   /**< [W4-D 삭제] 오른쪽 홍채 품질 점수 (0.0~1.0) */
+    /* 눈꺼풀 가림 비율 (W3 트랙).
+       ④ W4-D: detector 전용 메타 iris_quality_left/right, eye_refiner_used 제거(ADR §6.2,
+       C++ 미러 types.h와 동반). eyelid_ratio는 W3용 별도 트랙으로 보존. */
     float eyelid_ratio_left;    /**< 왼쪽 눈꺼풀 가림 비율 (0.0~1.0) */
     float eyelid_ratio_right;   /**< 오른쪽 눈꺼풀 가림 비율 (0.0~1.0) */
-    bool eye_refiner_used;      /**< [W4-D 삭제] Eye Refiner 사용 여부 */
 
     /* P7-W2: iris ROI 실측 평균 luma (srgb²+Rec.709 linear, 0~1, -1=미측정).
        C++ iris_sdk::IrisResult와 동일 레이아웃 유지(sdk_api_v2.cpp reinterpret_cast). */
@@ -311,85 +308,12 @@ IRIS_SDK_EXPORT void iris_sdk_destroy(void);
 IRIS_SDK_EXPORT bool iris_sdk_is_ready(void);
 
 // ============================================================================
-// 검출 함수
+// 검출/처리 함수
 // ============================================================================
-
-/**
- * @brief 홍채 검출
- *
- * 프레임에서 홍채를 검출합니다. 프레임 데이터는 수정되지 않습니다.
- *
- * @param frame_data 프레임 데이터 (읽기 전용)
- * @param width 프레임 너비
- * @param height 프레임 높이
- * @param format 픽셀 포맷
- * @param result 검출 결과 출력 (NULL 불가)
- * @return IRIS_SDK_OK 성공, 그 외 에러 코드
- *
- * @note 검출 성공 시에도 result->detected가 false일 수 있습니다 (얼굴 없음).
- * @note 회전이 필요한 경우 iris_sdk_detect_with_rotation() 사용
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_detect(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    IrisResult* result);
-
-/**
- * @brief 홍채 검출 (회전 지원)
- *
- * 프레임에서 홍채를 검출합니다. 이미지 회전을 지원합니다.
- * Android/iOS 카메라는 일반적으로 회전된 이미지를 출력하므로
- * 이 함수를 사용하여 회전을 보정합니다.
- *
- * @param frame_data 프레임 데이터 (읽기 전용)
- * @param width 프레임 너비
- * @param height 프레임 높이
- * @param format 픽셀 포맷
- * @param rotation_degrees 이미지 회전 각도 (0, 90, 180, 270)
- *                         카메라 센서 방향에 따른 회전 보정값
- * @param result 검출 결과 출력 (NULL 불가)
- * @return IRIS_SDK_OK 성공, 그 외 에러 코드
- *
- * @note rotation_degrees는 이미지를 정방향으로 만들기 위해 필요한 회전 각도입니다.
- *       예: Android CameraX의 ImageProxy.imageInfo.rotationDegrees 값을 직접 전달
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_detect_with_rotation(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    int rotation_degrees,
-    IrisResult* result);
-
-// ============================================================================
-// 처리 함수
-// ============================================================================
-
-/**
- * @brief 프레임 처리 (검출 + 렌더링)
- *
- * 홍채 검출과 렌즈 렌더링을 한 번에 수행합니다.
- * 프레임 데이터는 in-place로 수정됩니다.
- *
- * @param frame_data 프레임 데이터 (in-place 수정됨)
- * @param width 프레임 너비
- * @param height 프레임 높이
- * @param format 픽셀 포맷
- * @param config 렌더링 설정 (NULL이면 검출만 수행)
- * @param result 검출 결과 출력 (NULL 가능, NULL이면 결과 무시)
- * @return IRIS_SDK_OK 성공, 그 외 에러 코드
- *
- * @note 렌더링을 수행하려면 먼저 iris_sdk_load_texture()로 텍스처를 로드해야 합니다.
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_process(
-    uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    const IrisLensConfig* config,
-    IrisResult* result);
+// ④ W4-D: 검출 인프라(detector/InferenceThread)를 코어에서 제거하면서
+//   iris_sdk_detect / iris_sdk_detect_with_rotation / iris_sdk_process C API가
+//   제거되었습니다. 검출(랜드마크)은 외부 추적 글루가 책임지며 주입 경로
+//   (iris_set_landmarks)로 코어에 전달됩니다. 렌더는 iris_sdk_render_with_result로.
 
 // ============================================================================
 // 렌더링 함수
@@ -1031,62 +955,17 @@ IRIS_SDK_EXPORT void iris_sdk_stabilizer_set_enabled(int64_t handle, int enabled
 IRIS_SDK_EXPORT void iris_sdk_stabilizer_reset(int64_t handle);
 
 // ============================================================================
-// Async Frame API (P5-W1-04 — 추론/렌더링 분리)
+// 렌더 결과 적용 API
 // ============================================================================
+// ④ W4-D: 검출 인프라 제거로 비동기 프레임 제출 API
+//   (iris_sdk_submit_frame / _with_rotation / iris_sdk_get_latest_result)가
+//   제거되었습니다. 검출 결과는 주입 경로(iris_set_landmarks)로 전달되고,
+//   렌더는 아래 iris_sdk_render_with_result로 수행합니다.
 
 /**
- * @brief 프레임 비동기 제출
+ * @brief 기존(주입된) 결과로 렌더링
  *
- * 프레임 데이터를 추론 큐에 제출합니다 (논블로킹).
- * 이전에 제출된 미처리 프레임은 덮어씌워집니다 (drop-oldest).
- * 호출자는 제출 후 frame_data 버퍼를 즉시 재사용할 수 있습니다.
- *
- * @param frame_data 프레임 데이터
- * @param width 프레임 너비
- * @param height 프레임 높이
- * @param format 픽셀 포맷
- * @return IRIS_SDK_OK 성공
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_submit_frame(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format);
-
-/**
- * @brief 프레임 비동기 제출 (회전 지원)
- *
- * 이미지 회전을 처리하면서 프레임을 비동기 추론 큐에 제출합니다.
- *
- * @param frame_data 프레임 데이터
- * @param width 프레임 너비
- * @param height 프레임 높이
- * @param format 픽셀 포맷
- * @param rotation_degrees 회전 각도 (0, 90, 180, 270)
- * @return IRIS_SDK_OK 성공
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_submit_frame_with_rotation(
-    const uint8_t* frame_data,
-    int width,
-    int height,
-    IrisFrameFormat format,
-    int rotation_degrees);
-
-/**
- * @brief 최신 추론 결과 조회 (논블로킹)
- *
- * 가장 최근 완료된 추론 결과를 반환합니다.
- * 아직 결과가 없으면 IRIS_SDK_NO_FACE를 반환합니다.
- *
- * @param result 결과 출력 (NULL 불가)
- * @return IRIS_SDK_OK 결과 있음, IRIS_SDK_NO_FACE 아직 결과 없음
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_get_latest_result(IrisResult* result);
-
-/**
- * @brief 기존 결과로 렌더링 (비동기 워크플로우용)
- *
- * iris_sdk_get_latest_result()로 얻은 결과를 사용하여 렌더링만 수행합니다.
+ * 외부 추적 글루가 산출한 검출 결과를 사용하여 렌더링만 수행합니다.
  * 프레임 데이터는 in-place로 수정됩니다.
  *
  * @param frame_data 프레임 데이터 (in-place 수정됨)

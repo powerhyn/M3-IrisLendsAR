@@ -381,18 +381,8 @@ TEST_F(ErrorCodeTest, GeneralErrors) {
     EXPECT_EQ(static_cast<int>(ErrorCode::Unknown), 999);
 }
 
-// ============================================================
-// DetectorType 열거형 테스트
-// ============================================================
-
-class DetectorTypeTest : public ::testing::Test {};
-
-TEST_F(DetectorTypeTest, EnumValues) {
-    EXPECT_EQ(static_cast<int>(DetectorType::Unknown), 0);
-    EXPECT_EQ(static_cast<int>(DetectorType::MediaPipe), 1);
-    EXPECT_EQ(static_cast<int>(DetectorType::EyeOnly), 2);
-    EXPECT_EQ(static_cast<int>(DetectorType::Hybrid), 3);
-}
+// ④ W4-D: DetectorType 열거형 테스트 제거 — enum class DetectorType이
+//   검출 인프라 제거에 동반하여 삭제됨.
 
 } // namespace testing
 } // namespace iris_sdk

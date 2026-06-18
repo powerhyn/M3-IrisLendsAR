@@ -119,17 +119,6 @@ fun Bitmap.toRgbaByteArray(): ByteArray {
     return buffer.array()
 }
 
-/**
- * Bitmap에서 홍채를 검출합니다.
- *
- * @param sdk IrisLensSDKKt 인스턴스
- * @return 검출 결과
- */
-fun Bitmap.detectIris(sdk: IrisLensSDKKt): Result<IrisResultKt> {
-    val data = toRgbaByteArray()
-    return sdk.detect(data, width, height, FrameFormat.RGBA)
-}
-
 // ========================================================================
 // ByteArray 확장
 // ========================================================================
