@@ -62,7 +62,7 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 
 ### W4-D — removalScope 자체 추적 제거 + 좌표 canonical 정정 (게이트=A/B + 명시적 재기준선)
 
-> **실행 상태 (2026-06-18)**: ✅ **W4-D 코어 제거 완료** — 1~3단계(골든 injection 재배선/회전치수/18골든 검증, c2104e2 선커밋) + 5~9단계(leaf-first 제거) + 11단계(injection 재캡처 + manifest) 완료. **10단계=좌표 canonical relabeling은 별도 후속 슬라이스로 분리 이월**(출력 의미 변경·조사 미흡으로 de-risk; 이번 재캡처는 현 라벨 유지). 잔여: 실기기 TASKS 단일경로 무회귀(사용자 육안) + W4-E.
+> **실행 상태 (2026-06-18)**: ✅ **W4-D 코어 제거 완료** — 1~3단계(골든 injection 재배선/회전치수/18골든 검증, c2104e2 선커밋) + 5~9단계(leaf-first 제거) + 11단계(injection 재캡처 + manifest) 완료. **10단계=좌표 canonical relabeling은 별도 후속 슬라이스로 분리 이월**(출력 의미 변경·조사 미흡으로 de-risk; 이번 재캡처는 현 라벨 유지). **실기기 TASKS 단일경로 무회귀 통과(2026-06-18, SM-A235N+SM-S916N 2대 — 클린 재설치·실행·크래시0 스모크 + 육안 추적 무회귀) → W4-D 완전 종결.** 다음=W4-E + 별도 relabeling 슬라이스.
 > **11단계 재캡처 (2026-06-18)**: detector 제거로 detect-mode 캡처 불가 → injection 모드로 baseline 18 JSON+19 PNG 재생성(동결 478점 재주입, 현 라벨). diff=메타3 제거+confidence→1.0+avg_luma→-1+frame_w/h 추가, geometry·render 시각 ε-동일. manifest: `cpp/tests/golden/W4-D_RECAPTURE_MANIFEST.md`. **golden 게이트 idempotency PASS**(injection vs injection byte-identical). `golden_capture_all.sh` `INJECT_BASELINE` 모드가 재생성 도구.
 >
 > **이번 제거 내역(5~9단계)**:
