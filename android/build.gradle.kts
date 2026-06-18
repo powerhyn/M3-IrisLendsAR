@@ -7,8 +7,10 @@
 // @version 1.0.0
 
 plugins {
-    id("com.android.application") version "8.5.0" apply false
-    id("com.android.library") version "8.5.0" apply false
+    // ④ W4-E: AGP 8.5.0 → 8.5.1 (ADR-0001 §9 대응1). 8.5.1+는 APK 내 비압축 .so를
+    // 16KB 페이지 경계에 zip-정렬한다(16KB 기기 mmap 로드 + Android 15+ Play 제출 요건).
+    id("com.android.application") version "8.5.1" apply false
+    id("com.android.library") version "8.5.1" apply false
     id("org.jetbrains.kotlin.android") version "2.0.0" apply false
 }
 

@@ -131,6 +131,8 @@ class IrisLensSDKKt private constructor() {
      * @param path 텍스처 이미지 파일 경로
      * @return 성공 시 [Result.success], 실패 시 [Result.failure]
      */
+    @Deprecated("cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2). GPU 텍스처 렌즈 경로로 이행하세요.")
+    @Suppress("DEPRECATION")
     fun loadTexture(path: String): Result<Unit> {
         val errorCode = JavaIrisLensSDK.loadTexture(path)
         return errorCodeToResult(errorCode)
@@ -143,6 +145,8 @@ class IrisLensSDKKt private constructor() {
      * @param assetPath assets 내 상대 경로
      * @return 성공 시 [Result.success], 실패 시 [Result.failure]
      */
+    @Deprecated("cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2). GPU 텍스처 렌즈 경로로 이행하세요.")
+    @Suppress("DEPRECATION")
     fun loadTextureFromAssets(context: Context, assetPath: String): Result<Unit> {
         val errorCode = JavaIrisLensSDK.loadTextureFromAssets(context, assetPath)
         return errorCodeToResult(errorCode)
@@ -156,6 +160,8 @@ class IrisLensSDKKt private constructor() {
      * @param height 텍스처 높이
      * @return 성공 시 [Result.success], 실패 시 [Result.failure]
      */
+    @Deprecated("cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2). GPU 텍스처 렌즈 경로로 이행하세요.")
+    @Suppress("DEPRECATION")
     fun loadTextureFromMemory(data: ByteArray, width: Int, height: Int): Result<Unit> {
         val errorCode = JavaIrisLensSDK.loadTextureFromMemory(data, width, height)
         return errorCodeToResult(errorCode)

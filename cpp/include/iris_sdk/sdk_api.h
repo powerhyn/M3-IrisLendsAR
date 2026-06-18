@@ -327,8 +327,11 @@ IRIS_SDK_EXPORT bool iris_sdk_is_ready(void);
  *
  * @param path 텍스처 이미지 파일 경로
  * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ *
+ * @deprecated cpu-render/CPU 픽셀 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+ *   GPU 텍스처 경로(sdk_api_v2)로 이행하세요. 1.x 동안 동작은 유지됩니다.
  */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_texture(const char* path);
+IRIS_SDK_EXPORT IRIS_SDK_DEPRECATED IrisSdkError iris_sdk_load_texture(const char* path);
 
 /**
  * @brief 렌즈 텍스처 로드 (메모리)
@@ -339,8 +342,11 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_texture(const char* path);
  * @param width 텍스처 너비
  * @param height 텍스처 높이
  * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ *
+ * @deprecated cpu-render/CPU 픽셀 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+ *   GPU 텍스처 경로(sdk_api_v2)로 이행하세요. 1.x 동안 동작은 유지됩니다.
  */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_texture_from_memory(
+IRIS_SDK_EXPORT IRIS_SDK_DEPRECATED IrisSdkError iris_sdk_load_texture_from_memory(
     const uint8_t* data,
     int width,
     int height);
@@ -358,8 +364,11 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_load_texture_from_memory(
  * @param iris_result 홍채 검출 결과
  * @param config 렌더링 설정
  * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ *
+ * @deprecated cpu-render/CPU 픽셀 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+ *   GPU 텍스처 경로(sdk_api_v2)로 이행하세요. 1.x 동안 동작은 유지됩니다.
  */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_render_lens(
+IRIS_SDK_EXPORT IRIS_SDK_DEPRECATED IrisSdkError iris_sdk_render_lens(
     uint8_t* frame_data,
     int width,
     int height,
@@ -641,8 +650,11 @@ IRIS_SDK_EXPORT void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* con
  * @param config V2 뷰티 필터 설정
  * @param detection 얼굴 검출 결과 (NULL 가능, NULL이면 전체 프레임 처리)
  * @return IRIS_SDK_OK 성공, 그 외 에러 코드
+ *
+ * @deprecated cpu-render/CPU 픽셀 경로(CPU 픽셀 버퍼)는 2.0에서 제거됩니다(ADR-0001 §8.2).
+ *   GPU 텍스처 뷰티 경로(apply_beauty_texture_v2)로 이행하세요. 1.x 동안 동작은 유지됩니다.
  */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_v2_c(
+IRIS_SDK_EXPORT IRIS_SDK_DEPRECATED IrisSdkError iris_sdk_apply_beauty_v2_c(
     uint8_t* frame_data,
     int width, int height,
     IrisFrameFormat format,
@@ -975,8 +987,11 @@ IRIS_SDK_EXPORT void iris_sdk_stabilizer_reset(int64_t handle);
  * @param iris_result 홍채 검출 결과
  * @param config 렌더링 설정
  * @return IRIS_SDK_OK 성공
+ *
+ * @deprecated cpu-render/CPU 픽셀 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+ *   GPU 텍스처 경로(sdk_api_v2)로 이행하세요. 1.x 동안 동작은 유지됩니다.
  */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_render_with_result(
+IRIS_SDK_EXPORT IRIS_SDK_DEPRECATED IrisSdkError iris_sdk_render_with_result(
     uint8_t* frame_data,
     int width,
     int height,

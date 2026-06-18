@@ -1,7 +1,7 @@
 # REFACTOR-4: 추적 레이어 주입형 전환 (④) — 실행 계획
 
 > 새 세션이 이 문서 + ADR-0001만 읽고 ④를 실행할 수 있도록 작성. 작성: 2026-06-15.
-> 상태: 🔄 **④ 진행 중** — **W4-B1**(방향 A)+**W4-B2**(축소, enum/메타 W4-D 이월)+**W4-A**(internal 헤더 776302f + 에러코드 501→100; 기본값은 P8 이월)+**W4-B3**(DetectionSlot ts 원자 번들)+**W4-C**(글루 9파일 → iris-sdk AAR 승격, Option A)+**W4-D**(자체 추적 코어 제거: mediapipe_detector/inference_thread/iris_detector + detect surface + LEGACY 데모 + enum/메타 물리삭제 + TFLite 제거 + injection 골든 재캡처; 코어 TFLite-free) 완료. 검출 폴백(Eye-Only)=글루 결정(ADR §3). 다음=**W4-E**(cpu-render deprecation + 16KB). **좌표 canonical relabeling(§7.3)은 W4-D에서 분리해 별도 후속 슬라이스로 이월.** **W4-B4**(boundary/visibility 운반 + avg_iris_luma 승격)는 W4-D 전 또는 병행. **④ 완료 후 P8 뷰티**(사용자 확정 2026-06-16: 핵심=① 피부 skin smoothing[P8-W1 구현됨] + ② 턱깎기 형태워프[미구현, grid_mesh substrate 보존]; 곁가지 LUT/레거시FreqSep/색보정/vivid 제거).
+> 상태: 🔄 **④ 진행 중** — **W4-B1**(방향 A)+**W4-B2**(축소, enum/메타 W4-D 이월)+**W4-A**(internal 헤더 776302f + 에러코드 501→100; 기본값은 P8 이월)+**W4-B3**(DetectionSlot ts 원자 번들)+**W4-C**(글루 9파일 → iris-sdk AAR 승격, Option A)+**W4-D**(자체 추적 코어 제거: mediapipe_detector/inference_thread/iris_detector + detect surface + LEGACY 데모 + enum/메타 물리삭제 + TFLite 제거 + injection 골든 재캡처; 코어 TFLite-free) 완료. 검출 폴백(Eye-Only)=글루 결정(ADR §3). **W4-E**(cpu-render deprecation 5종 + Java/Kotlin 미러 + 16KB: 자체 .so 2**14 달성, CameraX 1.3.1→1.4.2로 transitive .so까지 정렬; 전 게이트 + **실기기 무회귀 2대(SM-S916N/A235N) 통과**, 2026-06-18) 완료. 다음=**좌표 canonical relabeling(§7.3) 별도 슬라이스**(W4-D에서 분리 이월) 또는 **W4-B4**(boundary/visibility + avg_iris_luma 승격). **W4-B4**(boundary/visibility 운반 + avg_iris_luma 승격)는 W4-D 전 또는 병행. **④ 완료 후 P8 뷰티**(사용자 확정 2026-06-16: 핵심=① 피부 skin smoothing[P8-W1 구현됨] + ② 턱깎기 형태워프[미구현, grid_mesh substrate 보존]; 곁가지 LUT/레거시FreqSep/색보정/vivid 제거).
 > 근거: ADR-0001(승인 2026-06-11) §3/§6/§8/§9/§12, REFACTOR-3-3 §9 이월, 스코핑 워크플로(wf_207a105f-dcc 수확 + wf_4f1249e6-81a 연속), **Codex 외부 검증 + critical-review(2026-06-15)**.
 
 ## 0. 핵심 사실 (스코핑 실측 2026-06-15)
@@ -86,7 +86,20 @@ ADR §10/§12 + REFACTOR-3-3 §7.4: ④ 착수는 **A/B 판정 통과 + 사용�
 - **골든**: 추적 교체+라벨 정정은 이종/출력 변경이라 ε 일치 불가 → A/B(§10 T1) + **명시적 베이스라인 재캡처**.
 - **재캡처 manifest 강제 (Codex HIGH, 무언의 재기준선 차단)**: Tasks 버전·model SHA·기기·입력 corpus·before/after 메트릭·luma/visibility/timestamp invariant·승인자를 파일로 기록해야 재기준선 인정.
 
-### W4-E — cpu-render deprecation + 16KB 재정렬 (게이트=objdump/zipalign)
+### W4-E — cpu-render deprecation + 16KB 재정렬 — ✅ 완료 (2026-06-18, 실기기 무회귀 통과)
+
+> **실수행 (2026-06-18)**:
+> - **cpu-render deprecation (5종, ADR §8.2 옵션 B — 5종 스코프 사용자 확정)**: 공개 CPU 픽셀 C API 5종에 `IRIS_SDK_DEPRECATED`(export.h:25 기존 매크로) 마킹 + `@deprecated` Doxygen 고지(2.0 제거, GPU 경로 이행). 대상: `iris_sdk_render_lens`·`iris_sdk_render_with_result`·`iris_sdk_load_texture`·`iris_sdk_load_texture_from_memory`(전부 g_processor CPU 경로 — GPU `iris_sdk_load_lens_texture`(sdk_api_v2)와 별개임을 코드 검증) + `iris_sdk_apply_beauty_v2_c`(CPU 뷰티, sdk_api_v2.cpp — 킥오프 §2 미열거였으나 ADR §8.1 "CPU 뷰티 계열"로 포함 확정). 시그니처/구현/ABI 불변. GPU 계열(render_lens_texture/apply_beauty_texture_v2/load_lens_texture/init_gpu_*)은 미래 경로라 비대상. export.h 미수정(빌드 재생성 NOLINT diff는 되돌림).
+> - **소비처 경고 억제**: golden_capture.cpp(3건 국소)·test_sdk_api.cpp(렌더 섹션 1 push/pop)·iris_jni.cpp(JNI 래퍼 3건 국소)에 clang 호환 `#pragma GCC diagnostic ignored "-Wdeprecated-declarations"`. 정의부는 deprecated 함수끼리 cross-call 없어 억제 불요(실측).
+> - **표면 일관성 미러 (사용자 확정)**: Java `@Deprecated(forRemoval=true)` 4종(loadTexture/loadTextureFromAssets/loadTextureFromMemory/applyBeautyFilterV2) + Kotlin `@Deprecated`+`@Suppress("DEPRECATION")` 3종(텍스처 래퍼). C API만이 아닌 외부 Java/Kotlin 소비자에게도 고지 도달([[sdk-surface-consistency]]).
+> - **16KB (ADR §9 대응1)**: AGP 8.5.0→8.5.1, ndkVersion `27.0.12077973` 핀(신설), `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON`(iris-sdk externalNativeBuild). 자체 `libiris_jni.so` 2**14 달성.
+> - **⚠️ 킥오프 §2 .so 출처 정정 (실측)**: 미정렬(2**12) 발견된 `libimage_processing_util_jni.so`는 **MP Tasks transitive가 아니라 CameraX `camera-core`** 산출물(킥오프 §2/plan 원문의 "MP Tasks 2종"·"OpenCV(.so) 별도검증" 분류 부정확). OpenCV는 libiris_jni 정적 내장(별도 .so 0). 실제 MP Tasks `libmediapipe_tasks_jni.so`는 0.10.35에서 이미 16KB(ADR §9 가정 확인). → §10 후퇴(MediaPipe 되돌리기)는 무관. **해법=CameraX 1.3.1→1.4.2**(iris-sdk api + demo 단일관리, 1.4.2 .so 16KB objdump 사전확인). camera-core를 iris-sdk가 api()로 전파하므로 SDK 패키징 결함 성격(ADR §9 동류, §9 실측 범위 밖 신규 발견). 1.4.2가 `libsurface_util_jni.so` 추가(이것도 16KB).
+>
+> **게이트 결과 (전부 통과)**: ① 데스크톱 빌드 44/44, 신규 error/warning 0(-Wdeprecated 0건, cpp-pro 동반). ② **골든 idempotency PASS**(injection vs injection, JSON18/PNG19 불일치 0 — deprecation 동작 불변 입증) + `test_golden_injection_derive` 19/19. ③ ctest 676/679, FAIL 3=pre-existing만(GPUBeautyBackendTest#401 + FreqSepMappingTest#587/588), 회귀 0. ④ `assembleDebug` BUILD SUCCESSFUL(NDK r27 native 재빌드 + JNI/Java/Kotlin deprecation 경고 누출 0). ⑤ **16KB PASS** — APK arm64-v8a 전 .so 4종(libiris_jni/libmediapipe_tasks_jni/libimage_processing_util_jni/libsurface_util_jni) objdump align 2**14 + zipalign -P 16 Verification successful.
+>
+> **실기기 무회귀 통과 (2026-06-18, SM-S916N + SM-A235N 2대)**: CameraX 1.3.1→1.4.2 버전 업에도 양 기기에서 데모 카메라·홍채 추적 무회귀(사용자 육안 "둘 다 잘 따라와"). cpu-render deprecation은 동작 불변이라 무영향. **→ W4-E 완전 종결.**
+
+**원안 스펙(참고)**:
 - **cpu-render(옵션 B, §8.2)**: `iris_sdk_render_lens`(sdk_api.h:362, W4-D 후 실측)·`iris_sdk_render_with_result`(:979)·`iris_sdk_load_texture`(:331/343) 등 공개 CPU 픽셀 API에 `IRIS_SDK_DEPRECATED`(export.h:25 기존 매크로) 마킹 + 구현 동결 + '2.0 제거' 고지. ⚠️ **`iris_sdk_process`는 W4-D에서 이미 물리 제거됨**(plan 원문 :376 스테일). **파일 삭제 금지(2.0)**, OpenCV 잔존은 1.x 정상. **착수 진입점=`docs/workPaper/REFACTOR-4_W4-E_kickoff.md`**(검증된 현황·게이트·남은 ④ 로드맵).
 - **16KB(§9 대응1)**: AGP 8.5.0→8.5.1+(android/build.gradle.kts:10-11), ndkVersion r27+ 핀(현재 미고정), `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` 또는 `-Wl,-z,max-page-size=16384`. 검증 게이트 신설: **최종 AAR/APK의 전 .so 전수** objdump --private-headers align 2**14 + zipalign -c -P 16. TFLite prebuilt 2종은 W4-D 제거로 자동 해소되나, **OpenCV(.so) — iris-sdk CMakeLists:136 `find_package(OpenCV REQUIRED)` — 와 MediaPipe Tasks transitive native lib는 잔존하므로 별도 검증 대상**(Codex 검증, '자동 해소' 가정 금지).
 

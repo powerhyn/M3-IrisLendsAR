@@ -496,7 +496,11 @@ int main(int argc, char* argv[]) {
 
     bool has_texture = false;
     if (!a.texture.empty()) {
+        // ④ W4-E: CPU 골든 렌더는 deprecated cpu-render API를 정당하게 사용(동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         err = iris_sdk_load_texture(a.texture.c_str());
+#pragma GCC diagnostic pop
         has_texture = (err == IRIS_SDK_OK);
         if (!has_texture) {
             std::cerr << "[Warning] 텍스처 로드 실패: "
@@ -588,9 +592,13 @@ int main(int argc, char* argv[]) {
         IrisLensConfig lens_cfg;
         iris_sdk_default_lens_config(&lens_cfg);
         lens_cfg.is_mirror = (a.lens_mirror != 0);  // 전면 카메라 렌더 분기 커버
+        // ④ W4-E: CPU 골든 렌더는 deprecated cpu-render API를 정당하게 사용(동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         err = iris_sdk_render_lens(
             render.data, render.cols, render.rows, IRIS_FORMAT_BGR,
             &result, &lens_cfg);
+#pragma GCC diagnostic pop
         if (err == IRIS_SDK_OK) {
             const fs::path render_path = fs::path(a.out) / (stem + ".render.png");
             // PNG 무압축 차이 회피를 위해 결정적 압축 레벨 고정
@@ -610,9 +618,13 @@ int main(int argc, char* argv[]) {
         }
         IrisBeautyConfigV2 bcfg;
         fillBeautyConfig(bcfg);
+        // ④ W4-E: CPU 골든 뷰티는 deprecated cpu-render API를 정당하게 사용(동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         err = iris_sdk_apply_beauty_v2_c(
             beauty.data, beauty.cols, beauty.rows, IRIS_FORMAT_BGR,
             &bcfg, result.detected ? &result : nullptr);
+#pragma GCC diagnostic pop
         if (err == IRIS_SDK_OK) {
             const fs::path beauty_path = fs::path(a.out) / (stem + ".beauty.png");
             std::vector<int> png_params = {cv::IMWRITE_PNG_COMPRESSION, 6};

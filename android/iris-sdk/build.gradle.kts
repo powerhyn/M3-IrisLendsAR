@@ -21,6 +21,11 @@ android {
     namespace = "com.irislenssdk"
     compileSdk = 34
 
+    // ④ W4-E: 16KB 페이지 정렬 — ndkVersion r27+ 핀 (ADR-0001 §9 대응1).
+    // r27 + ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON 조합이 자체 .so(libiris_jni)를
+    // max-page-size=16384로 링크한다. 게이트: 최종 APK .so objdump align 2**14.
+    ndkVersion = "27.0.12077973"
+
     defaultConfig {
         minSdk = 24
 
@@ -45,7 +50,11 @@ android {
                     "-DANDROID_ARM_NEON=TRUE",
                     "-DBUILD_TESTS=OFF",
                     "-DBUILD_EXAMPLES=OFF",
-                    "-DBUILD_SHARED_LIBS=OFF"
+                    "-DBUILD_SHARED_LIBS=OFF",
+                    // ④ W4-E: 16KB 페이지 정렬 (ADR-0001 §9). NDK r27의 flexible page
+                    // size 지원을 켜 libiris_jni.so를 max-page-size=16384로 링크한다.
+                    // 검증 게이트: 최종 APK .so objdump align 2**14 + zipalign -c -P 16.
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
                 )
 
                 // C/C++ 컴파일 플래그
@@ -211,7 +220,10 @@ dependencies {
     // 소비자(데모/외부)가 transitive로 사용. tasks-vision은 ADR-0001 §5로 0.10.35 고정
     // (0.10.26 미만 금지 — 16KB 페이지 정렬). camera-core는 demo와 동일 1.3.1.
     api("com.google.mediapipe:tasks-vision:0.10.35")
-    api("androidx.camera:camera-core:1.3.1")
+    // ④ W4-E: 1.3.1 → 1.4.2 — 16KB 페이지 정렬. camera-core 1.3.1의
+    // libimage_processing_util_jni.so는 4KB 정렬이라 SDK AAR이 16KB 미준수 .so를
+    // transitive 전파. 1.4.2는 16KB 정렬(objdump 확인). 데모와 버전 단일 관리.
+    api("androidx.camera:camera-core:1.4.2")
 
     // 테스트
     testImplementation("junit:junit:4.13.2")

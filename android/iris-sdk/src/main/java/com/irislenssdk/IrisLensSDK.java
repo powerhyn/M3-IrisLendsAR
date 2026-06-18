@@ -237,7 +237,10 @@ public final class IrisLensSDK {
      *
      * @param path 텍스처 이미지 파일 경로 (PNG, JPEG, BMP)
      * @return 에러 코드 (OK = 성공)
+     * @deprecated cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 렌즈 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int loadTexture(@NonNull String path) {
         if (!sLibraryLoaded) {
             return NOT_INITIALIZED;
@@ -251,7 +254,10 @@ public final class IrisLensSDK {
      * @param context Android Context
      * @param assetPath assets 내 상대 경로
      * @return 에러 코드 (OK = 성공)
+     * @deprecated cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 렌즈 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int loadTextureFromAssets(@NonNull Context context, @NonNull String assetPath) {
         if (!sLibraryLoaded) {
             return NOT_INITIALIZED;
@@ -285,7 +291,10 @@ public final class IrisLensSDK {
      * @param width 텍스처 너비
      * @param height 텍스처 높이
      * @return 에러 코드 (OK = 성공)
+     * @deprecated cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 렌즈 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int loadTextureFromMemory(@NonNull byte[] data, int width, int height) {
         if (!sLibraryLoaded) {
             return NOT_INITIALIZED;
@@ -629,7 +638,10 @@ public final class IrisLensSDK {
      * @param config V2 뷰티 필터 설정
      * @param result 얼굴 검출 결과 (null 가능, null이면 전체 프레임 처리)
      * @return 에러 코드 (OK = 성공)
+     * @deprecated CPU 뷰티(CPU 픽셀 버퍼) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 뷰티 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int applyBeautyFilterV2(@NonNull byte[] frameData, int width, int height,
                                            int format, @NonNull BeautyFilterConfigV2 config,
                                            @Nullable IrisResult result) {

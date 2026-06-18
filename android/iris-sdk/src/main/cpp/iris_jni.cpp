@@ -702,7 +702,11 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadTexture(
     }
 
     LOGD("Loading texture from: %s", path.get());
+    // ④ W4-E: deprecated cpu-render API를 정당하게 사용(1.x 동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IrisSdkError result = iris_sdk_load_texture(path.get());
+#pragma GCC diagnostic pop
 
     if (result == IRIS_SDK_OK) {
         LOGI("Texture loaded successfully");
@@ -801,10 +805,14 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadTextureFromMemory(
         return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
     }
 
+    // ④ W4-E: deprecated cpu-render API를 정당하게 사용(1.x 동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IrisSdkError result = iris_sdk_load_texture_from_memory(
         data.data(),
         static_cast<int>(width),
         static_cast<int>(height));
+#pragma GCC diagnostic pop
 
     if (result == IRIS_SDK_OK) {
         LOGI("Texture loaded from memory successfully");
@@ -1430,6 +1438,9 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
     const IrisResult* detection = reinterpret_cast<const IrisResult*>(detectionPtr);
 
     // C API 호출
+    // ④ W4-E: deprecated cpu-render API(CPU 픽셀 버퍼 뷰티)를 정당하게 사용(1.x 동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IrisSdkError error = iris_sdk_apply_beauty_v2_c(
         frame.data(),
         static_cast<int>(width),
@@ -1438,6 +1449,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
         &nativeConfig,
         detection
     );
+#pragma GCC diagnostic pop
 
     if (error != IRIS_SDK_OK) {
         LOGW("Apply beauty V2 failed: %d (%s)", error, iris_sdk_error_to_string(error));

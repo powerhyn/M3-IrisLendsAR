@@ -208,6 +208,11 @@ TEST_F(SdkApiTest, ShutdownAfterInitSucceeds) {
 // ============================================================================
 // 렌더링 함수 테스트 (초기화 없이)
 // ============================================================================
+// ④ W4-E: 이 섹션의 테스트는 deprecated cpu-render API(load_texture/render_lens)를
+//   정당하게 검증한다(1.x 동작 유지). 호출 지점이 다수 테스트에 흩어져 있어
+//   섹션 단위로 -Wdeprecated-declarations를 억제한다(설정 함수 테스트 직전 pop).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 TEST_F(SdkApiTest, LoadTextureWithoutInitReturnsNotInitialized) {
     IrisSdkError err = iris_sdk_load_texture("test.png");
@@ -266,6 +271,8 @@ TEST_F(SdkApiTest, RenderLensWithNullParamsReturnsError) {
         dummy_frame, 640, 480, IRIS_FORMAT_RGBA, &iris_result, nullptr);
     EXPECT_EQ(IRIS_SDK_NULL_POINTER, err);
 }
+
+#pragma GCC diagnostic pop  // ④ W4-E: 렌더링(cpu-render) 테스트 섹션 deprecated 억제 종료
 
 // ============================================================================
 // 설정 함수 테스트

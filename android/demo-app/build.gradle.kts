@@ -98,7 +98,9 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
     // CameraX (카메라 프리뷰 및 분석)
-    val cameraxVersion = "1.3.1"
+    // ④ W4-E: 1.3.1 → 1.4.2 — camera-core 1.3.1의 libimage_processing_util_jni.so가
+    // 4KB(2**12) 정렬이라 16KB 페이지 미준수. 1.4.2는 16KB(2**14) 정렬(objdump 확인).
+    val cameraxVersion = "1.4.2"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
