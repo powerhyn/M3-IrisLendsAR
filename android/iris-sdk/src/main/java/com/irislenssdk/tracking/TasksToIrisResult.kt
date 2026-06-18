@@ -203,6 +203,36 @@ object TasksToIrisResult {
     }
 
     /**
+     * ④ W4-B4: 478점 한 얼굴을 변환하고 홍채 ROI 평균 luma까지 채운 **완전한** [IrisResult]를 만든다.
+     *
+     * [convert] + [fillIrisLuma]를 SDK 내부에서 일원화한 단일 진입점이다. 이로써 SDK 단독 소비자가
+     * 두 단계를 따로 호출하지 않아도 avg_iris_luma(P7-W2 렌즈 색 적응, default ON)가 채워진 결과를
+     * 얻는다 — 측정 orchestration을 호출자(데모)에 의존하던 조용한 퇴화를 차단한다.
+     *
+     * [landmarks]는 convert·luma 측정에 **동일 얼굴**이 쓰이도록 호출자가 같은 한 얼굴을 전달한다
+     * (다얼굴 선택은 호출자 책임 — W4-C Option A 데모 오케스트레이션 유지). 검출 실패 시 [out]은
+     * noFace 상태(luma -1)로 채워진다.
+     *
+     * @return 변환 성공(478점 충족) 여부.
+     */
+    fun convertWithLuma(
+        landmarks: List<NormalizedLandmark>,
+        rotationDegrees: Int,
+        sensorWidth: Int,
+        sensorHeight: Int,
+        timestampMs: Long,
+        rgba: ByteBuffer,
+        rowStride: Int,
+        out: IrisResult,
+    ): Boolean {
+        val ok = convert(landmarks, rotationDegrees, sensorWidth, sensorHeight, timestampMs, out)
+        if (ok) {
+            fillIrisLuma(rgba, rowStride, sensorWidth, sensorHeight, landmarks, out)
+        }
+        return ok
+    }
+
+    /**
      * P4-W1-03 패리티: 홍채 중심 5점 크로스 Rec.601 휘도 (0..1, 미검출 -1).
      *
      * LEGACY sampleIrisLuminanceNv21/samplePointLuminanceNv21(GpuRenderActivity)와

@@ -2206,7 +2206,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetDetailReinject(
 
 /**
  * Java: native void nativeSetUseMeasuredLuma(boolean enabled);
- * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 false=fallback).
+ * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 true=실측, 코어 use_measured_luma_).
+ *   ④ W4-D 이후 측정 주체=글루 fillIrisLuma(per-eye Rec.709) — 코어 detector 아님.
  */
 JNIEXPORT void JNICALL
 Java_com_irislenssdk_IrisLensSDK_nativeSetUseMeasuredLuma(

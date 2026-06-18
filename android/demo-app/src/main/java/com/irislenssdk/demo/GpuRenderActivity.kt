@@ -1059,18 +1059,15 @@ class GpuRenderActivity : AppCompatActivity() {
                 (maxX - minX) * (maxY - minY)
             }
         }
-        val converted = lm != null && TasksToIrisResult.convert(
-            lm, rotation, srcWidth, srcHeight, result.timestampMs(), tasksIrisResult
+        // ④ W4-B4: convert+luma를 SDK 단일 진입(convertWithLuma)으로 일원화 — 같은 전경 얼굴(lm)로
+        // 변환·홍채 luma 측정(P7-W2). 측정 비용=눈당 디스크 스캔(분석 스레드, 검출 지연과 분리).
+        // 동작 동일(이전 convert+fillIrisLuma 2단계와 같은 측정·같은 얼굴).
+        val converted = lm != null && TasksToIrisResult.convertWithLuma(
+            lm, rotation, srcWidth, srcHeight, result.timestampMs(), rgba, rowStride, tasksIrisResult
         )
         if (!converted) {
             TasksToIrisResult.fillNoFace(
                 rotation, srcWidth, srcHeight, result.timestampMs(), tasksIrisResult
-            )
-        } else {
-            // P7-W2(avg_iris_luma)·패리티 측정 — RGBA 센서 버퍼에서 직접.
-            // 비용: 눈당 디스크 스캔(분석 스레드) — 검출 지연(onInferenceStats)과 분리.
-            TasksToIrisResult.fillIrisLuma(
-                rgba, rowStride, srcWidth, srcHeight, lm!!, tasksIrisResult
             )
         }
 

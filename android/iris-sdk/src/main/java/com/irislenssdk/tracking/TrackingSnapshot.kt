@@ -33,6 +33,11 @@ class TrackingSnapshot private constructor(
     /**
      * 홍채 ROI 평균 휘도 (Rec.601, 0..1, EMA 스무딩 완료) — 치환형 블렌딩의 노출 매칭용
      * (ADR-0004). 측정 전 기본값 0.5 (셰이더 항등 기준). SDK 밖으로 노출 금지.
+     *
+     * ⚠️ ④ W4-B4: 이 단일 스칼라(Rec.601, 8×8 샘플)는 FaceTracker 자체 측정용 **진단/레거시 경로**다.
+     * 렌더 색 적응(P7-W2)의 **정본**은 [com.irislenssdk.IrisResult.avgIrisLumaLeft]/Right(per-eye,
+     * srgb²·Rec.709 linear, TasksToIrisResult.fillIrisLuma)이며 셰이더 분모(uAvgIrisLum)와 색공간이
+     * 일치한다. 색공간/스칼라 불일치로 렌더 경로 승격 금지. 현재 데모 onSnapshot 미소비.
      */
     val avgIrisLuma: Float,
     /** 무필터 raw 홍채 중심 [rx, ry, lx, ly] — 디버그 메시 오버레이 전용 (진단 도구) */

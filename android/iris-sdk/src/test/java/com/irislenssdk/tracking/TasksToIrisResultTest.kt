@@ -1,4 +1,4 @@
-package com.irislenssdk.demo.tracking
+package com.irislenssdk.tracking
 
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.irislenssdk.IrisResult
@@ -175,5 +175,47 @@ class TasksToIrisResultTest {
         assertEquals(SENSOR_W, out.frameWidth)
         assertEquals(SENSOR_H, out.frameHeight)
         assertEquals(42L, out.timestampMs)
+    }
+
+    // ── ④ W4-B4: convertWithLuma (convert + avg_iris_luma SDK 단일 진입) ──
+
+    /** 균일 그레이(v) RGBA 버퍼 — roiLumaLinear off=y*rowStride+x*4 인덱싱 기준 packed. */
+    private fun grayRgba(v: Int): java.nio.ByteBuffer {
+        val buf = java.nio.ByteBuffer.allocate(SENSOR_W * SENSOR_H * 4)
+        java.util.Arrays.fill(buf.array(), v.toByte())
+        return buf
+    }
+
+    @Test
+    fun `convertWithLuma - convert 위임 + 홍채 luma 채움`() {
+        val out = IrisResult()
+        val rgba = grayRgba(128) // (128/255)^2 ≈ 0.252 linear (Rec.709, 균일채널)
+        val ok = TasksToIrisResult.convertWithLuma(
+            syntheticLandmarks(), 0, SENSOR_W, SENSOR_H, 1234L, rgba, SENSOR_W * 4, out
+        )
+
+        assertTrue(ok)
+        assertTrue(out.detected)
+        // convert 위임 정상 — 좌표 매핑은 convert()와 동일
+        assertEquals(0.40f, out.leftIrisX, EPS)
+        assertEquals(0.60f, out.rightIrisX, EPS)
+        // P7-W2 luma 채움 (양안 검출 + 균일 그레이 → 양수, ≈ 0.252)
+        assertTrue("left luma>0", out.avgIrisLumaLeft > 0f)
+        assertTrue("right luma>0", out.avgIrisLumaRight > 0f)
+        assertEquals(0.252f, out.avgIrisLumaLeft, 0.03f)
+        assertEquals(0.252f, out.avgIrisLumaRight, 0.03f)
+    }
+
+    @Test
+    fun `convertWithLuma - 미검출(478점 미만)이면 luma 미측정 -1`() {
+        val out = IrisResult()
+        val ok = TasksToIrisResult.convertWithLuma(
+            MutableList(10) { NormalizedLandmark.create(0.5f, 0.5f, 0f) },
+            0, SENSOR_W, SENSOR_H, 0L, grayRgba(200), SENSOR_W * 4, out
+        )
+
+        assertFalse(ok)
+        assertEquals(-1f, out.avgIrisLumaLeft, EPS)
+        assertEquals(-1f, out.avgIrisLumaRight, EPS)
     }
 }

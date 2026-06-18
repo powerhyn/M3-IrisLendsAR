@@ -1,4 +1,4 @@
-package com.irislenssdk.demo.tracking.math
+package com.irislenssdk.tracking.math
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

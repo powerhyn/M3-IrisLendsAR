@@ -1047,7 +1047,8 @@ public final class IrisLensSDK {
 
     /**
      * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글.
-     * false=fallback(0.1225, 기본, 안전 롤백), true=detector 실측 사용.
+     * true=실측 사용(기본 — 코어 use_measured_luma_=true), false=fallback(0.1225, 안전 롤백).
+     * ④ W4-D 이후 측정 주체=플랫폼 글루(TasksToIrisResult.fillIrisLuma, per-eye Rec.709) — 코어 detector 아님.
      * @param enabled true=실측, false=fallback.
      */
     public static void setUseMeasuredLuma(boolean enabled) {
