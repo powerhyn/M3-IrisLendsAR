@@ -59,7 +59,7 @@ class TasksToIrisResultTest {
     }
 
     @Test
-    fun `rot0 - 코어 레거시 시맨틱 매핑 (left=468그룹, right=473그룹)`() {
+    fun `rot0 - canonical 매핑 (left=473그룹 피험자 좌안, right=468그룹 우안)`() {
         val out = IrisResult()
         val ok = TasksToIrisResult.convert(syntheticLandmarks(), 0, SENSOR_W, SENSOR_H, 1234L, out)
 
@@ -67,14 +67,13 @@ class TasksToIrisResultTest {
         assertTrue(out.detected)
         assertTrue(out.leftDetected)
         assertTrue(out.rightDetected)
-        // left* ← 468 (해부학 라벨로는 피험자 우안 — LEGACY detector와 동일 매핑)
-        assertEquals(0.40f, out.leftIrisX, EPS)
+        // ④ canonical(ADR §7.3): left* ← 473그룹(피험자 좌안), right* ← 468그룹(피험자 우안)
+        assertEquals(0.60f, out.leftIrisX, EPS)
         assertEquals(0.50f, out.leftIrisY, EPS)
-        assertEquals(-0.01f, out.leftIrisZ, EPS)
-        // right* ← 473
-        assertEquals(0.60f, out.rightIrisX, EPS)
+        assertEquals(-0.02f, out.leftIrisZ, EPS)
+        assertEquals(0.40f, out.rightIrisX, EPS)
         assertEquals(0.50f, out.rightIrisY, EPS)
-        assertEquals(-0.02f, out.rightIrisZ, EPS)
+        assertEquals(-0.01f, out.rightIrisZ, EPS)
         // 프레임/타임스탬프
         assertEquals(SENSOR_W, out.frameWidth)
         assertEquals(SENSOR_H, out.frameHeight)
@@ -97,7 +96,8 @@ class TasksToIrisResultTest {
         val out = IrisResult()
         TasksToIrisResult.convert(syntheticLandmarks(), 0, SENSOR_W, SENSOR_H, 0L, out)
 
-        assertEquals(0.5f, out.eyelidRatioLeft, 1e-4f)
+        // ④ canonical: synthetic은 33그룹(=피험자 우안) EAR만 설정 → eyelidRatioRight=0.5
+        assertEquals(0.5f, out.eyelidRatioRight, 1e-4f)
     }
 
     @Test
@@ -113,11 +113,11 @@ class TasksToIrisResultTest {
         val out = IrisResult()
         TasksToIrisResult.convert(syntheticLandmarks(), 270, SENSOR_W, SENSOR_H, 0L, out)
 
-        // sensorToUpright(x, y, 270) = (y, 1-x)
+        // sensorToUpright(x, y, 270) = (y, 1-x). ④ canonical: left=473그룹(0.60), right=468그룹(0.40)
         assertEquals(0.50f, out.leftIrisX, EPS)
-        assertEquals(1f - 0.40f, out.leftIrisY, EPS)
+        assertEquals(1f - 0.60f, out.leftIrisY, EPS)
         assertEquals(0.50f, out.rightIrisX, EPS)
-        assertEquals(1f - 0.60f, out.rightIrisY, EPS)
+        assertEquals(1f - 0.40f, out.rightIrisY, EPS)
         // 90/270 회전 시 width/height 스왑은 공급자 책임 (ADR §7.1)
         assertEquals(SENSOR_H, out.frameWidth)
         assertEquals(SENSOR_W, out.frameHeight)
@@ -141,12 +141,13 @@ class TasksToIrisResultTest {
     @Test
     fun `홍채 범위 이탈 - 해당 눈만 미검출 (LEGACY extractIris 판정 재현)`() {
         val landmarks = syntheticLandmarks()
-        landmarks[472] = NormalizedLandmark.create(0.40f, 1.2f, 0f) // bottom이 프레임 밖
+        landmarks[472] = NormalizedLandmark.create(0.40f, 1.2f, 0f) // 468그룹 bottom 프레임 밖
         val out = IrisResult()
         TasksToIrisResult.convert(landmarks, 0, SENSOR_W, SENSOR_H, 0L, out)
 
-        assertFalse(out.leftDetected)
-        assertTrue(out.rightDetected)
+        // ④ canonical: 472∈468그룹=피험자 우안 → rightDetected=false
+        assertFalse(out.rightDetected)
+        assertTrue(out.leftDetected)
         assertTrue(out.detected) // 한쪽이라도 검출이면 true
     }
 
@@ -196,9 +197,9 @@ class TasksToIrisResultTest {
 
         assertTrue(ok)
         assertTrue(out.detected)
-        // convert 위임 정상 — 좌표 매핑은 convert()와 동일
-        assertEquals(0.40f, out.leftIrisX, EPS)
-        assertEquals(0.60f, out.rightIrisX, EPS)
+        // convert 위임 정상 — ④ canonical 매핑(left=473그룹 0.60, right=468그룹 0.40)
+        assertEquals(0.60f, out.leftIrisX, EPS)
+        assertEquals(0.40f, out.rightIrisX, EPS)
         // P7-W2 luma 채움 (양안 검출 + 균일 그레이 → 양수, ≈ 0.252)
         assertTrue("left luma>0", out.avgIrisLumaLeft > 0f)
         assertTrue("right luma>0", out.avgIrisLumaRight > 0f)

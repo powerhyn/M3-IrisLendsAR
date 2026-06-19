@@ -24,12 +24,11 @@ import kotlin.math.min
  *     [CoordMapper.sensorToUpright]로 upright 정규화 공간으로 변환한다.
  *     **미러 적용 금지** (ADR §7.4 — 주입 좌표는 항상 비미러, 미러는 렌더 단일 책임).
  *  2. 홍채: 중심 468/473, 경계 469~472/474~477 (§7.0 순서 right→top→left→bottom).
- *     ⚠️ 필드 매핑은 **코어 레거시 시맨틱**을 따른다 (landmark_injection.h
- *     landmark_indices — ③-1 동작 불변 강제): IrisResult.left* ← 468그룹,
- *     right* ← 473그룹. 이는 [LandmarkIndices]의 해부학 라벨(RIGHT_IRIS_CENTER=468)과
- *     **반대**다 — 인덱스가 정본(ADR §7.3)이고, A/B 기준선(LEGACY detector)이 이
- *     매핑으로 채우므로 동일 매핑이어야 인위적 L/R 스왑(눈 간 거리만큼의 가짜
- *     계통 오프셋)이 생기지 않는다. 라벨 일괄 정정은 ④에서 골든 재기준선과 함께.
+ *     ④ 좌표 canonical relabeling(ADR §7.3) 적용: IrisResult.left* ← 피험자 좌안
+ *     473그룹, right* ← 피험자 우안 468그룹. [LandmarkIndices] 해부학 라벨
+ *     (RIGHT_IRIS_CENTER=468)·코어 landmark_injection.h(kLeftIris=473그룹)와 정합.
+ *     (W4-C까지는 LEGACY detector 동작 불변 위해 반전 매핑이었으나 ④에서 코어·글루
+ *     동시 정정 + 골든 재기준선 완료 — migration checker new.left==old.right 증명.)
  *  3. radius: 중심→경계 4점 평균 **픽셀** 거리 — LEGACY calculateIrisRadius
  *     (mediapipe_detector.cpp:2240)와 동일 수식. 픽셀 환산은 upright 프레임 치수
  *     기준 ([IrisGeometry.radiusPx] — 함정 #5: 정규화 공간 직접 거리 금지).
@@ -44,17 +43,17 @@ import kotlin.math.min
  */
 object TasksToIrisResult {
 
-    /** IrisResult.left* 필드 소스 — 인덱스 468그룹 (코어 레거시 시맨틱, 위 ⚠️ 참조) */
-    private val RESULT_LEFT_IRIS = intArrayOf(468, 469, 470, 471, 472)
+    /** IrisResult.left* 필드 소스 — 피험자 좌안 473그룹 (canonical, ADR §7.3; 코어 kLeftIris 정합) */
+    private val RESULT_LEFT_IRIS = intArrayOf(473, 474, 475, 476, 477)
 
-    /** IrisResult.right* 필드 소스 — 인덱스 473그룹 */
-    private val RESULT_RIGHT_IRIS = intArrayOf(473, 474, 475, 476, 477)
+    /** IrisResult.right* 필드 소스 — 피험자 우안 468그룹 (canonical) */
+    private val RESULT_RIGHT_IRIS = intArrayOf(468, 469, 470, 471, 472)
 
-    /** EAR 6점 — landmark_injection.h kLeftEAR와 동일 (left 필드 ← 33그룹) */
-    private val RESULT_LEFT_EAR = intArrayOf(33, 160, 158, 133, 153, 144)
+    /** EAR 6점 — 피험자 좌안 362그룹 (canonical, landmark_injection.h kLeftEAR 정합) */
+    private val RESULT_LEFT_EAR = intArrayOf(362, 385, 387, 263, 373, 380)
 
-    /** EAR 6점 — landmark_injection.h kRightEAR와 동일 (right 필드 ← 362그룹) */
-    private val RESULT_RIGHT_EAR = intArrayOf(362, 385, 387, 263, 373, 380)
+    /** EAR 6점 — 피험자 우안 33그룹 (canonical, kRightEAR 정합) */
+    private val RESULT_RIGHT_EAR = intArrayOf(33, 160, 158, 133, 153, 144)
 
     // 분석 스레드 전용 재사용 버퍼 (프레임당 힙 할당 회피)
     private val pt = FloatArray(2)

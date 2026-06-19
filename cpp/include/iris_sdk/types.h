@@ -129,12 +129,12 @@ struct Rect {
  * 양쪽 눈의 홍채 정보 및 얼굴 메타데이터
  * POD 타입 - FFI 호환
  *
- * left/right 명명 계약 (ADR-0001 §7.3):
- *   - 인덱스가 정본이고 라벨은 보조 표기다. left_iris ← face_mesh 인덱스 468그룹
- *     {468,469,470,471,472}, right_iris ← 473그룹 {473,474,475,476,477}.
- *   - ⚠️ 현 코어 라벨은 MediaPipe canonical 해부학 명명과 반전돼 있다(§7.3 — 코드 'left'=
- *     468그룹=canonical FACEMESH_RIGHT). ③-1(동작 불변)은 현 라벨을 유지한다. canonical
- *     기준 일괄 정정은 ④(추적 교체) 시 골든 재기준선과 함께 수행한다.
+ * left/right 명명 계약 (ADR-0001 §7.3 — ④ canonical relabeling 적용 후):
+ *   - 인덱스가 정본이고 라벨은 보조 표기다. left_iris ← face_mesh 인덱스 473그룹
+ *     {473,474,475,476,477}=피험자 좌안(canonical LEFT_IRIS), right_iris ← 468그룹
+ *     {468,469,470,471,472}=피험자 우안(canonical RIGHT_IRIS). 명명 정본 = LandmarkIndices.kt.
+ *   - left=피험자 좌안 / right=피험자 우안으로 MediaPipe canonical 해부학 명명에 정합됐다(§7.3).
+ *     비미러(센서 원본 upright)에서 피험자 좌안은 화면 우측에 보인다.
  *   - 화면 기준 게이트(데모 applyLeft 등)는 screen_left/screen_right로 명시 분리하고
  *     해부학 라벨과 혼용을 금지한다(§7.3).
  *
@@ -154,11 +154,11 @@ struct IrisResult {
                             ///<   통과 상수 1.0(곱셈 항등원), 미검출 시 0.0으로 고정한다. presence
                             ///<   게이트는 detected/visibility가 담당(deriveIrisResult 참조).
 
-    // 왼쪽 눈 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 468 (§7.3 계약)
+    // 피험자 좌안 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 473 (§7.3 canonical)
     IrisLandmark left_iris[5];
-    float left_radius;      ///< 왼쪽 홍채 반지름 (픽셀 — 중심↔경계 평균 거리, 픽셀 환산 §7.0)
+    float left_radius;      ///< 피험자 좌안 홍채 반지름 (픽셀 — 중심↔경계 평균 거리, 픽셀 환산 §7.0)
 
-    // 오른쪽 눈 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 473 (§7.3 계약)
+    // 피험자 우안 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 468 (§7.3 canonical)
     IrisLandmark right_iris[5];
     float right_radius;     ///< 오른쪽 홍채 반지름 (픽셀 — 픽셀 환산 §7.0)
 

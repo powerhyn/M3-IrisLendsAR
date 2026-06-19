@@ -8,16 +8,17 @@ namespace iris_sdk {
 // MediaPipe face mesh landmark indices for EAR computation
 // ============================================================
 
-// Left eye EAR landmarks: p1=33, p2=160, p3=158, p4=133, p5=153, p6=144
-static constexpr int kLeftEAR[] = {33, 160, 158, 133, 153, 144};
-// Right eye EAR landmarks: p1=362, p2=385, p3=387, p4=263, p5=373, p6=380
-static constexpr int kRightEAR[] = {362, 385, 387, 263, 373, 380};
+// ④ §7.3 canonical: kLeft*=피험자 좌안(362그룹), kRight*=피험자 우안(33그룹).
+// Left eye (피험자 좌안) EAR landmarks: p1=362, p2=385, p3=387, p4=263, p5=373, p6=380
+static constexpr int kLeftEAR[] = {362, 385, 387, 263, 373, 380};
+// Right eye (피험자 우안) EAR landmarks: p1=33, p2=160, p3=158, p4=133, p5=153, p6=144
+static constexpr int kRightEAR[] = {33, 160, 158, 133, 153, 144};
 
-// Eyelid key landmark indices
-static constexpr int kLeftEyelidTop = 159;
-static constexpr int kLeftEyelidBottom = 145;
-static constexpr int kRightEyelidTop = 386;
-static constexpr int kRightEyelidBottom = 374;
+// Eyelid key landmark indices (④ §7.3 canonical: Left=피험자 좌안 386/374그룹)
+static constexpr int kLeftEyelidTop = 386;
+static constexpr int kLeftEyelidBottom = 374;
+static constexpr int kRightEyelidTop = 159;
+static constexpr int kRightEyelidBottom = 145;
 
 // ============================================================
 // EyeState helpers

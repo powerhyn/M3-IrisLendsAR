@@ -62,13 +62,13 @@ class OverlayView @JvmOverloads constructor(
         // 홍채 랜드마크 색상
         private const val COLOR_IRIS_LANDMARK = 0xFFFF00FF.toInt()  // Magenta
 
-        // MediaPipe Face Mesh with Iris 랜드마크 인덱스
-        // 왼쪽 홍채 (화면상 오른쪽): 중심 468, 경계 469-472
-        private const val LEFT_IRIS_CENTER = 468
-        private val LEFT_IRIS_POINTS = intArrayOf(469, 470, 471, 472)
-        // 오른쪽 홍채 (화면상 왼쪽): 중심 473, 경계 474-477
-        private const val RIGHT_IRIS_CENTER = 473
-        private val RIGHT_IRIS_POINTS = intArrayOf(474, 475, 476, 477)
+        // MediaPipe Face Mesh with Iris 랜드마크 인덱스 (피험자 해부학 기준, ADR §7.3 canonical)
+        // 왼쪽 눈 = 피험자 좌안 (비미러 화면 오른쪽): 중심 473, 경계 474-477
+        private const val LEFT_IRIS_CENTER = 473
+        private val LEFT_IRIS_POINTS = intArrayOf(474, 475, 476, 477)
+        // 오른쪽 눈 = 피험자 우안 (비미러 화면 왼쪽): 중심 468, 경계 469-472
+        private const val RIGHT_IRIS_CENTER = 468
+        private val RIGHT_IRIS_POINTS = intArrayOf(469, 470, 471, 472)
 
         // 렌즈 렌더링 설정
         // 홍채 반지름 대비 렌즈 크기 배율 (1.0 = 홍채 크기와 동일)
@@ -102,14 +102,14 @@ class OverlayView @JvmOverloads constructor(
         private const val DETECTION_TIMEOUT_MS = 1000L  // 1초 (mesh, debug info 등)
         private const val LENS_PERSISTENCE_TIMEOUT_MS = 2000L  // 2초 (렌즈 전용 - 더 긴 유지)
 
-        // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)
-        // 왼쪽 눈 (화면상 오른쪽) - 시계방향 순서
+        // 눈 윤곽 랜드마크 인덱스 (피험자 해부학 기준, ADR §7.3 canonical)
+        // 왼쪽 눈 = 피험자 좌안 (비미러 화면 오른쪽) - 시계방향 순서
         private val LEFT_EYE_CONTOUR_INDICES = intArrayOf(
-            33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7
-        )
-        // 오른쪽 눈 (화면상 왼쪽) - 시계방향 순서
-        private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(
             362, 398, 384, 385, 386, 387, 388, 466, 263, 249, 390, 373, 374, 380, 381, 382
+        )
+        // 오른쪽 눈 = 피험자 우안 (비미러 화면 왼쪽) - 시계방향 순서
+        private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(
+            33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7
         )
     }
 

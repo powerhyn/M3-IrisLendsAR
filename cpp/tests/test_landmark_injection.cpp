@@ -382,11 +382,12 @@ TEST_F(LandmarkAdapterGoldenTest, InjectedDetectedEyeYieldsPositiveVisibility) {
 TEST(LandmarkAdapterValidityTest, RejectsOutOfRangeIrisAsUndetected) {
     // 홍채 한 점이 [0,1] 밖이면 그쪽 detected=false (extractIris 동작 불변).
     std::vector<float> pts(478 * 3, 0.5f);
-    // 좌안 경계점(인덱스 469) y를 1.5로 → left 미검출.
+    // ④ §7.3 canonical: 인덱스 469는 468그룹(=kRightIris=피험자 우안)의 경계점.
+    //   469 y를 1.5로 → right(피험자 우안) 미검출. left(473그룹)은 0.5로 유효.
     pts[469 * 3 + 1] = 1.5f;
     CppIrisResult r = deriveIrisResult(pts.data(), 478, 640, 480, 0);
-    EXPECT_FALSE(r.left_detected);
-    EXPECT_TRUE(r.right_detected);  // 우안은 0.5로 모두 유효
+    EXPECT_FALSE(r.right_detected);
+    EXPECT_TRUE(r.left_detected);  // 좌안(473그룹)은 0.5로 모두 유효
 }
 
 // W4-B1 대칭 가드: confidence=1.0 변경이 "미검출 눈까지 게이트를 여는" 과잉을 내지 않는다.
@@ -394,19 +395,20 @@ TEST(LandmarkAdapterValidityTest, RejectsOutOfRangeIrisAsUndetected) {
 // 검출 눈은 visibility>0. presence 게이트가 confidence와 독립임을 고정한다.
 TEST(LandmarkAdapterValidityTest, UndetectedEyeYieldsZeroVisibility) {
     std::vector<float> pts(478 * 3, 0.5f);
-    pts[469 * 3 + 1] = 1.5f;  // 좌안 경계점(469) y 범위 밖 → left 미검출 (위 케이스와 동형)
+    // ④ §7.3 canonical: 469는 468그룹(=kRightIris=피험자 우안) 경계점 → right 미검출.
+    pts[469 * 3 + 1] = 1.5f;
     CppIrisResult r = deriveIrisResult(pts.data(), 478, 640, 480, 0);
-    ASSERT_FALSE(r.left_detected);
-    ASSERT_TRUE(r.right_detected);
-    EXPECT_FLOAT_EQ(r.confidence, 1.0f);  // 전체 detected(우안)=true → 게이트 통과 상수
-
-    const auto pl = iris_sdk::gpu::adaptIrisResult(
-        r, iris_sdk::gpu::EyeSide::Left, 640, 480);
-    EXPECT_FLOAT_EQ(pl.visibility, 0.0f) << "미검출 좌안은 어댑터 early-return으로 차단";
+    ASSERT_FALSE(r.right_detected);
+    ASSERT_TRUE(r.left_detected);
+    EXPECT_FLOAT_EQ(r.confidence, 1.0f);  // 전체 detected(좌안)=true → 게이트 통과 상수
 
     const auto pr = iris_sdk::gpu::adaptIrisResult(
         r, iris_sdk::gpu::EyeSide::Right, 640, 480);
-    EXPECT_GT(pr.visibility, 0.0f) << "검출 우안은 visibility>0";
+    EXPECT_FLOAT_EQ(pr.visibility, 0.0f) << "미검출 우안은 어댑터 early-return으로 차단";
+
+    const auto pl = iris_sdk::gpu::adaptIrisResult(
+        r, iris_sdk::gpu::EyeSide::Left, 640, 480);
+    EXPECT_GT(pl.visibility, 0.0f) << "검출 좌안은 visibility>0";
 }
 
 // W4-B1: 양쪽 모두 미검출이면 confidence=0(게이트 통과 상수 미부여). 방향 A의
@@ -438,7 +440,8 @@ TEST(LandmarkInjectionStoreTest, WriteThenReadRoundTrip) {
     LandmarkInjectionStore store;
     std::vector<float> pts(478 * 3, 0.5f);
     // 좌/우 홍채 5점을 의미있게 채움(중심 + 경계 — 반경 계산 가능하게).
-    // left center 468 = (0.4,0.5), 경계 4점은 ±0.02 사방.
+    // ④ §7.3 canonical: 인덱스 468그룹(468~472)은 right_iris(피험자 우안)로 라우팅된다.
+    //   center 468 = (0.4,0.5), 경계 4점은 ±0.02 사방. (473그룹은 0.5로 left도 검출됨)
     auto setPt = [&](int idx, float x, float y) {
         pts[idx * 3 + 0] = x; pts[idx * 3 + 1] = y; pts[idx * 3 + 2] = 0.0f;
     };
@@ -455,13 +458,13 @@ TEST(LandmarkInjectionStoreTest, WriteThenReadRoundTrip) {
 
     CppIrisResult r;
     ASSERT_TRUE(store.readDerived(&r));
-    EXPECT_TRUE(r.left_detected);
+    EXPECT_TRUE(r.right_detected);      // 468그룹 → right_iris(피험자 우안) 검출
     EXPECT_EQ(r.frame_width, 640);
     EXPECT_EQ(r.frame_height, 480);
     EXPECT_EQ(r.timestamp_ms, 1);       // 1000µs → 1ms
-    EXPECT_NEAR(r.left_iris[0].x, 0.40f, 1e-6f);
+    EXPECT_NEAR(r.right_iris[0].x, 0.40f, 1e-6f);  // 인덱스 468 center → right_iris[0]
     // 반경: 경계 4점이 모두 중심에서 0.02 정규화 = 0.02*640=12.8px (x), 0.02*480=9.6px (y).
-    EXPECT_GT(r.left_radius, 0.0f);
+    EXPECT_GT(r.right_radius, 0.0f);
 }
 
 TEST(LandmarkInjectionStoreTest, GenerationIncrementsBy2PerWrite) {

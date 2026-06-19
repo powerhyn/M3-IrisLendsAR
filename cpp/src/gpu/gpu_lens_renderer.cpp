@@ -44,31 +44,33 @@ extern const char* LENS_OVERLAY_FRAGMENT;
 // Face Mesh 랜드마크 인덱스 상수
 // ============================================================================
 
-// 왼쪽 눈 16개 윤곽 인덱스
+// ④ §7.3 canonical: LEFT_*=피험자 좌안(362/263그룹), RIGHT_*=피험자 우안(33/133그룹).
+// 피험자 좌안 16개 윤곽 인덱스 (canonical LEFT, 362그룹)
 static constexpr int LEFT_EYE_CONTOUR[] = {
-    33, 246, 161, 160, 159, 158, 157, 173,
-    133, 155, 154, 153, 145, 144, 163, 7
-};
-static constexpr int LEFT_EYE_CONTOUR_COUNT = 16;
-
-// 오른쪽 눈 16개 윤곽 인덱스
-static constexpr int RIGHT_EYE_CONTOUR[] = {
     263, 466, 388, 387, 386, 385, 384, 398,
     362, 382, 381, 380, 374, 373, 390, 249
 };
+static constexpr int LEFT_EYE_CONTOUR_COUNT = 16;
+
+// 피험자 우안 16개 윤곽 인덱스 (canonical RIGHT, 33그룹)
+static constexpr int RIGHT_EYE_CONTOUR[] = {
+    33, 246, 161, 160, 159, 158, 157, 173,
+    133, 155, 154, 153, 145, 144, 163, 7
+};
 static constexpr int RIGHT_EYE_CONTOUR_COUNT = 16;
 
-// 내안각/외안각 인덱스
-static constexpr int LEFT_INNER_CORNER = 33;
-static constexpr int LEFT_OUTER_CORNER = 133;
-static constexpr int RIGHT_INNER_CORNER = 263;
-static constexpr int RIGHT_OUTER_CORNER = 362;
+// 내안각/외안각 인덱스 (④ §R2: side+corner 이중반전 정정 — inner=코쪽, outer=귀쪽)
+//   canonical 안각: 33=RIGHT outer / 133=RIGHT inner / 263=LEFT outer / 362=LEFT inner.
+static constexpr int LEFT_INNER_CORNER = 362;
+static constexpr int LEFT_OUTER_CORNER = 263;
+static constexpr int RIGHT_INNER_CORNER = 133;
+static constexpr int RIGHT_OUTER_CORNER = 33;
 
-// 눈꺼풀 Y 좌표 인덱스
-static constexpr int LEFT_UPPER_EYELID[] = {159, 160, 161};
-static constexpr int LEFT_LOWER_EYELID[] = {145, 144, 153};
-static constexpr int RIGHT_UPPER_EYELID[] = {386, 385, 384};
-static constexpr int RIGHT_LOWER_EYELID[] = {374, 373, 380};
+// 눈꺼풀 Y 좌표 인덱스 (④ §7.3 canonical: LEFT=피험자 좌안 386/374그룹)
+static constexpr int LEFT_UPPER_EYELID[] = {386, 385, 384};
+static constexpr int LEFT_LOWER_EYELID[] = {374, 373, 380};
+static constexpr int RIGHT_UPPER_EYELID[] = {159, 160, 161};
+static constexpr int RIGHT_LOWER_EYELID[] = {145, 144, 153};
 static constexpr int EYELID_INDEX_COUNT = 3;
 
 #if IRIS_SDK_GPU_AVAILABLE
@@ -973,7 +975,10 @@ ErrorCode GPULensRenderer::renderToTexture(
     float normalized_left_r = iris_result.left_radius / det_hf;
     float normalized_right_r = iris_result.right_radius / det_hf;
 
-    // 홍채 좌표 (Y-flip 후, mirror 시 X-flip + 좌우 swap)
+    // 홍채 좌표 (Y-flip 후, mirror 시 X-flip만)
+    // ④ §R3/ADR §7.4: 미러는 렌더 X-flip 단일책임. L/R 라벨은 피험자 기준 유지(eye-swap 금지).
+    //   X-flip만으로 각 눈 좌표가 미러 화면 위치로 정확히 이동한다(피험자 우안 sensor low-x
+    //   → 1-x high → 미러 화면 우측). 기존 std::swap 4종은 불필요한 이중처리라 제거.
     float left_x = iris_result.left_iris[0].x;
     float left_y = 1.0f - iris_result.left_iris[0].y;
     float right_x = iris_result.right_iris[0].x;
@@ -986,10 +991,6 @@ ErrorCode GPULensRenderer::renderToTexture(
     if (config.is_mirror) {
         left_x = 1.0f - left_x;
         right_x = 1.0f - right_x;
-        std::swap(left_x, right_x);
-        std::swap(left_y, right_y);
-        std::swap(left_r, right_r);
-        std::swap(left_det, right_det);
     }
 
     static bool first_frame_logged = false;
@@ -1036,14 +1037,12 @@ ErrorCode GPULensRenderer::renderToTexture(
     glUniform1f(lens_uniforms_.uFrameAspect, det_wf / det_hf);
 
     // 눈꺼풀 (Y-flip만 적용; min/max 정렬은 셰이더 측에서 처리)
+    // ④ §R3: 미러는 X-flip 단일책임이라 L/R 라벨 유지. 눈꺼풀은 Y값만이라 X-flip 무관 →
+    //   기존 미러 eye-swap은 불필요한 이중처리라 제거(홍채 좌표 swap 제거와 동일 책임).
     float l_top = eyelid_cache_[0].valid_frames > 0 ? 1.0f - eyelid_cache_[0].top : 0.0f;
     float l_bot = eyelid_cache_[0].valid_frames > 0 ? 1.0f - eyelid_cache_[0].bottom : 1.0f;
     float r_top = eyelid_cache_[1].valid_frames > 0 ? 1.0f - eyelid_cache_[1].top : 0.0f;
     float r_bot = eyelid_cache_[1].valid_frames > 0 ? 1.0f - eyelid_cache_[1].bottom : 1.0f;
-    if (config.is_mirror) {
-        std::swap(l_top, r_top);
-        std::swap(l_bot, r_bot);
-    }
     glUniform1f(lens_uniforms_.uLeftEyeTop, l_top);
     glUniform1f(lens_uniforms_.uLeftEyeBottom, l_bot);
     glUniform1f(lens_uniforms_.uRightEyeTop, r_top);
@@ -1099,18 +1098,16 @@ ErrorCode GPULensRenderer::renderToTexture(
         int r_valid = ellipse_cache_[1].valid_frames;
 
         if (config.is_mirror) {
-            // cx mirror, rot = π - rot, rx_inner/rx_outer swap
+            // ④ §R3/ADR §7.4: 미러는 X-flip 단일책임 — per-eye X-flip 기하만 적용하고
+            //   좌우 객체 eye-swap은 제거(홍채 좌표 swap 제거와 동일 책임).
+            //   per-eye 미러: cx mirror(1-cx), rot = π - rot, rx_inner/rx_outer 교환
+            //   (X-flip 시 한 눈의 inner/outer 반경 방향이 좌우로 뒤집힘 — 좌표의 기하 결과).
             l_cx = 1.0f - l_cx;
             r_cx = 1.0f - r_cx;
             l_rot = static_cast<float>(M_PI) - l_rot;
             r_rot = static_cast<float>(M_PI) - r_rot;
             std::swap(l_rxi, l_rxo);
             std::swap(r_rxi, r_rxo);
-            // 좌우 객체 스왑
-            std::swap(l_cx, r_cx); std::swap(l_cy, r_cy);
-            std::swap(l_rxi, r_rxi); std::swap(l_rxo, r_rxo); std::swap(l_ry, r_ry);
-            std::swap(l_rot, r_rot);
-            std::swap(l_valid, r_valid);
         }
 
         if (l_valid > 0) {
@@ -1143,12 +1140,11 @@ ErrorCode GPULensRenderer::renderToTexture(
     // 블렌드(877/888)는 raw uAvgIrisLum 그대로라 영향 없음.
     glUniform1f(lens_uniforms_.uLowLightActive, is_low_light_ ? 1.0f : 0.0f);
 
-    // P6-W6 §1.3 C7: 블링크 ramp. mirror 시 좌/우 swap (eyelid uniform과 동일 패턴).
+    // P6-W6 §1.3 C7: 블링크 ramp. ④ §R3/ADR §7.4 — 미러는 X-flip 단일책임이라 L/R 라벨 유지.
+    //   alpha는 스칼라(X-flip 무관)이므로 기존 미러 eye-swap은 불필요한 이중처리라 제거
+    //   (홍채/눈꺼풀/타원 좌표 swap 제거와 동일 책임 — render_alpha는 per-eye 라벨 그대로 전달).
     float l_alpha = render_alpha_[0];
     float r_alpha = render_alpha_[1];
-    if (config.is_mirror) {
-        std::swap(l_alpha, r_alpha);
-    }
     glUniform1f(lens_uniforms_.uLeftRenderAlpha, l_alpha);
     glUniform1f(lens_uniforms_.uRightRenderAlpha, r_alpha);
 
