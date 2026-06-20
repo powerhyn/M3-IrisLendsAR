@@ -62,13 +62,13 @@ class OverlayView @JvmOverloads constructor(
         // 홍채 랜드마크 색상
         private const val COLOR_IRIS_LANDMARK = 0xFFFF00FF.toInt()  // Magenta
 
-        // MediaPipe Face Mesh with Iris 랜드마크 인덱스
-        // 왼쪽 홍채 (화면상 오른쪽): 중심 468, 경계 469-472
-        private const val LEFT_IRIS_CENTER = 468
-        private val LEFT_IRIS_POINTS = intArrayOf(469, 470, 471, 472)
-        // 오른쪽 홍채 (화면상 왼쪽): 중심 473, 경계 474-477
-        private const val RIGHT_IRIS_CENTER = 473
-        private val RIGHT_IRIS_POINTS = intArrayOf(474, 475, 476, 477)
+        // MediaPipe Face Mesh with Iris 랜드마크 인덱스 (피험자 해부학 기준, ADR §7.3 canonical)
+        // 왼쪽 눈 = 피험자 좌안 (비미러 화면 오른쪽): 중심 473, 경계 474-477
+        private const val LEFT_IRIS_CENTER = 473
+        private val LEFT_IRIS_POINTS = intArrayOf(474, 475, 476, 477)
+        // 오른쪽 눈 = 피험자 우안 (비미러 화면 왼쪽): 중심 468, 경계 469-472
+        private const val RIGHT_IRIS_CENTER = 468
+        private val RIGHT_IRIS_POINTS = intArrayOf(469, 470, 471, 472)
 
         // 렌즈 렌더링 설정
         // 홍채 반지름 대비 렌즈 크기 배율 (1.0 = 홍채 크기와 동일)
@@ -102,14 +102,14 @@ class OverlayView @JvmOverloads constructor(
         private const val DETECTION_TIMEOUT_MS = 1000L  // 1초 (mesh, debug info 등)
         private const val LENS_PERSISTENCE_TIMEOUT_MS = 2000L  // 2초 (렌즈 전용 - 더 긴 유지)
 
-        // 눈 윤곽 랜드마크 인덱스 (MediaPipe Face Mesh 468개 기준)
-        // 왼쪽 눈 (화면상 오른쪽) - 시계방향 순서
+        // 눈 윤곽 랜드마크 인덱스 (피험자 해부학 기준, ADR §7.3 canonical)
+        // 왼쪽 눈 = 피험자 좌안 (비미러 화면 오른쪽) - 시계방향 순서
         private val LEFT_EYE_CONTOUR_INDICES = intArrayOf(
-            33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7
-        )
-        // 오른쪽 눈 (화면상 왼쪽) - 시계방향 순서
-        private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(
             362, 398, 384, 385, 386, 387, 388, 466, 263, 249, 390, 373, 374, 380, 381, 382
+        )
+        // 오른쪽 눈 = 피험자 우안 (비미러 화면 왼쪽) - 시계방향 순서
+        private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(
+            33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7
         )
     }
 
@@ -256,6 +256,38 @@ class OverlayView @JvmOverloads constructor(
         strokeWidth = 2f
         pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
         isAntiAlias = true
+    }
+
+    // 진단(트래킹 지연 핸드오프 §2): stabilize 이전 raw 홍채 중심 오버레이.
+    // showRawIris가 켜지면 화면(최신 카메라 프레임) 위에 마젠타=raw(필터 이전),
+    // 녹색=필터(stabilize 후) 두 점을 함께 그려, 움직임 중 raw가 '필터 이전부터'
+    // 화면 눈보다 늦는지(=픽셀-랜드마크 프레임 불일치) 눈으로 확인하게 한다.
+    var showRawIris: Boolean = false
+    @Volatile private var rawIrisResult: IrisResult? = null
+    private val rawDiagDotPaint = Paint().apply {
+        color = 0xFFFF00FF.toInt()  // 마젠타 = raw(stabilize 이전)
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val rawDiagRingPaint = Paint().apply {
+        color = 0xFFFF00FF.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        isAntiAlias = true
+    }
+    private val filteredDiagDotPaint = Paint().apply {
+        color = 0xFF00FF66.toInt()  // 녹색 = 필터(stabilize 후)
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
+    /**
+     * 진단용 — stabilize 이전 raw 홍채 결과(사본)를 설정한다. onDraw에서 [showRawIris]일 때
+     * 마젠타 점으로 그린다. 호출자는 stabilize 직전 IrisResult 사본을 넘겨야 한다.
+     */
+    fun setRawIris(result: IrisResult?) {
+        rawIrisResult = result
+        if (showRawIris) invalidate()
     }
 
     // 홍채 랜드마크용 Paint (마젠타 - 눈에 잘 띄도록)
@@ -501,8 +533,12 @@ class OverlayView @JvmOverloads constructor(
                 (timeSinceLastValid < DETECTION_TIMEOUT_MS && (hasLeftEverDetected || hasRightEverDetected))
         }
 
-        // 렌즈도 Mesh도 렌더링할 것이 없으면 리턴
-        if (!shouldRenderLens && !shouldRenderMeshAndDebug) return
+        // 진단 raw 오버레이가 켜져 있고 raw 검출이 있으면 조기 반환하지 않는다
+        val wantRawIris = showRawIris &&
+            (rawIrisResult?.let { it.leftDetected || it.rightDetected } == true)
+
+        // 렌즈도 Mesh도 raw 진단도 렌더링할 것이 없으면 리턴
+        if (!shouldRenderLens && !shouldRenderMeshAndDebug && !wantRawIris) return
 
         // 타임아웃 상태 로깅 (디버깅용)
         if (!hasValidDetection && timeSinceLastValid < LENS_PERSISTENCE_TIMEOUT_MS) {
@@ -625,6 +661,23 @@ class OverlayView @JvmOverloads constructor(
                     "R"
                 )
             }
+        }
+
+        // 진단(트래킹 지연 핸드오프 §2): stabilize 이전 raw 홍채 중심(마젠타)을
+        // 필터 후 중심(녹색)과 함께 그린다. 움직임 중 마젠타가 화면 눈보다 늦으면
+        // 원인은 필터가 아니라 픽셀-랜드마크 프레임 불일치 → frame-sync가 정답.
+        if (wantRawIris) {
+            rawIrisResult?.let { raw ->
+                if (raw.leftDetected) {
+                    drawRawDiagMarker(canvas, raw.leftIrisX, raw.leftIrisY, raw.leftRadius, scaleFactor, offsetX, offsetY)
+                }
+                if (raw.rightDetected) {
+                    drawRawDiagMarker(canvas, raw.rightIrisX, raw.rightIrisY, raw.rightRadius, scaleFactor, offsetX, offsetY)
+                }
+            }
+            // 비교용 필터(stabilize 후) 중심 — 녹색 점
+            if (cachedLeftDetected) drawFilteredDiagDot(canvas, filteredLeftX, filteredLeftY, scaleFactor, offsetX, offsetY)
+            if (cachedRightDetected) drawFilteredDiagDot(canvas, filteredRightX, filteredRightY, scaleFactor, offsetX, offsetY)
         }
 
         // Face Mesh 표시 (충분한 신뢰도로 얼굴 감지 시에만, 캐시된 값 사용)
@@ -866,6 +919,38 @@ class OverlayView @JvmOverloads constructor(
         debugTextPaint.textSize = 24f
         val debugLabel = "%s rawR=%.0f effR=%.0f".format(label, rawR, effectiveR)
         canvas.drawText(debugLabel, cx + effectiveR + 10, cy, debugTextPaint)
+    }
+
+    /** 진단: stabilize 이전 raw 홍채 중심(마젠타 점 + 반경 링). [showRawIris] 전용. */
+    private fun drawRawDiagMarker(
+        canvas: Canvas,
+        normalizedX: Float,
+        normalizedY: Float,
+        radius: Float,
+        scaleFactor: Float,
+        offsetX: Float,
+        offsetY: Float,
+    ) {
+        var cx = normalizedX * imageWidth * scaleFactor + offsetX
+        val cy = normalizedY * imageHeight * scaleFactor + offsetY
+        if (isMirror) cx = width - cx
+        canvas.drawCircle(cx, cy, radius * scaleFactor, rawDiagRingPaint)
+        canvas.drawCircle(cx, cy, 9f, rawDiagDotPaint)
+    }
+
+    /** 진단: 필터(stabilize 후) 홍채 중심(녹색 점) — raw 마젠타와 시차 비교용. */
+    private fun drawFilteredDiagDot(
+        canvas: Canvas,
+        normalizedX: Float,
+        normalizedY: Float,
+        scaleFactor: Float,
+        offsetX: Float,
+        offsetY: Float,
+    ) {
+        var cx = normalizedX * imageWidth * scaleFactor + offsetX
+        val cy = normalizedY * imageHeight * scaleFactor + offsetY
+        if (isMirror) cx = width - cx
+        canvas.drawCircle(cx, cy, 7f, filteredDiagDotPaint)
     }
 
     /**

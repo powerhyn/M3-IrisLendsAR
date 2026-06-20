@@ -45,8 +45,9 @@ class MediaPipeBenchmarkActivity : AppCompatActivity() {
         private const val TAG = "MediaPipeBenchmark"
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
-        // MediaPipe Face Landmarker 모델
-        private const val FACE_LANDMARKER_MODEL = "face_landmarker.task"
+        // MediaPipe Face Landmarker 모델 — W4-C에서 iris-sdk AAR(assets/models/)로 단일화,
+        // AGP 에셋 병합으로 제공(데모 중복 제거). FaceTracker.MODEL_ASSET_PATH와 동일 경로.
+        private const val FACE_LANDMARKER_MODEL = "models/face_landmarker.task"
     }
 
     private lateinit var binding: ActivityMediapipeBenchmarkBinding

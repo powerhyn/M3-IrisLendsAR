@@ -22,33 +22,14 @@ namespace cv { class Mat; }
 namespace iris_sdk {
 
 // 전방 선언
-class IrisDetector;
 class LensRenderer;
 
 /**
- * @brief 프레임 처리 결과
- */
-struct IRIS_SDK_EXPORT ProcessResult {
-    bool success = false;           ///< 처리 성공 여부
-    IrisResult iris_result;         ///< 홍채 검출 결과
-    ErrorCode error_code = ErrorCode::Success; ///< 에러 코드
-    float processing_time_ms = 0.0f; ///< 총 처리 시간 (밀리초)
-    float detection_time_ms = 0.0f;  ///< 검출 시간 (밀리초)
-    float render_time_ms = 0.0f;     ///< 렌더링 시간 (밀리초)
-    float convert_time_ms = 0.0f;    ///< 포맷 변환 시간 (밀리초)
-};
-
-/**
- * @brief 프레임 처리 콜백 타입
- */
-using ProcessCallback = std::function<void(const ProcessResult&)>;
-
-// DetectorType은 types.h에 정의됨
-
-/**
- * @brief 프레임 처리 파이프라인
+ * @brief 프레임 처리 파이프라인 (render-only)
  *
- * 검출과 렌더링을 통합하여 단일 인터페이스로 제공합니다.
+ * ④ W4-D: 검출 인프라(detector/InferenceThread)를 코어에서 제거하면서
+ * 렌더링 전용 파이프라인으로 축소되었습니다. 검출(랜드마크)은 외부 추적 글루가
+ * 책임지며 주입 경로(landmark_injection)로 코어에 전달됩니다.
  * 다양한 프레임 포맷(RGBA, BGR, NV21, NV12)을 지원하며,
  * 내부적으로 최적화된 버퍼 관리를 수행합니다.
  *
@@ -58,19 +39,15 @@ using ProcessCallback = std::function<void(const ProcessResult&)>;
  * 사용 예시:
  * @code
  * FrameProcessor processor;
- * processor.initialize("models/");
+ * processor.initialize();
  * processor.loadLensTexture("lens.png");
  *
  * LensConfig config;
  * config.opacity = 0.8f;
  *
- * // 프레임 처리 (검출 + 렌더링)
- * ProcessResult result = processor.process(frame_data, width, height,
- *                                          FrameFormat::RGBA, &config);
- *
- * if (result.success && result.iris_result.detected) {
- *     // 처리 성공
- * }
+ * // 외부에서 주입된 검출 결과로 렌더링만 수행
+ * processor.renderOnly(frame_data, width, height,
+ *                      FrameFormat::RGBA, iris_result, config);
  * @endcode
  */
 class IRIS_SDK_EXPORT FrameProcessor {
@@ -91,16 +68,14 @@ public:
     // ========================================
 
     /**
-     * @brief 프로세서 초기화
+     * @brief 프로세서 초기화 (render-only)
      *
-     * 검출기와 렌더러를 초기화합니다.
+     * 렌더러를 초기화합니다. ④ W4-D에서 검출 인프라가 제거되어
+     * 모델 경로/검출기 타입 인자가 더 이상 필요하지 않습니다.
      *
-     * @param model_path 모델 파일 디렉토리 경로
-     * @param detector_type 검출기 종류 (기본: MediaPipe)
      * @return 초기화 성공 여부
      */
-    bool initialize(const std::string& model_path,
-                    DetectorType detector_type = DetectorType::MediaPipe);
+    bool initialize();
 
     /**
      * @brief 리소스 해제
@@ -153,76 +128,6 @@ public:
     // ========================================
 
     /**
-     * @brief 프레임 처리 (검출 + 렌더링)
-     *
-     * 프레임 데이터에서 홍채를 검출하고, 설정에 따라 렌즈를 렌더링합니다.
-     * 프레임 데이터는 in-place로 수정됩니다.
-     *
-     * @param frame_data 프레임 데이터 (in-place 수정됨)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 픽셀 포맷
-     * @param config 렌더링 설정 (nullptr이면 검출만 수행)
-     * @return 처리 결과
-     */
-    ProcessResult process(uint8_t* frame_data,
-                          int width,
-                          int height,
-                          FrameFormat format,
-                          const LensConfig* config = nullptr);
-
-    /**
-     * @brief cv::Mat 프레임 처리 (검출 + 렌더링)
-     *
-     * OpenCV Mat을 직접 처리합니다. BGR/BGRA 포맷 지원.
-     *
-     * @param frame 입출력 이미지 (in-place 수정됨)
-     * @param config 렌더링 설정 (nullptr이면 검출만 수행)
-     * @return 처리 결과
-     */
-    ProcessResult process(cv::Mat& frame,
-                          const LensConfig* config = nullptr);
-
-    /**
-     * @brief 검출만 수행
-     *
-     * 렌더링 없이 홍채 검출만 수행합니다.
-     *
-     * @param frame_data 프레임 데이터 (읽기 전용)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 픽셀 포맷
-     * @return 홍채 검출 결과
-     */
-    IrisResult detectOnly(const uint8_t* frame_data,
-                          int width,
-                          int height,
-                          FrameFormat format);
-
-    /**
-     * @brief 검출만 수행 (회전 지원)
-     *
-     * 이미지 회전을 처리하면서 홍채 검출을 수행합니다.
-     * Android/iOS 카메라는 센서 방향에 따라 회전된 이미지를 출력하므로
-     * 이 함수를 사용하여 회전을 보정합니다.
-     *
-     * @param frame_data 프레임 데이터 (읽기 전용)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 픽셀 포맷
-     * @param rotation_degrees 회전 각도 (0, 90, 180, 270)
-     * @return 홍채 검출 결과 (회전 보정된 좌표)
-     *
-     * @note rotation_degrees는 이미지를 정방향으로 만들기 위해 필요한 회전 각도입니다.
-     *       결과 좌표는 원본 프레임 기준으로 변환되어 반환됩니다.
-     */
-    IrisResult detectOnlyWithRotation(const uint8_t* frame_data,
-                                       int width,
-                                       int height,
-                                       FrameFormat format,
-                                       int rotation_degrees);
-
-    /**
      * @brief 렌더링만 수행
      *
      * 기존 검출 결과를 사용하여 렌더링만 수행합니다.
@@ -242,56 +147,11 @@ public:
                     const IrisResult& iris_result,
                     const LensConfig& config);
 
-    // ========================================
-    // 비동기 API (추론/렌더링 분리) — P5-W1-04
-    // ========================================
-
     /**
-     * @brief 프레임 제출 (비동기, 논블로킹)
+     * @brief 기존 결과로 렌더링 (주입 워크플로우용)
      *
-     * 프레임 데이터를 추론 큐에 제출합니다.
-     * 이전에 제출된 미처리 프레임은 덮어씌워집니다 (drop-oldest).
-     * 포맷 변환 및 딥카피가 수행됩니다.
-     *
-     * @param frame_data 프레임 데이터 (호출자 버퍼 재사용 가능)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 픽셀 포맷
-     */
-    void submitFrame(const uint8_t* frame_data, int width, int height,
-                     FrameFormat format);
-
-    /**
-     * @brief 프레임 제출 (비동기, 회전 지원)
-     *
-     * 이미지 회전을 처리하면서 프레임을 비동기 추론 큐에 제출합니다.
-     *
-     * @param frame_data 프레임 데이터 (호출자 버퍼 재사용 가능)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 픽셀 포맷
-     * @param rotation_degrees 회전 각도 (0, 90, 180, 270)
-     */
-    void submitFrameWithRotation(const uint8_t* frame_data, int width, int height,
-                                  FrameFormat format, int rotation_degrees);
-
-    /**
-     * @brief 최신 추론 결과 조회 (논블로킹)
-     *
-     * 가장 최근 완료된 추론 결과를 반환합니다.
-     * 아직 결과가 없으면 false를 반환합니다.
-     * 캐싱 로직이 적용되어 깜빡임을 방지합니다.
-     *
-     * @param out 결과 출력
-     * @return 유효한 결과가 있으면 true
-     */
-    bool getLatestResult(IrisResult& out);
-
-    /**
-     * @brief 기존 결과로 렌더링 (비동기 워크플로우용)
-     *
-     * getLatestResult()로 얻은 결과를 사용하여 렌더링만 수행합니다.
-     * renderOnly()와 동일한 동작이지만, 비동기 워크플로우를 위한 명시적 이름.
+     * 외부에서 주입된 검출 결과를 사용하여 렌더링만 수행합니다.
+     * renderOnly()와 동일한 동작이지만, 명시적 이름.
      *
      * @param frame_data 프레임 데이터 (in-place 수정됨)
      * @param width 프레임 너비
@@ -304,55 +164,6 @@ public:
     bool renderWithResult(uint8_t* frame_data, int width, int height,
                            FrameFormat format, const IrisResult& iris_result,
                            const LensConfig& config);
-
-    // ========================================
-    // 설정
-    // ========================================
-
-    /**
-     * @brief 검출 신뢰도 임계값 설정 (deprecated, use setMinDetectionConfidence)
-     *
-     * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0)
-     */
-    void setMinConfidence(float min_confidence);
-
-    /**
-     * @brief 얼굴 검출 최소 신뢰도 설정
-     *
-     * 얼굴 검출 결과의 최소 신뢰도. 이 값 이하면 검출되지 않은 것으로 처리.
-     * 기본값: 0.3
-     *
-     * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0)
-     */
-    void setMinDetectionConfidence(float min_confidence);
-
-    /**
-     * @brief 랜드마크 추적 최소 신뢰도 설정
-     *
-     * 랜드마크 추적 결과의 최소 신뢰도.
-     * 이 값 이하면 추적 실패로 간주하고 다시 Face Detection 수행.
-     * 기본값: 0.5
-     *
-     * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0)
-     */
-    void setMinTrackingConfidence(float min_confidence);
-
-    /**
-     * @brief 얼굴 추적 활성화/비활성화
-     *
-     * @param enable 추적 활성화 여부
-     */
-    void setFaceTracking(bool enable);
-
-    /**
-     * @brief 얼굴 존재 최소 신뢰도 설정
-     *
-     * 추적 모드에서 이전 프레임 결과를 재사용할지 판단하는 임계값.
-     * 이전 프레임의 confidence가 이 값 이상이어야 Face Detection 스킵.
-     *
-     * @param min_confidence 최소 신뢰도 (0.0 ~ 1.0), 기본값 0.5
-     */
-    void setMinPresenceConfidence(float min_confidence);
 
     // ========================================
     // GPU 가속
@@ -374,24 +185,6 @@ public:
      */
     bool isUsingGpu() const noexcept;
 
-    /**
-     * @brief InferenceThread 사용 여부 설정 (벤치마크용)
-     *
-     * 반드시 initialize() 호출 전에 설정해야 합니다.
-     * false로 설정하면 전용 스레드 없이 직접 호출합니다.
-     * GPU 가속은 InferenceThread 사용 시에만 지원됩니다.
-     *
-     * @param enable true면 InferenceThread 사용 (기본값), false면 직접 호출
-     */
-    void setUseInferenceThread(bool enable);
-
-    /**
-     * @brief 현재 InferenceThread 사용 상태 확인
-     *
-     * @return true면 InferenceThread 사용, false면 직접 호출
-     */
-    bool isUsingInferenceThread() const noexcept;
-
     // ========================================
     // 통계
     // ========================================
@@ -410,34 +203,6 @@ public:
      * @return 평균 FPS (처리 기록이 없으면 0.0)
      */
     double getAverageFPS() const noexcept;
-
-    // ========================================
-    // 디버그 및 시각화 (Face Mesh)
-    // ========================================
-
-    /**
-     * @brief 마지막 검출의 얼굴 랜드마크 수 반환
-     * @return 랜드마크 수 (V1: 468, V2: 478, 실패시 0)
-     */
-    int getFaceLandmarkCount() const;
-
-    /**
-     * @brief 마지막 검출의 얼굴 랜드마크 데이터 접근
-     *
-     * 디버그 및 시각화 목적으로 사용.
-     * 각 랜드마크는 (x, y, z) 3개 float로 구성.
-     * 좌표는 정규화 좌표 (0.0~1.0, 전체 이미지 기준)
-     *
-     * @param out_landmarks 출력 버퍼 (최소 getFaceLandmarkCount() * 3 floats)
-     * @return 성공 여부
-     */
-    bool getFaceLandmarks(float* out_landmarks) const;
-
-    /**
-     * @brief 모델 버전 반환
-     * @return 1: V1 (468 랜드마크), 2: V2 (478 랜드마크, 홍채 내장)
-     */
-    int getModelVersion() const;
 
 private:
     class Impl;

@@ -16,10 +16,11 @@ namespace {
 // gpu_lens_renderer.cpp의 파일-local 상수와 동일값.
 // 해당 상수는 소스 파일 내 static이라 외부 참조 불가 → 동일 인덱스 재선언.
 // 수식 아님(MediaPipe FaceMesh 표준 인덱스) — "신규 수식 금지" 원칙 불위배.
-constexpr int kLeftUpperEyelid[]  = {159, 160, 161};
-constexpr int kLeftLowerEyelid[]  = {145, 144, 153};
-constexpr int kRightUpperEyelid[] = {386, 385, 384};
-constexpr int kRightLowerEyelid[] = {374, 373, 380};
+// ④ §7.3 canonical: kLeft*=피험자 좌안(386/374그룹), kRight*=피험자 우안(159/145그룹).
+constexpr int kLeftUpperEyelid[]  = {386, 385, 384};
+constexpr int kLeftLowerEyelid[]  = {374, 373, 380};
+constexpr int kRightUpperEyelid[] = {159, 160, 161};
+constexpr int kRightLowerEyelid[] = {145, 144, 153};
 constexpr int kEyelidIndexCount   = 3;
 
 inline float clamp01(float v) {

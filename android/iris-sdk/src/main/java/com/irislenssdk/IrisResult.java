@@ -27,8 +27,8 @@ import androidx.annotation.NonNull;
  * <p>사용 예:</p>
  * <pre>{@code
  * IrisResult result = new IrisResult();
- * int error = IrisLensSDK.detect(frameData, width, height, format, result);
- * if (error == IrisLensSDK.OK && result.detected) {
+ * // 추적 글루(MediaPipe Tasks)가 검출한 478점을 주입한 뒤 결과를 읽습니다.
+ * if (result.detected) {
  *     float leftX = result.leftIrisX;
  *     float leftY = result.leftIrisY;
  *     // 홍채 위치 사용
@@ -116,25 +116,30 @@ public class IrisResult {
 
     // ========================================================================
     // 얼굴 영역 정보
+    //
+    // 모든 faceRect 좌표는 upright 프레임 기준 정규화 [0.0~1.0] 값이다 (ADR-0001 §7.1).
+    // 코어 어댑터(deriveIrisResult)가 478점 메시 바운딩 박스를 정규화 좌표로 채우며,
+    // JNI·데모 소비측 모두 정규화로 전달·소비한다. 픽셀로 환산하려면 frameWidth/frameHeight를
+    // 곱한다. (W4-B3 정정: 이전 "픽셀" 주석은 문서 드리프트였음 — 런타임 값은 무변경.)
     // ========================================================================
 
     /**
-     * 얼굴 바운딩 박스 X 좌표 (픽셀).
+     * 얼굴 바운딩 박스 X 좌표 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectX;
 
     /**
-     * 얼굴 바운딩 박스 Y 좌표 (픽셀).
+     * 얼굴 바운딩 박스 Y 좌표 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectY;
 
     /**
-     * 얼굴 바운딩 박스 너비 (픽셀).
+     * 얼굴 바운딩 박스 너비 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectWidth;
 
     /**
-     * 얼굴 바운딩 박스 높이 (픽셀).
+     * 얼굴 바운딩 박스 높이 (정규화, 0.0 ~ 1.0).
      */
     public float faceRectHeight;
 
@@ -187,18 +192,6 @@ public class IrisResult {
     // ========================================================================
 
     /**
-     * 왼쪽 홍채 품질 점수 (0.0 ~ 1.0).
-     * Eye Refiner 사용 시에만 유효합니다.
-     */
-    public float irisQualityLeft;
-
-    /**
-     * 오른쪽 홍채 품질 점수 (0.0 ~ 1.0).
-     * Eye Refiner 사용 시에만 유효합니다.
-     */
-    public float irisQualityRight;
-
-    /**
      * 왼쪽 눈꺼풀 가림 비율 (0.0 ~ 1.0).
      * 향후 구현 예정 (W3).
      */
@@ -209,12 +202,6 @@ public class IrisResult {
      * 향후 구현 예정 (W3).
      */
     public float eyelidRatioRight;
-
-    /**
-     * Eye Refiner 사용 여부.
-     * true이면 2차 정밀화가 적용된 결과입니다.
-     */
-    public boolean eyeRefinerUsed;
 
     /**
      * 왼쪽 홍채 ROI 실측 평균 luma (P7-W2, srgb²+Rec.709 linear, 0~1).
@@ -291,11 +278,8 @@ public class IrisResult {
         faceYaw = 0.0f;
         faceRoll = 0.0f;
 
-        irisQualityLeft = 0.0f;
-        irisQualityRight = 0.0f;
         eyelidRatioLeft = 0.0f;
         eyelidRatioRight = 0.0f;
-        eyeRefinerUsed = false;
 
         // P7-W2: 미측정 sentinel(-1).
         avgIrisLumaLeft = -1.0f;
@@ -366,11 +350,8 @@ public class IrisResult {
         this.faceYaw = src.faceYaw;
         this.faceRoll = src.faceRoll;
 
-        this.irisQualityLeft = src.irisQualityLeft;
-        this.irisQualityRight = src.irisQualityRight;
         this.eyelidRatioLeft = src.eyelidRatioLeft;
         this.eyelidRatioRight = src.eyelidRatioRight;
-        this.eyeRefinerUsed = src.eyeRefinerUsed;
 
         // P7-W2: iris ROI 실측 luma 보존.
         this.avgIrisLumaLeft = src.avgIrisLumaLeft;
@@ -426,8 +407,6 @@ public class IrisResult {
                 faceRectWidth + ", " + faceRectHeight + ")" +
                 ", faceRotation=(pitch=" + facePitch + ", yaw=" + faceYaw +
                 ", roll=" + faceRoll + ")" +
-                ", eyeRefiner=" + eyeRefinerUsed +
-                ", irisQuality=(" + irisQualityLeft + ", " + irisQualityRight + ")" +
                 ", frame=" + frameWidth + "x" + frameHeight +
                 ", timestamp=" + timestampMs +
                 '}';

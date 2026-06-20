@@ -201,72 +201,18 @@ TEST_F(SdkApiTest, ShutdownAfterInitSucceeds) {
 
 #endif  // IRIS_SDK_HAS_TFLITE && IRIS_SDK_HAS_OPENCV
 
-// ============================================================================
-// 검출 함수 테스트 (초기화 없이)
-// ============================================================================
-
-TEST_F(SdkApiTest, DetectWithoutInitReturnsNotInitialized) {
-    uint8_t dummy_frame[640 * 480 * 4] = {0};
-    IrisResult result = {0};
-
-    IrisSdkError err = iris_sdk_detect(dummy_frame, 640, 480, IRIS_FORMAT_RGBA, &result);
-    EXPECT_EQ(IRIS_SDK_NOT_INITIALIZED, err);
-}
-
-TEST_F(SdkApiTest, DetectWithNullFrameReturnsError) {
-    IrisResult result = {0};
-
-    IrisSdkError err = iris_sdk_detect(nullptr, 640, 480, IRIS_FORMAT_RGBA, &result);
-    EXPECT_EQ(IRIS_SDK_NULL_POINTER, err);
-}
-
-TEST_F(SdkApiTest, DetectWithNullResultReturnsError) {
-    uint8_t dummy_frame[640 * 480 * 4] = {0};
-
-    IrisSdkError err = iris_sdk_detect(dummy_frame, 640, 480, IRIS_FORMAT_RGBA, nullptr);
-    EXPECT_EQ(IRIS_SDK_NULL_POINTER, err);
-}
-
-TEST_F(SdkApiTest, DetectWithInvalidDimensionsReturnsError) {
-    uint8_t dummy_frame[100] = {0};
-    IrisResult result = {0};
-
-    IrisSdkError err = iris_sdk_detect(dummy_frame, 0, 480, IRIS_FORMAT_RGBA, &result);
-    EXPECT_EQ(IRIS_SDK_INVALID_PARAM, err);
-
-    err = iris_sdk_detect(dummy_frame, 640, 0, IRIS_FORMAT_RGBA, &result);
-    EXPECT_EQ(IRIS_SDK_INVALID_PARAM, err);
-
-    err = iris_sdk_detect(dummy_frame, -1, 480, IRIS_FORMAT_RGBA, &result);
-    EXPECT_EQ(IRIS_SDK_INVALID_PARAM, err);
-}
-
-// ============================================================================
-// 처리 함수 테스트 (초기화 없이)
-// ============================================================================
-
-TEST_F(SdkApiTest, ProcessWithoutInitReturnsNotInitialized) {
-    uint8_t dummy_frame[640 * 480 * 4] = {0};
-    IrisLensConfig config;
-    iris_sdk_default_lens_config(&config);
-    IrisResult result = {0};
-
-    IrisSdkError err = iris_sdk_process(dummy_frame, 640, 480, IRIS_FORMAT_RGBA, &config, &result);
-    EXPECT_EQ(IRIS_SDK_NOT_INITIALIZED, err);
-}
-
-TEST_F(SdkApiTest, ProcessWithNullFrameReturnsError) {
-    IrisLensConfig config;
-    iris_sdk_default_lens_config(&config);
-    IrisResult result = {0};
-
-    IrisSdkError err = iris_sdk_process(nullptr, 640, 480, IRIS_FORMAT_RGBA, &config, &result);
-    EXPECT_EQ(IRIS_SDK_NULL_POINTER, err);
-}
+// ④ W4-D: 검출/처리 함수 테스트 제거 — iris_sdk_detect / iris_sdk_process C API가
+//   검출 인프라 제거에 동반하여 삭제됨. 검출은 외부 추적 글루가 책임지며 주입 경로
+//   (iris_set_landmarks)로 코어에 전달된다. 렌더는 iris_sdk_render_with_result.
 
 // ============================================================================
 // 렌더링 함수 테스트 (초기화 없이)
 // ============================================================================
+// ④ W4-E: 이 섹션의 테스트는 deprecated cpu-render API(load_texture/render_lens)를
+//   정당하게 검증한다(1.x 동작 유지). 호출 지점이 다수 테스트에 흩어져 있어
+//   섹션 단위로 -Wdeprecated-declarations를 억제한다(설정 함수 테스트 직전 pop).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 TEST_F(SdkApiTest, LoadTextureWithoutInitReturnsNotInitialized) {
     IrisSdkError err = iris_sdk_load_texture("test.png");
@@ -325,6 +271,8 @@ TEST_F(SdkApiTest, RenderLensWithNullParamsReturnsError) {
         dummy_frame, 640, 480, IRIS_FORMAT_RGBA, &iris_result, nullptr);
     EXPECT_EQ(IRIS_SDK_NULL_POINTER, err);
 }
+
+#pragma GCC diagnostic pop  // ④ W4-E: 렌더링(cpu-render) 테스트 섹션 deprecated 억제 종료
 
 // ============================================================================
 // 설정 함수 테스트

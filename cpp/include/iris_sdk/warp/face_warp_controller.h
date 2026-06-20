@@ -103,32 +103,35 @@ public:
     // Eye Landmark Constants (MediaPipe 478 Face Mesh)
     // =========================================================================
 
-    /// Left iris center landmark index
-    static constexpr int LEFT_IRIS_CENTER = 468;
+    // ④ §7.3 canonical relabeling: LEFT_*=피험자 좌안(473/362/눈썹 좌), RIGHT_*=피험자 우안.
+    //   각 눈 triple(iris_center + eye_contour + eyebrow)이 한 눈을 가리키게 자기일관 유지.
 
-    /// Right iris center landmark index
-    static constexpr int RIGHT_IRIS_CENTER = 473;
+    /// Left iris center landmark index (canonical LEFT_IRIS = 피험자 좌안)
+    static constexpr int LEFT_IRIS_CENTER = 473;
 
-    /// Left eye contour landmark indices (upper and lower lids)
+    /// Right iris center landmark index (canonical RIGHT_IRIS = 피험자 우안)
+    static constexpr int RIGHT_IRIS_CENTER = 468;
+
+    /// Left eye contour landmark indices (피험자 좌안, 362그룹)
     static constexpr std::array<int, 16> LEFT_EYE_CONTOUR = {
-        33, 7, 163, 144, 145, 153, 154, 155, 133,
-        173, 157, 158, 159, 160, 161, 246
-    };
-
-    /// Right eye contour landmark indices (upper and lower lids)
-    static constexpr std::array<int, 16> RIGHT_EYE_CONTOUR = {
         362, 382, 381, 380, 374, 373, 390, 249, 263,
         466, 388, 387, 386, 385, 384, 398
     };
 
-    /// Left eyebrow landmark indices
-    static constexpr std::array<int, 10> LEFT_EYEBROW = {
-        70, 63, 105, 66, 107, 55, 65, 52, 53, 46
+    /// Right eye contour landmark indices (피험자 우안, 33그룹)
+    static constexpr std::array<int, 16> RIGHT_EYE_CONTOUR = {
+        33, 7, 163, 144, 145, 153, 154, 155, 133,
+        173, 157, 158, 159, 160, 161, 246
     };
 
-    /// Right eyebrow landmark indices
-    static constexpr std::array<int, 10> RIGHT_EYEBROW = {
+    /// Left eyebrow landmark indices (피험자 좌안 눈썹, LandmarkIndices.kt LEFT_BROW 계열)
+    static constexpr std::array<int, 10> LEFT_EYEBROW = {
         300, 293, 334, 296, 336, 285, 295, 282, 283, 276
+    };
+
+    /// Right eyebrow landmark indices (피험자 우안 눈썹, LandmarkIndices.kt RIGHT_BROW 계열)
+    static constexpr std::array<int, 10> RIGHT_EYEBROW = {
+        70, 63, 105, 66, 107, 55, 65, 52, 53, 46
     };
 
     // =========================================================================
@@ -182,7 +185,7 @@ public:
                    const WarpConfig& config,
                    int landmark_count = 478);
 
-    /// applyWarp가 접근하는 최대 랜드마크 인덱스(RIGHT_IRIS_CENTER=473) 기준 최소 배열 길이.
+    /// applyWarp가 접근하는 최대 랜드마크 인덱스(LEFT_IRIS_CENTER=473, ④ §7.3 후) 기준 최소 배열 길이.
     /// 이보다 짧은 face_mesh는 거부된다 (기존: 무검증 OOB 읽기 — 감사 finding).
     static constexpr int kMinWarpLandmarkCount = 474;
 

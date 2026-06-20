@@ -707,7 +707,7 @@ IrisSdkError GPUBeautyBackend::apply(
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     if (!frame_data || width <= 0 || height <= 0) {
@@ -736,7 +736,7 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     if (!input.isValid() || input.type != TextureHandle::Type::OpenGLES) {
@@ -2012,7 +2012,7 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     if (input_texture == 0 || !output_texture) {
@@ -2454,7 +2454,7 @@ IrisSdkError GPUBeautyBackend::applyFaceWarp(
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!initialized_) {
-        return IRIS_SDK_ERROR_NOT_INITIALIZED;
+        return IRIS_SDK_NOT_INITIALIZED;
     }
 
     if (input_texture == 0 || !output_texture) {

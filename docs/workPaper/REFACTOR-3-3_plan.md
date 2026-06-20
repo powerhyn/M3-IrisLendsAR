@@ -1,7 +1,7 @@
-# REFACTOR-3-3: 추적 교체 A/B 설계 (③-3) — 실행 대기
+# REFACTOR-3-3: 추적 교체 A/B 설계 (③-3) — 구현 완료, 실기기 A/B 대기
 
 > 이 문서는 **새 세션이 이 문서만 읽고 ③-3를 실행할 수 있도록** 작성된 설계서다.
-> 작성: 2026-06-12 (설계 세션), 상태: ⏳ 실행 대기
+> 작성: 2026-06-12 (설계 세션), 상태: 🔄 구현·게이트 완료 (워크플로 wf_65209251-239, 에이전트 7) — §7 실기기 A/B 판정 대기
 
 ## 0. 새 세션 진입 절차 (그대로 수행)
 
@@ -29,14 +29,17 @@
 | `internal/math/CoordMapper.kt` | `tracking/math/CoordMapper.kt` | sensorToUpright/uprightToSensor — 함정 #13 해법, 단위 테스트 동반 |
 | `internal/LandmarkIndices.kt` | `tracking/LandmarkIndices.kt` | 478 규약 정본 (ADR §7.3 — 명명 충돌 해소 정본) |
 | `internal/TrackingSnapshot.kt` | `tracking/TrackingSnapshot.kt` | 불변 스냅샷 — torn read 구조 해법 |
-| `internal/math/OneEuroFilter.kt` | (이식 보류) | 코어 C++ OneEuro가 이미 적용 중 — 이중 필터 금지 (§5 주의 3) |
+| `internal/math/OneEuroFilter.kt` | `tracking/math/OneEuroFilter.kt` | ~~이식 보류~~ → **이식(우회 소비)** — FaceTracker 컴파일 필수 의존. 이중 필터 금지(§5 주의 3)는 onRawResult 원시 탭 + onSnapshot 무소비로 구조적 이행 (실행 시 정정) |
+| `internal/math/IrisLumaSampler.kt` | `tracking/math/IrisLumaSampler.kt` | (실행 시 추가) FaceTracker 컴파일 의존 + 휘도 패리티 측정 |
+| `internal/EmulatorDetector.kt` | `tracking/EmulatorDetector.kt` | (실행 시 추가) §5 주의 1의 에뮬레이터 CPU 강제 분기가 요구 |
 | `internal/math/IrisGeometry.kt` | `tracking/math/IrisGeometry.kt` | 478→홍채 중심/반경 파생 — 듀얼 비교 메트릭 산출에 사용 |
 | `internal/CameraController.kt` | (이식 보류) | 데모는 기존 CameraX 경로 유지 — RGBA_8888 스트림 추가는 §5 주의 2 참조 |
 | `src/test/.../CoordMapperTest.kt`, `IrisGeometryTest.kt`, `OneEuroFilterTest.kt`(보류분 제외) | `demo-app/src/test/java/com/irislenssdk/demo/tracking/` | 패키지명 치환 외 무수정 |
 
 추가 자산:
-- gradle: `demo-app/build.gradle.kts`에 `implementation("com.google.mediapipe:tasks-vision:0.10.35")` — **버전 고정, latest.release 금지** (ADR §5 4사유)
-- 모델: `shared/models/face_landmarker.task`(3.6MB) → `demo-app/src/main/assets/models/face_landmarker.task` (이미 assets/models에 .tflite들 있음 — 같은 폴더)
+- gradle: `demo-app/build.gradle.kts`에 `implementation("com.google.mediapipe:tasks-vision:0.10.35")` — **버전 고정, latest.release 금지** (ADR §5 4사유). (실행 시 정정: '추가'가 아닌 **교체** — 기존 0.10.14(MediaPipeBenchmarkActivity 소비)가 ADR §5 금지 버전(<0.10.26 = 16KB 미정렬)이라 0.10.35로 교체. 과거 벤치 수치와의 버전 간 비교 가능성 단절 인지)
+- 이식 기준 리비전: **LensSimulator 6bacaec** (2026-06-12) — FaceTracker 상수·LandmarkIndices가 이 커밋 정본과 일치하도록 Revise 단계에서 재동기 완료. 파일 헤더에 리비전 명기됨
+- 모델: `third_party/models/face_landmarker.task`(3.6MB, LensSimulator 루트 기준 — 2026-06-12 실측 경로 정정) → `demo-app/src/main/assets/models/face_landmarker.task` (이미 assets/models에 .tflite들 있음 — 같은 폴더)
 - 패키지 치환: `com.cgg.lenssdk.internal` → `com.irislenssdk.demo.tracking`, 로그 태그 유지
 
 ## 3. JNI 주입 표면 추가 (③-1 경계의 첫 외부 소비자)
@@ -98,7 +101,7 @@
 ## 7. 실기기 A/B 절차 (사용자 안내용)
 
 1. 토글 LEGACY ↔ TASKS 전환하며 육안: 렌즈 정합·떨림·눈꺼풀 마스킹·지연 체감 (T2 — 밝은 환경 우선, 저조도는 우선순위 낮음)
-2. A/B 측정 모드 ON → 정면 응시 10초 + 좌우 회전 + 근접/원거리 → `adb logcat -s AB_METRIC` 수집 → 요약의 중심 오차(반경 비율)·패턴 플래그 확인
+2. A/B 측정 모드 ON → 정면 응시 10초 + 좌우 회전 + 근접/원거리 → `adb logcat -s AB_METRIC` 수집 → 요약의 중심 오차(반경 비율)·패턴 플래그 확인. ⚠️ maxErrRatio 단발 스파이크는 LEGACY 검출 캐시(MAX_CACHE_MISS — 최대 N프레임 스테일 반환, frame_processor.cpp:733) 때문일 수 있음 — meanErrRatio·부호 일관성 중심으로 판정
 3. T1 판정: 계통적 오프셋 ≥ 반경 100% 또는 축 스왑/미러 패턴 → 어댑터(변환 계약) 수정 2회 내 해소 안 되면 후퇴 트리거 (ADR §10)
 4. 판정 주체: 사용자. 통과 시 "전환 확정" 선언 → ④ 착수 가능 (별도 승인)
 
@@ -116,3 +119,14 @@ Build 병렬 2 (`tracker-port`: §2 이식+gradle+모델 / `jni-bridge`: §3) �
 ## 변경 이력
 
 - 2026-06-12: 설계 작성 (실행은 새 세션 — §0 절차)
+- 2026-06-12 (실행 세션): 워크플로 `p33-tracking-ab`(wf_65209251-239) 완주 — Build 병렬 2 → Integrate → Verify 병렬 3 → Revise. 게이트 §6 전 항목 통과(Revise 후 재검증 포함). 주요 실행 시 정정:
+  - 모델 경로 `shared/models/` → `third_party/models/face_landmarker.task` (실측)
+  - tasks-vision '추가' → '교체' (기존 0.10.14가 ADR §5 금지 버전)
+  - OneEuroFilter/IrisLumaSampler/EmulatorDetector 3파일 추가 이식 (FaceTracker 컴파일 의존 — 이중 필터 금지는 onRawResult 원시 탭으로 구조적 이행)
+  - 원본 FaceTracker는 LIVE_STREAM이 아닌 VIDEO 모드(detectForVideo 동기)로 전환된 상태였음 — 코드 정본 원칙대로 이식
+  - Revise: TASKS 슬롯 갱신을 LEGACY 실동작과 동일한 '매 프레임 무조건'으로 정정(important), FaceTracker 상수·LandmarkIndices를 6bacaec 정본 재동기(important 2)
+  - 검증자 critical 1건(env png 렌더 기준선 변경)은 사실 검증 후 기각 — LFS 팬텀 diff(워킹트리=HEAD 바이트 동일), 단 커밋 제외 권고는 수용
+  - ctest 793건 중 실패 5 = pre-existing 목록과 정확히 일치(회귀 0), 골든 37/37 PASS, demo 단위 테스트 32/32
+  - 16KB(§6-5): 자체 .so 무변경, tasks-vision 0.10.35는 16KB 정렬 보증 버전 — 기록만(재정렬은 ④)
+- 다음 단계: 실기기 설치 → §7 A/B 절차 → 사용자 T1/T2 판정 → 통과 시 ④는 별도 승인
+- 2026-06-15 (트래킹 지연 후속): T1 통과(계통 오프셋 반경 6.9%, 미러/스왑 없음)했으나 T2에서 TASKS 트래킹 지연 체감. 진단(워크플로 2회) + LensSim 핸드오프(`docs/lenssim-handoff/tracking-latency-handoff-from-lenssimulator.md`, ADR-0005) → 근본 원인 = **픽셀-랜드마크 프레임 불일치**(필터 아님): 화면=Preview 최신 프레임, 랜드마크=ImageAnalysis ~2프레임 전 별도 use case. 실기기 raw 오버레이로 "필터 이전부터 늦음" 확정 + 클럭 게이트 통과(preview/analysis 센서 ns 동일). 해결: **frame-sync 렌더링**(RGBA 링버퍼 4장 + 센서 ts 매칭, FrameRingSelector LensSim 이식, 양 모드 대칭, 킬스위치 fsync 토글) + 부수로 MP 내부 스무딩 우회(setNumFaces 1→2). 실기기 검증 성공(fsync ON에서 렌즈 정합). 거울 지연 +2~3프레임 trade-off 사용자 수용. 적대 리뷰가 콜드스타트 오강등 critical 1건 잡아 수정(정본 가드 2종 이식). 후속: ts/슬롯 번들링(④), 코어 stabilize near-raw 재튜닝(⑤/§5), TASKS 분석해상도 인하. **이 작업은 ③-3 범위를 넘는 데모 렌더 아키텍처 변경(원래 ④ 후보)이나 핸드오프로 우선 착수.**

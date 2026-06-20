@@ -11,9 +11,11 @@
 
 #include "jni_utils.h"
 #include "iris_sdk/sdk_api.h"
+#include "iris_sdk/internal/bench_toggles.h"  // W4-A §6.4: 수동 extern 정식화 (벤치 토글 9종)
 #include "iris_sdk/beauty_filter.h"
 
 #include <atomic>
+#include <cstdint>  // W4-B3: DetectionSlot.frame_ts_ns (int64_t) 정식 포함
 #include <cstring>
 #include <mutex>
 
@@ -70,12 +72,9 @@ bool JniCache::init(JNIEnv* env) {
     irisResult_faceMeshValid = env->GetFieldID(irisResultClass, "faceMeshValid", "Z");
     irisResult_faceMesh = env->GetFieldID(irisResultClass, "faceMesh", "[F");
 
-    // Eye Refiner 메타데이터 필드 ID 캐시
-    irisResult_irisQualityLeft = env->GetFieldID(irisResultClass, "irisQualityLeft", "F");
-    irisResult_irisQualityRight = env->GetFieldID(irisResultClass, "irisQualityRight", "F");
+    // 눈꺼풀 가림 비율 메타데이터 필드 ID 캐시 (W3)
     irisResult_eyelidRatioLeft = env->GetFieldID(irisResultClass, "eyelidRatioLeft", "F");
     irisResult_eyelidRatioRight = env->GetFieldID(irisResultClass, "eyelidRatioRight", "F");
-    irisResult_eyeRefinerUsed = env->GetFieldID(irisResultClass, "eyeRefinerUsed", "Z");
 
     // P7-W2: iris ROI 실측 평균 luma 필드 ID 캐시
     irisResult_avgIrisLumaLeft = env->GetFieldID(irisResultClass, "avgIrisLumaLeft", "F");
@@ -90,9 +89,7 @@ bool JniCache::init(JNIEnv* env) {
         !irisResult_faceRectHeight || !irisResult_facePitch || !irisResult_faceYaw ||
         !irisResult_faceRoll || !irisResult_timestampMs || !irisResult_frameWidth ||
         !irisResult_frameHeight || !irisResult_faceMeshValid || !irisResult_faceMesh ||
-        !irisResult_irisQualityLeft || !irisResult_irisQualityRight ||
         !irisResult_eyelidRatioLeft || !irisResult_eyelidRatioRight ||
-        !irisResult_eyeRefinerUsed ||
         !irisResult_avgIrisLumaLeft || !irisResult_avgIrisLumaRight) {
         LOGE("Failed to get IrisResult field IDs");
         return false;
@@ -268,12 +265,9 @@ bool copyResultToJava(JNIEnv* env, const IrisResult& src, jobject dest) {
     env->SetIntField(dest, g_jniCache.irisResult_frameWidth, src.frame_width);
     env->SetIntField(dest, g_jniCache.irisResult_frameHeight, src.frame_height);
 
-    // Eye Refiner 메타데이터
-    env->SetFloatField(dest, g_jniCache.irisResult_irisQualityLeft, src.iris_quality_left);
-    env->SetFloatField(dest, g_jniCache.irisResult_irisQualityRight, src.iris_quality_right);
+    // 눈꺼풀 가림 비율 메타데이터 (W3)
     env->SetFloatField(dest, g_jniCache.irisResult_eyelidRatioLeft, src.eyelid_ratio_left);
     env->SetFloatField(dest, g_jniCache.irisResult_eyelidRatioRight, src.eyelid_ratio_right);
-    env->SetBooleanField(dest, g_jniCache.irisResult_eyeRefinerUsed, src.eye_refiner_used);
 
     // P7-W2: iris ROI 실측 luma (디텍트→렌더 round-trip 보존).
     env->SetFloatField(dest, g_jniCache.irisResult_avgIrisLumaLeft, src.avg_iris_luma_left);
@@ -352,12 +346,9 @@ bool copyResultFromJava(JNIEnv* env, jobject src, IrisResult& dest) {
     dest.frame_width = env->GetIntField(src, g_jniCache.irisResult_frameWidth);
     dest.frame_height = env->GetIntField(src, g_jniCache.irisResult_frameHeight);
 
-    // Eye Refiner 메타데이터
-    dest.iris_quality_left = env->GetFloatField(src, g_jniCache.irisResult_irisQualityLeft);
-    dest.iris_quality_right = env->GetFloatField(src, g_jniCache.irisResult_irisQualityRight);
+    // 눈꺼풀 가림 비율 메타데이터 (W3)
     dest.eyelid_ratio_left = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioLeft);
     dest.eyelid_ratio_right = env->GetFloatField(src, g_jniCache.irisResult_eyelidRatioRight);
-    dest.eye_refiner_used = env->GetBooleanField(src, g_jniCache.irisResult_eyeRefinerUsed);
 
     // P7-W2: iris ROI 실측 luma (Java→native, 렌더 패스가 소비). 미측정=-1.
     dest.avg_iris_luma_left = env->GetFloatField(src, g_jniCache.irisResult_avgIrisLumaLeft);
@@ -558,7 +549,13 @@ namespace {
 
 struct DetectionSlot {
     IrisResult data{};
+    // 이 검출이 계산된 분석 프레임의 센서 타임스탬프(ns). data와 함께
+    // g_active_slot_index release store로 원자 publish (W4-B3, frame-sync 스큐 제거).
+    // ⚠️ 반드시 active_slot_index store '이전'에 기록할 것 — plain 멤버라 컴파일러가
+    //    순서를 강제하지 않는다. 뒤로 옮기면 즉시 data race(UB).
+    int64_t frame_ts_ns{0};
     std::atomic<bool> valid{false};
+    // (현재 미사용 — 미래 seqlock torn-read 가드 자리, 보존)
     std::atomic<uint64_t> generation{0};
 };
 
@@ -705,7 +702,11 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadTexture(
     }
 
     LOGD("Loading texture from: %s", path.get());
+    // ④ W4-E: deprecated cpu-render API를 정당하게 사용(1.x 동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IrisSdkError result = iris_sdk_load_texture(path.get());
+#pragma GCC diagnostic pop
 
     if (result == IRIS_SDK_OK) {
         LOGI("Texture loaded successfully");
@@ -715,235 +716,6 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadTexture(
     }
 
     return static_cast<jint>(result);
-}
-
-/**
- * @brief 홍채 검출
- *
- * Java: native int nativeDetect(byte[] frameData, int width, int height,
- *                               int format, IrisResult result);
- */
-JNIEXPORT jint JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeDetect(
-    JNIEnv* env,
-    jclass /* clazz */,
-    jbyteArray frameData,
-    jint width,
-    jint height,
-    jint format,
-    jobject resultObj) {
-
-    LOGV("nativeDetect called: %dx%d, format=%d", width, height, format);
-
-    // 파라미터 검증
-    if (!frameData) {
-        LOGE("nativeDetect: frameData is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (!resultObj) {
-        LOGE("nativeDetect: resultObj is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (width <= 0 || height <= 0) {
-        LOGE("nativeDetect: invalid dimensions %dx%d", width, height);
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // RAII로 바이트 배열 접근
-    ScopedByteArray frame(env, frameData, JNI_ABORT);
-    if (!frame.valid()) {
-        LOGE("nativeDetect: failed to get frame data");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // 버퍼 크기 검증
-    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
-        LOGE("nativeDetect: frame buffer size mismatch");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // C API 호출
-    IrisResult nativeResult = {};
-    IrisSdkError error = iris_sdk_detect(
-        frame.data(),
-        static_cast<int>(width),
-        static_cast<int>(height),
-        static_cast<IrisFrameFormat>(format),
-        &nativeResult);
-
-    if (error != IRIS_SDK_OK) {
-        LOGW("Detection failed: %d (%s)", error, iris_sdk_error_to_string(error));
-        return static_cast<jint>(error);
-    }
-
-    // 결과를 Java 객체로 복사
-    if (!copyResultToJava(env, nativeResult, resultObj)) {
-        LOGE("Failed to copy result to Java object");
-        return static_cast<jint>(IRIS_SDK_UNKNOWN);
-    }
-
-    LOGV("Detection completed: detected=%d, confidence=%.2f",
-         nativeResult.detected, nativeResult.confidence);
-
-    return static_cast<jint>(IRIS_SDK_OK);
-}
-
-/**
- * @brief 홍채 검출 (회전 지원)
- *
- * Java: native int nativeDetectWithRotation(byte[] frameData, int width, int height,
- *                                           int format, int rotationDegrees, IrisResult result);
- */
-JNIEXPORT jint JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeDetectWithRotation(
-    JNIEnv* env,
-    jclass /* clazz */,
-    jbyteArray frameData,
-    jint width,
-    jint height,
-    jint format,
-    jint rotationDegrees,
-    jobject resultObj) {
-
-    LOGV("nativeDetectWithRotation called: %dx%d, format=%d, rotation=%d",
-         width, height, format, rotationDegrees);
-
-    // 파라미터 검증
-    if (!frameData) {
-        LOGE("nativeDetectWithRotation: frameData is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (!resultObj) {
-        LOGE("nativeDetectWithRotation: resultObj is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (width <= 0 || height <= 0) {
-        LOGE("nativeDetectWithRotation: invalid dimensions %dx%d", width, height);
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // RAII로 바이트 배열 접근
-    ScopedByteArray frame(env, frameData, JNI_ABORT);
-    if (!frame.valid()) {
-        LOGE("nativeDetectWithRotation: failed to get frame data");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // 버퍼 크기 검증
-    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
-        LOGE("nativeDetectWithRotation: frame buffer size mismatch");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // C API 호출 (회전 지원)
-    IrisResult nativeResult = {};
-    IrisSdkError error = iris_sdk_detect_with_rotation(
-        frame.data(),
-        static_cast<int>(width),
-        static_cast<int>(height),
-        static_cast<IrisFrameFormat>(format),
-        static_cast<int>(rotationDegrees),
-        &nativeResult);
-
-    if (error != IRIS_SDK_OK) {
-        LOGW("Detection with rotation failed: %d (%s)", error, iris_sdk_error_to_string(error));
-        return static_cast<jint>(error);
-    }
-
-    // 결과를 Java 객체로 복사
-    if (!copyResultToJava(env, nativeResult, resultObj)) {
-        LOGE("Failed to copy result to Java object");
-        return static_cast<jint>(IRIS_SDK_UNKNOWN);
-    }
-
-    LOGV("Detection with rotation completed: detected=%d, confidence=%.2f",
-         nativeResult.detected, nativeResult.confidence);
-
-    return static_cast<jint>(IRIS_SDK_OK);
-}
-
-/**
- * @brief 프레임 처리 (검출 + 렌더링)
- *
- * Java: native int nativeProcess(byte[] frameData, int width, int height,
- *                                int format, LensConfig config, IrisResult result);
- */
-JNIEXPORT jint JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeProcess(
-    JNIEnv* env,
-    jclass /* clazz */,
-    jbyteArray frameData,
-    jint width,
-    jint height,
-    jint format,
-    jobject configObj,
-    jobject resultObj) {
-
-    LOGV("nativeProcess called: %dx%d, format=%d", width, height, format);
-
-    // 파라미터 검증
-    if (!frameData) {
-        LOGE("nativeProcess: frameData is null");
-        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
-    }
-    if (width <= 0 || height <= 0) {
-        LOGE("nativeProcess: invalid dimensions %dx%d", width, height);
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // RAII로 바이트 배열 접근 (쓰기 가능)
-    ScopedByteArray frame(env, frameData, 0);  // mode=0: 변경사항 복사
-    if (!frame.valid()) {
-        LOGE("nativeProcess: failed to get frame data");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // 버퍼 크기 검증
-    if (!validateFrameBufferSize(frame.size(), width, height, format)) {
-        LOGE("nativeProcess: frame buffer size mismatch");
-        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
-    }
-
-    // LensConfig 변환 (configObj가 null이면 검출만 수행)
-    IrisLensConfig nativeConfig = {};
-    IrisLensConfig* configPtr = nullptr;
-
-    if (configObj) {
-        if (copyConfigFromJava(env, configObj, nativeConfig)) {
-            configPtr = &nativeConfig;
-        } else {
-            LOGW("Failed to copy config from Java, proceeding with detection only");
-        }
-    }
-
-    // C API 호출
-    IrisResult nativeResult = {};
-    IrisResult* resultPtr = resultObj ? &nativeResult : nullptr;
-
-    IrisSdkError error = iris_sdk_process(
-        frame.data(),
-        static_cast<int>(width),
-        static_cast<int>(height),
-        static_cast<IrisFrameFormat>(format),
-        configPtr,
-        resultPtr);
-
-    if (error != IRIS_SDK_OK) {
-        LOGW("Process failed: %d (%s)", error, iris_sdk_error_to_string(error));
-        return static_cast<jint>(error);
-    }
-
-    // 결과를 Java 객체로 복사
-    if (resultObj && resultPtr) {
-        if (!copyResultToJava(env, nativeResult, resultObj)) {
-            LOGE("Failed to copy result to Java object");
-            return static_cast<jint>(IRIS_SDK_UNKNOWN);
-        }
-    }
-
-    LOGV("Process completed: detected=%d", resultPtr ? resultPtr->detected : -1);
-
-    return static_cast<jint>(IRIS_SDK_OK);
 }
 
 /**
@@ -1033,10 +805,14 @@ Java_com_irislenssdk_IrisLensSDK_nativeLoadTextureFromMemory(
         return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
     }
 
+    // ④ W4-E: deprecated cpu-render API를 정당하게 사용(1.x 동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IrisSdkError result = iris_sdk_load_texture_from_memory(
         data.data(),
         static_cast<int>(width),
         static_cast<int>(height));
+#pragma GCC diagnostic pop
 
     if (result == IRIS_SDK_OK) {
         LOGI("Texture loaded from memory successfully");
@@ -1662,6 +1438,9 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
     const IrisResult* detection = reinterpret_cast<const IrisResult*>(detectionPtr);
 
     // C API 호출
+    // ④ W4-E: deprecated cpu-render API(CPU 픽셀 버퍼 뷰티)를 정당하게 사용(1.x 동작 유지).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IrisSdkError error = iris_sdk_apply_beauty_v2_c(
         frame.data(),
         static_cast<int>(width),
@@ -1670,6 +1449,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
         &nativeConfig,
         detection
     );
+#pragma GCC diagnostic pop
 
     if (error != IRIS_SDK_OK) {
         LOGW("Apply beauty V2 failed: %d (%s)", error, iris_sdk_error_to_string(error));
@@ -1865,13 +1645,17 @@ Java_com_irislenssdk_IrisLensSDK_nativeIsTextureManaged(
  * 비활성 슬롯에 덮어쓰기 후 atomic swap으로 활성 슬롯 전환.
  * Lock-free, wait-free writer.
  *
- * Java: native void nativeUpdateDetectionSlot(IrisResult result);
+ * W4-B3: 분석 프레임의 센서 타임스탬프(frameTsNs, ns)를 data와 함께 단일
+ * g_active_slot_index release store로 원자 publish하여 frame-sync 1프레임 스큐 제거.
+ *
+ * Java: native void nativeUpdateDetectionSlot(IrisResult result, long frameTsNs);
  */
 JNIEXPORT void JNICALL
 Java_com_irislenssdk_IrisLensSDK_nativeUpdateDetectionSlot(
     JNIEnv* env,
     jclass /* clazz */,
-    jobject resultObj) {
+    jobject resultObj,
+    jlong frameTsNs) {
 
     if (!resultObj) {
         LOGW("nativeUpdateDetectionSlot: resultObj is null");
@@ -1888,6 +1672,10 @@ Java_com_irislenssdk_IrisLensSDK_nativeUpdateDetectionSlot(
         return;
     }
 
+    // frame_ts_ns는 아래 active_slot_index release store '이전'에 기록 — release/acquire가
+    // 이 plain 쓰기를 data와 함께 원자 publish.
+    g_detection_slots[write_idx].frame_ts_ns = static_cast<int64_t>(frameTsNs);
+
     // generation 증가 → valid 설정 → active swap (release ordering)
     g_detection_slots[write_idx].generation.fetch_add(1, std::memory_order_release);
     g_detection_slots[write_idx].valid.store(true, std::memory_order_release);
@@ -1900,6 +1688,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeUpdateDetectionSlot(
  * 반환된 포인터는 applyBeautyFilterTextureV2()의 detectionPtr로 사용.
  * Lock-free, wait-free reader. Generation 검증은 호출측에서 수행.
  *
+ * @deprecated W4-B3: ts·detected 원자 동반이 필요하면 nativeGetActiveDetectionSlot 사용.
+ *             이 함수는 active index를 단독 재읽기하므로 ts/게이트와 결합 시 race 가능.
  * Java: native long nativeGetDetectionSlotPtr();
  * @return 활성 슬롯의 IrisResult 포인터 (jlong), 유효하지 않으면 0L
  */
@@ -1921,6 +1711,48 @@ Java_com_irislenssdk_IrisLensSDK_nativeGetDetectionSlotPtr(
     }
 
     return reinterpret_cast<jlong>(&g_detection_slots[read_idx].data);
+}
+
+/**
+ * @brief 활성 Detection 슬롯의 data 포인터 + 메타(ts·detected)를 단일 스냅샷으로 반환
+ *        (GL 스레드에서 호출)
+ *
+ * g_active_slot_index를 단 한 번만 acquire load하여 그 read_idx로 ptr·frame_ts_ns·detected를
+ * 모두 읽으므로 일관된 스냅샷이 보장된다 (두 번 load하면 그 사이 writer swap으로 ptr·ts가
+ * 서로 다른 슬롯이 될 수 있음). Lock-free, wait-free reader.
+ *
+ * outMeta는 길이 ≥ 2 long 배열: outMeta[0]=frame_ts_ns, outMeta[1]=detected?1:0.
+ * 슬롯이 유효하지 않으면 ptr=0L, outMeta={0,0}.
+ *
+ * 참고: generation 기반 torn-read 가드는 미사용 — 기존 reader와 동일한 pre-existing 한계.
+ *
+ * Java: native long nativeGetActiveDetectionSlot(long[] outMeta);
+ * @return 활성 슬롯의 IrisResult 포인터 (jlong), 유효하지 않으면 0L
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetActiveDetectionSlot(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jlongArray outMeta) {
+
+    jlong meta[2] = {0, 0};
+    jlong ptr = 0L;
+
+    // active index는 단 한 번만 acquire load → 동일 read_idx로 ptr/ts/detected 일관 스냅샷
+    int read_idx = g_active_slot_index.load(std::memory_order_acquire);
+    if (read_idx >= 0 && read_idx <= 1 &&
+        g_detection_slots[read_idx].valid.load(std::memory_order_acquire)) {
+        ptr = reinterpret_cast<jlong>(&g_detection_slots[read_idx].data);
+        meta[0] = static_cast<jlong>(g_detection_slots[read_idx].frame_ts_ns);
+        meta[1] = g_detection_slots[read_idx].data.detected ? 1 : 0;
+    }
+
+    // outMeta null/길이 가드 (SetLongArrayRegion ArrayIndexOutOfBounds 예외 표면 방지)
+    if (outMeta != nullptr && env->GetArrayLength(outMeta) >= 2) {
+        env->SetLongArrayRegion(outMeta, 0, 2, meta);
+    }
+
+    return ptr;
 }
 
 /**
@@ -2233,10 +2065,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensScleraProtect(
     iris_sdk_set_lens_sclera_protect(enabled ? 1 : 0);
 }
 
-// P6-W5 §5.9: B1/B8 4조합 벤치용 sclera veto 수식 토글.
-// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
-extern void iris_sdk_set_lens_sclera_veto_mode(int mode);
-
+// P6-W5 §5.9: sclera veto 토글. internal 선언은 iris_sdk/internal/bench_toggles.h.
 /**
  * Java: native void nativeSetScleraVetoMode(int mode);
  * P6-W5 §5.9: mode 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini).
@@ -2272,13 +2101,9 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetLensHighlight(
 }
 
 // ============================================================================
-// P6-W4 §5.7/§5.11: 환경 반사 internal C API forward declare.
-// sdk_api_v2.cpp에 정의됨. 공개 sdk_api.h 미노출 (W4 Phase 벤치 internal 경로).
+// P6-W4 §5.7/§5.11: 환경 반사 internal C API.
+// 선언은 iris_sdk/internal/bench_toggles.h (정의는 sdk_api_v2.cpp).
 // ============================================================================
-extern IrisSdkError iris_sdk_load_env_map(const uint8_t* data, int width, int height);
-extern void iris_sdk_unload_env_map(void);
-extern void iris_sdk_set_reflection_mode(int mode);
-extern void iris_sdk_set_reflection_intensity(float intensity);
 
 /**
  * Java: native int nativeLoadEnvMap(byte[] data, int width, int height);
@@ -2338,14 +2163,10 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetReflectionIntensity(
 }
 
 // ============================================================================
-// P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글.
-// internal C API는 sdk_api_v2.cpp 정의. 공개 sdk_api.h 미노출.
+// P6-W6 / P7-W2: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) /
+// avg_iris_luma 실측↔fallback A/B 벤치 토글.
+// 선언은 iris_sdk/internal/bench_toggles.h (정의는 sdk_api_v2.cpp).
 // ============================================================================
-extern void iris_sdk_set_lens_blink_up_ms(float ms);
-extern void iris_sdk_set_lens_gate_threshold(float threshold);
-extern void iris_sdk_set_lens_detail_reinject(int enabled);
-// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (internal).
-extern void iris_sdk_set_use_measured_luma(int enabled);
 
 /**
  * Java: native void nativeSetBlinkUpMs(float ms);
@@ -2385,7 +2206,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetDetailReinject(
 
 /**
  * Java: native void nativeSetUseMeasuredLuma(boolean enabled);
- * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 false=fallback).
+ * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 true=실측, 코어 use_measured_luma_).
+ *   ④ W4-D 이후 측정 주체=글루 fillIrisLuma(per-eye Rec.709) — 코어 detector 아님.
  */
 JNIEXPORT void JNICALL
 Java_com_irislenssdk_IrisLensSDK_nativeSetUseMeasuredLuma(
@@ -2393,6 +2215,108 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetUseMeasuredLuma(
     jboolean enabled)
 {
     iris_sdk_set_use_measured_luma(enabled ? 1 : 0);
+}
+
+// ============================================================================
+// 랜드마크 주입 경계 JNI (③-3 §3-2 — ADR-0001 §6 첫 외부 소비자)
+// ============================================================================
+
+/**
+ * Java: native int nativeSetLandmarks(float[] pts478x3, int frameWidth,
+ *                                     int frameHeight, long timestampUs);
+ * 478×3 정규화 좌표(upright, 비미러)를 코어로 주입한다(deep-copy). ADR §6.1.
+ * 배열 길이 == 478×3 이중 가드(C 경계와 바인딩 양쪽 — ADR §6.1).
+ * @return IrisSdkError 코드 (성공 시 IRIS_SDK_OK).
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLandmarks(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jfloatArray pts,
+    jint frameWidth,
+    jint frameHeight,
+    jlong timestampUs)
+{
+    constexpr int LANDMARK_COUNT = 478;
+    constexpr int EXPECTED_LEN = LANDMARK_COUNT * 3;
+
+    if (!pts) {
+        LOGE("nativeSetLandmarks: pts is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    // RAII로 float 배열 접근 (iris_set_landmarks가 deep-copy → JNI_ABORT).
+    ScopedFloatArray arr(env, pts);
+    if (!arr.valid()) {
+        LOGE("nativeSetLandmarks: failed to get float array");
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    // 바인딩 레벨 길이 이중 가드 (ADR §6.1 — C 경계 478 가드와 별개의 방어선).
+    if (arr.size() < EXPECTED_LEN) {
+        LOGE("nativeSetLandmarks: array length %d < expected %d",
+             static_cast<int>(arr.size()), EXPECTED_LEN);
+        return static_cast<jint>(IRIS_SDK_INVALID_PARAM);
+    }
+
+    uint32_t generation = 0;
+    IrisSdkError error = iris_set_landmarks(
+        arr.data(),
+        LANDMARK_COUNT,
+        static_cast<int32_t>(frameWidth),
+        static_cast<int32_t>(frameHeight),
+        static_cast<int64_t>(timestampUs),
+        &generation);
+
+    if (error != IRIS_SDK_OK) {
+        LOGW("nativeSetLandmarks: rejected %d (%s)", error, iris_sdk_error_to_string(error));
+    }
+    return static_cast<jint>(error);
+}
+
+/**
+ * Java: native long nativeGetLandmarkGeneration();
+ * 현재 주입 세대 번호. uint32_t를 unsigned로 안전하게 담기 위해 long 반환.
+ * @return 세대 번호 (0 = 미주입).
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetLandmarkGeneration(
+    JNIEnv* /* env */,
+    jclass /* clazz */)
+{
+    // uint32_t → jlong: 상위 32비트 0 보장(부호 확장 방지).
+    return static_cast<jlong>(static_cast<uint64_t>(iris_get_landmark_generation()));
+}
+
+/**
+ * Java: native int nativeGetInjectedResult(IrisResult out);
+ * 주입 랜드마크 파생 IrisResult 조회. 미주입 시 IRIS_SDK_NO_FACE (out 미변경).
+ * @return IrisSdkError 코드.
+ */
+JNIEXPORT jint JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeGetInjectedResult(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jobject resultObj)
+{
+    if (!resultObj) {
+        LOGE("nativeGetInjectedResult: resultObj is null");
+        return static_cast<jint>(IRIS_SDK_NULL_POINTER);
+    }
+
+    IrisResult nativeResult = {};
+    IrisSdkError error = iris_get_injected_result(&nativeResult);
+    if (error != IRIS_SDK_OK) {
+        // 미주입(IRIS_SDK_NO_FACE) 등 — out 미변경, 에러 코드만 반환.
+        return static_cast<jint>(error);
+    }
+
+    if (!copyResultToJava(env, nativeResult, resultObj)) {
+        LOGE("nativeGetInjectedResult: failed to copy result to Java object");
+        return static_cast<jint>(IRIS_SDK_UNKNOWN);
+    }
+
+    return static_cast<jint>(IRIS_SDK_OK);
 }
 
 }  // extern "C"

@@ -44,10 +44,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.tabs.TabLayout
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
+import com.irislenssdk.tracking.FaceTracker
+import com.irislenssdk.tracking.TasksToIrisResult
 import com.irislenssdk.demo.beauty.BeautyPreset
 import com.irislenssdk.demo.beauty.BeautyPresetFactory
 import com.irislenssdk.demo.camera.OverlayView
@@ -65,7 +68,7 @@ import java.util.concurrent.Executors
  * GPU 렌더링 테스트 Activity
  *
  * 하이브리드 아키텍처:
- * - MediaPipe (CPU): 홍채 추적 (FrameAnalyzer)
+ * - MediaPipe Tasks (CPU/GPU delegate): 홍채 추적 (FaceTracker, processFrameTasks)
  * - GPU: 렌즈 오버레이 + 뷰티 필터 렌더링 (CameraGLView)
  */
 class GpuRenderActivity : AppCompatActivity() {
@@ -149,16 +152,22 @@ class GpuRenderActivity : AppCompatActivity() {
     private var currentPreset = BeautyPreset.CUSTOM
     private var isUpdatingSliders = false
 
-    // 홍채 검출 — Analyzer 스레드 전용 작업 인스턴스.
-    // GL/UI 전달은 프레임별 새 복사본으로 소유권을 넘긴다 (공유 가변 스냅샷 재사용은
-    // 수신 스레드가 읽는 중 analyzer가 덮어쓰는 torn read를 유발 — 감사 finding으로 제거)
-    private val irisResult = IrisResult()       // Analyzer 스레드 전용 (JNI 결과 수신)
+    //=========================================================================
+    // 추적: MediaPipe Tasks 단일 경로 (W4-D — LEGACY 자체 검출 경로 제거)
+    //=========================================================================
 
-    // Temporal Stabilizer (SDK 코어 스무딩)
-    private var stabilizerHandle: Long = 0
+    private var faceTracker: FaceTracker? = null      // 분석 스레드 전용 (생성·detect·close 동일 스레드)
+    private val tasksIrisResult = IrisResult()        // 분석 스레드 전용 (TASKS 변환 수신)
 
-    // NV21 버퍼 (재사용)
-    private var nv21Buffer: ByteArray? = null
+    /** TASKS stabilizer 핸들 — 분석 스레드 전용 (코어 stabilize 단일 적용). */
+    private var tasksStabilizerHandle: Long = 0
+    @Volatile private var tasksUsingGpu = false
+    @Volatile private var lastTasksInferMs = 0f
+    private var tasksHudCounter = 0                   // 분석 스레드 전용
+
+    private lateinit var btnFrameSync: Button
+    @Volatile private var frameSyncEnabled = false  // frame-sync 킬스위치 (트래킹 지연 핸드오프 §3-b)
+    private lateinit var tvAbHud: TextView
 
     // 카메라 회전 (한 번만 설정)
     private var lastRotation: Int = -1
@@ -223,6 +232,10 @@ class GpuRenderActivity : AppCompatActivity() {
         btnP8Skin = findViewById(R.id.btnP8Skin)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
+
+        // W4-D: frame-sync 킬스위치 + TASKS HUD (추적 공급자 토글/듀얼 A/B 측정 제거)
+        btnFrameSync = findViewById(R.id.btnFrameSync)
+        tvAbHud = findViewById(R.id.tvAbHud)
 
         // 뷰티 탭 UI
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
@@ -289,6 +302,7 @@ class GpuRenderActivity : AppCompatActivity() {
         setupLensControls()
         setupBeautyControls()
         setupDebugControls()
+        setupTrackingAbControls()
 
         // OverlayView 초기 설정: 렌즈는 GPU에서 렌더링하므로 OverlayView에서는 비활성화
         overlayView.showLens = false
@@ -733,7 +747,7 @@ class GpuRenderActivity : AppCompatActivity() {
                 if (overlayView.debugMode) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt()
             )
             btnToggleIris.setTextColor(
-                if (overlayView.showFaceRect) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt()
+                if (overlayView.showRawIris) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt()
             )
             btnToggleLog.setTextColor(
                 if (stabilityLogger?.isActive == true) 0xFFFF4444.toInt() else 0xFFAAAAAA.toInt()
@@ -758,10 +772,12 @@ class GpuRenderActivity : AppCompatActivity() {
             Toast.makeText(this, "FreqSep Debug: ${debugModeNames[freqSepDebugMode]}", Toast.LENGTH_SHORT).show()
         }
 
+        // 진단(트래킹 지연 핸드오프 §2): raw(stabilize 이전, 마젠타) + 필터(녹색) 홍채 중심 오버레이.
+        // 움직임 중 마젠타가 화면 눈보다 늦으면 = 픽셀-랜드마크 프레임 불일치(필터 무관) → frame-sync 필요.
         btnToggleIris.setOnClickListener {
-            overlayView.showFaceRect = !overlayView.showFaceRect
+            overlayView.showRawIris = !overlayView.showRawIris
             updateButtonColors()
-            Toast.makeText(this, "Face Rect: ${if (overlayView.showFaceRect) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Raw 홍채 오버레이(진단): ${if (overlayView.showRawIris) "ON (마젠타=raw, 녹색=필터)" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
 
         // StabilityLogger 토글 (P4-W1-02)
@@ -926,15 +942,16 @@ class GpuRenderActivity : AppCompatActivity() {
                 setSurfaceProvider(cameraGLView.getSurfaceProvider())
             }
 
-        // ImageAnalysis (MediaPipe 추론용)
+        // ImageAnalysis (MediaPipe Tasks 추론용)
+        // W4-D: TASKS 단일 경로. Tasks는 YUV 직접 입력 불가(함정 #2) → RGBA_8888 직접 스트림.
         val imageAnalysis = ImageAnalysis.Builder()
             .setResolutionSelector(resolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()
             .apply {
                 setAnalyzer(analysisExecutor) { imageProxy ->
-                    processFrame(imageProxy)
+                    processFrameTasks(imageProxy)
                 }
             }
 
@@ -957,214 +974,191 @@ class GpuRenderActivity : AppCompatActivity() {
         }
     }
 
+    //=========================================================================
+    // TASKS 공급자 경로 + frame-sync 제어 (W4-D — LEGACY 제거 후 단일 경로)
+    //=========================================================================
+
     /**
-     * 프레임 처리 (MediaPipe 추론 - CPU)
+     * TASKS 공급자 프레임 처리 (§4.1) — 분석 스레드 전용.
+     *
+     * FaceTracker(MediaPipe Tasks, RGBA_8888 직접 입력)가 detect 후
+     * [onTasksRawResult]를 같은 스레드에서 동기 호출한다.
+     * imageProxy의 close는 FaceTracker.analyze가 책임진다.
      */
-    private fun processFrame(imageProxy: androidx.camera.core.ImageProxy) {
-        try {
-            // 카메라 회전 정보 전달 (한 번만)
-            val rotation = imageProxy.imageInfo.rotationDegrees
-            if (rotation != lastRotation) {
-                lastRotation = rotation
-                cameraGLView.setFrameRotation(rotation)
-                Log.d(TAG, "Camera rotation: $rotation")
+    private fun processFrameTasks(imageProxy: androidx.camera.core.ImageProxy) {
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        if (rotation != lastRotation) {
+            lastRotation = rotation
+            cameraGLView.setFrameRotation(rotation)
+            Log.d(TAG, "Camera rotation (TASKS): $rotation")
+        }
+        ensureFaceTracker().analyze(imageProxy)
+    }
+
+    /** 분석 스레드 전용 — FaceTracker는 생성 스레드에서만 detect/close (스레드 친화성). */
+    private fun ensureFaceTracker(): FaceTracker {
+        faceTracker?.let { return it }
+        val tracker = FaceTracker(
+            context = applicationContext,
+            preferGpu = true,
+            // ⚠️ mirror=false 필수: 변환 계약은 비미러(센서 원본 upright) 공간 —
+            // ADR §7.4 '미러는 렌더 단일 책임'. LEGACY 검출 결과와 동일 공간이어야
+            // 같은 DetectionSlot/렌더 경로에서 A/B가 정합한다.
+            mirror = false,
+            // 내장 One-Euro 경로(onSnapshot)는 소비하지 않는다 — 이중 필터 금지
+            // (§5 주의 3 '우회'). 스무딩은 LEGACY와 동일하게 코어 stabilize 단일 적용.
+            onSnapshot = { },
+            onInferenceStats = { ms, gpu ->
+                lastTasksInferMs = ms
+                tasksUsingGpu = gpu
+            },
+            onError = { msg -> Log.w(TAG, "③-3 FaceTracker: $msg") },
+        )
+        tracker.onRawResult = ::onTasksRawResult
+        faceTracker = tracker
+        return tracker
+    }
+
+    /**
+     * TASKS 원시 478점 → IrisResult 변환 → 코어 stabilize → DetectionSlot (§4.1).
+     *
+     * LEGACY processFrame과 단계별 1:1 대응 — 동일 stabilize·동일 슬롯 채널·동일
+     * 슬롯 갱신 정책(stabilize 후 결과를 매 프레임 무조건 갱신 — 미검출 hold/fade
+     * 포함, LEGACY 실동작과 동일)·동일 GL/Overlay 전달 정책.
+     * 비교 변인은 추적기뿐이다. 분석 스레드 동기 실행.
+     */
+    private fun onTasksRawResult(
+        result: FaceLandmarkerResult,
+        rotation: Int,
+        srcWidth: Int,
+        srcHeight: Int,
+        rgba: java.nio.ByteBuffer,
+        rowStride: Int,
+        frameTimestampNs: Long,
+    ) {
+        val faces = result.faceLandmarks()
+        // numFaces=2(MP 내부 스무딩 우회, FaceTracker)면 배경 얼굴/포스터가 섞일 수 있어
+        // 전경(최대 bbox) 얼굴을 고른다 — MediaPipe는 faces[0]가 주 피사체라고 보장하지 않는다.
+        // 단일 얼굴이면 bbox 계산 없이 그대로 사용.
+        val lm = when (faces.size) {
+            0 -> null
+            1 -> faces[0]
+            else -> faces.maxByOrNull { f ->
+                var minX = Float.MAX_VALUE
+                var maxX = -Float.MAX_VALUE
+                var minY = Float.MAX_VALUE
+                var maxY = -Float.MAX_VALUE
+                for (p in f) {
+                    val x = p.x()
+                    val y = p.y()
+                    if (x < minX) minX = x
+                    if (x > maxX) maxX = x
+                    if (y < minY) minY = y
+                    if (y > maxY) maxY = y
+                }
+                (maxX - minX) * (maxY - minY)
             }
-
-            // YUV → NV21 변환
-            val nv21 = yuvToNv21(imageProxy)
-
-            // 홍채 검출 (CPU)
-            val detectResult = IrisLensSDK.detectWithRotation(
-                nv21,
-                imageProxy.width,
-                imageProxy.height,
-                IrisLensSDK.FORMAT_NV21,
-                imageProxy.imageInfo.rotationDegrees,
-                irisResult
+        }
+        // ④ W4-B4: convert+luma를 SDK 단일 진입(convertWithLuma)으로 일원화 — 같은 전경 얼굴(lm)로
+        // 변환·홍채 luma 측정(P7-W2). 측정 비용=눈당 디스크 스캔(분석 스레드, 검출 지연과 분리).
+        // 동작 동일(이전 convert+fillIrisLuma 2단계와 같은 측정·같은 얼굴).
+        val converted = lm != null && TasksToIrisResult.convertWithLuma(
+            lm, rotation, srcWidth, srcHeight, result.timestampMs(), rgba, rowStride, tasksIrisResult
+        )
+        if (!converted) {
+            TasksToIrisResult.fillNoFace(
+                rotation, srcWidth, srcHeight, result.timestampMs(), tasksIrisResult
             )
+        }
 
-            // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요)
-            if (detectResult == IrisLensSDK.OK || detectResult == IrisLensSDK.NO_FACE) {
-                if (stabilizerHandle == 0L) {
-                    stabilizerHandle = IrisLensSDK.createStabilizer()
-                }
-                if (stabilizerHandle != 0L) {
-                    val timestampSec = System.nanoTime() / 1_000_000_000.0
-                    IrisLensSDK.stabilize(stabilizerHandle, irisResult, timestampSec)
-                }
-            }
+        // 진단(트래킹 지연 핸드오프 §2): stabilize 이전 raw 홍채 사본 — OverlayView 마젠타 오버레이용.
+        // 변환만 거친(필터 없음) 좌표라 '필터 이전부터 늦는가' 확인의 정본.
+        val rawDiagSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
 
-            // GPU 렌더러에 스무딩된 결과 전달 (매 프레임, 미검출 포함)
-            // 프레임별 새 복사본으로 소유권 이전 — torn read 방지
-            val glSnapshot = IrisResult().also { it.copyFrom(irisResult) }
-            cameraGLView.setIrisResult(glSnapshot)
+        // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요, LEGACY 동일)
+        // TASKS 전용 핸들 — 같은 코어 stabilize, LEGACY 핸들 수명 불간섭 (§5-5)
+        if (tasksStabilizerHandle == 0L) {
+            tasksStabilizerHandle = IrisLensSDK.createStabilizer()
+        }
+        if (tasksStabilizerHandle != 0L) {
+            val timestampSec = System.nanoTime() / 1_000_000_000.0
+            IrisLensSDK.stabilize(tasksStabilizerHandle, tasksIrisResult, timestampSec)
+        }
 
-            // P4-W1-03: 홍채 밝기 샘플링 → EMA (Luminance Tint 블렌드용)
-            val rawLum = sampleIrisLuminanceNv21(
-                nv21, imageProxy.width, imageProxy.height, irisResult, rotation
+        // GPU 렌더러에 스무딩된 결과 전달 (매 프레임, 미검출 포함 — 새 복사본, LEGACY 동일)
+        val glSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
+        cameraGLView.setIrisResult(glSnapshot)
+
+        // P4-W1-03 패리티: 홍채 5점 크로스 휘도 (LEGACY sampleIrisLuminanceNv21 대응)
+        val rawLum = if (lm != null) {
+            TasksToIrisResult.sampleCrossLuma(
+                rgba, rowStride, srcWidth, srcHeight, lm, tasksIrisResult
             )
-            cameraGLView.setRawIrisLuminance(rawLum)
-
-            // Detection Slot 업데이트 (lock-free → GL 스레드에서 읽음)
-            if (detectResult == IrisLensSDK.OK) {
-                IrisLensSDK.updateDetectionSlot(irisResult)
-            }
-
-            // OverlayView에도 검출 결과 전달 (디버그 시각화용, 별도 스냅샷)
-            // SDK는 회전 후 좌표를 반환하므로 회전 후 프레임 크기를 전달해야 함
-            // (imageProxy.width/height는 회전 전 센서 크기 → 매쉬가 늘어나는 원인)
-            val isRotated = (rotation == 90 || rotation == 270)
-            val overlayFrameW = if (irisResult.frameWidth > 0) {
-                irisResult.frameWidth
-            } else {
-                if (isRotated) imageProxy.height else imageProxy.width
-            }
-            val overlayFrameH = if (irisResult.frameHeight > 0) {
-                irisResult.frameHeight
-            } else {
-                if (isRotated) imageProxy.width else imageProxy.height
-            }
-            val uiSnapshot = IrisResult().also { it.copyFrom(irisResult) }
-            runOnUiThread {
-                overlayView.setIrisResult(
-                    uiSnapshot,
-                    overlayFrameW,
-                    overlayFrameH,
-                    lensFacing == CameraSelector.LENS_FACING_FRONT
-                )
-            }
-
-            // FPS 계산
-            updateFps()
-
-        } finally {
-            imageProxy.close()
-        }
-    }
-
-    /**
-     * YUV_420_888 → NV21 변환 (stride-aware)
-     *
-     * 감사 finding: 기존 구현은 rowStride/패딩을 무시해 stride != width 기기에서
-     * 검출 입력이 오염됐다. FrameAnalyzer.imageProxyToNV21과 동일 의미의 stride 처리로
-     * 교체 (공용 유틸 추출은 ③-2 이월).
-     */
-    private fun yuvToNv21(imageProxy: androidx.camera.core.ImageProxy): ByteArray {
-        val width = imageProxy.width
-        val height = imageProxy.height
-        val ySize = width * height
-        val uvSize = width * height / 2
-        val totalSize = ySize + uvSize
-
-        // 버퍼 재사용
-        if (nv21Buffer == null || nv21Buffer!!.size != totalSize) {
-            nv21Buffer = ByteArray(totalSize)
-        }
-        val nv21 = nv21Buffer!!
-
-        val yPlane = imageProxy.planes[0]
-        val uPlane = imageProxy.planes[1]
-        val vPlane = imageProxy.planes[2]
-
-        // Y 평면 (rowStride 패딩 처리)
-        val yBuffer = yPlane.buffer
-        val yRowStride = yPlane.rowStride
-        if (yRowStride == width) {
-            yBuffer.get(nv21, 0, ySize)
         } else {
-            var yOffset = 0
-            for (row in 0 until height) {
-                yBuffer.position(row * yRowStride)
-                yBuffer.get(nv21, yOffset, width)
-                yOffset += width
-            }
+            -1f
+        }
+        cameraGLView.setRawIrisLuminance(rawLum)
+
+        // Detection Slot 업데이트 — LEGACY와 동일 채널 공유 (렌더 경로 완전 동일).
+        // LEGACY processFrame은 detectWithRotation이 미검출(detected=false)에도 항상
+        // IRIS_SDK_OK를 반환하므로 `if (detectResult == OK)` 게이트가 매 프레임 참이 되어
+        // stabilize 후 결과(hold/fade-out 궤적·detected=false 포함)를 무조건 슬롯에 넣는다
+        // (nativeUpdateDetectionSlot도 detected 무관 무조건 복사). TASKS도 동일하게
+        // stabilize 후 결과를 무조건 갱신해야 검출 손실 구간에서 슬롯 정본(getActiveDetectionSlot
+        // 소비 — 네이티브 렌더/뷰티 + GL 렌즈 게이트)이 양 모드 동일하게 게이트된다 (plan §4.1 비교 변인=추적기뿐).
+        // fillNoFace 프레임(detected=false)도 그대로 들어가야 LEGACY 미검출 동작과 일치.
+        // W4-B3: 분석 프레임 센서 ns(frameTimestampNs)를 좌표와 한 슬롯에 원자 결속 — 별도 ts 채널 폐기.
+        IrisLensSDK.updateDetectionSlot(tasksIrisResult, frameTimestampNs)
+
+        // OverlayView 전달 (LEGACY와 동일 정책 — 변환 결과의 upright frame dims 사용)
+        val uiSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
+        val frameW = uiSnapshot.frameWidth
+        val frameH = uiSnapshot.frameHeight
+        runOnUiThread {
+            overlayView.setRawIris(rawDiagSnapshot)
+            overlayView.setIrisResult(
+                uiSnapshot, frameW, frameH,
+                lensFacing == CameraSelector.LENS_FACING_FRONT
+            )
         }
 
-        // UV 평면 (NV21: VUVU...)
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-        val uvPixelStride = uPlane.pixelStride
-        val uvRowStride = uPlane.rowStride
-
-        if (uvPixelStride == 2 && uvRowStride == width) {
-            // 이미 인터리브(VU). V 평면 remaining은 uvSize-1이므로 마지막 U 바이트 보충
-            val vAvailable = vBuffer.remaining().coerceAtMost(uvSize - 1)
-            vBuffer.get(nv21, ySize, vAvailable)
-            nv21[totalSize - 1] = uBuffer.get(uBuffer.limit() - 1)
-        } else {
-            // 패딩/평면형 — 행별 수동 인터리브
-            var uvOffset = ySize
-            for (row in 0 until height / 2) {
-                for (col in 0 until width / 2) {
-                    val uvIndex = row * uvRowStride + col * uvPixelStride
-                    nv21[uvOffset++] = vBuffer.get(uvIndex)
-                    nv21[uvOffset++] = uBuffer.get(uvIndex)
-                }
-            }
+        // HUD 1줄 (30프레임 스로틀)
+        if (++tasksHudCounter >= 30) {
+            tasksHudCounter = 0
+            val hud = String.format(
+                java.util.Locale.US, "TRK:TASKS(%s) infer≈%.0fms",
+                if (tasksUsingGpu) "gpu" else "cpu", lastTasksInferMs
+            )
+            runOnUiThread { tvAbHud.text = hud }
         }
 
-        return nv21
+        updateFps()
     }
 
-    /**
-     * NV21 Y채널에서 홍채 영역 평균 밝기 샘플링
-     *
-     * 각 눈을 개별 샘플링 후 밝기값을 평균합니다.
-     * 좌표를 평균하면 두 눈 사이(피부/배경)를 샘플링하게 되므로,
-     * 반드시 개별 샘플링 → 값 평균 순서를 따릅니다.
-     *
-     * @return 0.0~1.0 밝기 (미검출 시 -1f)
-     */
-    private fun sampleIrisLuminanceNv21(
-        nv21: ByteArray, sensorW: Int, sensorH: Int,
-        result: IrisResult, rotation: Int
-    ): Float {
-        if (!result.detected || result.frameWidth <= 0 || result.frameHeight <= 0) return -1f
+    /** W4-D UI: frame-sync 킬스위치 (TASKS 단일 경로 — 공급자 토글/듀얼 측정 제거) */
+    private fun setupTrackingAbControls() {
+        tvAbHud.text = "TRK:TASKS"
 
-        val leftLum = if (result.leftDetected) {
-            samplePointLuminanceNv21(nv21, sensorW, sensorH, result.leftIrisX, result.leftIrisY, rotation)
-        } else -1f
-
-        val rightLum = if (result.rightDetected) {
-            samplePointLuminanceNv21(nv21, sensorW, sensorH, result.rightIrisX, result.rightIrisY, rotation)
-        } else -1f
-
-        return when {
-            leftLum >= 0f && rightLum >= 0f -> (leftLum + rightLum) / 2f
-            leftLum >= 0f -> leftLum
-            rightLum >= 0f -> rightLum
-            else -> -1f
+        // frame-sync 킬스위치 (트래킹 지연 핸드오프 §3-b): 렌더가 '랜드마크가 계산된 프레임'을
+        // 그린다. ON이면 렌즈-눈 어긋남 제거, 대신 거울 지연 +2~3프레임.
+        btnFrameSync.setOnClickListener {
+            setFrameSyncEnabled(!frameSyncEnabled)
         }
     }
 
-    /**
-     * NV21 Y채널에서 단일 홍채 중심의 5점 크로스 샘플링
-     */
-    private fun samplePointLuminanceNv21(
-        nv21: ByteArray, sensorW: Int, sensorH: Int,
-        nx: Float, ny: Float, rotation: Int
-    ): Float {
-        // 검출 좌표(회전 후) → 센서 좌표(회전 전) 역변환
-        val (sx, sy) = when (rotation) {
-            90 -> Pair(ny, 1f - nx)
-            180 -> Pair(1f - nx, 1f - ny)
-            270 -> Pair(1f - ny, nx)
-            else -> Pair(nx, ny)
-        }
-
-        val cx = (sx * sensorW).toInt().coerceIn(0, sensorW - 1)
-        val cy = (sy * sensorH).toInt().coerceIn(0, sensorH - 1)
-
-        // Y채널 5점 크로스 샘플링 (center + 4방향)
-        val r = 3.coerceAtMost(minOf(cx, cy, sensorW - 1 - cx, sensorH - 1 - cy))
-        val offsets = intArrayOf(0, 0, 0, -r, 0, r, -r, 0, r, 0) // (dx,dy) 쌍
-        var sum = 0
-        for (i in offsets.indices step 2) {
-            val px = cx + offsets[i]
-            val py = cy + offsets[i + 1]
-            sum += (nv21[py * sensorW + px].toInt() and 0xFF)
-        }
-        return (sum / 5f) / 255f
+    private fun setFrameSyncEnabled(enabled: Boolean) {
+        frameSyncEnabled = enabled
+        cameraGLView.setFrameSyncEnabled(enabled)
+        btnFrameSync.text = if (enabled) "fsync:on" else "fsync:off"
+        btnFrameSync.setBackgroundColor(
+            if (enabled) 0xCC2196F3.toInt() else 0x66555555.toInt()
+        )
+        Toast.makeText(
+            this,
+            "Frame-sync: ${if (enabled) "ON (렌즈 정합↑, 거울 지연↑)" else "OFF (현행)"}",
+            Toast.LENGTH_SHORT
+        ).show()
+        Log.i(TAG, "frame-sync → $enabled")
     }
 
     private fun updateFps() {
@@ -1320,12 +1314,20 @@ class GpuRenderActivity : AppCompatActivity() {
             stopStabilityLog()
         }
         super.onDestroy()
-        if (stabilizerHandle != 0L) {
-            IrisLensSDK.destroyStabilizer(stabilizerHandle)
-            stabilizerHandle = 0
-        }
         cameraGLView.release()
         lensManager.release()
+        // 분석 스레드 소유 자원 정리 — GPU delegate 스레드 친화성상 같은 스레드에서
+        // close해야 한다. shutdown은 큐 잔여 작업 완료 후 종료된다.
+        runCatching {
+            analysisExecutor.execute {
+                faceTracker?.close()
+                faceTracker = null
+                if (tasksStabilizerHandle != 0L) {
+                    IrisLensSDK.destroyStabilizer(tasksStabilizerHandle)
+                    tasksStabilizerHandle = 0L
+                }
+            }
+        }
         analysisExecutor.shutdown()
         IrisLensSDK.releaseDetectionSlot()
         IrisLensSDK.releaseGpuBeauty()

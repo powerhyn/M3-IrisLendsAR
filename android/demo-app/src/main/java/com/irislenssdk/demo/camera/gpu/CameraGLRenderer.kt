@@ -25,6 +25,7 @@ import android.util.Log
 import com.irislenssdk.BeautyFilterConfigV2
 import com.irislenssdk.IrisLensSDK
 import com.irislenssdk.IrisResult
+import com.irislenssdk.demo.tracking.math.FrameRingSelector
 import com.irislenssdk.LensConfig
 import com.irislenssdk.demo.camera.OneEuroFilter
 import java.nio.ByteBuffer
@@ -167,9 +168,26 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var quadVao: Int = 0
     private var quadVbo: Int = 0
 
-    // 중간 텍스처/FBO (OES → RGBA 변환용)
-    private var rgbaTextureId: Int = 0
-    private var rgbaFboId: Int = 0
+    // 중간 텍스처/FBO (OES → RGBA 변환용) — frame-sync 링버퍼로 확장.
+    // frame-sync(트래킹 지연 핸드오프 §3-b): OES→RGBA 변환 출력을 RGBA 프레임 링버퍼
+    // [ringSize]장에 센서 ts와 함께 보관하고, 렌더는 '랜드마크가 계산된 프레임'(분석측
+    // frameTimestampNs와 |Δ| 최소, FrameRingSelector)을 골라 그 위에 렌즈를 합성한다.
+    // frame-sync OFF(기본)면 항상 최신 슬롯 = 현행 단일버퍼 동작과 비트 동일.
+    private val ringSize = 4
+    private val ringTex = IntArray(ringSize)
+    private val ringFbo = IntArray(ringSize)
+    private val ringTsNs = LongArray(ringSize)
+    private var ringWrite = 0       // 이번 프레임이 쓸 슬롯
+    private var ringCount = 0       // 유효 슬롯 수 (워밍업 중 ringSize보다 작을 수 있음)
+    @Volatile private var frameSyncActive: Boolean = false   // 킬스위치 상태 (setFrameSyncEnabled로만 변경)
+    // W4-B3: 검출 슬롯 단일 스냅샷 메타 수신용 재사용 배열 [0]=frameTsNs, [1]=detected?1:0 (GL 스레드 전용)
+    private val detSlotMeta = LongArray(2)
+    // 클럭 도메인 검증 (LensSim selectCamSource 정본 가드 2종):
+    private var clockDomainStreak = 0          // 연속 |Δ|>1s 카운트
+    private var clockDomainChecked = false     // 검증 완료(일치/불일치 무관) — 이후 재평가 영구 중단
+    private var clockDomainMismatch = false    // 불일치 확정 → 영구 최신 슬롯 폴백
+    private var clockDomainLastTs = 0L         // 마지막 평가한 스냅샷 ts — '스냅샷당 1표'(같은 ts 재집계 금지)
+    private var frameSyncLogCounter = 0
 
     // 뷰티 필터 출력 텍스처
     private var beautyOutputTextureId: Int = 0
@@ -364,19 +382,37 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         surfaceTexture?.updateTexImage()
         surfaceTexture?.getTransformMatrix(stMatrix)
 
+        // frame-sync: 이 프레임의 센서 타임스탬프(ns) — 링 슬롯 태그 + 랜드마크 매칭 키.
+        // 분석측 imageInfo.timestamp와 동일 클럭(클럭 게이트 실기기 검증 완료, 06-15).
+        val frameTsNs = surfaceTexture?.timestamp ?: 0L
+
         // 펜딩 렌즈 텍스처 업로드
         uploadPendingLensTexture()
 
         // 화면 클리어
         GLES31.glClear(GLES31.GL_COLOR_BUFFER_BIT)
 
-        // 1단계: OES 텍스처 → RGBA 텍스처 변환
-        renderOESToRgba()
+        // 1단계: OES → RGBA 변환을 이번 프레임의 링 슬롯에 렌더하고 센서 ts로 태그.
+        val writtenIdx = ringWrite
+        renderOESToRgba(ringFbo[writtenIdx])
+        ringTsNs[writtenIdx] = frameTsNs
+        if (ringCount < ringSize) ringCount++
+        ringWrite = (ringWrite + 1) % ringSize
 
-        // 2단계: 렌즈 오버레이 (홍채 위치에 렌즈 합성)
-        var currentTexture = rgbaTextureId
-        if (lensEnabled && lensImageTextureId != 0 && irisResult?.detected == true) {
-            currentTexture = applyGpuLensRenderer(currentTexture)
+        // W4-B3: 검출 슬롯을 단일 스냅샷으로 취득 — 렌즈 좌표 포인터·센서 ts·detected를
+        // 모두 같은 슬롯에서 읽어 배경(ts)과 렌즈(좌표)가 서로 다른 프레임이 되는 스큐를 원천 제거.
+        // (active index 1회 read 보장 — getDetectionSlotPtr 다중 호출 race 대체)
+        val detectionHandle = IrisLensSDK.getActiveDetectionSlot(detSlotMeta)
+        val slotTsNs = if (detectionHandle != 0L) detSlotMeta[0] else 0L
+        val slotDetected = detectionHandle != 0L && detSlotMeta[1] != 0L
+
+        // frame-sync: 슬롯과 동반된 센서 ts와 |Δ| 최소인 슬롯 선택 (OFF/강등 시 최신 슬롯).
+        val sourceIdx = selectFrameSyncSlot(writtenIdx, slotTsNs)
+
+        // 2단계: 렌즈 오버레이 (홍채 위치에 렌즈 합성). 게이트는 슬롯 detected(좌표와 동일 스냅샷).
+        var currentTexture = ringTex[sourceIdx]
+        if (lensEnabled && lensImageTextureId != 0 && slotDetected) {
+            currentTexture = applyGpuLensRenderer(currentTexture, detectionHandle)
         } else if (stabilityLogEnabled && lensEnabled && lensImageTextureId != 0) {
             // 렌즈 파이프라인 활성 상태에서 검출 실패 시에만 기록
             // (렌즈 미선택/텍스처 미준비 시에는 기록하지 않음)
@@ -395,7 +431,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 4단계: GPU Beauty + LUT 통합 적용 (C++ Combined Color Pass에서 LUT 포함)
         val beautyApplied = beautyEnabled && beautyConfig.enabled
         var outputTexture = if (beautyApplied) {
-            applyGpuBeautyFilter(currentTexture)
+            applyGpuBeautyFilter(currentTexture, detectionHandle)
         } else {
             currentTexture
         }
@@ -450,9 +486,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     /**
      * OES 텍스처를 RGBA 2D 텍스처로 변환
      */
-    private fun renderOESToRgba() {
-        // FBO 바인딩
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, rgbaFboId)
+    private fun renderOESToRgba(targetFbo: Int) {
+        // FBO 바인딩 (frame-sync: 이번 프레임의 링 슬롯 FBO)
+        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, targetFbo)
         // 프레임 크기 사용 (FBO 텍스처 크기와 일치)
         val fboWidth = if (frameWidth > 0) frameWidth else viewWidth
         val fboHeight = if (frameHeight > 0) frameHeight else viewHeight
@@ -477,6 +513,57 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // FBO 언바인딩
         GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+    }
+
+    /**
+     * frame-sync 슬롯 선택 (트래킹 지연 핸드오프 §3-b). OFF/강등/랜드마크 미수신이면 최신 슬롯
+     * (= 현행 동작). ON이면 분석측 랜드마크 프레임 ts와 |Δ| 최소 슬롯(FrameRingSelector).
+     * 클럭 도메인 불일치가 연속 확정되면 영구 강등(최신 슬롯)한다.
+     */
+    private fun selectFrameSyncSlot(latestIdx: Int, snapTs: Long): Int {
+        if (!frameSyncActive) return latestIdx
+        if (snapTs <= 0L) return latestIdx  // 아직 랜드마크 없음 — 최신, 평가 안 함
+
+        // 클럭 도메인 검증 (LensSim 정본 가드): '검증 미완 && 새 스냅샷 ts'일 때만 1표 집계.
+        // 같은 랜드마크 ts가 여러 렌더 프레임에 재사용돼도(렌더 fps > 분석 cadence) 재집계 안 함 →
+        // 콜드스타트 묵은 ts 1개로 streak가 누적돼 오강등되는 버그 차단. |Δ|≤1s 1회 관측 시 영구 확정.
+        if (!clockDomainChecked && snapTs != clockDomainLastTs) {
+            clockDomainLastTs = snapTs
+            val minDelta = FrameRingSelector.minAbsDeltaNs(ringTsNs, ringCount, snapTs)
+            clockDomainStreak = FrameRingSelector.updateClockDomainStreak(clockDomainStreak, minDelta)
+            if (clockDomainStreak == 0) {
+                clockDomainChecked = true  // |Δ|≤1s — 같은 센서 클럭 확정, 재검사 불필요
+            } else if (clockDomainStreak >= FrameRingSelector.CLOCK_DOMAIN_CONFIRM_STREAK) {
+                clockDomainChecked = true
+                clockDomainMismatch = true
+                Log.w(TAG, "frame-sync: 클럭 도메인 불일치 확정(연속 ${clockDomainStreak}회 |Δ|>1s) — 최신 프레임 영구 강등")
+            }
+        }
+
+        if (clockDomainMismatch) return latestIdx
+
+        val sel = FrameRingSelector.select(ringTsNs, ringCount, latestIdx, snapTs)
+        if (++frameSyncLogCounter >= 120) {
+            frameSyncLogCounter = 0
+            val md = FrameRingSelector.minAbsDeltaNs(ringTsNs, ringCount, snapTs)
+            Log.i(TAG, "frame-sync: minΔ=${"%.1f".format(md / 1e6)}ms slot=$sel count=$ringCount latest=$latestIdx")
+        }
+        return if (sel < 0) latestIdx else sel
+    }
+
+    // W4-B3: setLandmarkFrameTimestamp(별도 volatile ts 사이드채널)는 제거됨. 분석 프레임 센서 ns는
+    // 이제 updateDetectionSlot(result, frameTsNs)로 렌즈 좌표와 한 슬롯에 원자 결속되고, GL 스레드는
+    // getActiveDetectionSlot 단일 스냅샷으로 ts·좌표·detected를 함께 읽어 1프레임 스큐를 원천 제거한다.
+
+    /** 킬스위치 — frame-sync ON 시 클럭 도메인 검증/강등 상태를 리셋해 재시도를 허용한다. */
+    fun setFrameSyncEnabled(enabled: Boolean) {
+        if (enabled && !frameSyncActive) {
+            clockDomainStreak = 0
+            clockDomainChecked = false
+            clockDomainMismatch = false
+            clockDomainLastTs = 0L
+        }
+        frameSyncActive = enabled
     }
 
     /**
@@ -581,7 +668,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 실패 시 무음 폴백 없이 렌즈 미적용 + sdkLensFailure 신호로 명시 처리합니다
      * (감사 finding: KT fallback 셰이더 blendMode 의미 불일치 + 프레임 단위 무음 폴백 제거).
      */
-    private fun applyGpuLensRenderer(inputTexture: Int): Int {
+    private fun applyGpuLensRenderer(inputTexture: Int, detectionHandle: Long): Int {
         if (!IrisLensSDK.isGpuLensInitialized()) {
             reportSdkLensFailure("GPU Lens 미초기화")
             return inputTexture
@@ -590,8 +677,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
         val texHeight = if (frameHeight > 0) frameHeight else viewHeight
 
-        // Detection Slot에서 최신 검출 결과 포인터 취득
-        val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
+        // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3)
 
         lensConfig.isMirror = isMirror
 
@@ -634,7 +720,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * @param inputTexture 입력 텍스처 ID
      * @return 출력 텍스처 ID
      */
-    private fun applyGpuBeautyFilter(inputTexture: Int): Int {
+    private fun applyGpuBeautyFilter(inputTexture: Int, detectionHandle: Long): Int {
         // 프레임 크기 사용
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
         val texHeight = if (frameHeight > 0) frameHeight else viewHeight
@@ -643,8 +729,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val lutTextureId = if (lutEnabled && lut3dTextureId != 0) lut3dTextureId else 0
         val lutIntensityVal = if (lutTextureId != 0) lutIntensity else 0.0f
 
-        // Detection Slot에서 최신 검출 결과 포인터 취득 (lock-free)
-        val detectionHandle = IrisLensSDK.getDetectionSlotPtr()
+        // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3, lock-free)
 
         // 디버그: 뷰티+LUT 설정 확인
         Log.d(
@@ -1030,55 +1115,65 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 중간 버퍼 (RGBA 텍스처 + FBO) 생성
      */
     private fun recreateIntermediateBuffers(width: Int, height: Int) {
-        // 기존 버퍼 삭제
-        if (rgbaTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(rgbaTextureId), 0)
+        // 기존 링버퍼 삭제
+        deleteRingBuffers()
+
+        // frame-sync RGBA 링버퍼 ringSize장 생성 (각 = 2D 텍스처 + FBO)
+        GLES31.glGenTextures(ringSize, ringTex, 0)
+        GLES31.glGenFramebuffers(ringSize, ringFbo, 0)
+        for (i in 0 until ringSize) {
+            GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, ringTex[i])
+            GLES31.glTexImage2D(
+                GLES31.GL_TEXTURE_2D, 0, GLES31.GL_RGBA,
+                width, height, 0,
+                GLES31.GL_RGBA, GLES31.GL_UNSIGNED_BYTE, null
+            )
+            GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR)
+            GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MAG_FILTER, GLES31.GL_LINEAR)
+            GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_S, GLES31.GL_CLAMP_TO_EDGE)
+            GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_T, GLES31.GL_CLAMP_TO_EDGE)
+
+            GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, ringFbo[i])
+            GLES31.glFramebufferTexture2D(
+                GLES31.GL_FRAMEBUFFER, GLES31.GL_COLOR_ATTACHMENT0,
+                GLES31.GL_TEXTURE_2D, ringTex[i], 0
+            )
+            val status = GLES31.glCheckFramebufferStatus(GLES31.GL_FRAMEBUFFER)
+            if (status != GLES31.GL_FRAMEBUFFER_COMPLETE) {
+                Log.e(TAG, "Ring FBO[$i] is not complete: $status")
+            }
+            ringTsNs[i] = 0L
         }
-        if (rgbaFboId != 0) {
-            GLES31.glDeleteFramebuffers(1, intArrayOf(rgbaFboId), 0)
-        }
-
-        // RGBA 텍스처 생성
-        val textures = IntArray(1)
-        GLES31.glGenTextures(1, textures, 0)
-        rgbaTextureId = textures[0]
-
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, rgbaTextureId)
-        GLES31.glTexImage2D(
-            GLES31.GL_TEXTURE_2D, 0, GLES31.GL_RGBA,
-            width, height, 0,
-            GLES31.GL_RGBA, GLES31.GL_UNSIGNED_BYTE, null
-        )
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MAG_FILTER, GLES31.GL_LINEAR)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_S, GLES31.GL_CLAMP_TO_EDGE)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_T, GLES31.GL_CLAMP_TO_EDGE)
-
-        // FBO 생성
-        val fbos = IntArray(1)
-        GLES31.glGenFramebuffers(1, fbos, 0)
-        rgbaFboId = fbos[0]
-
-        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, rgbaFboId)
-        GLES31.glFramebufferTexture2D(
-            GLES31.GL_FRAMEBUFFER, GLES31.GL_COLOR_ATTACHMENT0,
-            GLES31.GL_TEXTURE_2D, rgbaTextureId, 0
-        )
-
-        // FBO 상태 확인
-        val status = GLES31.glCheckFramebufferStatus(GLES31.GL_FRAMEBUFFER)
-        if (status != GLES31.GL_FRAMEBUFFER_COMPLETE) {
-            Log.e(TAG, "FBO is not complete: $status")
-        }
-
         GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+
+        // 링 상태 리셋 (크기 변경 시 묵은 프레임/타임스탬프 폐기)
+        ringWrite = 0
+        ringCount = 0
+        clockDomainStreak = 0
+        clockDomainChecked = false
+        clockDomainMismatch = false
+        clockDomainLastTs = 0L
 
         // 렌즈 FBO도 재생성
         if (lensFboId != 0) {
             createLensFbo()
         }
 
-        Log.d(TAG, "Intermediate buffers created: ${width}x${height}")
+        Log.d(TAG, "Intermediate ring buffers created: ${width}x${height} x$ringSize")
+    }
+
+    /** frame-sync 링버퍼(텍스처 + FBO) 일괄 해제. */
+    private fun deleteRingBuffers() {
+        for (i in 0 until ringSize) {
+            if (ringTex[i] != 0) {
+                GLES31.glDeleteTextures(1, intArrayOf(ringTex[i]), 0)
+                ringTex[i] = 0
+            }
+            if (ringFbo[i] != 0) {
+                GLES31.glDeleteFramebuffers(1, intArrayOf(ringFbo[i]), 0)
+                ringFbo[i] = 0
+            }
+        }
     }
 
     /**
@@ -1207,12 +1302,8 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         if (oesTextureId != 0) {
             GLES31.glDeleteTextures(1, intArrayOf(oesTextureId), 0)
         }
-        if (rgbaTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(rgbaTextureId), 0)
-        }
-        if (rgbaFboId != 0) {
-            GLES31.glDeleteFramebuffers(1, intArrayOf(rgbaFboId), 0)
-        }
+        // frame-sync 링버퍼 해제
+        deleteRingBuffers()
         if (quadVao != 0) {
             GLES31.glDeleteVertexArrays(1, intArrayOf(quadVao), 0)
         }

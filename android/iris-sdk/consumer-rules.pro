@@ -48,6 +48,21 @@
     public *;
 }
 
+# =============================================================================
+# 추적 글루 (W4-C: tracking/ → SDK AAR 승격)
+# =============================================================================
+
+# 공개 추적 API (FaceTracker / TasksToIrisResult / TrackingSnapshot / LandmarkIndices /
+# EmulatorDetector / math). 콜백 람다·생성자가 리플렉션/난독화에 깨지지 않게 보존.
+-keep public class com.irislenssdk.tracking.** {
+    public *;
+}
+
+# MediaPipe Tasks (tasks-vision) — iris-sdk api() 전이 의존. 네이티브 JNI·리플렉션
+# 로딩 클래스가 소비자 R8에서 제거되지 않게 보존(공식 권장 keep).
+-keep class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.**
+
 # 열거형 보존
 -keepclassmembers enum com.irislenssdk.kotlin.** {
     public static **[] values();

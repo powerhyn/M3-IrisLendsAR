@@ -18,8 +18,6 @@ package com.irislenssdk.kotlin
 
 import android.content.Context
 import com.irislenssdk.IrisLensSDK as JavaIrisLensSDK
-import com.irislenssdk.IrisResult as JavaIrisResult
-import com.irislenssdk.LensConfig as JavaLensConfig
 
 /**
  * IrisLensSDK Kotlin API.
@@ -67,12 +65,6 @@ class IrisLensSDKKt private constructor() {
     // ========================================================================
     // 내부 상태
     // ========================================================================
-
-    /**
-     * 재사용 가능한 Java 결과 객체.
-     * 할당 오버헤드 감소를 위해 재사용합니다.
-     */
-    private val reusableResult = JavaIrisResult()
 
     // ========================================================================
     // 초기화 API
@@ -139,6 +131,8 @@ class IrisLensSDKKt private constructor() {
      * @param path 텍스처 이미지 파일 경로
      * @return 성공 시 [Result.success], 실패 시 [Result.failure]
      */
+    @Deprecated("cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2). GPU 텍스처 렌즈 경로로 이행하세요.")
+    @Suppress("DEPRECATION")
     fun loadTexture(path: String): Result<Unit> {
         val errorCode = JavaIrisLensSDK.loadTexture(path)
         return errorCodeToResult(errorCode)
@@ -151,6 +145,8 @@ class IrisLensSDKKt private constructor() {
      * @param assetPath assets 내 상대 경로
      * @return 성공 시 [Result.success], 실패 시 [Result.failure]
      */
+    @Deprecated("cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2). GPU 텍스처 렌즈 경로로 이행하세요.")
+    @Suppress("DEPRECATION")
     fun loadTextureFromAssets(context: Context, assetPath: String): Result<Unit> {
         val errorCode = JavaIrisLensSDK.loadTextureFromAssets(context, assetPath)
         return errorCodeToResult(errorCode)
@@ -164,140 +160,11 @@ class IrisLensSDKKt private constructor() {
      * @param height 텍스처 높이
      * @return 성공 시 [Result.success], 실패 시 [Result.failure]
      */
+    @Deprecated("cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2). GPU 텍스처 렌즈 경로로 이행하세요.")
+    @Suppress("DEPRECATION")
     fun loadTextureFromMemory(data: ByteArray, width: Int, height: Int): Result<Unit> {
         val errorCode = JavaIrisLensSDK.loadTextureFromMemory(data, width, height)
         return errorCodeToResult(errorCode)
-    }
-
-    // ========================================================================
-    // 검출 API
-    // ========================================================================
-
-    /**
-     * 프레임에서 홍채를 검출합니다.
-     *
-     * 프레임 데이터는 수정되지 않습니다.
-     *
-     * @param frameData 프레임 데이터 (읽기 전용)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 프레임 포맷 (기본값: NV21)
-     * @return 성공 시 검출 결과, 실패 시 예외
-     */
-    fun detect(
-        frameData: ByteArray,
-        width: Int,
-        height: Int,
-        format: FrameFormat = FrameFormat.NV21
-    ): Result<IrisResultKt> {
-        // 버퍼 크기 검증
-        val expectedSize = FrameFormat.calculateBufferSize(format, width, height)
-        if (frameData.size < expectedSize) {
-            return Result.failure(
-                IrisException.InvalidParameter(
-                    "Buffer size mismatch: expected $expectedSize, got ${frameData.size}"
-                )
-            )
-        }
-
-        synchronized(reusableResult) {
-            reusableResult.reset()
-            val errorCode = JavaIrisLensSDK.detect(
-                frameData, width, height, format.value, reusableResult
-            )
-
-            return if (IrisException.isSuccess(errorCode)) {
-                Result.success(IrisResultKt.fromJava(reusableResult))
-            } else {
-                Result.failure(errorCode.toIrisException())
-            }
-        }
-    }
-
-    // ========================================================================
-    // 처리 API (검출 + 렌더링)
-    // ========================================================================
-
-    /**
-     * 프레임을 처리합니다 (검출 + 렌더링).
-     *
-     * frameData는 in-place로 수정됩니다.
-     *
-     * @param frameData 프레임 데이터 (수정됨)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 프레임 포맷 (기본값: NV21)
-     * @param config 렌더링 설정 (기본값: 기본 설정)
-     * @return 성공 시 처리 결과, 실패 시 예외
-     */
-    fun process(
-        frameData: ByteArray,
-        width: Int,
-        height: Int,
-        format: FrameFormat = FrameFormat.NV21,
-        config: LensConfigKt = LensConfigKt.Default
-    ): Result<ProcessResultKt> {
-        // 버퍼 크기 검증
-        val expectedSize = FrameFormat.calculateBufferSize(format, width, height)
-        if (frameData.size < expectedSize) {
-            return Result.failure(
-                IrisException.InvalidParameter(
-                    "Buffer size mismatch: expected $expectedSize, got ${frameData.size}"
-                )
-            )
-        }
-
-        val startTime = System.currentTimeMillis()
-        val javaConfig = config.toJava()
-
-        synchronized(reusableResult) {
-            reusableResult.reset()
-            val errorCode = JavaIrisLensSDK.process(
-                frameData, width, height, format.value, javaConfig, reusableResult
-            )
-
-            val renderTime = System.currentTimeMillis() - startTime
-            val irisResult = IrisResultKt.fromJava(reusableResult)
-
-            return if (IrisException.isSuccess(errorCode)) {
-                Result.success(
-                    ProcessResultKt(
-                        irisResult = irisResult,
-                        rendered = irisResult.isDetected,
-                        renderTimeMs = renderTime
-                    )
-                )
-            } else {
-                // 검출 실패해도 결과는 반환 (렌더링만 안됨)
-                if (errorCode == JavaIrisLensSDK.NO_FACE) {
-                    Result.success(ProcessResultKt.detectionOnly(irisResult))
-                } else {
-                    Result.failure(errorCode.toIrisException())
-                }
-            }
-        }
-    }
-
-    /**
-     * 검출만 수행하고 렌더링은 하지 않습니다.
-     *
-     * [detect]와 동일하지만 ProcessResultKt로 반환합니다.
-     *
-     * @param frameData 프레임 데이터 (읽기 전용)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 프레임 포맷
-     * @return 검출 결과
-     */
-    fun detectOnly(
-        frameData: ByteArray,
-        width: Int,
-        height: Int,
-        format: FrameFormat = FrameFormat.NV21
-    ): Result<ProcessResultKt> {
-        return detect(frameData, width, height, format).map { irisResult ->
-            ProcessResultKt.detectionOnly(irisResult)
-        }
     }
 
     // ========================================================================

@@ -36,25 +36,26 @@ namespace iris_sdk {
 //   - 미러는 렌더 단일 책임. 주입 좌표는 항상 비미러(센서 원본 upright).
 //   - 홍채 z(인덱스 468~477)는 기하 계산에 사용 금지.
 //
-// ⚠️ ③-1 동작 불변: 인덱스 라벨(left/right)은 ADR §7.3이 canonical 반전을 지적했으나,
-//    본 단계는 현 detector(mediapipe_detector.cpp)와 동일 파생을 강제한다 —
-//    detector는 left_iris ← 인덱스 468그룹, right_iris ← 인덱스 473그룹으로 채운다.
-//    라벨 일괄 정정은 ④(추적 교체) 시 골든 재기준선과 함께 수행한다.
+// ④ §7.3 canonical relabeling: left/right 라벨을 MediaPipe canonical 해부학 명명에
+//    정합한다(LandmarkIndices.kt 정본 — 468=RIGHT_IRIS=피험자 우안, 473=LEFT_IRIS=피험자 좌안).
+//    필드/상수 이름은 불변, 인덱스 그룹 값만 left↔right 교환한다.
+//    left_iris ← 473그룹(피험자 좌안), right_iris ← 468그룹(피험자 우안).
 namespace landmark_indices {
 
 /// 주입 계약: 점 수는 478 고정 (ADR §6.1 입력 유효성 — 478 외 거부)
 inline constexpr int kNumPoints = 478;
 
-/// IrisResult.left_iris ← {중심 468, 경계 469~472} (현 detector V2_LEFT_IRIS_INDICES 동일)
-inline constexpr std::array<int, 5> kLeftIris = {468, 469, 470, 471, 472};
+/// IrisResult.left_iris ← {중심 473, 경계 474~477} (canonical LEFT_IRIS = 피험자 좌안 §7.3)
+inline constexpr std::array<int, 5> kLeftIris = {473, 474, 475, 476, 477};
 
-/// IrisResult.right_iris ← {중심 473, 경계 474~477} (현 detector V2_RIGHT_IRIS_INDICES 동일)
-inline constexpr std::array<int, 5> kRightIris = {473, 474, 475, 476, 477};
+/// IrisResult.right_iris ← {중심 468, 경계 469~472} (canonical RIGHT_IRIS = 피험자 우안 §7.3)
+inline constexpr std::array<int, 5> kRightIris = {468, 469, 470, 471, 472};
 
-/// EAR 계산용 6점 (temporal_stabilizer.cpp kLeftEAR/kRightEAR 동일 — 동작 불변)
+/// EAR 계산용 6점 (temporal_stabilizer.cpp kLeftEAR/kRightEAR 동일)
 /// 순서: p1, p2, p3, p4, p5, p6 → EAR=(|p2-p6|+|p3-p5|)/(2·|p1-p4|)
-inline constexpr std::array<int, 6> kLeftEAR = {33, 160, 158, 133, 153, 144};
-inline constexpr std::array<int, 6> kRightEAR = {362, 385, 387, 263, 373, 380};
+/// canonical §7.3: kLeftEAR=362그룹(피험자 좌안), kRightEAR=33그룹(피험자 우안).
+inline constexpr std::array<int, 6> kLeftEAR = {362, 385, 387, 263, 373, 380};
+inline constexpr std::array<int, 6> kRightEAR = {33, 160, 158, 133, 153, 144};
 
 }  // namespace landmark_indices
 
@@ -66,7 +67,7 @@ inline constexpr std::array<int, 6> kRightEAR = {362, 385, 387, 263, 373, 380};
  * @brief 주입된 478점 + upright 프레임 치수로부터 IrisResult 파생값을 계산한다.
  *
  * 현 mediapipe_detector.cpp의 파생 수식을 동작 불변으로 재현한다:
- *   - 홍채 중심·5점: 인덱스 468그룹(left)/473그룹(right) 그대로 복사 (extractIrisFromFaceLandmarkV2)
+ *   - 홍채 중심·5점: 인덱스 473그룹(left=피험자 좌안)/468그룹(right=피험자 우안) 복사 (§7.3 canonical)
  *   - 반경: 중심에서 경계 4점까지 평균 픽셀 거리 (calculateIrisRadius — x·W, y·H 환산)
  *   - face_rect: 478점 메시 바운딩 박스, 정규화 좌표 (0~1 범위 점만 집계)
  *   - eyelid_ratio_left/right: 0.0f (현 detector가 W3 미구현으로 0 고정 — 동작 불변)
@@ -96,7 +97,7 @@ IrisResult deriveIrisResult(const float* pts,
  * ADR §7.0은 픽셀 환산을 요구하나 그것은 ③-2 결함 수리 범위이며, ③-1은 동작 불변이다.
  *
  * @param mesh   478점 face_mesh (IrisLandmark 배열).
- * @param left_eye true=좌안(kLeftEAR), false=우안(kRightEAR).
+ * @param left_eye true=피험자 좌안(kLeftEAR=362그룹), false=피험자 우안(kRightEAR=33그룹). §7.3
  * @return EAR 값. mesh 무효(수평거리 ≈0) 시 0.0f.
  */
 float computeEyeAspectRatio(const IrisLandmark* mesh, bool left_eye);

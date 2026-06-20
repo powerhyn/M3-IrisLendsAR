@@ -155,9 +155,17 @@ IrisResult deriveIrisResult(const float* pts,
     result.eyelid_ratio_left = 0.0f;
     result.eyelid_ratio_right = 0.0f;
 
-    // confidence는 ADR §6.2대로 경계에서 제거(주입에 face detection score 부재).
-    // 게이팅은 visibility(EAR 파생)로 일원화. 여기서는 0.0f 유지(IrisResult{} 초기값).
-    // iris_quality_*, eye_refiner_used 등 detector 전용 메타도 0/false 유지(ADR §6.2 삭제 대상).
+    // confidence: 주입에는 face detection score가 없다(ADR §6.2 — MediaPipe Tasks 미노출).
+    // 게이팅은 visibility(EAR 파생)로 일원화하되, 어댑터(eye_render_packet_adapter.cpp:89)의
+    //   visibility = confidence * (1 - eyelid_ratio)
+    // 곱셈식에서 confidence가 게이트를 닫지 않도록 '게이트 통과 상수' 1.0으로 고정한다
+    // (곱셈 항등원 — visibility가 정확히 (1 - eyelid_ratio)로 환원되어 §6.2 "visibility 일원화"
+    // 효과를 달성). detector 경로(face_confidence * eye_factor)와 달리 측정값이 아닌 상수이며,
+    // 데모 Kotlin 형제(TasksToIrisResult.kt:122 out.confidence=1.0)와 동일 계약이다.
+    // presence 게이트("검출 실패=주입 부재")는 detected(어댑터 side별 early-return)가 담당하므로
+    // 미검출(detected=false)이면 0.0 — 어댑터가 어차피 visibility=0으로 닫는다.
+    result.confidence = result.detected ? 1.0f : 0.0f;
+    // iris_quality_*, eye_refiner_used 등 detector 전용 메타는 0/false 유지(ADR §6.2 삭제 대상).
 
     return result;
 }

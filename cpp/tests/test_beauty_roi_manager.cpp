@@ -66,8 +66,11 @@ private:
     }
 
     static void setEyeLandmarks(IrisLandmark* landmarks) {
-        // 왼쪽 눈: 중앙 위쪽 왼편
-        const int left_indices[] = {
+        // BeautyROIManager.LEFT_EYE_INDICES와 동일한 33그룹을 채운다.
+        // ④ §7.3 canonical: 33그룹은 피험자 우안(canonical RIGHT). 눈 보호 마스크는
+        //   양쪽을 union으로 마킹하므로 left/right 라벨은 동작 무관(아래 변수명은 소스
+        //   상수명 LEFT_EYE_INDICES와의 대응 유지를 위해 보존). 좌표는 화면 좌측 배치.
+        const int left_indices[] = {  // = LEFT_EYE_INDICES (33그룹 = 피험자 우안)
             33, 7, 163, 144, 145, 153, 154, 155, 133,
             173, 157, 158, 159, 160, 161, 246
         };
@@ -78,8 +81,9 @@ private:
             landmarks[left_indices[i]].visibility = 1.0f;
         }
 
-        // 오른쪽 눈: 중앙 위쪽 오른편
-        const int right_indices[] = {
+        // BeautyROIManager.RIGHT_EYE_INDICES와 동일한 362그룹을 채운다.
+        // ④ §7.3 canonical: 362그룹은 피험자 좌안(canonical LEFT). 좌표는 화면 우측 배치.
+        const int right_indices[] = {  // = RIGHT_EYE_INDICES (362그룹 = 피험자 좌안)
             362, 382, 381, 380, 374, 373, 390, 249, 263,
             466, 388, 387, 386, 385, 384, 398
         };

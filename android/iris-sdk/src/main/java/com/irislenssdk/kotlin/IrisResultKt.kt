@@ -103,6 +103,14 @@ data class FaceRotation(
  * @property frameWidth 프레임 너비 (픽셀)
  * @property frameHeight 프레임 높이 (픽셀)
  * @property timestampMs 타임스탬프 (밀리초)
+ * @property eyelidRatioLeft 왼쪽 눈꺼풀 가림 비율 (W3용 별도 트랙)
+ * @property eyelidRatioRight 오른쪽 눈꺼풀 가림 비율 (W3용 별도 트랙)
+ * @property avgIrisLumaLeft 왼쪽 홍채 ROI 평균 linear luma (P7-W2 렌즈 색 적응, srgb²·Rec.709, -1=미측정)
+ * @property avgIrisLumaRight 오른쪽 홍채 ROI 평균 linear luma (-1=미측정)
+ *
+ * 부재 필드(의도적 — Java IrisResult/C++에는 존재, Kotlin 경량 DTO는 미포함):
+ * - faceMesh[478]: 디버그/시각화용 코어·JNI 보유 필드. Kotlin 호출자 요구 발생 시 데모 렌더 로직과
+ *   함께 재검토. (avgIrisLumaLeft/Right는 ④ W4-B4에서 SDK AAR 계약으로 승격되어 아래에 노출됨.)
  */
 data class IrisResultKt(
     val isDetected: Boolean,
@@ -118,11 +126,11 @@ data class IrisResultKt(
     val frameWidth: Int,
     val frameHeight: Int,
     val timestampMs: Long,
-    val irisQualityLeft: Float = 0f,
-    val irisQualityRight: Float = 0f,
-    val eyelidRatioLeft: Float = 0f,
-    val eyelidRatioRight: Float = 0f,
-    val eyeRefinerUsed: Boolean = false
+    val eyelidRatioLeft: Float = 0f,   // W3용 별도 트랙
+    val eyelidRatioRight: Float = 0f,  // W3용 별도 트랙
+    // ④ W4-B4: P7-W2 홍채 ROI 평균 linear luma (렌즈 색 적응). -1=미측정. SDK AAR 계약으로 승격.
+    val avgIrisLumaLeft: Float = -1f,
+    val avgIrisLumaRight: Float = -1f
 ) {
     /**
      * 양쪽 눈 모두 검출되었는지 확인합니다.
@@ -180,11 +188,10 @@ data class IrisResultKt(
             frameWidth = 0,
             frameHeight = 0,
             timestampMs = 0,
-            irisQualityLeft = 0f,
-            irisQualityRight = 0f,
             eyelidRatioLeft = 0f,
             eyelidRatioRight = 0f,
-            eyeRefinerUsed = false
+            avgIrisLumaLeft = -1f,
+            avgIrisLumaRight = -1f
         )
 
         /**
@@ -229,11 +236,10 @@ data class IrisResultKt(
                 frameWidth = java.frameWidth,
                 frameHeight = java.frameHeight,
                 timestampMs = java.timestampMs,
-                irisQualityLeft = java.irisQualityLeft,
-                irisQualityRight = java.irisQualityRight,
                 eyelidRatioLeft = java.eyelidRatioLeft,
                 eyelidRatioRight = java.eyelidRatioRight,
-                eyeRefinerUsed = java.eyeRefinerUsed
+                avgIrisLumaLeft = java.avgIrisLumaLeft,
+                avgIrisLumaRight = java.avgIrisLumaRight
             )
         }
     }

@@ -32,8 +32,9 @@ bool FaceWarpController::applyWarp(GridMesh& mesh,
         return false;
     }
 
-    // ③-2 B3: 사용 최대 인덱스가 RIGHT_IRIS_CENTER(473)이므로 그보다 짧은 배열은
-    // 기존에 out-of-bounds 읽기(UB)였다 — 명시 거부로 전환 (정상 478 호출자는 불변).
+    // ③-2 B3: 사용 최대 인덱스가 LEFT_IRIS_CENTER(473, ④ §7.3 canonical 후)이므로
+    // 그보다 짧은 배열은 기존에 out-of-bounds 읽기(UB)였다 — 명시 거부로 전환
+    // (kMinWarpLandmarkCount=474 = max index+1 불변, 정상 478 호출자도 불변).
     if (landmark_count < kMinWarpLandmarkCount) {
         return false;
     }

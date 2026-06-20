@@ -94,6 +94,17 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
+    // W4-B3: setLandmarkFrameTimestamp 제거 — 분석 프레임 센서 ns는 이제 IrisLensSDK.updateDetectionSlot(
+    // result, frameTsNs)로 렌즈 좌표와 한 슬롯에 원자 결속된다. 별도 ts 사이드채널 폐기로 frame-sync
+    // 배경/렌즈 1프레임 스큐 제거.
+
+    /** frame-sync 킬스위치 토글 (UI 스레드 → GL 스레드에서 강등 상태 리셋). */
+    fun setFrameSyncEnabled(enabled: Boolean) {
+        queueEvent {
+            glRenderer.setFrameSyncEnabled(enabled)
+        }
+    }
+
     /**
      * Temporal 상태 리셋 (onResume 시 호출)
      */

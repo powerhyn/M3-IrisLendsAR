@@ -80,6 +80,15 @@
             android:textColor="@android:color/holo_blue_light"
             android:textSize="14sp" />
 
+        <!-- ③-3 A/B HUD 1줄 (REFACTOR-3-3 §4.2) — 추적 공급자/듀얼 측정 요약 -->
+        <TextView
+            android:id="@+id/tvAbHud"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TRK:LEGACY"
+            android:textColor="#FFFFB300"
+            android:textSize="12sp" />
+
     </LinearLayout>
 
     <!-- 디버그 토글 버튼 -->
@@ -282,6 +291,34 @@
             android:layout_width="72dp"
             android:layout_height="36dp"
             android:text="skin:off"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:minWidth="0dp"
+            android:backgroundTint="#66555555"
+            style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+    </LinearLayout>
+
+    <!-- W4-D: TASKS 단일 경로 — frame-sync 킬스위치만 유지 (추적 공급자 토글/듀얼 A/B 측정 제거) -->
+    <LinearLayout
+        android:id="@+id/p33AbPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="16dp"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:background="#80000000"
+        app:layout_constraintTop_toBottomOf="@id/w6BenchPanel"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <Button
+            android:id="@+id/btnFrameSync"
+            android:layout_width="80dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="2dp"
+            android:text="fsync:off"
             android:textSize="12sp"
             android:textStyle="bold"
             android:textAllCaps="false"

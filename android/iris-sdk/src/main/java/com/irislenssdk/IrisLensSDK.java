@@ -237,7 +237,10 @@ public final class IrisLensSDK {
      *
      * @param path 텍스처 이미지 파일 경로 (PNG, JPEG, BMP)
      * @return 에러 코드 (OK = 성공)
+     * @deprecated cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 렌즈 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int loadTexture(@NonNull String path) {
         if (!sLibraryLoaded) {
             return NOT_INITIALIZED;
@@ -251,7 +254,10 @@ public final class IrisLensSDK {
      * @param context Android Context
      * @param assetPath assets 내 상대 경로
      * @return 에러 코드 (OK = 성공)
+     * @deprecated cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 렌즈 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int loadTextureFromAssets(@NonNull Context context, @NonNull String assetPath) {
         if (!sLibraryLoaded) {
             return NOT_INITIALIZED;
@@ -285,80 +291,15 @@ public final class IrisLensSDK {
      * @param width 텍스처 너비
      * @param height 텍스처 높이
      * @return 에러 코드 (OK = 성공)
+     * @deprecated cpu-render(CPU 렌즈) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 렌즈 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int loadTextureFromMemory(@NonNull byte[] data, int width, int height) {
         if (!sLibraryLoaded) {
             return NOT_INITIALIZED;
         }
         return nativeLoadTextureFromMemory(data, width, height);
-    }
-
-    // ========================================================================
-    // 검출/처리 API
-    // ========================================================================
-
-    /**
-     * 프레임에서 홍채를 검출합니다.
-     *
-     * @param frameData 프레임 데이터 (읽기 전용)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 프레임 포맷 (FORMAT_* 상수)
-     * @param result 검출 결과 출력 객체
-     * @return 에러 코드 (OK = 성공)
-     */
-    public static int detect(@NonNull byte[] frameData, int width, int height,
-                             int format, @NonNull IrisResult result) {
-        if (!sLibraryLoaded) {
-            return NOT_INITIALIZED;
-        }
-        return nativeDetect(frameData, width, height, format, result);
-    }
-
-    /**
-     * 회전을 고려하여 프레임에서 홍채를 검출합니다.
-     *
-     * <p>Android 카메라는 센서 방향에 따라 회전된 이미지를 출력합니다.
-     * CameraX ImageProxy.imageInfo.rotationDegrees 값을 전달하여
-     * 올바른 방향으로 검출을 수행합니다.</p>
-     *
-     * @param frameData 프레임 데이터 (읽기 전용)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 프레임 포맷 (FORMAT_* 상수)
-     * @param rotationDegrees 이미지 회전 각도 (0, 90, 180, 270)
-     * @param result 검출 결과 출력 객체
-     * @return 에러 코드 (OK = 성공)
-     */
-    public static int detectWithRotation(@NonNull byte[] frameData, int width, int height,
-                                          int format, int rotationDegrees,
-                                          @NonNull IrisResult result) {
-        if (!sLibraryLoaded) {
-            return NOT_INITIALIZED;
-        }
-        return nativeDetectWithRotation(frameData, width, height, format, rotationDegrees, result);
-    }
-
-    /**
-     * 프레임을 처리합니다 (검출 + 렌더링).
-     *
-     * <p>프레임 데이터는 in-place로 수정됩니다.</p>
-     *
-     * @param frameData 프레임 데이터 (수정됨)
-     * @param width 프레임 너비
-     * @param height 프레임 높이
-     * @param format 프레임 포맷 (FORMAT_* 상수)
-     * @param config 렌더링 설정 (null이면 검출만 수행)
-     * @param result 검출 결과 출력 객체 (null 가능)
-     * @return 에러 코드 (OK = 성공)
-     */
-    public static int process(@NonNull byte[] frameData, int width, int height,
-                              int format, @Nullable LensConfig config,
-                              @Nullable IrisResult result) {
-        if (!sLibraryLoaded) {
-            return NOT_INITIALIZED;
-        }
-        return nativeProcess(frameData, width, height, format, config, result);
     }
 
     // ========================================================================
@@ -697,7 +638,10 @@ public final class IrisLensSDK {
      * @param config V2 뷰티 필터 설정
      * @param result 얼굴 검출 결과 (null 가능, null이면 전체 프레임 처리)
      * @return 에러 코드 (OK = 성공)
+     * @deprecated CPU 뷰티(CPU 픽셀 버퍼) 경로는 2.0에서 제거됩니다(ADR-0001 §8.2).
+     *             GPU 텍스처 뷰티 경로로 이행하세요. 1.x에서는 동작이 유지됩니다.
      */
+    @Deprecated(forRemoval = true)
     public static int applyBeautyFilterV2(@NonNull byte[] frameData, int width, int height,
                                            int format, @NonNull BeautyFilterConfigV2 config,
                                            @Nullable IrisResult result) {
@@ -1103,7 +1047,8 @@ public final class IrisLensSDK {
 
     /**
      * P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글.
-     * false=fallback(0.1225, 기본, 안전 롤백), true=detector 실측 사용.
+     * true=실측 사용(기본 — 코어 use_measured_luma_=true), false=fallback(0.1225, 안전 롤백).
+     * ④ W4-D 이후 측정 주체=플랫폼 글루(TasksToIrisResult.fillIrisLuma, per-eye Rec.709) — 코어 detector 아님.
      * @param enabled true=실측, false=fallback.
      */
     public static void setUseMeasuredLuma(boolean enabled) {
@@ -1131,16 +1076,21 @@ public final class IrisLensSDK {
     // ========================================================================
 
     /**
-     * Detection 슬롯에 최신 검출 결과를 기록합니다.
+     * Detection 슬롯에 최신 검출 결과 + 분석 프레임 센서 타임스탬프(ns)를 기록합니다.
      *
      * <p>Analyzer 스레드에서 검출 완료 후 호출합니다.
      * 내부적으로 더블 버퍼를 사용하여 GL 스레드와 lock-free로 데이터를 공유합니다.</p>
      *
+     * <p>frameTsNs는 검출 좌표와 한 슬롯에 원자 결속되어, GL 스레드가
+     * {@link #getActiveDetectionSlot(long[])}로 좌표·ts·detected를 단일 스냅샷으로
+     * 읽을 수 있게 한다 — frame-sync 배경/렌즈 1프레임 스큐 제거 (W4-B3).</p>
+     *
      * @param result 검출 결과
+     * @param frameTsNs 이 검출이 계산된 분석 프레임의 센서 타임스탬프 (ns)
      */
-    public static void updateDetectionSlot(@NonNull IrisResult result) {
+    public static void updateDetectionSlot(@NonNull IrisResult result, long frameTsNs) {
         if (sLibraryLoaded) {
-            nativeUpdateDetectionSlot(result);
+            nativeUpdateDetectionSlot(result, frameTsNs);
         }
     }
 
@@ -1152,12 +1102,34 @@ public final class IrisLensSDK {
      * detectionHandle 파라미터에 전달합니다.</p>
      *
      * @return 네이티브 IrisResult 포인터 (유효하지 않으면 0L)
+     * @deprecated W4-B3: ts·detected 원자 동반이 필요하면 {@link #getActiveDetectionSlot(long[])}
+     *             사용. 이 함수는 active index를 단독 재읽기하므로 ts/렌즈 게이트와 결합 시 race 가능.
      */
+    @Deprecated
     public static long getDetectionSlotPtr() {
         if (!sLibraryLoaded) {
             return 0L;
         }
         return nativeGetDetectionSlotPtr();
+    }
+
+    /**
+     * Detection 슬롯의 data 포인터 + 메타(센서 ts·detected)를 단일 스냅샷으로 가져옵니다.
+     *
+     * <p>GL 스레드에서 프레임당 1회 호출하여 배경 슬롯 선택용 ts, 렌즈 게이트용 detected,
+     * 렌즈 렌더용 좌표 포인터를 <b>모두 같은 슬롯</b>에서 얻습니다. active index를 1회만
+     * 읽으므로 좌표·ts·detected가 서로 다른 프레임이 되는 frame-sync 스큐가 원천 제거됩니다.</p>
+     *
+     * @param outMeta 길이 ≥ 2 배열(호출자 재사용 권장) — outMeta[0]=frameTsNs, outMeta[1]=detected?1:0
+     * @return 활성 슬롯 IrisResult 네이티브 포인터 (유효하지 않으면 0L, outMeta={0,0})
+     */
+    public static long getActiveDetectionSlot(@NonNull long[] outMeta) {
+        if (!sLibraryLoaded) {
+            outMeta[0] = 0L;
+            outMeta[1] = 0L;
+            return 0L;
+        }
+        return nativeGetActiveDetectionSlot(outMeta);
     }
 
     /**
@@ -1169,6 +1141,65 @@ public final class IrisLensSDK {
         if (sLibraryLoaded) {
             nativeReleaseDetectionSlot();
         }
+    }
+
+    // ========================================================================
+    // 랜드마크 주입 경계 API (③-3 §3-2 — ADR-0001 §6)
+    // ========================================================================
+
+    /**
+     * 478점 랜드마크 + upright 프레임 치수 + 타임스탬프를 코어로 주입합니다.
+     *
+     * <p>외부 추적기(MediaPipe Tasks 등)가 산출한 478×3 정규화 좌표(upright, 비미러 —
+     * ADR §7.1/§7.4)를 코어에 주입합니다. 코어가 호출 내에서 deep-copy하며,
+     * 478점·프레임 치수·타임스탬프가 한 세대(generation)에 원자 결속됩니다.</p>
+     *
+     * @param pts478x3 478×3 정규화 좌표 (배열 길이 ≥ 1434 필수)
+     * @param frameWidth upright 프레임 너비 (px) — 파생 어댑터 픽셀 환산 기준
+     * @param frameHeight upright 프레임 높이 (px)
+     * @param timestampUs 단조 증가 타임스탬프 (µs) — One-Euro dt 산출용
+     * @return 에러 코드 (OK = 성공, INVALID_PARAM = 길이/치수/NaN 거부, NULL_POINTER = pts null)
+     */
+    public static int setLandmarks(@NonNull float[] pts478x3, int frameWidth,
+                                   int frameHeight, long timestampUs) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeSetLandmarks(pts478x3, frameWidth, frameHeight, timestampUs);
+    }
+
+    /**
+     * 현재 주입 세대 번호를 반환합니다.
+     *
+     * <p>0 = 미주입(주입 이력 없음). setLandmarks 성공마다 증가합니다.
+     * 호출자가 새 주입 도착을 감지하거나 슬롯 일관성을 검증하는 용도입니다.</p>
+     *
+     * @return 세대 번호 (라이브러리 미로드 시 0)
+     */
+    public static long getLandmarkGeneration() {
+        if (!sLibraryLoaded) {
+            return 0L;
+        }
+        return nativeGetLandmarkGeneration();
+    }
+
+    /**
+     * 주입된 랜드마크에서 파생된 IrisResult를 조회합니다.
+     *
+     * <p>setLandmarks로 주입된 478점에서 코어 어댑터가 유도한 파생 결과
+     * (홍채 중심·반경, EAR→visibility, face_rect)를 result에 채웁니다.
+     * 내부 detect 경로(detect*)와 별개의 주입 전용 채널입니다.</p>
+     *
+     * <p>미주입 시 NO_FACE를 반환하며 result는 미변경으로 남습니다.</p>
+     *
+     * @param result 파생 결과 출력 객체
+     * @return 에러 코드 (OK = 결과 있음, NO_FACE = 미주입, NULL_POINTER = result null)
+     */
+    public static int getInjectedResult(@NonNull IrisResult result) {
+        if (!sLibraryLoaded) {
+            return NOT_INITIALIZED;
+        }
+        return nativeGetInjectedResult(result);
     }
 
     // ========================================================================
@@ -1357,14 +1388,6 @@ public final class IrisLensSDK {
     private static native int nativeLoadTexture(String path);
     private static native int nativeLoadTextureFromMemory(byte[] data, int width, int height);
 
-    private static native int nativeDetect(byte[] frameData, int width, int height,
-                                           int format, IrisResult result);
-    private static native int nativeDetectWithRotation(byte[] frameData, int width, int height,
-                                                        int format, int rotationDegrees,
-                                                        IrisResult result);
-    private static native int nativeProcess(byte[] frameData, int width, int height,
-                                            int format, LensConfig config, IrisResult result);
-
     private static native int nativeSetConfig(String key, String value);
 
     // GPU 가속 API
@@ -1504,18 +1527,39 @@ public final class IrisLensSDK {
     // ========================================================================
 
     /**
-     * Detection 슬롯에 검출 결과 기록 (Analyzer → GL 더블 버퍼)
+     * Detection 슬롯에 검출 결과 + 분석 프레임 센서 ns 기록 (Analyzer → GL 더블 버퍼).
+     * frameTsNs는 슬롯 좌표와 원자 결속되어 frame-sync 1프레임 스큐를 제거한다 (W4-B3).
      */
-    private static native void nativeUpdateDetectionSlot(IrisResult result);
+    private static native void nativeUpdateDetectionSlot(IrisResult result, long frameTsNs);
 
     /**
      * Detection 슬롯에서 활성 IrisResult 포인터 반환
      * @return 네이티브 포인터 (jlong), 유효하지 않으면 0L
+     * @deprecated W4-B3: ts·detected 원자 동반이 필요하면 {@link #nativeGetActiveDetectionSlot(long[])}
+     *             사용. 이 함수는 active index를 단독 재읽기하므로 ts/게이트와 결합 시 race 가능.
      */
+    @Deprecated
     private static native long nativeGetDetectionSlotPtr();
+
+    /**
+     * Detection 슬롯의 data 포인터 + 메타(ts·detected)를 단일 스냅샷으로 반환.
+     * active index를 1회만 읽어 ptr·ts·detected가 같은 슬롯에서 오는 것을 보장한다 (W4-B3).
+     * @param outMeta 길이 ≥ 2 배열 — outMeta[0]=frameTsNs, outMeta[1]=detected?1:0
+     * @return 활성 슬롯 IrisResult 포인터 (jlong), 유효하지 않으면 0L (outMeta={0,0})
+     */
+    private static native long nativeGetActiveDetectionSlot(long[] outMeta);
 
     /**
      * Detection 슬롯 해제
      */
     private static native void nativeReleaseDetectionSlot();
+
+    // ========================================================================
+    // 랜드마크 주입 경계 (③-3 §3-2 — ADR-0001 §6)
+    // ========================================================================
+
+    private static native int nativeSetLandmarks(float[] pts478x3, int frameWidth,
+                                                 int frameHeight, long timestampUs);
+    private static native long nativeGetLandmarkGeneration();
+    private static native int nativeGetInjectedResult(IrisResult out);
 }

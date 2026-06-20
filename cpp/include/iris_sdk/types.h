@@ -81,26 +81,11 @@ enum class ErrorCode : int {
     Unknown = 999               ///< 알 수 없는 에러
 };
 
-/**
- * @brief 검출기 타입 열거형
- * 홍채 검출에 사용할 검출기 종류
- */
-enum class DetectorType : int {
-    Unknown = 0,    ///< 알 수 없음
-    MediaPipe = 1,  ///< MediaPipe Face Mesh + Iris
-    EyeOnly = 2,    ///< 눈 영역 전용 커스텀 모델
-    Hybrid = 3      ///< MediaPipe + EyeOnly 하이브리드
-};
-
-/**
- * @brief Eye Refiner 실행 정책
- * 2차 눈 정밀화 모델의 실행 조건
- */
-enum class EyeRefinerPolicy : int {
-    Always = 0,       ///< 항상 실행 (HQ 모드: 사진 촬영, 녹화)
-    Conditional = 1,  ///< 조건부 실행 (기본값: confidence < 0.7 또는 iris_radius 작을 때)
-    Never = 2         ///< 비활성화 (저사양 기기)
-};
+// ④ W4-D: enum class DetectorType / EyeRefinerPolicy 제거.
+//   검출 인프라(iris_detector·mediapipe_detector·inference_thread) 물리 제거에 동반.
+//   추적 외부화로 코어는 검출/추적·Eye Refiner를 보유하지 않는다(ADR §3/§6.2).
+//   C 미러 IrisEyeRefinerPolicy(sdk_api.h) + no-op stub iris_sdk_set_eye_refiner_policy는
+//   ABI 호환을 위해 W4-E deprecation까지 보존된다.
 
 // ============================================================
 // 기본 데이터 구조체
@@ -144,12 +129,12 @@ struct Rect {
  * 양쪽 눈의 홍채 정보 및 얼굴 메타데이터
  * POD 타입 - FFI 호환
  *
- * left/right 명명 계약 (ADR-0001 §7.3):
- *   - 인덱스가 정본이고 라벨은 보조 표기다. left_iris ← face_mesh 인덱스 468그룹
- *     {468,469,470,471,472}, right_iris ← 473그룹 {473,474,475,476,477}.
- *   - ⚠️ 현 코어 라벨은 MediaPipe canonical 해부학 명명과 반전돼 있다(§7.3 — 코드 'left'=
- *     468그룹=canonical FACEMESH_RIGHT). ③-1(동작 불변)은 현 라벨을 유지한다. canonical
- *     기준 일괄 정정은 ④(추적 교체) 시 골든 재기준선과 함께 수행한다.
+ * left/right 명명 계약 (ADR-0001 §7.3 — ④ canonical relabeling 적용 후):
+ *   - 인덱스가 정본이고 라벨은 보조 표기다. left_iris ← face_mesh 인덱스 473그룹
+ *     {473,474,475,476,477}=피험자 좌안(canonical LEFT_IRIS), right_iris ← 468그룹
+ *     {468,469,470,471,472}=피험자 우안(canonical RIGHT_IRIS). 명명 정본 = LandmarkIndices.kt.
+ *   - left=피험자 좌안 / right=피험자 우안으로 MediaPipe canonical 해부학 명명에 정합됐다(§7.3).
+ *     비미러(센서 원본 upright)에서 피험자 좌안은 화면 우측에 보인다.
  *   - 화면 기준 게이트(데모 applyLeft 등)는 screen_left/screen_right로 명시 분리하고
  *     해부학 라벨과 혼용을 금지한다(§7.3).
  *
@@ -163,14 +148,17 @@ struct IrisResult {
     bool left_detected;     ///< 왼쪽 눈 검출 여부
     bool right_detected;    ///< 오른쪽 눈 검출 여부
     float confidence;       ///< 전체 신뢰도 (0.0~1.0)
-                            ///<   주입 경로(§6.2): confidence는 경계에서 제거(MediaPipe Tasks
-                            ///<   미노출). 검출 실패=주입 부재, 게이팅은 visibility(EAR 파생)로 일원화.
+                            ///<   detector 경로: face_confidence * eye_factor (측정값).
+                            ///<   주입 경로(§6.2): MediaPipe Tasks가 score 미노출 → 측정값 부재.
+                            ///<   게이팅을 visibility(EAR 파생)로 일원화하기 위해 detected 시 게이트
+                            ///<   통과 상수 1.0(곱셈 항등원), 미검출 시 0.0으로 고정한다. presence
+                            ///<   게이트는 detected/visibility가 담당(deriveIrisResult 참조).
 
-    // 왼쪽 눈 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 468 (§7.3 계약)
+    // 피험자 좌안 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 473 (§7.3 canonical)
     IrisLandmark left_iris[5];
-    float left_radius;      ///< 왼쪽 홍채 반지름 (픽셀 — 중심↔경계 평균 거리, 픽셀 환산 §7.0)
+    float left_radius;      ///< 피험자 좌안 홍채 반지름 (픽셀 — 중심↔경계 평균 거리, 픽셀 환산 §7.0)
 
-    // 오른쪽 눈 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 473 (§7.3 계약)
+    // 피험자 우안 홍채 (5개 랜드마크: center + 4 boundary). center=인덱스 468 (§7.3 canonical)
     IrisLandmark right_iris[5];
     float right_radius;     ///< 오른쪽 홍채 반지름 (픽셀 — 픽셀 환산 §7.0)
 
@@ -188,12 +176,11 @@ struct IrisResult {
     int32_t frame_width;    ///< 원본 프레임 너비
     int32_t frame_height;   ///< 원본 프레임 높이
 
-    // Eye Refiner 메타데이터
-    float iris_quality_left;    ///< 왼쪽 홍채 품질 점수 (0.0~1.0, Eye Refiner 사용시)
-    float iris_quality_right;   ///< 오른쪽 홍채 품질 점수 (0.0~1.0, Eye Refiner 사용시)
+    // 눈꺼풀 가림 비율 (W3 트랙)
+    // ④ W4-D: detector 전용 메타 iris_quality_*/eye_refiner_used 제거(ADR §6.2).
+    //   eyelid_ratio_*는 W3용 별도 트랙, avg_iris_luma_*(아래)는 P7-W2 활성 필드 — 보존.
     float eyelid_ratio_left;    ///< 왼쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
     float eyelid_ratio_right;   ///< 오른쪽 눈꺼풀 가림 비율 (0.0~1.0, 향후 W3용)
-    bool eye_refiner_used;      ///< Eye Refiner 사용 여부 (디버그용)
 
     // P7-W2 §5.5: iris ROI 실측 평균 luma (srgb²+Rec.709 linear, 0~1).
     // 미측정/미검출 시 -1.0f sentinel. C IrisResult(sdk_api.h)와 reinterpret_cast로

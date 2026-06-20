@@ -106,12 +106,16 @@ protected:
         // Left Eye Setup
         // ========================================
 
-        // Left iris center (468)
+        // ④ §7.3 canonical: iris/contour/eyebrow triple이 한 눈을 가리키도록 좌표를 정합한다.
+        //   LEFT triple = (LEFT_IRIS_CENTER=473, 362그룹 contour, 300계열 eyebrow) → 0.35
+        //   RIGHT triple = (RIGHT_IRIS_CENTER=468, 33그룹 contour, 70계열 eyebrow) → 0.65
+        //   아래 두 좌표 블록은 인덱스 그룹은 그대로 두고 eye center(cx)만 그룹에 맞춰 스왑한다.
+        // LEFT iris center (473, 피험자 좌안) — 0.35
         face_mesh_[FaceWarpController::LEFT_IRIS_CENTER].x = 0.35f;
         face_mesh_[FaceWarpController::LEFT_IRIS_CENTER].y = 0.35f;
 
-        // Left eye contour - create a realistic eye shape
-        const float left_cx = 0.35f;  // Eye center X
+        // 33그룹 contour - canonical RIGHT_EYE_CONTOUR(피험자 우안). RIGHT iris(0.65)와 정합.
+        const float left_cx = 0.65f;  // 33그룹 eye center X (RIGHT iris=468 위치)
         const float left_cy = 0.35f;  // Eye center Y
         const float eye_rx = 0.03f;   // Horizontal radius
         const float eye_ry = 0.015f;  // Vertical radius
@@ -153,11 +157,12 @@ protected:
         // Right Eye Setup (mirrored)
         // ========================================
 
-        // Right iris center (473)
+        // RIGHT iris center (468, 피험자 우안) — 0.65 (위 33그룹 contour 블록 left_cx와 정합)
         face_mesh_[FaceWarpController::RIGHT_IRIS_CENTER].x = 0.65f;
         face_mesh_[FaceWarpController::RIGHT_IRIS_CENTER].y = 0.35f;
 
-        const float right_cx = 0.65f;
+        // 362그룹 contour - canonical LEFT_EYE_CONTOUR(피험자 좌안). LEFT iris(0.35)와 정합.
+        const float right_cx = 0.35f;  // 362그룹 eye center X (LEFT iris=473 위치)
         const float right_cy = 0.35f;
 
         // Upper lid landmarks

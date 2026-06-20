@@ -19,7 +19,7 @@ android {
         applicationId = "com.irislenssdk.demo"
         minSdk = 24
         targetSdk = 34
-        versionCode = 279
+        versionCode = 280
         versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -81,8 +81,9 @@ dependencies {
     // IrisLensSDK (로컬 모듈)
     implementation(project(":iris-sdk"))
 
-    // MediaPipe Tasks Vision (Face Landmarker for benchmark comparison)
-    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    // MediaPipe Tasks Vision (Face Landmarker): W4-C에서 iris-sdk로 이관 — api()로 전이 제공.
+    //   데모(AbMeasure A/B 하니스·MediaPipeBenchmarkActivity)는 transitive로 계속 사용.
+    //   버전 고정(0.10.35)은 iris-sdk/build.gradle.kts에서 단일 관리(ADR-0001 §5).
 
     // AndroidX Core
     implementation("androidx.core:core-ktx:1.12.0")
@@ -97,7 +98,9 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
     // CameraX (카메라 프리뷰 및 분석)
-    val cameraxVersion = "1.3.1"
+    // ④ W4-E: 1.3.1 → 1.4.2 — camera-core 1.3.1의 libimage_processing_util_jni.so가
+    // 4KB(2**12) 정렬이라 16KB 페이지 미준수. 1.4.2는 16KB(2**14) 정렬(objdump 확인).
+    val cameraxVersion = "1.4.2"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")

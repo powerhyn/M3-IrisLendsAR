@@ -56,6 +56,14 @@ seam 기준 분류 (감사 §6.3, §6.4 removalScope 승계):
 
 **플랫폼 순차 전환** (계획 ③-3 승계): **Android 먼저** — 실기기 검증 가능 + LensSimulator 글루 재활용 (CameraX RGBA_8888 → ByteBufferImageBuilder → FaceLandmarker LIVE_STREAM, GPU delegate + CPU 폴백). 같은 코어에 기존 추적 vs 공식 바인딩을 꽂아 A/B 비교(정확도·지연·안정성) 후 데이터로 전환 확정. iOS → Web 순차 진행, 완료 후 자체 TFLite 파이프라인 제거.
 
+### 검출 폴백 (Eye-Only) — 플랫폼 글루 책임 (2026-06-16 결정)
+
+MediaPipe Tasks가 얼굴 검출에 실패하는 경우(눈만 클로즈업, 극단 각도 — CLAUDE.md "MediaPipe 한계점 Phase 1", HybridDetector 원계획)의 **Eye-Only 폴백은 플랫폼 글루(코어 밖)가 책임진다.** 글루가 "Tasks 검출 실패 → Eye-Only `.tflite` 모델 추론 → 478 랜드마크(부분 mesh 포함) 주입"을 수행하고, 코어는 변함없이 "주입받아 렌더"만 한다.
+
+- **근거**: ④의 "추적은 글루, 코어는 렌더" 전제(§2-1, §3)와 일관 — Eye-Only도 '눈 찾기 = 추적'이므로 글루 책임이 맞다. **TFLite 런타임은 글루 레이어(MediaPipe Tasks가 이미 사용)에 위임**되어 코어 `.so`는 TFLite-free(§9 16KB 위임 + §8 OpenCV 제거 이득)를 유지한다. 코어가 폴백을 보유하면 ④가 제거하려는 TFLite 인프라(mediapipe_detector·TFLite CMake·prebuilt .so)가 코어에 잔존해 ④ 목적이 훼손되므로 **기각**(검토 2026-06-16: 글루 vs 코어 폴백 — 글루 채택).
+- **현 코어 DetectorType/EyeOnlyDetector/HybridDetector는 코어 폴백 미보유 확정에 따라 W4-D에서 완전 삭제**한다(iris_detector.cpp `createDetector`가 이미 전 분기 nullptr 반환 = 구현 0인 빈 껍데기 — 폴백 능력 0이므로 보존 가치 없음). 미래에도 코어는 추적/검출을 보유하지 않는다.
+- **Eye-Only 폴백 구현은 ④ 완료 후 별도 글루 트랙**(Phase 9+ 후보). Eye-Only 모델 출력(눈 주변 점)을 478 주입 계약(§6.1 num_points 478 고정)에 맞추는 변환(부분 mesh 주입 허용 여부 등)은 그 트랙에서 설계한다 — 글루/코어 위치와 무관한 별도 과제.
+
 ## 4. 결정의 전제 — 감사가 확정한 사실
 
 | 사실 | 출처 |
@@ -130,7 +138,7 @@ IrisSdkStatus iris_render(uint64_t target_texture, int width, int height);
 | generation | **경계 신설 필드** (코어 발급, 노출 필수) | §6.1. 감사 torn-read finding |
 | 홍채 중심·반경 | **코어 내 파생 어댑터** | 인덱스 468~477에서 유도, 픽셀 변환 후 거리 계산(§7.0). LensSimulator `IrisGeometry.kt`가 참조 구현 (감사 §6.3) |
 | eyelid_ratio → visibility | **코어 내 파생 어댑터** | EAR 재계산 — 수식은 `temporal_stabilizer.cpp:315 computeEAR`에 이미 존재(감사 §6.2 pt6). 단 픽셀 공간 환산 후 계산으로 수정 (정규화 EAR 결함 finding 반영) |
-| confidence | **경계에서 제거** | MediaPipe Tasks는 per-face confidence를 노출하지 않음. '검출 실패 = 주입 부재'로 표현하고, 게이팅은 visibility(EAR 파생)로 일원화 |
+| confidence | **경계에서 제거**(게이팅 무력화) | MediaPipe Tasks는 per-face confidence를 노출하지 않음. '검출 실패 = 주입 부재'로 표현하고, 게이팅은 visibility(EAR 파생)로 일원화. **구현 노트(W4-B1)**: 어댑터 수식 `visibility = confidence·(1-eyelid_ratio)`이 detector 경로와 공유되어 confidence=0이면 게이트가 닫힌다. 주입 경로는 detector 골든 불변을 위해 어댑터를 건드리지 않고, `deriveIrisResult`가 검출 시 confidence를 **게이트 통과 상수 1.0(곱셈 항등원)** 으로 고정한다 → visibility가 (1-eyelid_ratio)로 환원되어 'EAR 일원화' 효과를 달성(measurement로서의 confidence는 제거, 게이팅에서 중립화). presence 게이트는 detected(어댑터 side별 early-return)가 담당. 데모 Kotlin 형제 `TasksToIrisResult.kt`도 동일하게 confidence=1.0 고정 |
 | avg_iris_luma | **GPU self-measure로 이전** (1순위) + 주입 옵션 필드(보조) | 감사 §6.2 pt5: gpu_lens_renderer.cpp:898, 1121에 'W6 이관' 주석으로 계획 기존재. P7-W2 default ON 실측이 fallback 상수 체인으로 후퇴하지 않도록 **경계 도입과 동시 처리** (§6.6 리스크 3) |
 | face_rect | **코어 내 파생 어댑터** | 478점 메시 바운딩 박스 (감사 §6.3) |
 | iris_quality_*, eye_refiner_used 등 detector 전용 메타 | **삭제** | Eye Refiner는 활성화 자체가 불가능한 결함 상태(좌표 폭주 finding) — 추적 외부화로 존재 이유 소멸 |
@@ -323,3 +331,4 @@ One-Euro 필터 등 스무딩 파라미터는 **입력의 단위(정규화 좌�
 | 2026-06-11 | 초안 작성 — 1단계 감사(133건, Codex 교차 검토 반영) 기반. 16KB 실측 확정 반영. 사용자 검토 대기 |
 | 2026-06-11 | 적대 리뷰 반영 — ① §7.5 One-Euro 정정(실코드 검증: min_cutoff 0.5·픽셀 공간, ADR-0002 텍스트 드리프트 각주) ② §10 T1 판정 기준을 골든 ε에서 분리(좌표 계약 위반 규모) + §11 ε 적용 범위 한정 + §12 게이트에 추적 교체 PR 대체 절차 ③ §10 후퇴 시 TFLite 16KB 재정렬 수리 트랙 편입(§9 대응 2 단서) ④ §6.1 입력 유효성 계약(num_points 478 고정 + 바인딩 이중 가드) + §6.4 468 하드코딩 정리 전제 + §13 견적 +1일 |
 | 2026-06-11 | **승인** — LensSimulator 세션 교차 검토(수용 8/부분 2/거부 0) + 사용자 확인. 결정 항목 ① **옵션 B 확정**. 보완 반영: §6 `iris_set_landmarks`에 frame_width/height 편입(generation 원자 결속, 함정 #5 봉쇄), §10 ③-3 A/B 회전 입력 주의(rot0 중심 판정). §7.5 각주 갱신(LensSimulator ADR-0002 정정 완료) |
+| 2026-06-16 | **§3 보강 — 검출 폴백(Eye-Only) 위치 결정**: ADR 공백(MediaPipe 얼굴 검출 실패 시 폴백 미정의)을 사용자 결정으로 메움. Eye-Only 폴백 = **플랫폼 글루 책임**(코어 밖, TFLite를 글루에 위임해 코어 .so TFLite-free 유지). 코어 폴백(TFLite 코어 잔존) 기각. → 코어 DetectorType/EyeOnly/Hybrid는 코어 폴백 미보유 확정으로 W4-D 완전 삭제, Eye-Only 폴백 구현은 ④ 이후 별도 글루 트랙(Phase 9+). W4-B1 완료(af07e04) 후 W4-B2 착수 중 발견·결정 |
