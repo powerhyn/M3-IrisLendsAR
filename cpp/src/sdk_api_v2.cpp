@@ -408,15 +408,17 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
     }
 
     // GPU 뷰티 필터 적용 (텍스처 ID 기반)
+    // P8-W2: LUT 곁가지 제거 — lut_texture_id/lut_intensity는 D단계까지 시그니처만
+    // 유지되며 백엔드로 전달하지 않는다(applyTextureId 내 LUT 경로 제거에 맞춤).
+    (void)lut_texture_id;
+    (void)lut_intensity;
     uint32_t result_texture = 0;
     IrisSdkError err = g_gpu_beauty->applyTextureId(
         input_texture,
         &result_texture,
         width, height,
         cpp_config,
-        reinterpret_cast<const iris_sdk::IrisResult*>(detection),
-        lut_texture_id,
-        lut_intensity
+        reinterpret_cast<const iris_sdk::IrisResult*>(detection)
     );
 
     if (err == IRIS_SDK_OK && result_texture != 0) {
@@ -438,26 +440,14 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
 #endif
 }
 
+// P8-W2: FreqSep 디버그 모드 곁가지 제거 — 시그니처는 D단계까지 유지, 구현은 no-op.
 void iris_sdk_set_freqsep_debug_mode(int mode) {
-#ifdef IRIS_SDK_HAS_GLES
-    std::lock_guard<std::mutex> lock(g_gpu_mutex);
-    if (g_gpu_beauty && g_gpu_beauty->isInitialized()) {
-        g_gpu_beauty->setFreqSepDebugMode(mode);
-    }
-#else
     (void)mode;
-#endif
 }
 
+// P8-W2: 색보정(skin color filter) 곁가지 제거 — 시그니처는 D단계까지 유지, 구현은 no-op.
 void iris_sdk_set_skin_color_filter(int enabled) {
-#ifdef IRIS_SDK_HAS_GLES
-    std::lock_guard<std::mutex> lock(g_gpu_mutex);
-    if (g_gpu_beauty && g_gpu_beauty->isInitialized()) {
-        g_gpu_beauty->setSkinColorFilter(enabled != 0);
-    }
-#else
     (void)enabled;
-#endif
 }
 
 void iris_sdk_set_skin_mask_smoothing(int enabled, float strength) {

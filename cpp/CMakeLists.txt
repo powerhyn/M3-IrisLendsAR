@@ -76,14 +76,8 @@ set(IRIS_SDK_SOURCES
     # Warp module
     src/warp/grid_mesh.cpp
     src/warp/face_warp_controller.cpp
-    # Quality metrics
-    src/quality_metrics.cpp
-    # A/B comparison framework
-    src/ab_compare.cpp
-    # Release gate
-    src/release_gate.cpp
-    # Parameter tuning
-    src/param_tuner.cpp
+    # (P8-W2 제거) FreqSep 전용 부가 인프라: quality_metrics / ab_compare /
+    #             release_gate / param_tuner — 곁가지 뷰티 제거로 dead.
     # Temporal stabilizer (P5-W1)
     src/temporal_stabilizer.cpp
     # Landmark injection boundary (ADR-0001 §6 — 추적 외부화 진입점)
@@ -118,14 +112,7 @@ set(IRIS_SDK_HEADERS
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
     include/iris_sdk/warp/face_warp_controller.h
-    # Quality metrics headers
-    include/iris_sdk/quality_metrics.h
-    # A/B comparison framework headers
-    include/iris_sdk/ab_compare.h
-    # Release gate headers
-    include/iris_sdk/release_gate.h
-    # Parameter tuning headers
-    include/iris_sdk/param_tuner.h
+    # (P8-W2 제거) FreqSep 전용 부가 인프라 헤더 — 곁가지 뷰티 제거로 dead.
     # Temporal stabilizer headers (P5-W1)
     include/iris_sdk/temporal_stabilizer.h
 )

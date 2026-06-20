@@ -164,17 +164,8 @@ extern const char* PASSTHROUGH_FRAGMENT;
 /// 밝기 조정 프래그먼트 셰이더
 extern const char* BRIGHTNESS_FRAGMENT;
 
-/// Bilateral 필터 프래그먼트 셰이더 (피부 스무딩)
-extern const char* BILATERAL_FILTER_FRAGMENT;
-
-/// 화이트닝 프래그먼트 셰이더
-extern const char* WHITENING_FRAGMENT;
-
-/// 컬러 밸런스 프래그먼트 셰이더
-extern const char* COLOR_BALANCE_FRAGMENT;
-
-/// 소프트 포커스 프래그먼트 셰이더
-extern const char* SOFT_FOCUS_FRAGMENT;
+// (P8-W2 제거) Bilateral/Whitening/ColorBalance/SoftFocus/FreqSep Gaussian·Composite/
+//             LuminanceSharpen 곁가지 셰이더 선언 제거.
 
 /// 마스킹(ROI 블렌딩) 프래그먼트 셰이더
 extern const char* MASKING_FRAGMENT;
@@ -182,17 +173,8 @@ extern const char* MASKING_FRAGMENT;
 /// Gaussian Blur 프래그먼트 셰이더
 extern const char* GAUSSIAN_BLUR_FRAGMENT;
 
-/// 통합 Color Adjustment 셰이더 (Brightness + ColorBalance + Whitening)
+/// 통합 Color Adjustment 셰이더 (Brightness 잔존)
 extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
-
-/// Frequency Separation Gaussian Blur 셰이더
-extern const char* FREQ_SEP_GAUSSIAN_FRAGMENT;
-
-/// Frequency Separation Composite 셰이더
-extern const char* FREQ_SEP_COMPOSITE_FRAGMENT;
-
-/// Luminance Sharpen 셰이더 (FreqSep 후 선명도 복구)
-extern const char* LUMINANCE_SHARPEN_FRAGMENT;
 
 //=============================================================================
 // P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
