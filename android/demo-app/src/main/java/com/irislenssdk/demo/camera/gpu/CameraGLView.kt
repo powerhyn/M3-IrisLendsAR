@@ -362,41 +362,6 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
-     * LUT 3D 텍스처 설정 (임의 스레드에서 호출 가능 — 내부에서 GL 스레드로 큐잉)
-     *
-     * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)
-     */
-    fun setLut3dTexture(textureId: Int) {
-        queueEvent {
-            glRenderer.setLut3dTexture(textureId)
-        }
-    }
-
-    /**
-     * LUT 3D 텍스처 설정 (GL 스레드 직접 호출 전용 — 이중 큐잉 방지)
-     * queueEvent 블록 안에서 호출할 때 사용합니다.
-     */
-    fun setLut3dTextureDirect(textureId: Int) {
-        glRenderer.setLut3dTexture(textureId)
-    }
-
-    /**
-     * LUT 필터 활성화/비활성화 (임의 스레드에서 호출 가능)
-     */
-    fun setLutEnabled(enabled: Boolean) {
-        queueEvent {
-            glRenderer.setLutEnabled(enabled)
-        }
-    }
-
-    /**
-     * LUT 필터 활성화/비활성화 (GL 스레드 직접 호출 전용)
-     */
-    fun setLutEnabledDirect(enabled: Boolean) {
-        glRenderer.setLutEnabled(enabled)
-    }
-
-    /**
      * Sclera Protection 활성화/비활성화 (P4-W2-01)
      */
     fun setScleraProtect(enabled: Boolean) {
@@ -429,15 +394,6 @@ class CameraGLView @JvmOverloads constructor(
     fun setEllipseMask(enabled: Boolean) {
         queueEvent {
             glRenderer.setEllipseMask(enabled)
-        }
-    }
-
-    /**
-     * LUT 필터 강도 설정 (0.0 ~ 1.0)
-     */
-    fun setLutIntensity(intensity: Float) {
-        queueEvent {
-            glRenderer.setLutIntensity(intensity)
         }
     }
 
