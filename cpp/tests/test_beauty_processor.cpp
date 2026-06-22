@@ -173,10 +173,11 @@ TEST(CPUBeautyBackendTest, Apply_EnabledConfig_ModifiesFrame) {
     }
     auto original = frame;
 
+    // P8-W2-C: smoothing(삭제됨) 대신 생존 효과 brightness로 프레임 변경을 검증.
     auto config = BeautyFilterConfigV2Helper::defaults();
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.8f;
+    config.brightness = 1.2f;
 
     IrisSdkError result = backend.apply(
         frame.data(), 640, 480, IRIS_FORMAT_RGB, config, nullptr);
@@ -189,9 +190,10 @@ TEST(CPUBeautyBackendTest, Apply_SupportsDifferentFormats) {
     CPUBeautyBackend backend;
     backend.initialize();
 
+    // P8-W2-C: smoothing(삭제됨) 대신 brightness로 포맷별 apply() 경로를 검증.
     auto config = BeautyFilterConfigV2Helper::defaults();
     config.enabled = true;
-    config.smoothing = 0.5f;
+    config.brightness = 1.1f;
 
     // RGB
     {
@@ -327,10 +329,11 @@ TEST(BeautyProcessorTest, Process_EnabledConfig_ModifiesFrame) {
     BeautyProcessor processor;
     processor.initialize(false);
 
+    // P8-W2-C: smoothing(삭제됨) 대신 생존 효과 brightness로 프레임 변경을 검증.
     auto config = BeautyFilterConfigV2Helper::defaults();
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.8f;
+    config.brightness = 1.2f;
     processor.setConfig(config);
 
     // 그라데이션이 있는 프레임 생성 (필터 적용 시 변화 감지 가능)
@@ -349,9 +352,10 @@ TEST(BeautyProcessorTest, Process_WithROI_AppliesFilterToFaceOnly) {
     BeautyProcessor processor;
     processor.initialize(false);
 
+    // P8-W2-C: smoothing(삭제됨) 대신 brightness로 ROI 경로 apply()를 검증.
     auto config = BeautyFilterConfigV2Helper::defaults();
     config.enabled = true;
-    config.smoothing = 0.8f;
+    config.brightness = 1.2f;
     config.roiOnly = true;
     processor.setConfig(config);
 
@@ -419,27 +423,8 @@ TEST(IBeautyBackendTest, ApplyTexture_DefaultReturnsNotSupported) {
 // 필터 효과 테스트
 //=============================================================================
 
-TEST(CPUBeautyBackendTest, SmoothingEffect_ReducesVariance) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    // 노이즈가 있는 프레임 생성
-    auto frame = createTestFrame(100, 100, 3);
-    for (size_t i = 0; i < frame.size(); i++) {
-        frame[i] = static_cast<uint8_t>((i % 256 + 128) % 256);
-    }
-
-    auto config = BeautyFilterConfigV2Helper::defaults();
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 1.0f;
-
-    backend.apply(frame.data(), 100, 100, IRIS_FORMAT_RGB, config, nullptr);
-
-    // 스무딩 후 인접 픽셀 간 차이가 줄어들어야 함
-    // (구체적인 검증은 시각적 테스트로 수행)
-    SUCCEED();
-}
+// P8-W2-C: SmoothingEffect_ReducesVariance 제거
+//   (삭제된 CPU skin smoothing 효과를 적용만 하고 SUCCEED()로 끝나는 케이스).
 
 TEST(CPUBeautyBackendTest, BrightnessEffect_IncreasesValues) {
     CPUBeautyBackend backend;

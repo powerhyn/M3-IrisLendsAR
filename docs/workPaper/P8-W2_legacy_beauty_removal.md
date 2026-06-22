@@ -1,7 +1,7 @@
 # P8-W2 — 곁가지 뷰티 제거 (레거시 정리 + 2.0 ABI)
 
-> 상태: 🔄 진행 중 (2026-06-20 착수)
-> 브랜치: `develop` (착수 시점 `5bcdd94`)
+> 상태: 🔄 진행 중 (2026-06-20 착수) — A+B 커밋 완료, C/D 잔여
+> 브랜치: `feature/p8-beauty` (develop `5bcdd94`에서 분기). A=ea0d7d6, B=912d682. 미푸시.
 > 선행: P8 kickoff(`P8_kickoff.md`), P8-W1(skin smoothing 구현 완료)
 > 진입 메모리: [[p8-facemesh478-substrate]], [[refactor-p2-adr-golden]]
 
@@ -94,8 +94,8 @@ P8 뷰티 핵심 2개(① 피부 skin smoothing[구현됨] + ② 턱깎기 형�
 - [x] 인벤토리 + 스코핑 + 사용자 결정 2건
 - [x] W2-A 데모 UI 제거 (assembleDebug SUCCESS)
 - [x] W2-B GPU 패스 + stale 테스트 (빌드 신규경고0 + ctest 신규회귀0)
-- [ ] W2-C CPU 색보정 + 골든 재캡처 ← **다음 (휴식 후)**
-- [ ] W2-D 구조체 ABI 필드 (2.0)
+- [x] W2-C CPU 색보정 + 골든 재캡처 (빌드 신규경고0 + ctest 신규회귀0 + beauty.png 4벌 격리 재캡처 + manifest)
+- [ ] W2-D 구조체 ABI 필드 (2.0) ← **다음**
 
 ## 9. 변경 이력
 - 2026-06-20: 착수. 인벤토리(Explore) + 사용자 결정(전체 레거시 제거 / 2.0 ABI) + 본 문서 작성.
@@ -114,6 +114,24 @@ P8 뷰티 핵심 2개(① 피부 skin smoothing[구현됨] + ② 턱깎기 형�
   보존: config 필드 전체(D몫)·skin smoothing(use_skin_mask)·grid_mesh·brightness·CPU 백엔드(C몫)·JNI/Java(D몫).
   **게이트: 데스크톱 빌드 exit0 신규경고0(차집합 공집합) / ctest 591개 590통과, 유일 실패=GPUBeautyBackendTest.FailsWithNullContext(pre-existing 동일, 곁가지무관) — 신규 회귀0.**
   **pre-existing 재정의**: 종료 시점 pre-existing = GPUBeautyBackendTest.FailsWithNullContext 1건만(FreqSepMappingTest #587/588은 제거됨).
-  ⚠️ **휴식 지점**: W2-A+B 전부 **미커밋**(워킹트리 잔존). 재개 = W2-C(CPU 색보정 applyWhitening/applyColorBalance/applySoftFocus + COMBINED CPU측 제거 + beauty.png 4벌 골든 재캡처).
-</content>
-</invoke>
+  **커밋**: 새 브랜치 `feature/p8-beauty`(develop 5bcdd94 분기)에 슬라이스별 2커밋 — A=ea0d7d6(데모 7파일), B=912d682(cpp 18파일, -5886줄). 미푸시.
+  ⚠️ **휴식 지점**: 재개 = W2-C(CPU 색보정 applyWhitening/applyColorBalance/applySoftFocus + COMBINED CPU측 제거 + beauty.png 4벌 골든 재캡처).
+- 2026-06-22: **W2-C 편집 완료** (cpp-pro 편집만 — 빌드/ctest/골든 재캡처는 메인세션). CPU 곁가지 EFFECT 제거:
+  **cpu_beauty_backend.cpp/.h** — 삭제: applySkinSmoothing(2 오버로드, Bilateral V1)·applySoftFocus(V1)·
+  applyWhitening(2 오버로드)·applyColorBalance(색보정)·applySkinSmoothingV2·applySoftFocusV2·applyBrightnessV2·
+  applyWrinkleRemoval·overlayBlend·detectSkinTone·createWrinkleRegionMasks(전부 dead 또는 곁가지) + WrinkleRegions 구조체 +
+  fast_guided_filter.h include(orphan). applyFullFrame=brightness-only, applyWithROI=brightness-only(ROI추출·feather·applyROIRegion 골격 보존,
+  소비처 사라진 protection_mask 준비블록 제거→unused 회피). **생존: applyBrightness**. (find_referencing로 V2 5종+detectSkinTone dead 확인)
+  **beauty_filter.cpp(레거시 V1 싱글톤)** — processBeautyEffect에서 effective_smoothing/effective_soft_focus 블록 제거(brightness만 유지),
+  자체 applySkinSmoothing/applySoftFocus 정의 제거, MAX_BLUR_KERNEL_SIZE 주석처리(orphan). config 필드 참조(clamp/skinQuality API)는 미접촉(D몫).
+  **테스트** — test_new_filter_effects.cpp: SkinSmoothingV2_*/SoftFocusV2_*/Whitening_*/ColorBalance_*/Performance_SmoothingV2_* 제거,
+  BrightnessV2_*(3) 보존, FullPipeline_AllEffectsCombined→brightness-only 축소, MultipleFormats→brightness, DisabledConfig 보존, fast_guided_filter.h include 제거.
+  test_beauty_processor.cpp(스코프 외였으나 빌드 회귀 방지로 처리): SmoothingEffect_ReducesVariance 제거,
+  Apply_EnabledConfig_ModifiesFrame·Process_EnabledConfig_ModifiesFrame·Apply_SupportsDifferentFormats·Process_WithROI를 smoothing→brightness 전환
+  (default brightness=1.0라 smoothing 제거 시 isFrameModified 실패하던 2건 수정). BrightnessEffect_IncreasesValues·SetConfig/Clamp/fromV1(config필드 roundtrip) 보존.
+  **golden_capture.cpp** — fillBeautyConfig: c.smoothing=0.5/c.skin_quality=0.5 줄 제거, **c.brightness=1.2f**로 변경(곁가지 제거 후 CPU beauty 유일 생존효과=brightness 실측). beauty.png 4벌 재캡처는 메인세션.
+  **잔여(D몫)**: config 필드 물리삭제(IrisBeautyConfigV2/BeautyFilterConfigV2)·clamp/reset/skinQuality 편의 C API·JNI/Java·offsetof 가드.
+- 2026-06-22: **W2-C 메인세션 검증 완료**. 데스크톱 빌드 exit0, C 변경 파일(cpu_beauty_backend/beauty_filter/test_*) 신규 경고 0(유일 경고 fromCppConfigV2=pre-existing).
+  ctest 582개 중 581통과, 유일 실패=GPUBeautyBackendTest.FailsWithNullContext(pre-existing 동일) — 신규 회귀0. **beauty.png 4벌 골든 재캡처**(INJECT_BASELINE 주입):
+  격리 검증 PASS — beauty.png 4벌만 변경, JSON 18+render 15 = 33벌 byte-identical, 파일집합 동일. brightness=1.2 ROI 적용 정량확인(변경 5.2%, 변경영역 mean diff 17.3, ×1.2 정합).
+  manifest=`cpp/tests/golden/P8-W2-C_RECAPTURE_MANIFEST.md`. test_beauty_processor.cpp 스코프외 변경(smoothing→brightness 4건+SmoothingEffect 제거)은 빌드회귀 방지로 수용(diff 검토 완료).

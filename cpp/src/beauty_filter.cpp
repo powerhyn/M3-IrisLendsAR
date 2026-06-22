@@ -31,8 +31,8 @@ namespace {
     /// Bilateral Filter 최대 diameter (현재 고정값 사용으로 미사용)
     // constexpr int MAX_BILATERAL_DIAMETER = 15;
 
-    /// Gaussian Blur 최대 커널 크기
-    constexpr int MAX_BLUR_KERNEL_SIZE = 31;
+    /// Gaussian Blur 최대 커널 크기 (P8-W2-C: applySoftFocus 제거로 미사용)
+    // constexpr int MAX_BLUR_KERNEL_SIZE = 31;
 
     /// 기본 설정값
     constexpr bool DEFAULT_ENABLED = true;
@@ -312,73 +312,22 @@ private:
      * @brief 뷰티 효과 처리 (BGR 이미지)
      */
     void processBeautyEffect(cv::Mat& image, const BeautyFilterConfig& config) {
-        // 유효 강도 계산
-        float effective_smoothing = config.smoothing * config.intensity;
-        float effective_soft_focus = config.softFocus * config.intensity;
+        // P8-W2-C: 곁가지 효과(피부 스무딩 Bilateral / 소프트 포커스 Gaussian) 제거.
+        //   레거시 BeautyFilter(V1)의 생존 효과는 밝기 조절 뿐이다.
+        //   config.smoothing/softFocus 필드는 D단계 전까지 보존(여기서는 미사용).
         float effective_brightness = 1.0f + (config.brightness - 1.0f) * config.intensity;
 
-        // 1. 피부 스무딩 (Bilateral Filter)
-        if (effective_smoothing > 0.01f) {
-            applySkinSmoothing(image, effective_smoothing);
-        }
-
-        // 2. 소프트 포커스 (Gaussian Blur 블렌딩)
-        if (effective_soft_focus > 0.01f) {
-            applySoftFocus(image, effective_soft_focus);
-        }
-
-        // 3. 밝기 조절
+        // 밝기 조절
         if (std::abs(effective_brightness - 1.0f) > 0.01f) {
             applyBrightness(image, effective_brightness);
         }
     }
 
-    /**
-     * @brief 피부 스무딩 적용 (Bilateral Filter - 성능 최적화 버전)
-     *
-     * Bilateral Filter는 에지를 보존하면서 노이즈를 제거하여
-     * 피부를 자연스럽게 스무딩합니다.
-     *
-     * 성능 최적화: diameter 5 고정, sigma 값 감소
-     */
-    void applySkinSmoothing(cv::Mat& image, float strength) {
-        // 성능 최적화: diameter 5 고정 (기존: 5~15)
-        // bilateral filter는 O(d^2)이므로 diameter가 클수록 급격히 느려짐
-        constexpr int diameter = 5;
-
-        // sigma 값: strength에 따라 조절 (기존보다 감소)
-        double sigma_color = 30.0 + strength * 50.0;  // 30~80 (기존: 50~150)
-        double sigma_space = 30.0 + strength * 50.0;
-
-        cv::bilateralFilter(image, smooth_buffer_, diameter, sigma_color, sigma_space);
-
-        // 원본과 블렌딩하여 자연스럽게
-        float blend_alpha = strength * 0.7f;  // 최대 70%까지만 적용
-        cv::addWeighted(smooth_buffer_, blend_alpha, image, 1.0f - blend_alpha, 0, image);
-    }
-
-    /**
-     * @brief 소프트 포커스 적용 (Gaussian Blur 블렌딩)
-     *
-     * 원본 이미지에 블러된 이미지를 블렌딩하여
-     * 소프트한 글로우 효과를 만듭니다.
-     */
-    void applySoftFocus(cv::Mat& image, float strength) {
-        // 커널 크기: strength에 따라 5~31 (홀수)
-        int kernel_size = static_cast<int>(5 + strength * 26);
-        kernel_size = std::min(kernel_size, MAX_BLUR_KERNEL_SIZE);
-        if (kernel_size % 2 == 0) {
-            kernel_size += 1;
-        }
-
-        cv::GaussianBlur(image, glow_buffer_, cv::Size(kernel_size, kernel_size), 0);
-
-        // 소프트 글로우 블렌딩 (스크린 블렌딩과 유사한 효과)
-        float blend_alpha = strength * 0.4f;  // 최대 40%까지만 적용
-
-        // 간단한 블렌딩 (addWeighted)
-        cv::addWeighted(glow_buffer_, blend_alpha, image, 1.0f - blend_alpha, 0, image);
-    }
+    // P8-W2-C: applySkinSmoothing(Bilateral)/applySoftFocus(Gaussian) 정의 제거.
+    //   곁가지 효과로 분류되어 삭제. 레거시 BeautyFilter(V1) 생존 효과는 밝기 뿐.
+    //   (smooth_buffer_/glow_buffer_ 멤버 + MAX_BLUR_KERNEL_SIZE는 호출처가 사라져
+    //    orphan 상태가 되나, 멤버 변수는 -Wunused-private-field 대상이 아니라 보존.
+    //    MAX_BLUR_KERNEL_SIZE는 아래 상수 정의에서 주석 처리하여 미사용 경고 회피.)
 
     /**
      * @brief 밝기 조절
