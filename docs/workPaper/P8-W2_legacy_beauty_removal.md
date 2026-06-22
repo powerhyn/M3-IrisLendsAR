@@ -1,7 +1,7 @@
 # P8-W2 — 곁가지 뷰티 제거 (레거시 정리 + 2.0 ABI)
 
-> 상태: 🔄 진행 중 (2026-06-20 착수) — A+B 커밋 완료, C/D 잔여
-> 브랜치: `feature/p8-beauty` (develop `5bcdd94`에서 분기). A=ea0d7d6, B=912d682. 미푸시.
+> 상태: ✅ 완료 (2026-06-20 착수 → 2026-06-22 종결) — A~D 4슬라이스 전부 커밋 + 적대 리뷰 통과
+> 브랜치: `feature/p8-beauty` (develop `5bcdd94`에서 분기). A=ea0d7d6, B=912d682, C=fd8e994, D=46ebf7c. 미푸시·미머지.
 > 선행: P8 kickoff(`P8_kickoff.md`), P8-W1(skin smoothing 구현 완료)
 > 진입 메모리: [[p8-facemesh478-substrate]], [[refactor-p2-adr-golden]]
 
@@ -151,3 +151,8 @@ P8 뷰티 핵심 2개(① 피부 skin smoothing[구현됨] + ② 턱깎기 형�
 - 2026-06-22: **W2-D 메인세션 검증 완료**. **offsetof 가드 갱신 불필요 확정**(sdk_api_v2.cpp:44-80 가드는 IrisLandmark/IrisResult 전용, IrisBeautyConfigV2엔 레이아웃 가드 없음; C↔C++↔Java는 필드별 변환이라 레이아웃 일치 불필요 — §6 불변식4·§5 D행의 "offsetof 갱신"은 기우였음).
   cpp 빌드 exit0 신규경고0(fromCppConfigV2 경고 D가 해소; 잔존 format-pedantic은 nativeStabilize의 %p+jobject=pre-existing, D 무관). ctest 568개 중 567통과(유일 실패=GPUBeautyBackendTest.FailsWithNullContext=pre-existing). assembleDebug(iris-sdk+demo) BUILD SUCCESSFUL. testDebugUnitTest(--rerun-tasks) BUILD SUCCESSFUL.
   beauty_roi_manager erode 게이트 변경 검토=OR-항 정확 축소(protectNose 동작 불변). 4면 미러 독립 grep 재확인: V2 구조체 곁가지 0, JNI/Java V2 곁가지 0(잔존은 V1 BeautyFilterConfig=스코프외). **잔여(별도 향후 정리 후보)**: V1 BeautyFilterConfig(smoothing/softFocus)는 CPU 구현 제거로 V1→V2 변환 시 무시되는 vestigial(W2 스코프 밖). 커밋=feature/p8-beauty.
+- 2026-06-22: **W2 전체(A~D) 적대 리뷰 워크플로**(wf, 5렌즈 residue/preservation/abi-mirror/golden-test/completeness × 발견별 적대 검증, 28 에이전트). 확정 6건 **전부 LOW 이하**(critical/high 0): positive 확인 2(②워프 substrate 무손상·C API 5종 완전 제거)+pre-existing 1(dead GAUSSIAN_BLUR/executeBrightnessPass, W2 무관 out-of-scope). **실제 조치 3건(LOW) 수정 완료**:
+  ① **stale 테스트 4개 삭제**(test_beauty_config_v2.cpp FreqSepPipelineTest 1 + LuminanceSharpenFormulaTest 3 — 제거된 FreqSep RT풀/LUMINANCE_SHARPEN 셰이더를 self-contained stub으로 검증하던 dead test; B의 FreqSep 테스트 purge 누락분; SoftLightFormulaTest=보존 skin smoothing은 유지) → ctest 568→564, 신규 회귀0.
+  ② work paper status 헤더를 본문(A~D 완료)과 동기화.
+  ③ skin-mask doc 양면(sdk_api.h + IrisLensSDK.java)에서 제거된 "기존 FreqSep 경로" 언급 → "유일 스무딩 경로, off=스무딩 없음"으로 정정.
+  리뷰 결론: 곁가지 제거 완결(핵심 의존=enabled+use_skin_mask 달성), 보존(①skin smoothing/②워프/brightness) 무손상, 4면 ABI 일관, 골든·테스트 정직. **W2 종결.**

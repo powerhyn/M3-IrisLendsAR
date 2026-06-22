@@ -695,11 +695,12 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
  * @brief P8-W1: landmark-masked skin smoothing 모드 설정 (internal, 벤치/A-B용)
  *
  * LensSimulator에서 검증된 랜드마크 폴리곤 마스크 기반 피부 보정 경로를 토글합니다.
- * 활성 시 기존 FreqSep/Bilateral 스무딩을 대체하며(다른 패스는 불변), 비활성 또는
- * strength 0이면 마스크/블러/필터/저해상도 타깃 생성을 전부 생략합니다(비용 0).
+ * 이것이 SDK의 유일한 피부 스무딩 경로입니다(레거시 FreqSep/Bilateral은 P8-W2에서 제거).
+ * 활성 시 랜드마크 마스크 기반 스무딩을 적용하며(다른 패스는 불변), 비활성 또는
+ * strength 0이면 마스크/블러/필터/저해상도 타깃 생성을 전부 생략합니다(비용 0=스무딩 없음).
  * GL 스레드(GPU 뷰티 백엔드 초기화 스레드)에서 호출하세요.
  *
- * @param enabled 0=off(기존 FreqSep 경로), 1=on
+ * @param enabled 0=off(스무딩 없음), 1=on
  * @param strength 피부 스무딩 강도 (0.0~1.0). 0이면 모드 활성이어도 패스 생략
  */
 IRIS_SDK_EXPORT void iris_sdk_set_skin_mask_smoothing(int enabled, float strength);

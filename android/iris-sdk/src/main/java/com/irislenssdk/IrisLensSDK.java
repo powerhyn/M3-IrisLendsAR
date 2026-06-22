@@ -759,11 +759,12 @@ public final class IrisLensSDK {
      * P8-W1: landmark-masked skin smoothing 모드 토글 (internal, 벤치/A-B용).
      *
      * <p>LensSimulator에서 검증된 랜드마크 폴리곤 마스크 기반 피부 보정 경로를
-     * 켭니다. 활성 시 기존 FreqSep/Bilateral 스무딩을 대체하며(다른 패스는 불변),
+     * 켭니다. 이것이 SDK의 유일한 피부 스무딩 경로입니다(레거시 FreqSep/Bilateral은
+     * P8-W2에서 제거). 활성 시 마스크 기반 스무딩을 적용하며(다른 패스는 불변),
      * 비활성 또는 strength 0이면 마스크/블러/필터/저해상도 타깃 생성을 전부
-     * 생략합니다(비용 0). GL 스레드에서 호출하세요.</p>
+     * 생략합니다(비용 0=스무딩 없음). GL 스레드에서 호출하세요.</p>
      *
-     * @param enabled  true=on, false=off(기존 FreqSep 경로)
+     * @param enabled  true=on, false=off(스무딩 없음)
      * @param strength 피부 스무딩 강도 (0.0~1.0). 0이면 모드 활성이어도 패스 생략
      */
     public static void setSkinMaskSmoothing(boolean enabled, float strength) {
