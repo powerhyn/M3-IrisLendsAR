@@ -112,15 +112,7 @@ BeautyFilterConfigV2 toCppConfigV2(const IrisBeautyConfigV2* c_config) {
 
     config.enabled = c_config->enabled != 0;
     config.intensity = c_config->intensity;
-    config.smoothing = c_config->smoothing;
     config.brightness = c_config->brightness;
-    config.softFocus = c_config->soft_focus;
-    config.whitening = c_config->whitening;
-    config.colorBalance = c_config->color_balance;
-    config.wrinkleRemove = c_config->wrinkle_remove;
-    config.skinQuality = c_config->skin_quality;
-    config.smoothIntensity = c_config->smooth_intensity;
-    config.poreReduction = c_config->pore_reduction;
     config.slimFace = c_config->slim_face;
     config.enlargeEyes = c_config->enlarge_eyes;
     config.thinChin = c_config->thin_chin;
@@ -129,48 +121,12 @@ BeautyFilterConfigV2 toCppConfigV2(const IrisBeautyConfigV2* c_config) {
     config.protectEyes = c_config->protect_eyes != 0;
     config.protectLips = c_config->protect_lips != 0;
     config.downscaleFactor = c_config->downscale_factor;
-    config.vividIntensity = c_config->vivid_intensity;
-    config.vividSaturation = c_config->vivid_saturation;
-    config.vividBrightness = c_config->vivid_brightness;
-    config.vividWarmth = c_config->vivid_warmth;
     config.protectNose = c_config->protect_nose != 0;
 
     // NaN/Inf/범위초과 방어 — 모든 C API 진입점에서 정규화
     iris_sdk::BeautyFilterConfigV2Helper::clamp(config);
 
     return config;
-}
-
-/**
- * @brief C++ 구조체를 C API 구조체로 변환
- */
-void fromCppConfigV2(const BeautyFilterConfigV2& cpp_config, IrisBeautyConfigV2* c_config) {
-    if (!c_config) return;
-
-    c_config->enabled = cpp_config.enabled ? 1 : 0;
-    c_config->intensity = cpp_config.intensity;
-    c_config->smoothing = cpp_config.smoothing;
-    c_config->brightness = cpp_config.brightness;
-    c_config->soft_focus = cpp_config.softFocus;
-    c_config->whitening = cpp_config.whitening;
-    c_config->color_balance = cpp_config.colorBalance;
-    c_config->wrinkle_remove = cpp_config.wrinkleRemove;
-    c_config->skin_quality = cpp_config.skinQuality;
-    c_config->smooth_intensity = cpp_config.smoothIntensity;
-    c_config->pore_reduction = cpp_config.poreReduction;
-    c_config->slim_face = cpp_config.slimFace;
-    c_config->enlarge_eyes = cpp_config.enlargeEyes;
-    c_config->thin_chin = cpp_config.thinChin;
-    c_config->use_gpu = cpp_config.useGpu ? 1 : 0;
-    c_config->roi_only = cpp_config.roiOnly ? 1 : 0;
-    c_config->protect_eyes = cpp_config.protectEyes ? 1 : 0;
-    c_config->protect_lips = cpp_config.protectLips ? 1 : 0;
-    c_config->downscale_factor = cpp_config.downscaleFactor;
-    c_config->vivid_intensity = cpp_config.vividIntensity;
-    c_config->vivid_saturation = cpp_config.vividSaturation;
-    c_config->vivid_brightness = cpp_config.vividBrightness;
-    c_config->vivid_warmth = cpp_config.vividWarmth;
-    c_config->protect_nose = cpp_config.protectNose ? 1 : 0;
 }
 
 /**
@@ -205,15 +161,7 @@ void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* config) {
 
     config->enabled = 1;
     config->intensity = 0.5f;
-    config->smoothing = 0.0f;
     config->brightness = 1.0f;
-    config->soft_focus = 0.0f;
-    config->whitening = 0.0f;
-    config->color_balance = 0.0f;
-    config->wrinkle_remove = 0.0f;
-    config->skin_quality = 0.0f;
-    config->smooth_intensity = 0.0f;
-    config->pore_reduction = 0.0f;
     config->slim_face = 0.0f;
     config->enlarge_eyes = 0.0f;
     config->thin_chin = 0.0f;
@@ -223,10 +171,6 @@ void iris_sdk_default_beauty_config_v2_c(IrisBeautyConfigV2* config) {
     config->protect_lips = 1;
     config->downscale_factor = 1;
     config->feather_radius = 15;
-    config->vivid_intensity = 0.0f;
-    config->vivid_saturation = 0.0f;
-    config->vivid_brightness = 0.0f;
-    config->vivid_warmth = 0.0f;
     config->protect_nose = 0;
 }
 
@@ -355,9 +299,7 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
     uint32_t* output_texture,
     int width, int height,
     const IrisBeautyConfigV2* config,
-    const IrisResult* detection,
-    uint32_t lut_texture_id,
-    float lut_intensity) {
+    const IrisResult* detection) {
 
 #ifdef IRIS_SDK_HAS_GLES
     std::lock_guard<std::mutex> lock(g_gpu_mutex);
@@ -374,9 +316,8 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
         return IRIS_SDK_INVALID_PARAM;
     }
 
-    // 비활성화 상태면 입력 텍스처 그대로 반환 (vivid는 enabled와 독립)
-    bool needsVivid = config->vivid_intensity > 0.01f;
-    if (!config->enabled && !needsVivid) {
+    // 비활성화 상태면 입력 텍스처 그대로 반환
+    if (!config->enabled) {
         *output_texture = input_texture;
         return IRIS_SDK_OK;
     }
@@ -408,10 +349,6 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
     }
 
     // GPU 뷰티 필터 적용 (텍스처 ID 기반)
-    // P8-W2: LUT 곁가지 제거 — lut_texture_id/lut_intensity는 D단계까지 시그니처만
-    // 유지되며 백엔드로 전달하지 않는다(applyTextureId 내 LUT 경로 제거에 맞춤).
-    (void)lut_texture_id;
-    (void)lut_intensity;
     uint32_t result_texture = 0;
     IrisSdkError err = g_gpu_beauty->applyTextureId(
         input_texture,
@@ -438,16 +375,6 @@ IrisSdkError iris_sdk_apply_beauty_texture_v2(
     }
     return IRIS_SDK_ERROR_NOT_SUPPORTED;
 #endif
-}
-
-// P8-W2: FreqSep 디버그 모드 곁가지 제거 — 시그니처는 D단계까지 유지, 구현은 no-op.
-void iris_sdk_set_freqsep_debug_mode(int mode) {
-    (void)mode;
-}
-
-// P8-W2: 색보정(skin color filter) 곁가지 제거 — 시그니처는 D단계까지 유지, 구현은 no-op.
-void iris_sdk_set_skin_color_filter(int enabled) {
-    (void)enabled;
 }
 
 void iris_sdk_set_skin_mask_smoothing(int enabled, float strength) {

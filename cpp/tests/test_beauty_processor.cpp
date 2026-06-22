@@ -281,14 +281,14 @@ TEST(BeautyProcessorTest, SetConfig_Valid_Success) {
 
     auto config = BeautyFilterConfigV2Helper::defaults();
     config.enabled = true;
-    config.smoothing = 0.8f;
+    config.brightness = 1.2f;  // P8-W2-D: smoothing 제거 → 생존 필드 brightness로 roundtrip 검증
 
     EXPECT_EQ(processor.setConfig(config), IRIS_SDK_OK);
 
     BeautyFilterConfigV2 out_config;
     EXPECT_EQ(processor.getConfig(out_config), IRIS_SDK_OK);
     EXPECT_TRUE(out_config.enabled);
-    EXPECT_FLOAT_EQ(out_config.smoothing, 0.8f);
+    EXPECT_FLOAT_EQ(out_config.brightness, 1.2f);
 }
 
 TEST(BeautyProcessorTest, SetConfig_Invalid_ReturnsError) {

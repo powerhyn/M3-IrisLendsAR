@@ -670,35 +670,11 @@ public final class IrisLensSDK {
         if (!sLibraryLoaded) {
             return inputTexture;
         }
-        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L, 0, 0.0f);
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L);
     }
 
     /**
-     * V2 뷰티 필터 + LUT를 GPU 텍스처에 적용합니다.
-     *
-     * <p>GPU 뷰티 백엔드가 초기화되어 있어야 합니다.
-     * GLSurfaceView.Renderer의 onDrawFrame 등 OpenGL 컨텍스트 내에서 호출해야 합니다.</p>
-     *
-     * @param inputTexture 입력 OpenGL ES 텍스처 ID
-     * @param width 텍스처 너비
-     * @param height 텍스처 높이
-     * @param config V2 뷰티 필터 설정
-     * @param lutTextureId LUT 3D 텍스처 ID (0이면 LUT 비활성)
-     * @param lutIntensity LUT 적용 강도 (0.0~1.0)
-     * @return 출력 텍스처 ID (실패 시 입력 텍스처 반환)
-     */
-    public static int applyBeautyFilterTextureV2(int inputTexture, int width, int height,
-                                                  @NonNull BeautyFilterConfigV2 config,
-                                                  int lutTextureId, float lutIntensity) {
-        if (!sLibraryLoaded) {
-            return inputTexture;
-        }
-        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L,
-                lutTextureId, lutIntensity);
-    }
-
-    /**
-     * V2 뷰티 필터 + LUT를 GPU 텍스처에 적용합니다 (Detection Handle 포함).
+     * V2 뷰티 필터를 GPU 텍스처에 적용합니다 (Detection Handle 포함).
      *
      * <p>Detection 슬롯의 검출 결과를 활용하여 ROI 기반 처리를 수행합니다.
      * {@link #getDetectionSlotPtr()}로 얻은 포인터를 전달하세요.</p>
@@ -708,19 +684,15 @@ public final class IrisLensSDK {
      * @param height 텍스처 높이
      * @param config V2 뷰티 필터 설정
      * @param detectionHandle 네이티브 검출 결과 포인터 (0L이면 ROI 미사용)
-     * @param lutTextureId LUT 3D 텍스처 ID (0이면 LUT 비활성)
-     * @param lutIntensity LUT 적용 강도 (0.0~1.0)
      * @return 출력 텍스처 ID (실패 시 입력 텍스처 반환)
      */
     public static int applyBeautyFilterTextureV2(int inputTexture, int width, int height,
                                                   @NonNull BeautyFilterConfigV2 config,
-                                                  long detectionHandle,
-                                                  int lutTextureId, float lutIntensity) {
+                                                  long detectionHandle) {
         if (!sLibraryLoaded) {
             return inputTexture;
         }
-        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, detectionHandle,
-                lutTextureId, lutIntensity);
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, detectionHandle);
     }
 
     /**
@@ -780,27 +752,6 @@ public final class IrisLensSDK {
     public static void releaseTexture(int texture) {
         if (sLibraryLoaded) {
             nativeReleaseTexture(texture);
-        }
-    }
-
-    /**
-     * FreqSep 디버그 모드 설정 (GL 스레드에서 호출).
-     * @param mode 0=off, 1=magnitude heatmap, 2=compression, 3=mask
-     */
-    public static void setFreqSepDebugMode(int mode) {
-        if (sLibraryLoaded) {
-            nativeSetFreqSepDebugMode(mode);
-        }
-    }
-
-    /**
-     * 피부색 기반 마스크 필터 설정 (실험용, FreqSep 전용).
-     * GL 스레드에서 호출.
-     * @param enabled true=on, false=off
-     */
-    public static void setSkinColorFilter(boolean enabled) {
-        if (sLibraryLoaded) {
-            nativeSetSkinColorFilter(enabled ? 1 : 0);
         }
     }
 
@@ -1457,11 +1408,8 @@ public final class IrisLensSDK {
      */
     private static native int nativeApplyBeautyTextureV2(
             int inputTexture, int width, int height,
-            BeautyFilterConfigV2 config, long detectionPtr,
-            int lutTextureId, float lutIntensity);
+            BeautyFilterConfigV2 config, long detectionPtr);
 
-    private static native void nativeSetFreqSepDebugMode(int mode);
-    private static native void nativeSetSkinColorFilter(int enabled);
     private static native void nativeSetSkinMaskSmoothing(boolean enabled, float strength);
 
     /**

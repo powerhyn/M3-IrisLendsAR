@@ -31,8 +31,7 @@ import androidx.annotation.NonNull;
  * BeautyFilterConfigV2 config = new BeautyFilterConfigV2.Builder()
  *     .enabled(true)
  *     .intensity(0.6f)
- *     .smoothing(0.5f)
- *     .whitening(0.3f)
+ *     .brightness(1.1f)
  *     .slimFace(0.2f)
  *     .build();
  *
@@ -65,59 +64,10 @@ public class BeautyFilterConfigV2 {
     // ========================================================================
 
     /**
-     * 피부 스무딩 정도 (0.0 ~ 1.0).
-     * Bilateral Filter를 사용한 피부 스무딩 효과입니다.
-     */
-    public float smoothing;
-
-    /**
      * 밝기 조절 (0.5 ~ 1.5).
      * 1.0 = 원본 밝기
      */
     public float brightness;
-
-    /**
-     * 소프트 포커스 정도 (0.0 ~ 1.0).
-     * Gaussian Blur를 사용한 소프트 글로우 효과입니다.
-     */
-    public float softFocus;
-
-    /**
-     * 피부톤 화이트닝 (0.0 ~ 1.0).
-     * 피부톤을 밝게 만드는 효과입니다.
-     */
-    public float whitening;
-
-    /**
-     * 컬러 밸런스 (-1.0 ~ 1.0).
-     * 음수 = 쿨톤, 양수 = 웜톤
-     */
-    public float colorBalance;
-
-    /**
-     * 주름 제거 (0.0 ~ 1.0).
-     * 주름 영역을 부드럽게 처리합니다.
-     */
-    public float wrinkleRemove;
-
-    /**
-     * 피부 품질 개선 (0.0 ~ 1.0).
-     * Frequency Separation 기반 고급 피부 보정을 활성화합니다.
-     * 0.0 = 비활성 (기존 Bilateral 경로), 0.0 초과 = Freq Sep 활성화
-     */
-    public float skinQuality;
-
-    /**
-     * 매끈하게 강도 (0.0~1.0, 기본 0.0).
-     * 저주파 톤 정리 + texture blend + foundation finish
-     */
-    public float smoothIntensity;
-
-    /**
-     * 모공 축소 강도 (0.0~1.0, 기본 0.0).
-     * 고주파 미세 텍스처 압축
-     */
-    public float poreReduction;
 
     // ========================================================================
     // 얼굴 형태 보정
@@ -183,48 +133,12 @@ public class BeautyFilterConfigV2 {
     public int downscaleFactor;
 
     // ========================================================================
-    // 화면 전체 포스트프로세싱 (Vivid, GPU 전용)
-    // ========================================================================
-
-    /**
-     * 화사한 필터 마스터 강도 (0.0 ~ 1.0).
-     * 0이면 비활성화됩니다. GPU 전용 기능입니다.
-     */
-    public float vividIntensity;
-
-    /**
-     * Vibrance 채도 부스트 (0.0 ~ 1.0).
-     * 저채도 영역을 우선 부스트하여 과포화를 방지합니다.
-     */
-    public float vividSaturation;
-
-    /**
-     * 밝기 리프트 (0.0 ~ 0.5).
-     * 미드톤 위주 소프트 리프트로 하이라이트 클리핑을 방지합니다.
-     */
-    public float vividBrightness;
-
-    /**
-     * 웜톤 시프트 (0.0 ~ 1.0).
-     * R/G 미세 증가, B 미세 감소로 따뜻한 톤을 적용합니다.
-     */
-    public float vividWarmth;
-
-    // ========================================================================
     // 기본값 상수
     // ========================================================================
 
     public static final boolean DEFAULT_ENABLED = false;
     public static final float DEFAULT_INTENSITY = 0.5f;
-    public static final float DEFAULT_SMOOTHING = 0.0f;
     public static final float DEFAULT_BRIGHTNESS = 1.0f;
-    public static final float DEFAULT_SOFT_FOCUS = 0.0f;
-    public static final float DEFAULT_WHITENING = 0.0f;
-    public static final float DEFAULT_COLOR_BALANCE = 0.0f;
-    public static final float DEFAULT_WRINKLE_REMOVE = 0.0f;
-    public static final float DEFAULT_SKIN_QUALITY = 0.0f;
-    public static final float DEFAULT_SMOOTH_INTENSITY = 0.0f;
-    public static final float DEFAULT_PORE_REDUCTION = 0.0f;
     public static final float DEFAULT_SLIM_FACE = 0.0f;
     public static final float DEFAULT_ENLARGE_EYES = 0.0f;
     public static final float DEFAULT_THIN_CHIN = 0.0f;
@@ -234,10 +148,6 @@ public class BeautyFilterConfigV2 {
     public static final boolean DEFAULT_PROTECT_LIPS = true;
     public static final boolean DEFAULT_PROTECT_NOSE = false;
     public static final int DEFAULT_DOWNSCALE_FACTOR = 1;
-    public static final float DEFAULT_VIVID_INTENSITY = 0.0f;
-    public static final float DEFAULT_VIVID_SATURATION = 0.0f;
-    public static final float DEFAULT_VIVID_BRIGHTNESS = 0.0f;
-    public static final float DEFAULT_VIVID_WARMTH = 0.0f;
 
     // ========================================================================
     // 생성자
@@ -258,15 +168,7 @@ public class BeautyFilterConfigV2 {
     public BeautyFilterConfigV2(@NonNull BeautyFilterConfigV2 other) {
         this.enabled = other.enabled;
         this.intensity = other.intensity;
-        this.smoothing = other.smoothing;
         this.brightness = other.brightness;
-        this.softFocus = other.softFocus;
-        this.whitening = other.whitening;
-        this.colorBalance = other.colorBalance;
-        this.wrinkleRemove = other.wrinkleRemove;
-        this.skinQuality = other.skinQuality;
-        this.smoothIntensity = other.smoothIntensity;
-        this.poreReduction = other.poreReduction;
         this.slimFace = other.slimFace;
         this.enlargeEyes = other.enlargeEyes;
         this.thinChin = other.thinChin;
@@ -276,10 +178,6 @@ public class BeautyFilterConfigV2 {
         this.protectLips = other.protectLips;
         this.protectNose = other.protectNose;
         this.downscaleFactor = other.downscaleFactor;
-        this.vividIntensity = other.vividIntensity;
-        this.vividSaturation = other.vividSaturation;
-        this.vividBrightness = other.vividBrightness;
-        this.vividWarmth = other.vividWarmth;
     }
 
     // ========================================================================
@@ -292,15 +190,7 @@ public class BeautyFilterConfigV2 {
     public void setDefaults() {
         enabled = DEFAULT_ENABLED;
         intensity = DEFAULT_INTENSITY;
-        smoothing = DEFAULT_SMOOTHING;
         brightness = DEFAULT_BRIGHTNESS;
-        softFocus = DEFAULT_SOFT_FOCUS;
-        whitening = DEFAULT_WHITENING;
-        colorBalance = DEFAULT_COLOR_BALANCE;
-        wrinkleRemove = DEFAULT_WRINKLE_REMOVE;
-        skinQuality = DEFAULT_SKIN_QUALITY;
-        smoothIntensity = DEFAULT_SMOOTH_INTENSITY;
-        poreReduction = DEFAULT_PORE_REDUCTION;
         slimFace = DEFAULT_SLIM_FACE;
         enlargeEyes = DEFAULT_ENLARGE_EYES;
         thinChin = DEFAULT_THIN_CHIN;
@@ -310,10 +200,6 @@ public class BeautyFilterConfigV2 {
         protectLips = DEFAULT_PROTECT_LIPS;
         protectNose = DEFAULT_PROTECT_NOSE;
         downscaleFactor = DEFAULT_DOWNSCALE_FACTOR;
-        vividIntensity = DEFAULT_VIVID_INTENSITY;
-        vividSaturation = DEFAULT_VIVID_SATURATION;
-        vividBrightness = DEFAULT_VIVID_BRIGHTNESS;
-        vividWarmth = DEFAULT_VIVID_WARMTH;
     }
 
     /**
@@ -325,28 +211,26 @@ public class BeautyFilterConfigV2 {
     @NonNull
     public static BeautyFilterConfigV2 fromV1(@NonNull BeautyFilterConfig v1) {
         BeautyFilterConfigV2 v2 = new BeautyFilterConfigV2();
+        // V1↔V2 공통 생존 필드만 이관 (smoothing/softFocus는 V2에서 제거됨, P8-W2-D).
         v2.enabled = v1.enabled;
         v2.intensity = v1.intensity;
-        v2.smoothing = v1.smoothing;
         v2.brightness = v1.brightness;
-        v2.softFocus = v1.softFocus;
         // V2 전용 필드는 기본값 유지
         return v2;
     }
 
     /**
-     * V1 설정으로 변환합니다 (피부 효과만).
+     * V1 설정으로 변환합니다 (공통 생존 필드만).
      *
      * @return V1 설정
      */
     @NonNull
     public BeautyFilterConfig toV1() {
         BeautyFilterConfig v1 = new BeautyFilterConfig();
+        // V2엔 smoothing/softFocus가 없으므로 V1 기본값 유지(P8-W2-D).
         v1.enabled = this.enabled;
         v1.intensity = this.intensity;
-        v1.smoothing = this.smoothing;
         v1.brightness = this.brightness;
-        v1.softFocus = this.softFocus;
         return v1;
     }
 
@@ -357,23 +241,11 @@ public class BeautyFilterConfigV2 {
      */
     public boolean isValid() {
         return intensity >= 0.0f && intensity <= 1.0f
-                && smoothing >= 0.0f && smoothing <= 1.0f
                 && brightness >= 0.5f && brightness <= 1.5f
-                && softFocus >= 0.0f && softFocus <= 1.0f
-                && whitening >= 0.0f && whitening <= 1.0f
-                && colorBalance >= -1.0f && colorBalance <= 1.0f
-                && wrinkleRemove >= 0.0f && wrinkleRemove <= 1.0f
-                && skinQuality >= 0.0f && skinQuality <= 1.0f
-                && smoothIntensity >= 0.0f && smoothIntensity <= 1.0f
-                && poreReduction >= 0.0f && poreReduction <= 1.0f
                 && slimFace >= 0.0f && slimFace <= 1.0f
                 && enlargeEyes >= 0.0f && enlargeEyes <= 1.0f
                 && thinChin >= 0.0f && thinChin <= 1.0f
-                && downscaleFactor >= 1 && downscaleFactor <= 4
-                && vividIntensity >= 0.0f && vividIntensity <= 1.0f
-                && vividSaturation >= 0.0f && vividSaturation <= 1.0f
-                && vividBrightness >= 0.0f && vividBrightness <= 0.5f
-                && vividWarmth >= 0.0f && vividWarmth <= 1.0f;
+                && downscaleFactor >= 1 && downscaleFactor <= 4;
     }
 
     /**
@@ -381,23 +253,11 @@ public class BeautyFilterConfigV2 {
      */
     public void clamp() {
         intensity = clampFloat(intensity, 0.0f, 1.0f);
-        smoothing = clampFloat(smoothing, 0.0f, 1.0f);
         brightness = clampFloat(brightness, 0.5f, 1.5f);
-        softFocus = clampFloat(softFocus, 0.0f, 1.0f);
-        whitening = clampFloat(whitening, 0.0f, 1.0f);
-        colorBalance = clampFloat(colorBalance, -1.0f, 1.0f);
-        wrinkleRemove = clampFloat(wrinkleRemove, 0.0f, 1.0f);
-        skinQuality = clampFloat(skinQuality, 0.0f, 1.0f);
-        smoothIntensity = clampFloat(smoothIntensity, 0.0f, 1.0f);
-        poreReduction = clampFloat(poreReduction, 0.0f, 1.0f);
         slimFace = clampFloat(slimFace, 0.0f, 1.0f);
         enlargeEyes = clampFloat(enlargeEyes, 0.0f, 1.0f);
         thinChin = clampFloat(thinChin, 0.0f, 1.0f);
         downscaleFactor = clampInt(downscaleFactor, 1, 4);
-        vividIntensity = clampFloat(vividIntensity, 0.0f, 1.0f);
-        vividSaturation = clampFloat(vividSaturation, 0.0f, 1.0f);
-        vividBrightness = clampFloat(vividBrightness, 0.0f, 0.5f);
-        vividWarmth = clampFloat(vividWarmth, 0.0f, 1.0f);
     }
 
     private static float clampFloat(float value, float min, float max) {
@@ -414,15 +274,7 @@ public class BeautyFilterConfigV2 {
         return "BeautyFilterConfigV2{" +
                 "enabled=" + enabled +
                 ", intensity=" + intensity +
-                ", smoothing=" + smoothing +
                 ", brightness=" + brightness +
-                ", softFocus=" + softFocus +
-                ", whitening=" + whitening +
-                ", colorBalance=" + colorBalance +
-                ", wrinkleRemove=" + wrinkleRemove +
-                ", skinQuality=" + skinQuality +
-                ", smoothIntensity=" + smoothIntensity +
-                ", poreReduction=" + poreReduction +
                 ", slimFace=" + slimFace +
                 ", enlargeEyes=" + enlargeEyes +
                 ", thinChin=" + thinChin +
@@ -432,10 +284,6 @@ public class BeautyFilterConfigV2 {
                 ", protectLips=" + protectLips +
                 ", protectNose=" + protectNose +
                 ", downscaleFactor=" + downscaleFactor +
-                ", vividIntensity=" + vividIntensity +
-                ", vividSaturation=" + vividSaturation +
-                ", vividBrightness=" + vividBrightness +
-                ", vividWarmth=" + vividWarmth +
                 '}';
     }
 
@@ -473,48 +321,8 @@ public class BeautyFilterConfigV2 {
 
         // 피부 효과
 
-        public Builder smoothing(float smoothing) {
-            config.smoothing = smoothing;
-            return this;
-        }
-
         public Builder brightness(float brightness) {
             config.brightness = brightness;
-            return this;
-        }
-
-        public Builder softFocus(float softFocus) {
-            config.softFocus = softFocus;
-            return this;
-        }
-
-        public Builder whitening(float whitening) {
-            config.whitening = whitening;
-            return this;
-        }
-
-        public Builder colorBalance(float colorBalance) {
-            config.colorBalance = colorBalance;
-            return this;
-        }
-
-        public Builder wrinkleRemove(float wrinkleRemove) {
-            config.wrinkleRemove = wrinkleRemove;
-            return this;
-        }
-
-        public Builder skinQuality(float skinQuality) {
-            config.skinQuality = skinQuality;
-            return this;
-        }
-
-        public Builder smoothIntensity(float smoothIntensity) {
-            config.smoothIntensity = smoothIntensity;
-            return this;
-        }
-
-        public Builder poreReduction(float poreReduction) {
-            config.poreReduction = poreReduction;
             return this;
         }
 
@@ -564,28 +372,6 @@ public class BeautyFilterConfigV2 {
 
         public Builder downscaleFactor(int downscaleFactor) {
             config.downscaleFactor = downscaleFactor;
-            return this;
-        }
-
-        // 화면 전체 포스트프로세싱 (Vivid)
-
-        public Builder vividIntensity(float vividIntensity) {
-            config.vividIntensity = vividIntensity;
-            return this;
-        }
-
-        public Builder vividSaturation(float vividSaturation) {
-            config.vividSaturation = vividSaturation;
-            return this;
-        }
-
-        public Builder vividBrightness(float vividBrightness) {
-            config.vividBrightness = vividBrightness;
-            return this;
-        }
-
-        public Builder vividWarmth(float vividWarmth) {
-            config.vividWarmth = vividWarmth;
             return this;
         }
 

@@ -21,13 +21,7 @@ TEST(BeautyFilterConfigV2Test, DefaultValuesFromHelper) {
 
     EXPECT_FALSE(config.enabled);
     EXPECT_FLOAT_EQ(config.intensity, 0.5f);
-    EXPECT_FLOAT_EQ(config.smoothing, 0.0f);
     EXPECT_FLOAT_EQ(config.brightness, 1.0f);
-    EXPECT_FLOAT_EQ(config.softFocus, 0.0f);
-    EXPECT_FLOAT_EQ(config.whitening, 0.0f);
-    EXPECT_FLOAT_EQ(config.colorBalance, 0.0f);
-    EXPECT_FLOAT_EQ(config.wrinkleRemove, 0.0f);
-    EXPECT_FLOAT_EQ(config.skinQuality, 0.0f);
     EXPECT_FLOAT_EQ(config.slimFace, 0.0f);
     EXPECT_FLOAT_EQ(config.enlargeEyes, 0.0f);
     EXPECT_FLOAT_EQ(config.thinChin, 0.0f);
@@ -63,16 +57,6 @@ TEST(BeautyFilterConfigV2Test, IsValidRejectsOutOfRangeBrightness) {
     EXPECT_FALSE(BeautyFilterConfigV2Helper::isValid(config));
 }
 
-TEST(BeautyFilterConfigV2Test, IsValidRejectsOutOfRangeColorBalance) {
-    auto config = BeautyFilterConfigV2Helper::defaults();
-
-    config.colorBalance = 1.5f;  // Out of range (max 1.0)
-    EXPECT_FALSE(BeautyFilterConfigV2Helper::isValid(config));
-
-    config.colorBalance = -1.5f;  // Out of range (min -1.0)
-    EXPECT_FALSE(BeautyFilterConfigV2Helper::isValid(config));
-}
-
 TEST(BeautyFilterConfigV2Test, IsValidRejectsInvalidDownscale) {
     auto config = BeautyFilterConfigV2Helper::defaults();
 
@@ -87,17 +71,15 @@ TEST(BeautyFilterConfigV2Test, ClampCorrectsBoundaries) {
     BeautyFilterConfigV2 config = {};
     config.intensity = 1.5f;
     config.brightness = 0.0f;
-    config.colorBalance = 2.0f;
     config.downscaleFactor = 10;
-    config.smoothing = -0.5f;
+    config.slimFace = -0.5f;
 
     BeautyFilterConfigV2Helper::clamp(config);
 
     EXPECT_FLOAT_EQ(config.intensity, 1.0f);
     EXPECT_FLOAT_EQ(config.brightness, 0.5f);
-    EXPECT_FLOAT_EQ(config.colorBalance, 1.0f);
     EXPECT_EQ(config.downscaleFactor, 4);
-    EXPECT_FLOAT_EQ(config.smoothing, 0.0f);
+    EXPECT_FLOAT_EQ(config.slimFace, 0.0f);
 }
 
 TEST(BeautyFilterConfigV2Test, ClampPreservesValidValues) {
@@ -125,11 +107,10 @@ TEST(BeautyFilterConfigV2Test, FromV1PreservesV1Fields) {
 
     auto v2 = BeautyFilterConfigV2Helper::fromV1(v1);
 
+    // V1↔V2 공통 생존 필드만 이관 (smoothing/softFocus는 V2에서 제거됨, P8-W2-D).
     EXPECT_EQ(v2.enabled, v1.enabled);
     EXPECT_FLOAT_EQ(v2.intensity, v1.intensity);
-    EXPECT_FLOAT_EQ(v2.smoothing, v1.smoothing);
     EXPECT_FLOAT_EQ(v2.brightness, v1.brightness);
-    EXPECT_FLOAT_EQ(v2.softFocus, v1.softFocus);
 }
 
 TEST(BeautyFilterConfigV2Test, FromV1SetsDefaultsForV2Fields) {
@@ -140,7 +121,6 @@ TEST(BeautyFilterConfigV2Test, FromV1SetsDefaultsForV2Fields) {
     auto v2 = BeautyFilterConfigV2Helper::fromV1(v1);
 
     // V2 전용 필드는 기본값
-    EXPECT_FLOAT_EQ(v2.whitening, 0.0f);
     EXPECT_FLOAT_EQ(v2.slimFace, 0.0f);
     EXPECT_FLOAT_EQ(v2.enlargeEyes, 0.0f);
     EXPECT_TRUE(v2.useGpu);
@@ -151,36 +131,29 @@ TEST(BeautyFilterConfigV2Test, ToV1PreservesBasicFields) {
     auto v2 = BeautyFilterConfigV2Helper::defaults();
     v2.enabled = true;
     v2.intensity = 0.8f;
-    v2.smoothing = 0.7f;
     v2.brightness = 1.2f;
-    v2.softFocus = 0.5f;
-    v2.whitening = 0.3f;  // V2 전용 (V1에서 무시됨)
 
     auto v1 = BeautyFilterConfigV2Helper::toV1(v2);
 
+    // V2엔 smoothing/softFocus가 없으므로 공통 생존 필드만 검증(P8-W2-D).
     EXPECT_EQ(v1.enabled, v2.enabled);
     EXPECT_FLOAT_EQ(v1.intensity, v2.intensity);
-    EXPECT_FLOAT_EQ(v1.smoothing, v2.smoothing);
     EXPECT_FLOAT_EQ(v1.brightness, v2.brightness);
-    EXPECT_FLOAT_EQ(v1.softFocus, v2.softFocus);
 }
 
 TEST(BeautyFilterConfigV2Test, RoundTripV1ToV2ToV1) {
     BeautyFilterConfig original = {};
     original.enabled = true;
     original.intensity = 0.6f;
-    original.smoothing = 0.5f;
     original.brightness = 1.15f;
-    original.softFocus = 0.35f;
 
     auto v2 = BeautyFilterConfigV2Helper::fromV1(original);
     auto v1 = BeautyFilterConfigV2Helper::toV1(v2);
 
+    // smoothing/softFocus는 V2 경유 시 보존되지 않으므로 공통 생존 필드만 검증(P8-W2-D).
     EXPECT_EQ(v1.enabled, original.enabled);
     EXPECT_FLOAT_EQ(v1.intensity, original.intensity);
-    EXPECT_FLOAT_EQ(v1.smoothing, original.smoothing);
     EXPECT_FLOAT_EQ(v1.brightness, original.brightness);
-    EXPECT_FLOAT_EQ(v1.softFocus, original.softFocus);
 }
 
 //=============================================================================
@@ -194,7 +167,7 @@ TEST(BeautyFilterConfigV2CAPI, DefaultConfigReturnsValidDefaults) {
     iris_sdk_default_beauty_config_v2(&config);
 
     EXPECT_FLOAT_EQ(config.intensity, 0.5f);
-    EXPECT_FLOAT_EQ(config.smoothing, 0.0f);
+    EXPECT_FLOAT_EQ(config.brightness, 1.0f);
     EXPECT_FALSE(config.enabled);
 }
 
@@ -209,7 +182,7 @@ TEST(BeautyFilterConfigV2CAPI, SetAndGetConfig) {
     iris_sdk_default_beauty_config_v2(&set_config);
     set_config.enabled = true;
     set_config.intensity = 0.7f;
-    set_config.whitening = 0.3f;
+    set_config.brightness = 1.2f;
 
     IrisSdkError err = iris_sdk_set_beauty_filter_v2(&set_config);
     EXPECT_EQ(err, IRIS_SDK_OK);
@@ -220,7 +193,7 @@ TEST(BeautyFilterConfigV2CAPI, SetAndGetConfig) {
 
     EXPECT_EQ(get_config.enabled, set_config.enabled);
     EXPECT_FLOAT_EQ(get_config.intensity, set_config.intensity);
-    EXPECT_FLOAT_EQ(get_config.whitening, set_config.whitening);
+    EXPECT_FLOAT_EQ(get_config.brightness, set_config.brightness);
 }
 
 TEST(BeautyFilterConfigV2CAPI, SetConfigRejectsInvalid) {
@@ -273,117 +246,10 @@ TEST(BeautyFilterConfigV2CAPI, UsingGpuReflectsConfig) {
 }
 
 //=============================================================================
-// skinQuality validation 테스트
+// (P8-W2-D 제거) skinQuality validation / SkinQualityCAPITest / BeautyPresetTest
+//   곁가지 config 필드(skinQuality 등) 및 FreqSep 프리셋/편의 C API 물리 삭제로 함께 제거.
+//   (FreqSepParamsTest는 W2-B에서 매핑 함수 제거와 함께 이미 제거됨.)
 //=============================================================================
-
-TEST(BeautyFilterConfigV2Test, IsValidRejectsOutOfRangeSkinQuality) {
-    auto config = BeautyFilterConfigV2Helper::defaults();
-
-    config.skinQuality = 1.5f;  // Out of range (max 1.0)
-    EXPECT_FALSE(BeautyFilterConfigV2Helper::isValid(config));
-
-    config.skinQuality = -0.1f;  // Out of range (min 0.0)
-    EXPECT_FALSE(BeautyFilterConfigV2Helper::isValid(config));
-}
-
-TEST(BeautyFilterConfigV2Test, ClampCorrectsSkinQuality) {
-    BeautyFilterConfigV2 config = BeautyFilterConfigV2Helper::defaults();
-    config.skinQuality = 2.0f;
-    BeautyFilterConfigV2Helper::clamp(config);
-    EXPECT_FLOAT_EQ(config.skinQuality, 1.0f);
-
-    config.skinQuality = -1.0f;
-    BeautyFilterConfigV2Helper::clamp(config);
-    EXPECT_FLOAT_EQ(config.skinQuality, 0.0f);
-}
-
-//=============================================================================
-// (P8-W2 제거) FreqSepParamsTest (mapSkinQuality / mapSmoothingAndPore 기반)
-// 전체는 곁가지 FreqSep 백엔드 제거로 매핑 함수 자체가 사라져 함께 제거.
-// config 필드(skinQuality 등) 테스트는 D단계까지 보존된다.
-//=============================================================================
-//=============================================================================
-// skinQuality C API 테스트
-//=============================================================================
-
-TEST(SkinQualityCAPITest, SetAndGetRoundTrip) {
-    IrisSdkError err = iris_sdk_set_skin_quality(0.6f);
-    EXPECT_EQ(err, IRIS_SDK_OK);
-
-    float quality = -1.0f;
-    err = iris_sdk_get_skin_quality(&quality);
-    EXPECT_EQ(err, IRIS_SDK_OK);
-    EXPECT_FLOAT_EQ(quality, 0.6f);
-}
-
-TEST(SkinQualityCAPITest, SetRejectsOutOfRange) {
-    EXPECT_EQ(iris_sdk_set_skin_quality(-0.5f), IRIS_SDK_INVALID_PARAM);
-    EXPECT_EQ(iris_sdk_set_skin_quality(1.5f), IRIS_SDK_INVALID_PARAM);
-}
-
-TEST(SkinQualityCAPITest, SetAcceptsBoundaryValues) {
-    EXPECT_EQ(iris_sdk_set_skin_quality(0.0f), IRIS_SDK_OK);
-    EXPECT_EQ(iris_sdk_set_skin_quality(1.0f), IRIS_SDK_OK);
-}
-
-TEST(SkinQualityCAPITest, GetRejectsNullptr) {
-    EXPECT_EQ(iris_sdk_get_skin_quality(nullptr), IRIS_SDK_NULL_POINTER);
-}
-
-TEST(SkinQualityCAPITest, ZeroBypassesFreqSep) {
-    // skinQuality=0 -> 기존 Bilateral 경로 (하위 호환)
-    EXPECT_EQ(iris_sdk_set_skin_quality(0.0f), IRIS_SDK_OK);
-    float quality = -1.0f;
-    iris_sdk_get_skin_quality(&quality);
-    EXPECT_FLOAT_EQ(quality, 0.0f);
-}
-
-//=============================================================================
-// 프리셋 API 테스트
-//=============================================================================
-
-TEST(BeautyPresetTest, NaturalPresetSetsSkinQuality) {
-    IrisSdkError err = iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_NATURAL);
-    EXPECT_EQ(err, IRIS_SDK_OK);
-    float quality = -1.0f;
-    iris_sdk_get_skin_quality(&quality);
-    EXPECT_FLOAT_EQ(quality, 0.3f);
-}
-
-TEST(BeautyPresetTest, ModeratePresetSetsSkinQuality) {
-    iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_MODERATE);
-    float quality = -1.0f;
-    iris_sdk_get_skin_quality(&quality);
-    EXPECT_FLOAT_EQ(quality, 0.5f);
-}
-
-TEST(BeautyPresetTest, StrongPresetSetsSkinQuality) {
-    iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_STRONG);
-    float quality = -1.0f;
-    iris_sdk_get_skin_quality(&quality);
-    EXPECT_FLOAT_EQ(quality, 0.8f);
-}
-
-TEST(BeautyPresetTest, CustomPresetKeepsCurrentValue) {
-    iris_sdk_set_skin_quality(0.42f);
-    IrisSdkError err = iris_sdk_set_beauty_preset(IRIS_BEAUTY_PRESET_CUSTOM);
-    EXPECT_EQ(err, IRIS_SDK_OK);
-    float quality = -1.0f;
-    iris_sdk_get_skin_quality(&quality);
-    EXPECT_FLOAT_EQ(quality, 0.42f);  // 변경 없음
-}
-
-TEST(BeautyPresetTest, InvalidPresetReturnsError) {
-    IrisSdkError err = iris_sdk_set_beauty_preset(static_cast<IrisBeautyPreset>(99));
-    EXPECT_EQ(err, IRIS_SDK_INVALID_PARAM);
-}
-
-TEST(BeautyPresetTest, BackwardCompatDefaultZero) {
-    // 기존 API만 사용 (프리셋 미사용) -> skinQuality는 기본 0.0
-    BeautyFilterConfigV2 config = {};
-    iris_sdk_default_beauty_config_v2(&config);
-    EXPECT_FLOAT_EQ(config.skinQuality, 0.0f);
-}
 
 //=============================================================================
 // Soft Light (Pegtop) CPU 참조 테스트

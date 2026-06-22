@@ -68,27 +68,8 @@ typedef struct BeautyFilterConfigV2 {
     float intensity;
 
     //===== 피부 효과 =====
-    /** @brief 피부 스무딩 (0.0~1.0, 기본값 0.5) */
-    float smoothing;
     /** @brief 밝기 (0.5~1.5, 1.0=원본, 기본값 1.0) */
     float brightness;
-    /** @brief 소프트 포커스 (0.0~1.0, 기본값 0.3) */
-    float softFocus;
-    /** @brief 피부톤 화이트닝 (0.0~1.0, 기본값 0.0) */
-    float whitening;
-    /** @brief 컬러 밸런스 (-1.0~1.0, 기본값 0.0)
-     *  @note 음수=쿨톤, 양수=웜톤 */
-    float colorBalance;
-    /** @brief 주름 제거 (0.0~1.0, 기본값 0.0) */
-    float wrinkleRemove;
-    /** @brief 피부 품질 개선 (0~1, 기본 0.0, Freq Sep 활성화) */
-    float skinQuality;
-
-    //===== 피부 2축 독립 제어 (smoothIntensity/poreReduction 둘 다 0이면 skinQuality 사용) =====
-    /** @brief 매끈하게 강도 (0~1, 기본 0.0) - 저주파 톤 정리 + texture blend + foundation finish */
-    float smoothIntensity;
-    /** @brief 모공 축소 강도 (0~1, 기본 0.0) - 고주파 미세 텍스처 압축 */
-    float poreReduction;
 
     //===== 얼굴 형태 보정 =====
     /** @brief 얼굴 슬림화 (0.0~1.0, 기본값 0.0) */
@@ -110,16 +91,6 @@ typedef struct BeautyFilterConfigV2 {
     /** @brief 다운스케일 팩터 (1=원본, 2=1/2, 4=1/4, 기본값 1)
      *  @note 성능과 품질 트레이드오프 조절용 */
     int downscaleFactor;
-
-    //===== 화면 전체 포스트프로세싱 (Vivid, GPU 전용) =====
-    /** @brief 화사한 필터 마스터 강도 (0.0~1.0, 기본값 0.0, 0이면 비활성) */
-    float vividIntensity;
-    /** @brief 채도 부스트 - Vibrance 방식 (0.0~1.0, 기본값 0.0) */
-    float vividSaturation;
-    /** @brief 밝기 리프트 (0.0~0.5, 기본값 0.0) */
-    float vividBrightness;
-    /** @brief 웜톤 시프트 (0.0~1.0, 기본값 0.0) */
-    float vividWarmth;
 
     //===== 추가 보호 옵션 =====
     /** @brief 코 영역 보호 (기본값 false) */
@@ -272,50 +243,6 @@ IRIS_SDK_EXPORT bool iris_sdk_beauty_gpu_available(void);
  */
 IRIS_SDK_EXPORT bool iris_sdk_beauty_using_gpu(void);
 
-// ============================================================================
-// 프리셋 및 skinQuality 편의 API
-// ============================================================================
-
-/**
- * @brief 뷰티 프리셋 (skinQuality 사전 설정)
- */
-typedef enum IrisBeautyPreset {
-    IRIS_BEAUTY_PRESET_NATURAL  = 0,   /**< 자연스러운 보정 (skinQuality=0.3) */
-    IRIS_BEAUTY_PRESET_MODERATE = 1,   /**< 적절한 보정 (skinQuality=0.5) */
-    IRIS_BEAUTY_PRESET_STRONG   = 2,   /**< 강한 보정 (skinQuality=0.8) */
-    IRIS_BEAUTY_PRESET_CUSTOM   = 3    /**< 사용자 직접 설정 */
-} IrisBeautyPreset;
-
-/**
- * @brief 피부 품질 개선 강도 설정 (Frequency Separation)
- *
- * skinQuality > 0이면 Freq Sep 파이프라인이 활성화됩니다.
- * skinQuality = 0이면 기존 Bilateral 경로로 동작합니다 (하위 호환).
- *
- * @param quality 피부 품질 강도 (0.0~1.0, 0.0=비활성)
- * @return IRIS_SDK_OK 성공, IRIS_SDK_INVALID_PARAM 범위 초과
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_skin_quality(float quality);
-
-/**
- * @brief 현재 피부 품질 개선 강도 조회
- *
- * @param out_quality 결과를 저장할 포인터 (NULL 불가)
- * @return IRIS_SDK_OK 성공, IRIS_SDK_NULL_POINTER out_quality가 NULL인 경우
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_get_skin_quality(float* out_quality);
-
-/**
- * @brief 뷰티 프리셋 적용
- *
- * 프리셋에 따라 skinQuality 값이 자동 설정됩니다.
- * IRIS_BEAUTY_PRESET_CUSTOM 선택 시 skinQuality 값이 변경되지 않습니다.
- *
- * @param preset 적용할 프리셋
- * @return IRIS_SDK_OK 성공, IRIS_SDK_INVALID_PARAM 유효하지 않은 프리셋
- */
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_beauty_preset(IrisBeautyPreset preset);
-
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
@@ -338,18 +265,11 @@ struct BeautyFilterConfigV2Helper {
      */
     static BeautyFilterConfigV2 fromV1(const BeautyFilterConfig& v1) {
         BeautyFilterConfigV2 v2 = {};
+        // V1↔V2 공통 생존 필드만 이관 (smoothing/softFocus는 V2에서 제거됨, P8-W2-D).
         v2.enabled = v1.enabled;
         v2.intensity = v1.intensity;
-        v2.smoothing = v1.smoothing;
         v2.brightness = v1.brightness;
-        v2.softFocus = v1.softFocus;
         // V2 전용 필드는 기본값
-        v2.whitening = 0.0f;
-        v2.colorBalance = 0.0f;
-        v2.wrinkleRemove = 0.0f;
-        v2.skinQuality = 0.0f;
-        v2.smoothIntensity = 0.0f;
-        v2.poreReduction = 0.0f;
         v2.slimFace = 0.0f;
         v2.enlargeEyes = 0.0f;
         v2.thinChin = 0.0f;
@@ -358,24 +278,19 @@ struct BeautyFilterConfigV2Helper {
         v2.protectEyes = true;
         v2.protectLips = true;
         v2.downscaleFactor = 1;
-        v2.vividIntensity = 0.0f;
-        v2.vividSaturation = 0.0f;
-        v2.vividBrightness = 0.0f;
-        v2.vividWarmth = 0.0f;
         v2.protectNose = false;
         return v2;
     }
 
     /**
-     * @brief V2 설정을 V1으로 변환 (피부 효과만)
+     * @brief V2 설정을 V1으로 변환 (공통 생존 필드만)
      */
     static BeautyFilterConfig toV1(const BeautyFilterConfigV2& v2) {
         BeautyFilterConfig v1 = {};
+        // V2엔 smoothing/softFocus가 없으므로 V1 기본값 유지(P8-W2-D).
         v1.enabled = v2.enabled;
         v1.intensity = v2.intensity;
-        v1.smoothing = v2.smoothing;
         v1.brightness = v2.brightness;
-        v1.softFocus = v2.softFocus;
         return v1;
     }
 
@@ -384,23 +299,11 @@ struct BeautyFilterConfigV2Helper {
      */
     static bool isValid(const BeautyFilterConfigV2& cfg) {
         return (cfg.intensity >= 0.0f && cfg.intensity <= 1.0f) &&
-               (cfg.smoothing >= 0.0f && cfg.smoothing <= 1.0f) &&
                (cfg.brightness >= 0.5f && cfg.brightness <= 1.5f) &&
-               (cfg.softFocus >= 0.0f && cfg.softFocus <= 1.0f) &&
-               (cfg.whitening >= 0.0f && cfg.whitening <= 1.0f) &&
-               (cfg.colorBalance >= -1.0f && cfg.colorBalance <= 1.0f) &&
-               (cfg.wrinkleRemove >= 0.0f && cfg.wrinkleRemove <= 1.0f) &&
-               (cfg.skinQuality >= 0.0f && cfg.skinQuality <= 1.0f) &&
-               (cfg.smoothIntensity >= 0.0f && cfg.smoothIntensity <= 1.0f) &&
-               (cfg.poreReduction >= 0.0f && cfg.poreReduction <= 1.0f) &&
                (cfg.slimFace >= 0.0f && cfg.slimFace <= 1.0f) &&
                (cfg.enlargeEyes >= 0.0f && cfg.enlargeEyes <= 1.0f) &&
                (cfg.thinChin >= 0.0f && cfg.thinChin <= 1.0f) &&
-               (cfg.downscaleFactor >= 1 && cfg.downscaleFactor <= 4) &&
-               (cfg.vividIntensity >= 0.0f && cfg.vividIntensity <= 1.0f) &&
-               (cfg.vividSaturation >= 0.0f && cfg.vividSaturation <= 1.0f) &&
-               (cfg.vividBrightness >= 0.0f && cfg.vividBrightness <= 0.5f) &&
-               (cfg.vividWarmth >= 0.0f && cfg.vividWarmth <= 1.0f);
+               (cfg.downscaleFactor >= 1 && cfg.downscaleFactor <= 4);
     }
 
     /**
@@ -413,24 +316,12 @@ struct BeautyFilterConfigV2Helper {
             return v < lo ? lo : (v > hi ? hi : v);
         };
         cfg.intensity = clampf(cfg.intensity, 0.0f, 1.0f);
-        cfg.smoothing = clampf(cfg.smoothing, 0.0f, 1.0f);
         cfg.brightness = clampf(cfg.brightness, 0.5f, 1.5f);
-        cfg.softFocus = clampf(cfg.softFocus, 0.0f, 1.0f);
-        cfg.whitening = clampf(cfg.whitening, 0.0f, 1.0f);
-        cfg.colorBalance = clampf(cfg.colorBalance, -1.0f, 1.0f);
-        cfg.wrinkleRemove = clampf(cfg.wrinkleRemove, 0.0f, 1.0f);
-        cfg.skinQuality = clampf(cfg.skinQuality, 0.0f, 1.0f);
-        cfg.smoothIntensity = clampf(cfg.smoothIntensity, 0.0f, 1.0f);
-        cfg.poreReduction = clampf(cfg.poreReduction, 0.0f, 1.0f);
         cfg.slimFace = clampf(cfg.slimFace, 0.0f, 1.0f);
         cfg.enlargeEyes = clampf(cfg.enlargeEyes, 0.0f, 1.0f);
         cfg.thinChin = clampf(cfg.thinChin, 0.0f, 1.0f);
         cfg.downscaleFactor = cfg.downscaleFactor < 1 ? 1 :
                               (cfg.downscaleFactor > 4 ? 4 : cfg.downscaleFactor);
-        cfg.vividIntensity = clampf(cfg.vividIntensity, 0.0f, 1.0f);
-        cfg.vividSaturation = clampf(cfg.vividSaturation, 0.0f, 1.0f);
-        cfg.vividBrightness = clampf(cfg.vividBrightness, 0.0f, 0.5f);
-        cfg.vividWarmth = clampf(cfg.vividWarmth, 0.0f, 1.0f);
     }
 
     /**
@@ -440,15 +331,7 @@ struct BeautyFilterConfigV2Helper {
         BeautyFilterConfigV2 cfg = {};
         cfg.enabled = false;
         cfg.intensity = 0.5f;
-        cfg.smoothing = 0.0f;
         cfg.brightness = 1.0f;
-        cfg.softFocus = 0.0f;
-        cfg.whitening = 0.0f;
-        cfg.colorBalance = 0.0f;
-        cfg.wrinkleRemove = 0.0f;
-        cfg.skinQuality = 0.0f;
-        cfg.smoothIntensity = 0.0f;
-        cfg.poreReduction = 0.0f;
         cfg.slimFace = 0.0f;
         cfg.enlargeEyes = 0.0f;
         cfg.thinChin = 0.0f;
@@ -457,10 +340,6 @@ struct BeautyFilterConfigV2Helper {
         cfg.protectEyes = true;
         cfg.protectLips = true;
         cfg.downscaleFactor = 1;
-        cfg.vividIntensity = 0.0f;
-        cfg.vividSaturation = 0.0f;
-        cfg.vividBrightness = 0.0f;
-        cfg.vividWarmth = 0.0f;
         cfg.protectNose = false;
         return cfg;
     }

@@ -95,7 +95,9 @@ P8 뷰티 핵심 2개(① 피부 skin smoothing[구현됨] + ② 턱깎기 형�
 - [x] W2-A 데모 UI 제거 (assembleDebug SUCCESS)
 - [x] W2-B GPU 패스 + stale 테스트 (빌드 신규경고0 + ctest 신규회귀0)
 - [x] W2-C CPU 색보정 + 골든 재캡처 (빌드 신규경고0 + ctest 신규회귀0 + beauty.png 4벌 격리 재캡처 + manifest)
-- [ ] W2-D 구조체 ABI 필드 (2.0) ← **다음**
+- [x] W2-D 구조체 ABI 필드 (2.0) — 4면 미러 12필드+C API 4종 물리삭제. cpp 빌드 신규경고0+ctest 신규회귀0 + assembleDebug SUCCESS + testDebugUnitTest SUCCESS
+
+**→ W2 곁가지 제거 A~D 전부 완료. 종착 상태 = 뷰티 핵심 의존 config = enabled + use_skin_mask + brightness/형태워프 필드만.**
 
 ## 9. 변경 이력
 - 2026-06-20: 착수. 인벤토리(Explore) + 사용자 결정(전체 레거시 제거 / 2.0 ABI) + 본 문서 작성.
@@ -135,3 +137,17 @@ P8 뷰티 핵심 2개(① 피부 skin smoothing[구현됨] + ② 턱깎기 형�
   ctest 582개 중 581통과, 유일 실패=GPUBeautyBackendTest.FailsWithNullContext(pre-existing 동일) — 신규 회귀0. **beauty.png 4벌 골든 재캡처**(INJECT_BASELINE 주입):
   격리 검증 PASS — beauty.png 4벌만 변경, JSON 18+render 15 = 33벌 byte-identical, 파일집합 동일. brightness=1.2 ROI 적용 정량확인(변경 5.2%, 변경영역 mean diff 17.3, ×1.2 정합).
   manifest=`cpp/tests/golden/P8-W2-C_RECAPTURE_MANIFEST.md`. test_beauty_processor.cpp 스코프외 변경(smoothing→brightness 4건+SmoothingEffect 제거)은 빌드회귀 방지로 수용(diff 검토 완료).
+- 2026-06-22: **W2-D 편집 완료** (cpp-pro 편집만 — 빌드/ctest/assembleDebug/testDebugUnitTest는 메인세션). 곁가지 config 필드 12종 **4면(C/C++/Java/JNI) 물리 삭제** + C API 4종 제거.
+  **C struct(sdk_api.h)**: IrisBeautyConfigV2 12필드 삭제(smoothing/soft_focus/whitening/color_balance/wrinkle_remove/skin_quality/smooth_intensity/pore_reduction/vivid×4). 보존: enabled/intensity/brightness/slim_face/enlarge_eyes/thin_chin/use_gpu/roi_only/protect_eyes/protect_lips/downscale_factor/feather_radius/protect_nose. apply_beauty_texture_v2 LUT 인자 2개 제거. set_freqsep_debug_mode/set_skin_color_filter decl 삭제.
+  **C++ struct(beauty_filter.h)**: BeautyFilterConfigV2 12필드 삭제 + Helper(fromV1/toV1/isValid/clamp/defaults) 제거필드 줄 삭제(fromV1/toV1=enabled/intensity/brightness 공통 생존만). IrisBeautyPreset enum + set_skin_quality/get_skin_quality/set_beauty_preset decl 삭제(전부 skinQuality 기반).
+  **sdk_api_v2.cpp**: toCppConfigV2 제거필드 복사 삭제, **fromCppConfigV2 함수째 제거**(find_referencing 0참조 — 기존 pre-existing -Wunused-function 경고 동반 해소), default_config_v2_c 제거필드 삭제, apply_beauty_texture_v2 LUT 인자+needsVivid 게이트 제거(→!config->enabled), set_freqsep_debug_mode/set_skin_color_filter impl 삭제.
+  **beauty_filter.cpp**: set_skin_quality/get_skin_quality/set_beauty_preset impl 삭제(g_config_v2.skinQuality/smoothing/softFocus 참조 동반). V1 BeautyFilter 싱글톤(config_.smoothing/softFocus)은 스코프외=불변.
+  **beauty_roi_manager.cpp(⚠️ 작업목록 외 추가 발견)**: erode 게이트 `config.smoothIntensity>0||poreReduction>0` 참조가 필드 삭제로 깨짐 → `if (config.protectNose)`로 축소(FreqSep 2축 소비처가 protectNose만 남음).
+  **JNI(jni_utils.h/iris_jni.cpp)**: beautyConfigV2_ 제거필드 jfieldID 선언+GetFieldID 캐시+null검증+From/ToJava 변환 줄 삭제. nativeSetFreqSepDebugMode/nativeSetSkinColorFilter 삭제. nativeApplyBeautyTextureV2 LUT 인자 제거(name-based 링킹=signature 테이블 없음).
+  **Java(BeautyFilterConfigV2.java)**: 12필드+DEFAULT_상수+복사ctor+setDefaults+fromV1/toV1+isValid+clamp+toString+Builder 메서드 제거. **IrisLensSDK.java**: applyBeautyFilterTextureV2 LUT 오버로드(2번째=중복화로 삭제, 1·3번째=LUT 인자 제거·detectionHandle 보존), setFreqSepDebugMode/setSkinColorFilter+native decl 삭제.
+  **데모(CameraGLRenderer.kt)**: applyBeautyFilterTextureV2 호출 7→5인자(LUT 0,0.0f 제거). 데모 beautyConfig는 enabled/intensity/brightness/roiOnly/protectNose만 사용=무손상.
+  **테스트**: test_beauty_config_v2.cpp(SkinQuality validation/CAPI/Preset 블록 제거 + from/to/round-trip·default·set-get를 brightness/slimFace 생존필드로 전환), test_gpu_beauty_backend.cpp(Defaults/Clamp/ConvertsFromV1 제거필드 정리), test_new_filter_effects.cpp(BrightnessV2×3/FullPipeline/MultipleFormats 제거필드 assignment 삭제), test_beauty_processor.cpp(SetConfig roundtrip smoothing→brightness).
+  **4면 미러 일관성 grep PASS**: 제거 12필드·C API 4종이 C/C++/Java/JNI 전 면에서 소거(잔존=V1 BeautyFilterConfig smoothing/softFocus[스코프외] + 주석 + 내부 GPUBeautyBackend::applyTextureId의 default-arg LUT 파라미터[B 잔재, 스코프외]).
+- 2026-06-22: **W2-D 메인세션 검증 완료**. **offsetof 가드 갱신 불필요 확정**(sdk_api_v2.cpp:44-80 가드는 IrisLandmark/IrisResult 전용, IrisBeautyConfigV2엔 레이아웃 가드 없음; C↔C++↔Java는 필드별 변환이라 레이아웃 일치 불필요 — §6 불변식4·§5 D행의 "offsetof 갱신"은 기우였음).
+  cpp 빌드 exit0 신규경고0(fromCppConfigV2 경고 D가 해소; 잔존 format-pedantic은 nativeStabilize의 %p+jobject=pre-existing, D 무관). ctest 568개 중 567통과(유일 실패=GPUBeautyBackendTest.FailsWithNullContext=pre-existing). assembleDebug(iris-sdk+demo) BUILD SUCCESSFUL. testDebugUnitTest(--rerun-tasks) BUILD SUCCESSFUL.
+  beauty_roi_manager erode 게이트 변경 검토=OR-항 정확 축소(protectNose 동작 불변). 4면 미러 독립 grep 재확인: V2 구조체 곁가지 0, JNI/Java V2 곁가지 0(잔존은 V1 BeautyFilterConfig=스코프외). **잔여(별도 향후 정리 후보)**: V1 BeautyFilterConfig(smoothing/softFocus)는 CPU 구현 제거로 V1→V2 변환 시 무시되는 vestigial(W2 스코프 밖). 커밋=feature/p8-beauty.

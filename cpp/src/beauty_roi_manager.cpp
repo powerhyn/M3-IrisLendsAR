@@ -187,8 +187,9 @@ bool BeautyROIManager::computeROI(
                  out_roi.eyebrow_protect_mask, out_roi.lip_protect_mask,
                  out_roi.nose_protect_mask, out_roi.combined_mask);
 
-    // 5-b. 정규화 erode (코 보호 또는 스무딩 활성 시 마스크 경계 축소)
-    if (config.protectNose || config.smoothIntensity > 0.0f || config.poreReduction > 0.0f) {
+    // 5-b. 정규화 erode (코 보호 시 마스크 경계 축소)
+    //   P8-W2-D: smoothIntensity/poreReduction(FreqSep 2축) 곁가지 제거 — 게이트는 protectNose만.
+    if (config.protectNose) {
         int min_dim = std::min(out_roi.mask_width, out_roi.mask_height);
         int erode_size = std::clamp(static_cast<int>(std::round(min_dim * 0.02f)), 1, 5);
         erode_size = erode_size | 1; // 홀수 보장

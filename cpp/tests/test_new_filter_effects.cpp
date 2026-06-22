@@ -176,11 +176,7 @@ TEST_F(NewFilterEffectsTest, BrightnessV2_IncreasesLChannel) {
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.0f;
     config.brightness = 1.3f;  // 30% brighter
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
     config.useGpu = false;
     config.roiOnly = false;
 
@@ -212,11 +208,7 @@ TEST_F(NewFilterEffectsTest, BrightnessV2_PreservesHighlights) {
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.0f;
     config.brightness = 1.4f;  // 40% brighter
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
     config.useGpu = false;
     config.roiOnly = false;
 
@@ -250,11 +242,7 @@ TEST_F(NewFilterEffectsTest, BrightnessV2_DecreasesWhenBelow1) {
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.0f;
     config.brightness = 0.7f;  // 30% darker
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
     config.useGpu = false;
     config.roiOnly = false;
 
@@ -283,16 +271,11 @@ TEST_F(NewFilterEffectsTest, FullPipeline_AllEffectsCombined) {
     cv::Mat processed = test_image_.clone();
 
     BeautyFilterConfigV2 config{};
-    // P8-W2-C: 곁가지 효과(smoothing/softFocus/whitening/colorBalance) 삭제 후
+    // P8-W2-C/D: 곁가지 효과(smoothing/softFocus/whitening/colorBalance) 삭제 후
     //   CPU 파이프라인 생존 효과는 brightness 뿐 → brightness-only 스모크 테스트로 축소.
     config.enabled = true;
     config.intensity = 0.7f;
-    config.smoothing = 0.0f;
     config.brightness = 1.1f;
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
-    config.wrinkleRemove = 0.0f;
     config.useGpu = false;
     config.roiOnly = false;
     config.protectEyes = false;
@@ -348,7 +331,6 @@ TEST_F(NewFilterEffectsTest, FullPipeline_MultipleFormats) {
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.0f;
     config.brightness = 1.1f;
     config.useGpu = false;
     config.roiOnly = false;

@@ -314,7 +314,7 @@ private:
     void processBeautyEffect(cv::Mat& image, const BeautyFilterConfig& config) {
         // P8-W2-C: 곁가지 효과(피부 스무딩 Bilateral / 소프트 포커스 Gaussian) 제거.
         //   레거시 BeautyFilter(V1)의 생존 효과는 밝기 조절 뿐이다.
-        //   config.smoothing/softFocus 필드는 D단계 전까지 보존(여기서는 미사용).
+        //   (V1 BeautyFilterConfig는 smoothing/softFocus 필드를 보존하나 여기서는 미사용.)
         float effective_brightness = 1.0f + (config.brightness - 1.0f) * config.intensity;
 
         // 밝기 조절
@@ -468,51 +468,7 @@ IRIS_SDK_EXPORT bool iris_sdk_beauty_using_gpu(void) {
     return g_config_v2.useGpu && iris_sdk_beauty_gpu_available();
 }
 
-// ============================================================================
-// skinQuality 편의 API
-// ============================================================================
-
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_skin_quality(float quality) {
-    if (quality < 0.0f || quality > 1.0f) {
-        return IRIS_SDK_INVALID_PARAM;
-    }
-    ensureV2ConfigInitialized();
-    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
-    g_config_v2.skinQuality = quality;
-    return IRIS_SDK_OK;
-}
-
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_get_skin_quality(float* out_quality) {
-    if (out_quality == nullptr) {
-        return IRIS_SDK_NULL_POINTER;
-    }
-    ensureV2ConfigInitialized();
-    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
-    *out_quality = g_config_v2.skinQuality;
-    return IRIS_SDK_OK;
-}
-
-IRIS_SDK_EXPORT IrisSdkError iris_sdk_set_beauty_preset(IrisBeautyPreset preset) {
-    float quality = 0.0f;
-    switch (preset) {
-        case IRIS_BEAUTY_PRESET_NATURAL:  quality = 0.3f; break;
-        case IRIS_BEAUTY_PRESET_MODERATE: quality = 0.5f; break;
-        case IRIS_BEAUTY_PRESET_STRONG:   quality = 0.8f; break;
-        case IRIS_BEAUTY_PRESET_CUSTOM:
-            ensureV2ConfigInitialized();
-            {
-                std::lock_guard<std::mutex> lock(g_config_v2_mutex);
-                g_config_v2.smoothing = 0.0f;
-                g_config_v2.softFocus = 0.0f;
-            }
-            return IRIS_SDK_OK;  // skinQuality 유지, smoothing/softFocus 초기화
-        default:
-            return IRIS_SDK_INVALID_PARAM;
-    }
-    ensureV2ConfigInitialized();
-    std::lock_guard<std::mutex> lock(g_config_v2_mutex);
-    g_config_v2.skinQuality = quality;
-    return IRIS_SDK_OK;
-}
+// P8-W2-D: skinQuality / FreqSep 프리셋 편의 API 제거(곁가지 config 필드 물리 삭제).
+//   iris_sdk_set_skin_quality / iris_sdk_get_skin_quality / iris_sdk_set_beauty_preset 삭제.
 
 }  /* extern "C" */

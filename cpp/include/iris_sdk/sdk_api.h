@@ -591,21 +591,9 @@ typedef struct IrisBeautyConfigV2 {
     /* 기본 (V1 호환) */
     int enabled;            /**< 필터 활성화 여부 (0=비활성, 1=활성) */
     float intensity;        /**< 전체 강도 (0.0~1.0) */
-    float smoothing;        /**< 피부 스무딩 (0.0~1.0) */
     float brightness;       /**< 밝기 조절 (0.5~1.5, 1.0=원본) */
-    float soft_focus;       /**< 소프트 포커스 (0.0~1.0) */
 
-    /* V2 확장 - 피부 효과 */
-    float whitening;        /**< 피부톤 화이트닝 (0.0~1.0) */
-    float color_balance;    /**< 컬러 밸런스 (-1.0~1.0, 음수=쿨톤, 양수=웜톤) */
-    float wrinkle_remove;   /**< 주름 제거 (0.0~1.0) */
-    float skin_quality;     /**< 피부 품질 개선 (0.0~1.0, Freq Sep 활성화) */
-
-    /* V2 확장 - 피부 2축 독립 제어 (둘 다 0이면 skin_quality 사용) */
-    float smooth_intensity; /**< 매끈하게 강도 (0.0~1.0, 0=비활성) */
-    float pore_reduction;   /**< 모공 축소 강도 (0.0~1.0, 0=비활성) */
-
-    /* V2 확장 - 얼굴 형태 보정 */
+    /* 얼굴 형태 보정 */
     float slim_face;        /**< 얼굴 슬림화 (0.0~1.0) */
     float enlarge_eyes;     /**< 눈 확대 (0.0~1.0) */
     float thin_chin;        /**< 턱 축소 (0.0~1.0) */
@@ -617,12 +605,6 @@ typedef struct IrisBeautyConfigV2 {
     int protect_lips;       /**< 입술 영역 보호 (0=미보호, 1=보호) */
     int downscale_factor;   /**< 다운스케일 팩터 (1, 2, 4) */
     int feather_radius;     /**< ROI 페더링 반경 (픽셀) */
-
-    /* 화면 전체 포스트프로세싱 (Vivid, GPU 전용) */
-    float vivid_intensity;     /**< 화사한 필터 강도 (0.0~1.0, 0=비활성) */
-    float vivid_saturation;    /**< 채도 부스트 (0.0~1.0) */
-    float vivid_brightness;    /**< 밝기 리프트 (0.0~0.5) */
-    float vivid_warmth;        /**< 웜톤 시프트 (0.0~1.0) */
 
     /* 추가 보호 옵션 */
     int protect_nose;          /**< 코 보호 (0=비활성, 1=활성, 기본 0) */
@@ -699,8 +681,6 @@ IRIS_SDK_EXPORT int iris_sdk_is_gpu_beauty_initialized(void);
  * @param height 텍스처 높이
  * @param config V2 뷰티 필터 설정
  * @param detection 얼굴 검출 결과 (NULL 가능)
- * @param lut_texture_id LUT 3D 텍스처 ID (0이면 LUT 비활성)
- * @param lut_intensity LUT 적용 강도 (0.0~1.0)
  * @return IRIS_SDK_OK 성공, IRIS_SDK_NOT_INITIALIZED GPU 미초기화 (W4-A: 501 alias→100 정본)
  */
 IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
@@ -708,22 +688,8 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
     uint32_t* output_texture,
     int width, int height,
     const IrisBeautyConfigV2* config,
-    const IrisResult* detection,
-    uint32_t lut_texture_id,
-    float lut_intensity
+    const IrisResult* detection
 );
-
-/**
- * @brief FreqSep 디버그 모드 설정
- * @param mode 0=off, 1=magnitude heatmap, 2=compression heatmap, 3=mask
- */
-IRIS_SDK_EXPORT void iris_sdk_set_freqsep_debug_mode(int mode);
-
-/**
- * @brief 피부색 기반 마스크 필터 설정 (실험용, FreqSep 전용)
- * @param enabled 0=off, 1=on
- */
-IRIS_SDK_EXPORT void iris_sdk_set_skin_color_filter(int enabled);
 
 /**
  * @brief P8-W1: landmark-masked skin smoothing 모드 설정 (internal, 벤치/A-B용)

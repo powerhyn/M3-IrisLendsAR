@@ -726,15 +726,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         )
 
         // GPU Beauty Backend 호출 (JNI) - Detection Handle
-        // (LUT 인자는 후속 단계 D에서 시그니처 제거 예정 — 지금은 0 전달)
+        // (P8-W2-D: LUT 곁가지 시그니처 제거됨)
         val outputTexture = IrisLensSDK.applyBeautyFilterTextureV2(
             inputTexture,
             texWidth,
             texHeight,
             beautyConfig,
-            detectionHandle,
-            0,
-            0.0f
+            detectionHandle
         )
 
         // 디버그: 결과 확인
