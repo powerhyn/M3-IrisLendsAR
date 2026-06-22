@@ -1492,6 +1492,19 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetSkinMaskSmoothing(
 }
 
 /**
+ * @brief P8-W3: 피부 화사함(soft-glow radiance) 강도 설정 (internal, 벤치/A-B용)
+ *
+ * Java: native void nativeSetSkinRadiance(float strength);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetSkinRadiance(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jfloat strength) {
+    iris_sdk_set_skin_radiance(static_cast<float>(strength));
+}
+
+/**
  * @brief Face Warp 적용 (GPU)
  *
  * Java: native int nativeApplyFaceWarp(int inputTexture, int width, int height,

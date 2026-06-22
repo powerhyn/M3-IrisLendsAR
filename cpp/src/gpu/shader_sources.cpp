@@ -214,6 +214,7 @@ uniform sampler2D uTexture;     // 원본 (풀해상도, base)
 uniform sampler2D uBlurTex;     // 컬러 블러 결과 (1/4)
 uniform sampler2D uSkinMaskTex; // 마스크 블러 결과 (1/4, R 채널)
 uniform float uSkin;            // 0..1 강도. 0이면 패스 호출 안 됨
+uniform float uRadiance;        // P8-W3: 0..1 화사함(soft-glow) 강도. 0이면 블록 생략
 in vec2 vTexCoord;
 out vec4 fragColor;
 void main() {
@@ -227,6 +228,32 @@ void main() {
     float edge = smoothstep(0.06, 0.18, abs(lumaBase - lumaBlur));
     vec3 smoothed = blur + (base - blur) * 0.5; // 고주파 디테일 50% 보존
     base = mix(base, smoothed, mask * uSkin * (1.0 - edge));
+    // P8-W3 radiance (soft-glow) — skin 블러+마스크 재활용, mask>0 게이팅.
+    // 입력은 위 스무딩이 적용된 base + 공유 blur/mask (새 패스/fetch 0).
+    // 상수·알고리즘은 LensSim S23+(기본 0.40) + 적대리뷰 확정값 그대로 이식.
+    if (uRadiance > 0.0 && mask > 0.0) {
+        const vec3 LW = vec3(0.299, 0.587, 0.114);
+        const float RAD_GLOW  = 0.20;
+        const float RAD_LIFT  = 0.08;
+        const float RAD_DESAT = 0.10;
+        const float RAD_KNEE  = 0.78;
+        const float RAD_WARM  = 0.012;
+        float rad = uRadiance;
+        float lumaB = dot(base, LW);
+        float hiRoll = 1.0 - smoothstep(RAD_KNEE - 0.06, RAD_KNEE + 0.17, lumaB);
+        float radEdge = smoothstep(0.06, 0.18, abs(lumaB - dot(blur, LW)));
+        vec3 screenC = 1.0 - (1.0 - base) * (1.0 - blur);
+        vec3 bloomed = mix(base, screenC, RAD_GLOW * rad * hiRoll * (1.0 - radEdge));
+        float midW = smoothstep(0.10, 0.35, lumaB) * (1.0 - smoothstep(0.70, 0.92, lumaB));
+        float yIn  = max(dot(bloomed, LW), 1e-4);
+        float yOut = yIn + RAD_LIFT * rad * midW * (1.0 - yIn);
+        vec3  lifted = bloomed * (yOut / yIn);
+        float y2   = dot(lifted, LW);
+        vec3  even = mix(lifted, vec3(y2), RAD_DESAT * rad);
+        even.r += RAD_WARM * rad * midW;
+        even.b -= RAD_WARM * 0.5 * rad * midW;
+        base = clamp(mix(base, even, mask * rad), 0.0, 1.0);
+    }
     fragColor = vec4(base, 1.0);
 }
 )glsl";

@@ -114,6 +114,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
     private lateinit var btnP8Skin: Button       // P8-W1: landmark-masked skin smoothing
+    private lateinit var btnP8Radiance: Button   // P8-W3: skin soft-glow radiance(화사함)
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -213,6 +214,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
         btnP8Skin = findViewById(R.id.btnP8Skin)
+        btnP8Radiance = findViewById(R.id.btnP8Radiance)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -476,6 +478,16 @@ class GpuRenderActivity : AppCompatActivity() {
             btnP8Skin.text = if (s > 0f) String.format("skin:%.1f", s) else "skin:off"
             Log.i(TAG, "P8-W1 skin mask smoothing → strength $s")
         }
+        // P8-W3: skin 화사함(soft-glow radiance) — off → 0.40 → 0.60 사이클.
+        // skin 경로(블러+마스크)를 공유하되 게이트 독립 — radiance>0이면 btnP8Skin off여도 단독 적용.
+        // (Beauty 토글 ON 필요 — radiance는 뷰티 효과.)
+        btnP8Radiance.setOnClickListener {
+            p8RadianceIdx = (p8RadianceIdx + 1) % p8RadianceSweep.size
+            val s = p8RadianceSweep[p8RadianceIdx]
+            cameraGLView.setSkinRadiance(s)
+            btnP8Radiance.text = if (s > 0f) String.format("rad:%.2f", s) else "rad:off"
+            Log.i(TAG, "P8-W3 skin radiance → strength $s")
+        }
     }
 
     //=========================================================================
@@ -502,6 +514,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
     private val p8SkinSweep = floatArrayOf(0f, 0.5f, 1.0f)   // P8-W1: off → 0.5 → 1.0 사이클
     private var p8SkinIdx = 0         // 기본 off (SDK default와 일치 — FreqSep 경로 무회귀)
+    private val p8RadianceSweep = floatArrayOf(0f, 0.40f, 0.60f) // P8-W3: off → 0.40 → 0.60 (핸드오프 기본 0.40)
+    private var p8RadianceIdx = 0     // 기본 off (SDK default와 일치)
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]

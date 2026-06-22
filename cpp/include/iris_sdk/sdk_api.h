@@ -706,6 +706,20 @@ IRIS_SDK_EXPORT IrisSdkError iris_sdk_apply_beauty_texture_v2(
 IRIS_SDK_EXPORT void iris_sdk_set_skin_mask_smoothing(int enabled, float strength);
 
 /**
+ * @brief P8-W3: 피부 화사함(soft-glow radiance) 강도 설정 (internal, 벤치/A-B용)
+ *
+ * LensSimulator(S23+ 기본 0.40)에서 검증된 soft-glow 화사함(윤기/맑은 톤)을 토글합니다.
+ * skin mask 경로(skin smoothing이 만드는 블러+마스크)를 bloom 소스로 공유하므로
+ * 별도 패스/텍스처 fetch가 없습니다. skin smoothing(setSkinMaskSmoothing)이 0이어도
+ * radiance>0이면 skin 경로가 활성화되어 radiance만 단독으로 적용됩니다(윤기 단독 가능).
+ * mask>0(눈/눈썹/입술 제외) 영역에만 적용되어 렌즈/홍채에는 영향이 없습니다.
+ * GL 스레드(GPU 뷰티 백엔드 초기화 스레드)에서 호출하세요.
+ *
+ * @param strength 화사함 강도 (0.0~1.0). 0이면 off(radiance 블록 생략)
+ */
+IRIS_SDK_EXPORT void iris_sdk_set_skin_radiance(float strength);
+
+/**
  * @brief Face Warp 적용 (GPU)
  *
  * GPU에서 얼굴 형태 보정(Face Warp)을 적용합니다.

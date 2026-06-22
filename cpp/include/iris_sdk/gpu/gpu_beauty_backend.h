@@ -379,6 +379,9 @@ private:
     // 모드 토글 (internal API)
     bool skin_mask_smoothing_enabled_ = false;
     float skin_mask_smoothing_strength_ = 0.0f;
+    // P8-W3: skin 화사함(soft-glow radiance) 강도. skin mask 경로(blur/mask) 공유.
+    // smoothing=0이어도 radiance>0이면 skin 경로가 활성화되어 radiance만 단독 적용된다.
+    float skin_radiance_strength_ = 0.0f;
 
     // 팬 정점 버퍼 (NDC, position만) + 픽셀 좌표 작업 버퍼 (프레임당 할당 금지)
     std::array<float, kSkinFanFloats> skin_fan_{};
@@ -399,6 +402,7 @@ private:
         GLint compositeBlurTex = -1;
         GLint compositeMaskTex = -1;
         GLint compositeSkin = -1;
+        GLint compositeRadiance = -1;  // P8-W3: uRadiance
     } skin_uniforms_;
 
     // [B2 idx18] passthrough 셰이더 uTexture location 캐시
@@ -453,6 +457,16 @@ public:
     }
     bool getSkinMaskSmoothingEnabled() const { return skin_mask_smoothing_enabled_; }
     float getSkinMaskSmoothingStrength() const { return skin_mask_smoothing_strength_; }
+
+    /// P8-W3: skin 화사함(soft-glow radiance) 강도 설정 (internal/벤치용).
+    /// skin mask 경로(blur/mask)를 공유한다. smoothing=0이어도 radiance>0이면
+    /// skin 경로가 활성화되어 radiance만 단독으로 적용된다(윤기/화사 단독 가능).
+    /// strength=0이면 radiance 블록은 생략된다(skin 경로 자체는 smoothing 조건에 따름).
+    void setSkinRadiance(float strength) {
+        // setSkinMaskSmoothing와 동일한 수동 clamp 관용구 (헤더에 <algorithm> 미포함).
+        skin_radiance_strength_ = (strength < 0.0f) ? 0.0f : (strength > 1.0f ? 1.0f : strength);
+    }
+    float getSkinRadianceStrength() const { return skin_radiance_strength_; }
 private:
 
     /// Uniform Location 캐싱 (초기화 시 호출)

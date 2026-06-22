@@ -774,6 +774,23 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P8-W3: 피부 화사함(soft-glow radiance) 강도 설정 (internal, 벤치/A-B용).
+     *
+     * <p>LensSimulator(S23+ 기본 0.40)에서 검증된 soft-glow 화사함(윤기/맑은 톤)을
+     * 설정합니다. skin smoothing이 만드는 블러+마스크를 bloom 소스로 공유하므로 별도
+     * 패스가 없습니다. skin smoothing(setSkinMaskSmoothing)이 0이어도 radiance>0이면
+     * skin 경로가 활성화되어 radiance만 단독으로 적용됩니다. mask>0(눈/눈썹/입술 제외)
+     * 영역에만 적용되어 렌즈/홍채에는 영향이 없습니다. GL 스레드에서 호출하세요.</p>
+     *
+     * @param strength 화사함 강도 (0.0~1.0). 0이면 off(radiance 블록 생략)
+     */
+    public static void setSkinRadiance(float strength) {
+        if (sLibraryLoaded) {
+            nativeSetSkinRadiance(strength);
+        }
+    }
+
+    /**
      * 텍스처가 SDK 관리인지 확인합니다.
      *
      * @param texture 확인할 텍스처 ID
@@ -1412,6 +1429,8 @@ public final class IrisLensSDK {
             BeautyFilterConfigV2 config, long detectionPtr);
 
     private static native void nativeSetSkinMaskSmoothing(boolean enabled, float strength);
+
+    private static native void nativeSetSkinRadiance(float strength);
 
     /**
      * Face Warp 적용 (GPU)

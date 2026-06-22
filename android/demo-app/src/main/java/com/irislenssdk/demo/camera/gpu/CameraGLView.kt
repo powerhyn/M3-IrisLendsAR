@@ -362,6 +362,17 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * P8-W3: 피부 화사함(soft-glow radiance) 토글.
+     * skin smoothing 경로(블러+마스크)를 공유한다 — smoothing=0이어도 radiance 단독 적용.
+     * 뷰티 활성(beautyEnabled) 상태에서만 시각 효과 발생.
+     */
+    fun setSkinRadiance(strength: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setSkinRadiance(strength)
+        }
+    }
+
+    /**
      * Sclera Protection 활성화/비활성화 (P4-W2-01)
      */
     fun setScleraProtect(enabled: Boolean) {

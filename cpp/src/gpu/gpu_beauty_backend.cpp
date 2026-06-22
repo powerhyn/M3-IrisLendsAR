@@ -286,6 +286,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
         skin_uniforms_.compositeBlurTex = glGetUniformLocation(skin_composite_program_, "uBlurTex");
         skin_uniforms_.compositeMaskTex = glGetUniformLocation(skin_composite_program_, "uSkinMaskTex");
         skin_uniforms_.compositeSkin = glGetUniformLocation(skin_composite_program_, "uSkin");
+        skin_uniforms_.compositeRadiance = glGetUniformLocation(skin_composite_program_, "uRadiance");  // P8-W3
     }
 
     LOGI("Uniform locations cached successfully");
@@ -854,9 +855,14 @@ std::string GPUBeautyBackend::getProfilingReport() const {
 // P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
 //=============================================================================
 
+// P8-W3: skin mask 경로(smoothing + radiance) 활성 여부.
+// 독립 게이팅 — (smoothing 모드 enabled & strength>0) OR (radiance>0) 중 하나라도 켜지면
+// 마스크/블러 base 패스 + composite를 돌린다. enabled_ 토글은 **smoothing만** 게이트하고,
+// radiance는 strength>0으로 독립 활성(setSkinRadiance가 strength만 설정 — enabled 무관).
+// (smoothing off & radiance>0이면 composite의 uSkin=0으로 스무딩 mix가 no-op, radiance 블록만 적용.)
 bool GPUBeautyBackend::skinMaskSmoothingActive(const IrisResult* detection) const {
-    return skin_mask_smoothing_enabled_
-        && skin_mask_smoothing_strength_ > 0.0f
+    return ((skin_mask_smoothing_enabled_ && skin_mask_smoothing_strength_ > 0.0f)
+            || skin_radiance_strength_ > 0.0f)
         && detection != nullptr
         && detection->detected
         && detection->face_mesh_valid
@@ -1081,6 +1087,7 @@ void GPUBeautyBackend::renderSkinComposite(GLuint base_tex, GLuint output_fbo,
     glUniform1i(skin_uniforms_.compositeBlurTex, 1);
     glUniform1i(skin_uniforms_.compositeMaskTex, 2);
     glUniform1f(skin_uniforms_.compositeSkin, strength);
+    glUniform1f(skin_uniforms_.compositeRadiance, skin_radiance_strength_);  // P8-W3
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, base_tex);
     glActiveTexture(GL_TEXTURE1);

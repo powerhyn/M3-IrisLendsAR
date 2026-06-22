@@ -389,6 +389,17 @@ void iris_sdk_set_skin_mask_smoothing(int enabled, float strength) {
 #endif
 }
 
+void iris_sdk_set_skin_radiance(float strength) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_beauty && g_gpu_beauty->isInitialized()) {
+        g_gpu_beauty->setSkinRadiance(strength);
+    }
+#else
+    (void)strength;
+#endif
+}
+
 IrisSdkError iris_sdk_apply_face_warp(
     uint32_t input_texture,
     uint32_t* output_texture,
