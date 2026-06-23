@@ -88,7 +88,7 @@ P8 뷰티 핵심 2개(① 피부 skin smoothing[구현됨] + ② 턱깎기 형�
 - 골든: beauty.png 4벌 재캡처(W2-C) + manifest, 그 외 ε 일치
 - ctest 회귀0 (pre-existing 3 허용: GPUBeautyBackendTest#401 + FreqSepMappingTest#587/588 — 단 FreqSep 테스트는 본 W에서 제거되므로 종료 시 pre-existing 목록 재정의)
 - assembleDebug BUILD SUCCESSFUL
-- 실기기 육안(밝은 환경, 본인 토글 체감) — 곁가지 제거가 핵심 2개에 무영향인지
+- ✅ 실기기 육안(S23+ SM-S916N, 2026-06-22 "다 잘 되네") — 곁가지 제거가 핵심 2개(skin smoothing·brightness)에 무영향 확인. W3 radiance와 1회 세션 묶음 통과.
 
 ## 8. 진행 상태
 - [x] 인벤토리 + 스코핑 + 사용자 결정 2건

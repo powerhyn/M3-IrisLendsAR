@@ -56,8 +56,8 @@ luma = sRGB 0.299/0.587/0.114. 셰이더 GLSL은 핸드오프 §3 그대로 이�
 - [x] C API + JNI + Java + demo 토글 (4면) (2026-06-22 구현 — 메인 세션 빌드 검증 대기)
 - [x] 데스크톱 빌드 신규 warn0 + ctest 564개 563통과(pre-existing GPUBeautyBackendTest.FailsWithNullContext만, 신규 회귀0)
 - [x] assembleDebug BUILD SUCCESSFUL (iris-sdk+demo)
-- [ ] 🔴 **실기기 육안(사용자)**: radiance 룩(윤기/화사) + 렌즈 무영향 + skin smoothing 무회귀 + W2 곁가지 무회귀 + P8-W1 잔여 2항(룩 재현·에지·30fps) — **1회 세션 묶음**
-- [ ] 실기기 통과 후 W2+W3 함께 develop 머지
+- [x] 🔴 **실기기 육안(S23+ SM-S916N, 2026-06-22 사용자 "다 잘 되네")**: radiance 룩(윤기/화사) + 렌즈 무영향 + skin smoothing 무회귀 + W2 곁가지 무회귀 통과. APK=installDebug 최신(76f4305).
+- [ ] 실기기 통과 후 W2+W3 함께 develop 머지 ← **다음 (사용자 확인 대기)**
 
 ## 9. 브레인스토밍 생략 사유
 P8-W1 선례 — 알고리즘·파라미터·함정이 LensSim 실기기(S23+ 0.40)+적대리뷰로 확정. 본 W 결정=통합 지점만(§3·§4, 코드 실측 기반).
