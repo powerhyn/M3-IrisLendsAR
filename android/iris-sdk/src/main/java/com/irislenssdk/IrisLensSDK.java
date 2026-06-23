@@ -670,35 +670,11 @@ public final class IrisLensSDK {
         if (!sLibraryLoaded) {
             return inputTexture;
         }
-        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L, 0, 0.0f);
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L);
     }
 
     /**
-     * V2 뷰티 필터 + LUT를 GPU 텍스처에 적용합니다.
-     *
-     * <p>GPU 뷰티 백엔드가 초기화되어 있어야 합니다.
-     * GLSurfaceView.Renderer의 onDrawFrame 등 OpenGL 컨텍스트 내에서 호출해야 합니다.</p>
-     *
-     * @param inputTexture 입력 OpenGL ES 텍스처 ID
-     * @param width 텍스처 너비
-     * @param height 텍스처 높이
-     * @param config V2 뷰티 필터 설정
-     * @param lutTextureId LUT 3D 텍스처 ID (0이면 LUT 비활성)
-     * @param lutIntensity LUT 적용 강도 (0.0~1.0)
-     * @return 출력 텍스처 ID (실패 시 입력 텍스처 반환)
-     */
-    public static int applyBeautyFilterTextureV2(int inputTexture, int width, int height,
-                                                  @NonNull BeautyFilterConfigV2 config,
-                                                  int lutTextureId, float lutIntensity) {
-        if (!sLibraryLoaded) {
-            return inputTexture;
-        }
-        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, 0L,
-                lutTextureId, lutIntensity);
-    }
-
-    /**
-     * V2 뷰티 필터 + LUT를 GPU 텍스처에 적용합니다 (Detection Handle 포함).
+     * V2 뷰티 필터를 GPU 텍스처에 적용합니다 (Detection Handle 포함).
      *
      * <p>Detection 슬롯의 검출 결과를 활용하여 ROI 기반 처리를 수행합니다.
      * {@link #getDetectionSlotPtr()}로 얻은 포인터를 전달하세요.</p>
@@ -708,19 +684,15 @@ public final class IrisLensSDK {
      * @param height 텍스처 높이
      * @param config V2 뷰티 필터 설정
      * @param detectionHandle 네이티브 검출 결과 포인터 (0L이면 ROI 미사용)
-     * @param lutTextureId LUT 3D 텍스처 ID (0이면 LUT 비활성)
-     * @param lutIntensity LUT 적용 강도 (0.0~1.0)
      * @return 출력 텍스처 ID (실패 시 입력 텍스처 반환)
      */
     public static int applyBeautyFilterTextureV2(int inputTexture, int width, int height,
                                                   @NonNull BeautyFilterConfigV2 config,
-                                                  long detectionHandle,
-                                                  int lutTextureId, float lutIntensity) {
+                                                  long detectionHandle) {
         if (!sLibraryLoaded) {
             return inputTexture;
         }
-        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, detectionHandle,
-                lutTextureId, lutIntensity);
+        return nativeApplyBeautyTextureV2(inputTexture, width, height, config, detectionHandle);
     }
 
     /**
@@ -784,40 +756,37 @@ public final class IrisLensSDK {
     }
 
     /**
-     * FreqSep 디버그 모드 설정 (GL 스레드에서 호출).
-     * @param mode 0=off, 1=magnitude heatmap, 2=compression, 3=mask
-     */
-    public static void setFreqSepDebugMode(int mode) {
-        if (sLibraryLoaded) {
-            nativeSetFreqSepDebugMode(mode);
-        }
-    }
-
-    /**
-     * 피부색 기반 마스크 필터 설정 (실험용, FreqSep 전용).
-     * GL 스레드에서 호출.
-     * @param enabled true=on, false=off
-     */
-    public static void setSkinColorFilter(boolean enabled) {
-        if (sLibraryLoaded) {
-            nativeSetSkinColorFilter(enabled ? 1 : 0);
-        }
-    }
-
-    /**
      * P8-W1: landmark-masked skin smoothing 모드 토글 (internal, 벤치/A-B용).
      *
      * <p>LensSimulator에서 검증된 랜드마크 폴리곤 마스크 기반 피부 보정 경로를
-     * 켭니다. 활성 시 기존 FreqSep/Bilateral 스무딩을 대체하며(다른 패스는 불변),
+     * 켭니다. 이것이 SDK의 유일한 피부 스무딩 경로입니다(레거시 FreqSep/Bilateral은
+     * P8-W2에서 제거). 활성 시 마스크 기반 스무딩을 적용하며(다른 패스는 불변),
      * 비활성 또는 strength 0이면 마스크/블러/필터/저해상도 타깃 생성을 전부
-     * 생략합니다(비용 0). GL 스레드에서 호출하세요.</p>
+     * 생략합니다(비용 0=스무딩 없음). GL 스레드에서 호출하세요.</p>
      *
-     * @param enabled  true=on, false=off(기존 FreqSep 경로)
+     * @param enabled  true=on, false=off(스무딩 없음)
      * @param strength 피부 스무딩 강도 (0.0~1.0). 0이면 모드 활성이어도 패스 생략
      */
     public static void setSkinMaskSmoothing(boolean enabled, float strength) {
         if (sLibraryLoaded) {
             nativeSetSkinMaskSmoothing(enabled, strength);
+        }
+    }
+
+    /**
+     * P8-W3: 피부 화사함(soft-glow radiance) 강도 설정 (internal, 벤치/A-B용).
+     *
+     * <p>LensSimulator(S23+ 기본 0.40)에서 검증된 soft-glow 화사함(윤기/맑은 톤)을
+     * 설정합니다. skin smoothing이 만드는 블러+마스크를 bloom 소스로 공유하므로 별도
+     * 패스가 없습니다. skin smoothing(setSkinMaskSmoothing)이 0이어도 radiance>0이면
+     * skin 경로가 활성화되어 radiance만 단독으로 적용됩니다. mask>0(눈/눈썹/입술 제외)
+     * 영역에만 적용되어 렌즈/홍채에는 영향이 없습니다. GL 스레드에서 호출하세요.</p>
+     *
+     * @param strength 화사함 강도 (0.0~1.0). 0이면 off(radiance 블록 생략)
+     */
+    public static void setSkinRadiance(float strength) {
+        if (sLibraryLoaded) {
+            nativeSetSkinRadiance(strength);
         }
     }
 
@@ -1457,12 +1426,11 @@ public final class IrisLensSDK {
      */
     private static native int nativeApplyBeautyTextureV2(
             int inputTexture, int width, int height,
-            BeautyFilterConfigV2 config, long detectionPtr,
-            int lutTextureId, float lutIntensity);
+            BeautyFilterConfigV2 config, long detectionPtr);
 
-    private static native void nativeSetFreqSepDebugMode(int mode);
-    private static native void nativeSetSkinColorFilter(int enabled);
     private static native void nativeSetSkinMaskSmoothing(boolean enabled, float strength);
+
+    private static native void nativeSetSkinRadiance(float strength);
 
     /**
      * Face Warp 적용 (GPU)

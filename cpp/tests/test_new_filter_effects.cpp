@@ -1,20 +1,21 @@
 /**
  * @file test_new_filter_effects.cpp
- * @brief Unit tests for new beauty filter effects (V2)
+ * @brief CPUBeautyBackend brightness 생존 테스트 + apply() 파이프라인 스모크.
  *
- * Tests for:
- * - Skin Smoothing V2 (Guided Filter based)
- * - Soft Focus V2 (Guided Filter + Overlay blend)
- * - Brightness V2 (Highlight protection)
- * - Wrinkle Removal (Targeted smoothing)
+ * P8-W2-C: 곁가지 CPU 효과(skin smoothing / soft focus / whitening / color balance /
+ *   V2 Guided 계열 / wrinkle removal)가 전부 제거되어, 해당 효과를 검증하던
+ *   케이스(SkinSmoothingV2_* / SoftFocusV2_* / Whitening_* / ColorBalance_* /
+ *   Performance_SmoothingV2_*)도 함께 삭제했다.
  *
- * Note: Helper functions (detectSkinTone, overlayBlend, createWrinkleRegionMasks)
- * are tested indirectly through their usage in the public API.
+ * 남은 테스트:
+ * - BrightnessV2_* : apply() → applyBrightness 생존 검증
+ * - FullPipeline_AllEffectsCombined : brightness-only 스모크
+ * - FullPipeline_DisabledConfig_NoChange : enabled=false no-op
+ * - FullPipeline_MultipleFormats : 포맷 변환 경로(brightness 적용)
  */
 
 #include <gtest/gtest.h>
 #include "iris_sdk/cpu_beauty_backend.h"
-#include "iris_sdk/fast_guided_filter.h"
 #include "iris_sdk/types.h"
 
 #include <opencv2/imgproc.hpp>
@@ -157,141 +158,10 @@ protected:
 };
 
 //=============================================================================
-// Skin Smoothing V2 Tests
-//=============================================================================
-
-TEST_F(NewFilterEffectsTest, SkinSmoothingV2_ReducesTextureVariance) {
-    // Create a CPUBeautyBackend to access the method
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    // Clone image for comparison
-    cv::Mat original = test_image_.clone();
-    cv::Mat processed = test_image_.clone();
-
-    // Calculate original variance
-    double original_variance = calculateVariance(original);
-
-    // Apply skin smoothing V2 via the public interface
-    // Since applySkinSmoothingV2 is private, we test via apply()
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.8f;
-    config.brightness = 1.0f;
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
-    config.wrinkleRemove = 0.0f;
-    config.useGpu = false;
-    config.roiOnly = false;
-    config.protectEyes = false;
-    config.protectLips = false;
-    config.downscaleFactor = 1;
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    double processed_variance = calculateVariance(processed);
-
-    // Smoothing should reduce variance (texture)
-    EXPECT_LT(processed_variance, original_variance);
-    EXPECT_GT(processed_variance, 0.0);  // But not completely flat
-}
-
-TEST_F(NewFilterEffectsTest, SkinSmoothingV2_PreservesEdges) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    // Create image with strong edge
-    cv::Mat edge_image = cv::Mat::zeros(100, 100, CV_8UC3);
-    edge_image(cv::Rect(0, 0, 50, 100)).setTo(cv::Scalar(50, 50, 50));
-    edge_image(cv::Rect(50, 0, 50, 100)).setTo(cv::Scalar(200, 200, 200));
-
-    cv::Mat processed = edge_image.clone();
-
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.5f;
-    config.brightness = 1.0f;
-    config.useGpu = false;
-    config.roiOnly = false;
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    // Edge should still be visible (left side darker than right)
-    double left_mean = cv::mean(processed(cv::Rect(10, 40, 20, 20)))[0];
-    double right_mean = cv::mean(processed(cv::Rect(70, 40, 20, 20)))[0];
-
-    EXPECT_LT(left_mean, right_mean);
-    EXPECT_GT(right_mean - left_mean, 50.0);  // Edge preserved with difference > 50
-}
-
-//=============================================================================
-// Soft Focus V2 Tests
-//=============================================================================
-
-TEST_F(NewFilterEffectsTest, SoftFocusV2_CreatesGlowEffect) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    cv::Mat original = test_image_.clone();
-    cv::Mat processed = test_image_.clone();
-
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.0f;
-    config.brightness = 1.0f;
-    config.softFocus = 0.8f;  // Strong soft focus
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
-    config.useGpu = false;
-    config.roiOnly = false;
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    // Soft focus should create a dreamy, glowing effect
-    // This typically increases average brightness slightly and reduces contrast
-    double original_mean = calculateMeanBrightness(original);
-    double processed_mean = calculateMeanBrightness(processed);
-
-    // The glow effect blends soft image, so extreme values move toward center
-    // Just verify the image was modified
-    EXPECT_NE(cv::norm(original, processed), 0.0);
-}
-
-TEST_F(NewFilterEffectsTest, SoftFocusV2_ZeroStrength_NoChange) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    cv::Mat original = test_image_.clone();
-    cv::Mat processed = test_image_.clone();
-
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.0f;
-    config.brightness = 1.0f;
-    config.softFocus = 0.0f;  // No soft focus
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
-    config.useGpu = false;
-    config.roiOnly = false;
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    // No change expected
-    double diff = cv::norm(original, processed);
-    EXPECT_DOUBLE_EQ(diff, 0.0);
-}
-
-//=============================================================================
-// Brightness V2 Tests
+// Brightness Tests (apply() → applyBrightness 생존 검증)
+// P8-W2-C: SkinSmoothingV2_* / SoftFocusV2_* 케이스 제거(곁가지 효과 삭제).
+//   이 테스트들은 이름은 V2였으나 실제로는 apply()→applyFullFrame→V1 함수
+//   (applySkinSmoothing/applySoftFocus, 삭제됨)를 경유했다.
 //=============================================================================
 
 TEST_F(NewFilterEffectsTest, BrightnessV2_IncreasesLChannel) {
@@ -306,11 +176,7 @@ TEST_F(NewFilterEffectsTest, BrightnessV2_IncreasesLChannel) {
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.0f;
     config.brightness = 1.3f;  // 30% brighter
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
     config.useGpu = false;
     config.roiOnly = false;
 
@@ -342,11 +208,7 @@ TEST_F(NewFilterEffectsTest, BrightnessV2_PreservesHighlights) {
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.0f;
     config.brightness = 1.4f;  // 40% brighter
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
     config.useGpu = false;
     config.roiOnly = false;
 
@@ -380,11 +242,7 @@ TEST_F(NewFilterEffectsTest, BrightnessV2_DecreasesWhenBelow1) {
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.0f;
     config.brightness = 0.7f;  // 30% darker
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.0f;
     config.useGpu = false;
     config.roiOnly = false;
 
@@ -397,123 +255,9 @@ TEST_F(NewFilterEffectsTest, BrightnessV2_DecreasesWhenBelow1) {
     EXPECT_LT(processed_L, original_L);
 }
 
-//=============================================================================
-// Whitening Tests
-//=============================================================================
-
-TEST_F(NewFilterEffectsTest, Whitening_BrightensSkintone) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    cv::Mat original = test_image_.clone();
-    cv::Mat processed = test_image_.clone();
-
-    double original_L = calculateLabChannel(original, 0);
-
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.0f;
-    config.brightness = 1.0f;
-    config.softFocus = 0.0f;
-    config.whitening = 0.7f;  // Strong whitening
-    config.colorBalance = 0.0f;
-    config.useGpu = false;
-    config.roiOnly = false;
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    double processed_L = calculateLabChannel(processed, 0);
-
-    // Whitening should increase L channel (brightness in LAB)
-    EXPECT_GT(processed_L, original_L);
-}
-
-//=============================================================================
-// Color Balance Tests
-//=============================================================================
-
-TEST_F(NewFilterEffectsTest, ColorBalance_ShiftsToneWarm) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    cv::Mat original = test_image_.clone();
-    cv::Mat processed = test_image_.clone();
-
-    // Get original B channel mean (Blue)
-    std::vector<cv::Mat> orig_channels;
-    cv::split(original, orig_channels);
-    double orig_B = cv::mean(orig_channels[0])[0];
-    double orig_R = cv::mean(orig_channels[2])[0];
-
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.0f;
-    config.brightness = 1.0f;
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = 0.8f;  // Warm tone
-    config.useGpu = false;
-    config.roiOnly = false;
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    std::vector<cv::Mat> proc_channels;
-    cv::split(processed, proc_channels);
-    double proc_B = cv::mean(proc_channels[0])[0];
-    double proc_R = cv::mean(proc_channels[2])[0];
-
-    // Warm tone: R increases, B decreases
-    EXPECT_GT(proc_R, orig_R);
-    EXPECT_LT(proc_B, orig_B);
-}
-
-TEST_F(NewFilterEffectsTest, ColorBalance_ShiftsToneCool) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    cv::Mat original = test_image_.clone();
-    cv::Mat processed = test_image_.clone();
-
-    std::vector<cv::Mat> orig_channels;
-    cv::split(original, orig_channels);
-    double orig_B = cv::mean(orig_channels[0])[0];
-    double orig_R = cv::mean(orig_channels[2])[0];
-
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.0f;
-    config.brightness = 1.0f;
-    config.softFocus = 0.0f;
-    config.whitening = 0.0f;
-    config.colorBalance = -0.8f;  // Cool tone
-    config.useGpu = false;
-    config.roiOnly = false;
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    std::vector<cv::Mat> proc_channels;
-    cv::split(processed, proc_channels);
-    double proc_B = cv::mean(proc_channels[0])[0];
-    double proc_R = cv::mean(proc_channels[2])[0];
-
-    // Cool tone: B increases, R decreases
-    EXPECT_GT(proc_B, orig_B);
-    EXPECT_LT(proc_R, orig_R);
-}
-
-//=============================================================================
-// Wrinkle Removal Tests (Indirect - via public API observation)
-// Note: createWrinkleRegionMasks is private, tested indirectly
-//=============================================================================
-
-// Wrinkle removal is tested through the full pipeline as it requires
-// face mesh landmarks which are typically obtained from detection.
+// P8-W2-C: Whitening_* / ColorBalance_* 케이스 제거(곁가지 색보정 효과 삭제).
+//   Wrinkle Removal 테스트는 원래 코멘트-only(applyWrinkleRemoval가 dead였음)였고
+//   해당 함수 삭제로 코멘트 블록도 제거.
 
 //=============================================================================
 // Integration Tests
@@ -527,14 +271,11 @@ TEST_F(NewFilterEffectsTest, FullPipeline_AllEffectsCombined) {
     cv::Mat processed = test_image_.clone();
 
     BeautyFilterConfigV2 config{};
+    // P8-W2-C/D: 곁가지 효과(smoothing/softFocus/whitening/colorBalance) 삭제 후
+    //   CPU 파이프라인 생존 효과는 brightness 뿐 → brightness-only 스모크 테스트로 축소.
     config.enabled = true;
     config.intensity = 0.7f;
-    config.smoothing = 0.5f;
     config.brightness = 1.1f;
-    config.softFocus = 0.3f;
-    config.whitening = 0.3f;
-    config.colorBalance = 0.2f;  // Slightly warm
-    config.wrinkleRemove = 0.0f;  // Skip for this test (needs landmarks)
     config.useGpu = false;
     config.roiOnly = false;
     config.protectEyes = false;
@@ -586,11 +327,11 @@ TEST_F(NewFilterEffectsTest, FullPipeline_MultipleFormats) {
     CPUBeautyBackend backend;
     backend.initialize();
 
+    // P8-W2-C: smoothing(삭제됨) 대신 생존 효과 brightness로 포맷 변환 경로를 검증.
     BeautyFilterConfigV2 config{};
     config.enabled = true;
     config.intensity = 1.0f;
-    config.smoothing = 0.5f;
-    config.brightness = 1.0f;
+    config.brightness = 1.1f;
     config.useGpu = false;
     config.roiOnly = false;
 
@@ -617,33 +358,6 @@ TEST_F(NewFilterEffectsTest, FullPipeline_MultipleFormats) {
     EXPECT_EQ(result_rgb, IRIS_SDK_OK);
 }
 
-//=============================================================================
-// Performance Tests
-//=============================================================================
-
-TEST_F(NewFilterEffectsTest, Performance_SmoothingV2_ReasonableTime) {
-    CPUBeautyBackend backend;
-    backend.initialize();
-
-    cv::Mat processed = test_image_.clone();
-
-    BeautyFilterConfigV2 config{};
-    config.enabled = true;
-    config.intensity = 1.0f;
-    config.smoothing = 0.8f;
-    config.brightness = 1.0f;
-    config.useGpu = false;
-    config.roiOnly = false;
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    backend.apply(processed.data, processed.cols, processed.rows,
-                  IRIS_FORMAT_BGR, config, nullptr);
-
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-    // Should complete within 100ms for 640x480 image
-    EXPECT_LT(duration.count(), 100);
-}
+// P8-W2-C: Performance_SmoothingV2_ReasonableTime 제거
+//   (삭제된 Bilateral skin smoothing 효과의 성능 측정이라 의미 소멸).
 

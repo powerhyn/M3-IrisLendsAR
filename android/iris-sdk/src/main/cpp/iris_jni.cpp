@@ -159,15 +159,7 @@ bool JniCache::init(JNIEnv* env) {
     // BeautyFilterConfigV2 필드 ID 캐시
     beautyConfigV2_enabled = env->GetFieldID(beautyConfigV2Class, "enabled", "Z");
     beautyConfigV2_intensity = env->GetFieldID(beautyConfigV2Class, "intensity", "F");
-    beautyConfigV2_smoothing = env->GetFieldID(beautyConfigV2Class, "smoothing", "F");
     beautyConfigV2_brightness = env->GetFieldID(beautyConfigV2Class, "brightness", "F");
-    beautyConfigV2_softFocus = env->GetFieldID(beautyConfigV2Class, "softFocus", "F");
-    beautyConfigV2_whitening = env->GetFieldID(beautyConfigV2Class, "whitening", "F");
-    beautyConfigV2_colorBalance = env->GetFieldID(beautyConfigV2Class, "colorBalance", "F");
-    beautyConfigV2_wrinkleRemove = env->GetFieldID(beautyConfigV2Class, "wrinkleRemove", "F");
-    beautyConfigV2_skinQuality = env->GetFieldID(beautyConfigV2Class, "skinQuality", "F");
-    beautyConfigV2_smoothIntensity = env->GetFieldID(beautyConfigV2Class, "smoothIntensity", "F");
-    beautyConfigV2_poreReduction = env->GetFieldID(beautyConfigV2Class, "poreReduction", "F");
     beautyConfigV2_slimFace = env->GetFieldID(beautyConfigV2Class, "slimFace", "F");
     beautyConfigV2_enlargeEyes = env->GetFieldID(beautyConfigV2Class, "enlargeEyes", "F");
     beautyConfigV2_thinChin = env->GetFieldID(beautyConfigV2Class, "thinChin", "F");
@@ -177,22 +169,14 @@ bool JniCache::init(JNIEnv* env) {
     beautyConfigV2_protectLips = env->GetFieldID(beautyConfigV2Class, "protectLips", "Z");
     beautyConfigV2_protectNose = env->GetFieldID(beautyConfigV2Class, "protectNose", "Z");
     beautyConfigV2_downscaleFactor = env->GetFieldID(beautyConfigV2Class, "downscaleFactor", "I");
-    beautyConfigV2_vividIntensity = env->GetFieldID(beautyConfigV2Class, "vividIntensity", "F");
-    beautyConfigV2_vividSaturation = env->GetFieldID(beautyConfigV2Class, "vividSaturation", "F");
-    beautyConfigV2_vividBrightness = env->GetFieldID(beautyConfigV2Class, "vividBrightness", "F");
-    beautyConfigV2_vividWarmth = env->GetFieldID(beautyConfigV2Class, "vividWarmth", "F");
 
     // 필드 ID 검증
-    if (!beautyConfigV2_enabled || !beautyConfigV2_intensity || !beautyConfigV2_smoothing ||
-        !beautyConfigV2_brightness || !beautyConfigV2_softFocus || !beautyConfigV2_whitening ||
-        !beautyConfigV2_colorBalance || !beautyConfigV2_wrinkleRemove || !beautyConfigV2_skinQuality ||
-        !beautyConfigV2_smoothIntensity || !beautyConfigV2_poreReduction ||
+    if (!beautyConfigV2_enabled || !beautyConfigV2_intensity ||
+        !beautyConfigV2_brightness ||
         !beautyConfigV2_slimFace ||
         !beautyConfigV2_enlargeEyes || !beautyConfigV2_thinChin || !beautyConfigV2_useGpu ||
         !beautyConfigV2_roiOnly || !beautyConfigV2_protectEyes || !beautyConfigV2_protectLips ||
-        !beautyConfigV2_protectNose || !beautyConfigV2_downscaleFactor ||
-        !beautyConfigV2_vividIntensity || !beautyConfigV2_vividSaturation ||
-        !beautyConfigV2_vividBrightness || !beautyConfigV2_vividWarmth) {
+        !beautyConfigV2_protectNose || !beautyConfigV2_downscaleFactor) {
         LOGE("Failed to get BeautyFilterConfigV2 field IDs");
         return false;
     }
@@ -457,15 +441,7 @@ bool copyBeautyConfigV2FromJava(JNIEnv* env, jobject src, IrisBeautyConfigV2& de
     // Java 객체에서 값 복사
     dest.enabled = env->GetBooleanField(src, g_jniCache.beautyConfigV2_enabled) ? 1 : 0;
     dest.intensity = env->GetFloatField(src, g_jniCache.beautyConfigV2_intensity);
-    dest.smoothing = env->GetFloatField(src, g_jniCache.beautyConfigV2_smoothing);
     dest.brightness = env->GetFloatField(src, g_jniCache.beautyConfigV2_brightness);
-    dest.soft_focus = env->GetFloatField(src, g_jniCache.beautyConfigV2_softFocus);
-    dest.whitening = env->GetFloatField(src, g_jniCache.beautyConfigV2_whitening);
-    dest.color_balance = env->GetFloatField(src, g_jniCache.beautyConfigV2_colorBalance);
-    dest.wrinkle_remove = env->GetFloatField(src, g_jniCache.beautyConfigV2_wrinkleRemove);
-    dest.skin_quality = env->GetFloatField(src, g_jniCache.beautyConfigV2_skinQuality);
-    dest.smooth_intensity = env->GetFloatField(src, g_jniCache.beautyConfigV2_smoothIntensity);
-    dest.pore_reduction = env->GetFloatField(src, g_jniCache.beautyConfigV2_poreReduction);
     dest.slim_face = env->GetFloatField(src, g_jniCache.beautyConfigV2_slimFace);
     dest.enlarge_eyes = env->GetFloatField(src, g_jniCache.beautyConfigV2_enlargeEyes);
     dest.thin_chin = env->GetFloatField(src, g_jniCache.beautyConfigV2_thinChin);
@@ -475,10 +451,6 @@ bool copyBeautyConfigV2FromJava(JNIEnv* env, jobject src, IrisBeautyConfigV2& de
     dest.protect_lips = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectLips) ? 1 : 0;
     dest.protect_nose = env->GetBooleanField(src, g_jniCache.beautyConfigV2_protectNose) ? 1 : 0;
     dest.downscale_factor = env->GetIntField(src, g_jniCache.beautyConfigV2_downscaleFactor);
-    dest.vivid_intensity = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividIntensity);
-    dest.vivid_saturation = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividSaturation);
-    dest.vivid_brightness = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividBrightness);
-    dest.vivid_warmth = env->GetFloatField(src, g_jniCache.beautyConfigV2_vividWarmth);
 
     return !checkAndLogException(env);
 }
@@ -492,15 +464,7 @@ bool copyBeautyConfigV2ToJava(JNIEnv* env, const IrisBeautyConfigV2& src, jobjec
 
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_enabled, src.enabled != 0);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_intensity, src.intensity);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_smoothing, src.smoothing);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_brightness, src.brightness);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_softFocus, src.soft_focus);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_whitening, src.whitening);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_colorBalance, src.color_balance);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_wrinkleRemove, src.wrinkle_remove);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_skinQuality, src.skin_quality);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_smoothIntensity, src.smooth_intensity);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_poreReduction, src.pore_reduction);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_slimFace, src.slim_face);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_enlargeEyes, src.enlarge_eyes);
     env->SetFloatField(dest, g_jniCache.beautyConfigV2_thinChin, src.thin_chin);
@@ -510,10 +474,6 @@ bool copyBeautyConfigV2ToJava(JNIEnv* env, const IrisBeautyConfigV2& src, jobjec
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectLips, src.protect_lips != 0);
     env->SetBooleanField(dest, g_jniCache.beautyConfigV2_protectNose, src.protect_nose != 0);
     env->SetIntField(dest, g_jniCache.beautyConfigV2_downscaleFactor, src.downscale_factor);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividIntensity, src.vivid_intensity);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividSaturation, src.vivid_saturation);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividBrightness, src.vivid_brightness);
-    env->SetFloatField(dest, g_jniCache.beautyConfigV2_vividWarmth, src.vivid_warmth);
 
     return !checkAndLogException(env);
 }
@@ -1462,8 +1422,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyV2(
  * @brief V2 뷰티 필터 적용 (GPU 텍스처)
  *
  * Java: native int nativeApplyBeautyTextureV2(int inputTexture, int width, int height,
- *                                              BeautyFilterConfigV2 config, long detectionPtr,
- *                                              int lutTextureId, float lutIntensity);
+ *                                              BeautyFilterConfigV2 config, long detectionPtr);
  *
  * @return 출력 텍스처 ID (0이면 실패)
  */
@@ -1475,12 +1434,10 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
     jint width,
     jint height,
     jobject configObj,
-    jlong detectionPtr,
-    jint lutTextureId,
-    jfloat lutIntensity) {
+    jlong detectionPtr) {
 
-    LOGV("nativeApplyBeautyTextureV2 called: texture=%d, %dx%d, lut=%d, lutIntensity=%.2f",
-         inputTexture, width, height, lutTextureId, lutIntensity);
+    LOGV("nativeApplyBeautyTextureV2 called: texture=%d, %dx%d",
+         inputTexture, width, height);
 
     if (!configObj) {
         LOGE("nativeApplyBeautyTextureV2: configObj is null");
@@ -1509,9 +1466,7 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
         static_cast<int>(width),
         static_cast<int>(height),
         &nativeConfig,
-        detection,
-        static_cast<uint32_t>(lutTextureId),
-        static_cast<float>(lutIntensity)
+        detection
     );
 
     if (error != IRIS_SDK_OK) {
@@ -1520,22 +1475,6 @@ Java_com_irislenssdk_IrisLensSDK_nativeApplyBeautyTextureV2(
     }
 
     return static_cast<jint>(outputTexture);
-}
-
-JNIEXPORT void JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeSetFreqSepDebugMode(
-    JNIEnv* /* env */,
-    jclass /* clazz */,
-    jint mode) {
-    iris_sdk_set_freqsep_debug_mode(static_cast<int>(mode));
-}
-
-JNIEXPORT void JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeSetSkinColorFilter(
-    JNIEnv* /* env */,
-    jclass /* clazz */,
-    jint enabled) {
-    iris_sdk_set_skin_color_filter(static_cast<int>(enabled));
 }
 
 /**
@@ -1550,6 +1489,19 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetSkinMaskSmoothing(
     jboolean enabled,
     jfloat strength) {
     iris_sdk_set_skin_mask_smoothing(enabled ? 1 : 0, static_cast<float>(strength));
+}
+
+/**
+ * @brief P8-W3: 피부 화사함(soft-glow radiance) 강도 설정 (internal, 벤치/A-B용)
+ *
+ * Java: native void nativeSetSkinRadiance(float strength);
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetSkinRadiance(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jfloat strength) {
+    iris_sdk_set_skin_radiance(static_cast<float>(strength));
 }
 
 /**

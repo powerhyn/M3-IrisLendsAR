@@ -34,85 +34,36 @@
 namespace iris_sdk {
 
 #if IRIS_SDK_GPU_AVAILABLE
-// Gaussian half-kernel: center + kMaxGaussianRadius sides = 29 entries
-constexpr int kMaxGaussianRadius = 28;
-
-// CPU-side Gaussian weight precomputation (symmetric half-kernel)
-// weights[i] = exp(-i*i / (2*sigma*sigma)), normalized so full kernel sums to 1.0
-static void computeGaussianWeights(int radius, float weights[kMaxGaussianRadius + 1]) {
-    radius = std::clamp(radius, 1, kMaxGaussianRadius);
-    float sigma = radius * 0.4f;
-    float sum = 0.0f;
-    for (int i = 0; i <= radius; i++) {
-        weights[i] = std::exp(-(float)(i * i) / (2.0f * sigma * sigma));
-        sum += weights[i] * (i == 0 ? 1.0f : 2.0f); // center once, sides twice
-    }
-    for (int i = 0; i <= radius; i++) {
-        weights[i] /= sum;
-    }
-    // Zero out unused entries
-    for (int i = radius + 1; i <= kMaxGaussianRadius; i++) {
-        weights[i] = 0.0f;
-    }
-}
+// (P8-W2 제거) computeGaussianWeights / computeFallbackSmoothing 는 FreqSep 전용 → dead.
 
 static BeautyFilterConfigV2 buildEffectiveConfig(const BeautyFilterConfigV2& config) {
     BeautyFilterConfigV2 effective = config;
 
     if (!config.enabled) {
-        // beauty 비활성 → vivid-only 경로. 모든 beauty 수치를 중립값으로 설정.
-        effective.smoothing = 0.0f;
-        effective.softFocus = 0.0f;
-        effective.whitening = 0.0f;
-        effective.colorBalance = 0.0f;
+        // beauty 비활성 경로. 잔존 패스가 읽는 값만 중립화하면 충분.
+        // (P8-W2) smoothing/softFocus/whitening/colorBalance 등 곁가지 필드는
+        // 더 이상 읽히지 않으므로 brightness만 중립값으로 둔다(필드 자체는 D단계까지 보존).
         effective.brightness = 1.0f;
-        effective.skinQuality = 0.0f;
-        effective.smoothIntensity = 0.0f;
-        effective.poreReduction = 0.0f;
         return effective;
     }
 
     const float master = std::clamp(config.intensity, 0.0f, 1.0f);
 
-    effective.smoothing *= master;
-    effective.softFocus *= master;
-    effective.whitening *= master;
-    effective.colorBalance *= master;
-    // skinQuality is controlled by its dedicated slider.
-    // Keeping it independent from the legacy master intensity avoids
-    // unintentionally halving the effect when the UI leaves intensity at 0.5.
+    // (P8-W2) 잔존 패스가 읽는 brightness만 마스터 강도로 스케일.
     effective.brightness = 1.0f + (config.brightness - 1.0f) * master;
 
     return effective;
 }
-
-static float computeFallbackSmoothing(float skin_quality,
-                                      float smooth_intensity = 0.0f,
-                                      float pore_reduction = 0.0f) {
-    // 2축 모드: smoothIntensity/poreReduction 중 더 큰 값 기준
-    float effective = skin_quality;
-    if (smooth_intensity > 0.0f || pore_reduction > 0.0f) {
-        effective = std::max(smooth_intensity, pore_reduction);
-    }
-    const float t = std::clamp(effective, 0.0f, 1.0f);
-    return 0.05f + t * 0.15f;  // 0.05 ~ 0.20
-}
 #endif
 
 // 셰이더 소스 extern 선언
+// (P8-W2 제거) Bilateral/Whitening/ColorBalance/SoftFocus/FreqSep/Vivid 곁가지 셰이더 extern 삭제.
 namespace shaders {
 extern const char* FULLSCREEN_QUAD_VERTEX;
 extern const char* PASSTHROUGH_FRAGMENT;
 extern const char* BRIGHTNESS_FRAGMENT;
-extern const char* BILATERAL_FILTER_FRAGMENT;
-extern const char* WHITENING_FRAGMENT;
-extern const char* COLOR_BALANCE_FRAGMENT;
-extern const char* SOFT_FOCUS_FRAGMENT;
 extern const char* MASKING_FRAGMENT;
 extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
-extern const char* FREQ_SEP_GAUSSIAN_FRAGMENT;
-extern const char* FREQ_SEP_COMPOSITE_FRAGMENT;
-extern const char* VIVID_POSTPROCESS_FRAGMENT;
 // P8-W1: landmark-masked skin smoothing
 extern const char* SKIN_MASK_FILL_VERTEX;
 extern const char* SKIN_MASK_FILL_FRAGMENT;
@@ -191,32 +142,8 @@ bool GPUBeautyBackend::initialize(IRenderContext* render_context) {
     // Uniform Location 캐싱 (성능 최적화)
     cacheUniformLocations();
 
-#if IRIS_SDK_GPU_AVAILABLE
-    // Neutral 1x1x1 identity 3D LUT 생성 (sampler3D fallback)
-    // LUT OFF 시 glBindTexture(GL_TEXTURE_3D, 0) 대신 바인딩하여
-    // 드라이버 의존적 불안정을 방지
-    {
-        glGenTextures(1, &neutral_lut_texture_);
-        glBindTexture(GL_TEXTURE_3D, neutral_lut_texture_);
-        // Identity: RGB 그대로 반환 (R=1, G=1, B=1, A=1)
-        const uint8_t identity_data[4] = {255, 255, 255, 255};
-        glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, identity_data);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-        glBindTexture(GL_TEXTURE_3D, 0);
-        LOGI("Neutral 1x1x1 identity LUT created: id=%u", neutral_lut_texture_);
-    }
-#endif
-
-    // 디바이스 성능 등급 감지 (P4-W3-04)
-    device_tier_ = detectDeviceTier();
-    LOGI("Device tier detected: %s",
-         device_tier_ == DeviceTier::HIGH ? "HIGH" :
-         device_tier_ == DeviceTier::MID ? "MID" : "LOW");
+    // (P8-W2 제거) Neutral 1x1x1 identity 3D LUT 생성 + 디바이스 티어 감지(FreqSep half-res
+    //             분기용)는 LUT/FreqSep 곁가지 제거로 dead.
 
     // P8-W1 §5: landmark One-Euro 픽셀 공간 파라미터 (min_cutoff 0.5 / beta 0.007 / d_cutoff 1.0).
     // 기본 생성자는 min_cutoff=1.0 이므로 0.5로 명시 설정.
@@ -242,45 +169,7 @@ bool GPUBeautyBackend::initializeShaders() {
     }
     shader_manager_->cacheProgram("passthrough", passthrough_program_);
 
-    // 스무딩 (Bilateral Filter)
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::BILATERAL_FILTER_FRAGMENT,
-            smoothing_program_)) {
-        LOGE("Failed to create smoothing program");
-        return false;
-    }
-    shader_manager_->cacheProgram("smoothing", smoothing_program_);
-
-    // 화이트닝
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::WHITENING_FRAGMENT,
-            whitening_program_)) {
-        LOGE("Failed to create whitening program");
-        return false;
-    }
-    shader_manager_->cacheProgram("whitening", whitening_program_);
-
-    // 컬러 밸런스
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::COLOR_BALANCE_FRAGMENT,
-            color_balance_program_)) {
-        LOGE("Failed to create color_balance program");
-        return false;
-    }
-    shader_manager_->cacheProgram("color_balance", color_balance_program_);
-
-    // 소프트 포커스
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::SOFT_FOCUS_FRAGMENT,
-            soft_focus_program_)) {
-        LOGE("Failed to create soft_focus program");
-        return false;
-    }
-    shader_manager_->cacheProgram("soft_focus", soft_focus_program_);
+    // (P8-W2 제거) 곁가지 프로그램: smoothing(Bilateral)/whitening/color_balance/soft_focus.
 
     // 밝기
     if (!shader_manager_->createProgram(
@@ -312,22 +201,7 @@ bool GPUBeautyBackend::initializeShaders() {
     }
     shader_manager_->cacheProgram("combined_color", combined_color_program_);
 
-    // Vivid 포스트프로세싱 (non-fatal: 실패해도 beauty 파이프라인은 정상 동작)
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::VIVID_POSTPROCESS_FRAGMENT,
-            vivid_program_)) {
-        LOGW("Failed to create vivid program (non-fatal, vivid will be unavailable)");
-        vivid_program_ = 0;
-    } else {
-        shader_manager_->cacheProgram("vivid", vivid_program_);
-    }
-
-    // Frequency Separation 셰이더
-    if (!initializeFreqSepShaders()) {
-        LOGW("Failed to create Freq Sep shaders (non-fatal)");
-        // Non-fatal: Freq Sep은 선택적 기능, Bilateral fallback 사용
-    }
+    // (P8-W2 제거) Vivid 포스트프로세싱 / Frequency Separation 셰이더 곁가지 제거.
 
     // P8-W1: landmark-masked skin smoothing 셰이더 (non-fatal — OFF 시 영향 없음)
     if (!initializeSkinSmoothingShaders()) {
@@ -374,40 +248,7 @@ bool GPUBeautyBackend::initializeSkinSmoothingShaders() {
     return true;
 }
 
-bool GPUBeautyBackend::initializeFreqSepShaders() {
-    // Freq Sep Gaussian
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::FREQ_SEP_GAUSSIAN_FRAGMENT,
-            freq_sep_gaussian_program_)) {
-        LOGE("Failed to create freq_sep_gaussian program");
-        return false;
-    }
-    shader_manager_->cacheProgram("freq_sep_gaussian", freq_sep_gaussian_program_);
-
-    // Freq Sep Composite
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::FREQ_SEP_COMPOSITE_FRAGMENT,
-            freq_sep_composite_program_)) {
-        LOGE("Failed to create freq_sep_composite program");
-        return false;
-    }
-    shader_manager_->cacheProgram("freq_sep_composite", freq_sep_composite_program_);
-
-    // Luminance Sharpen
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::LUMINANCE_SHARPEN_FRAGMENT,
-            luminance_sharpen_program_)) {
-        LOGE("Failed to create Luminance Sharpen program");
-    } else {
-        shader_manager_->cacheProgram("luminance_sharpen", luminance_sharpen_program_);
-    }
-
-    LOGI("Freq Sep shader programs created successfully");
-    return true;
-}
+// (P8-W2 제거) initializeFreqSepShaders() — FreqSep 곁가지 전체 제거.
 
 void GPUBeautyBackend::cacheUniformLocations() {
 #if IRIS_SDK_GPU_AVAILABLE
@@ -416,23 +257,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
         passthrough_u_texture_ = glGetUniformLocation(passthrough_program_, "uTexture");
     }
 
-    // Smoothing (Bilateral Filter) Uniforms
-    smoothing_uniforms_.uTexture = glGetUniformLocation(smoothing_program_, "uTexture");
-    smoothing_uniforms_.uTexelSize = glGetUniformLocation(smoothing_program_, "uTexelSize");
-    smoothing_uniforms_.uStrength = glGetUniformLocation(smoothing_program_, "uStrength");
-
-    // Whitening Uniforms
-    whitening_uniforms_.uTexture = glGetUniformLocation(whitening_program_, "uTexture");
-    whitening_uniforms_.uWhiteningStrength = glGetUniformLocation(whitening_program_, "uStrength");
-
-    // Color Balance Uniforms
-    color_balance_uniforms_.uTexture = glGetUniformLocation(color_balance_program_, "uTexture");
-    color_balance_uniforms_.uBalance = glGetUniformLocation(color_balance_program_, "uBalance");
-
-    // Soft Focus Uniforms
-    soft_focus_uniforms_.uTexture = glGetUniformLocation(soft_focus_program_, "uTexture");
-    soft_focus_uniforms_.uSoftFocusTexelSize = glGetUniformLocation(soft_focus_program_, "uTexelSize");
-    soft_focus_uniforms_.uSoftFocusStrength = glGetUniformLocation(soft_focus_program_, "uStrength");
+    // (P8-W2 제거) Smoothing/Whitening/ColorBalance/SoftFocus/Vivid/FreqSep/Sharpen 유니폼 캐시.
 
     // Brightness Uniforms
     brightness_uniforms_.uTexture = glGetUniformLocation(brightness_program_, "uTexture");
@@ -443,56 +268,9 @@ void GPUBeautyBackend::cacheUniformLocations() {
     masking_uniforms_.uOriginal = glGetUniformLocation(masking_program_, "uOriginal");
     masking_uniforms_.uMask = glGetUniformLocation(masking_program_, "uMask");
 
-    // Combined Color Adjustment Uniforms
+    // Combined Color Adjustment Uniforms (brightness 잔존)
     combined_color_uniforms_.uTexture = glGetUniformLocation(combined_color_program_, "uTexture");
     combined_color_uniforms_.uCombinedBrightness = glGetUniformLocation(combined_color_program_, "uBrightness");
-    combined_color_uniforms_.uCombinedBalance = glGetUniformLocation(combined_color_program_, "uBalance");
-    combined_color_uniforms_.uCombinedWhitening = glGetUniformLocation(combined_color_program_, "uWhitening");
-    combined_color_uniforms_.uCombinedLutTexture = glGetUniformLocation(combined_color_program_, "uLutTexture");
-    combined_color_uniforms_.uCombinedLutIntensity = glGetUniformLocation(combined_color_program_, "uLutIntensity");
-
-    // Vivid Postprocess Uniforms
-    if (vivid_program_ != 0) {
-        vivid_uniforms_.uTexture = glGetUniformLocation(vivid_program_, "uTexture");
-        vivid_uniforms_.uIntensity = glGetUniformLocation(vivid_program_, "uIntensity");
-        vivid_uniforms_.uSaturation = glGetUniformLocation(vivid_program_, "uSaturation");
-        vivid_uniforms_.uBrightness = glGetUniformLocation(vivid_program_, "uBrightness");
-        vivid_uniforms_.uWarmth = glGetUniformLocation(vivid_program_, "uWarmth");
-    }
-
-    // Freq Sep Gaussian Uniforms
-    if (freq_sep_gaussian_program_ != 0) {
-        freq_sep_gaussian_uniforms_.uTexture = glGetUniformLocation(freq_sep_gaussian_program_, "uTexture");
-        freq_sep_gaussian_uniforms_.uDirection = glGetUniformLocation(freq_sep_gaussian_program_, "uDirection");
-        freq_sep_gaussian_uniforms_.uRadius = glGetUniformLocation(freq_sep_gaussian_program_, "uRadius");
-        freq_sep_gaussian_uniforms_.uWeights = glGetUniformLocation(freq_sep_gaussian_program_, "uWeights[0]");
-        freq_sep_gaussian_uniforms_.uLinearize = glGetUniformLocation(freq_sep_gaussian_program_, "uLinearize");
-    }
-
-    // Freq Sep Composite Uniforms
-    if (freq_sep_composite_program_ != 0) {
-        freq_sep_composite_uniforms_.uSmoothedLow = glGetUniformLocation(freq_sep_composite_program_, "uSmoothedLow");
-        freq_sep_composite_uniforms_.uLowFreq = glGetUniformLocation(freq_sep_composite_program_, "uLowFreq");
-        freq_sep_composite_uniforms_.uOriginal = glGetUniformLocation(freq_sep_composite_program_, "uOriginal");
-        freq_sep_composite_uniforms_.uSkinMask = glGetUniformLocation(freq_sep_composite_program_, "uSkinMask");
-        freq_sep_composite_uniforms_.uHighFreqPreserve = glGetUniformLocation(freq_sep_composite_program_, "uHighFreqPreserve");
-        freq_sep_composite_uniforms_.uAttenuationLow = glGetUniformLocation(freq_sep_composite_program_, "uAttenuationLow");
-        freq_sep_composite_uniforms_.uAttenuationHigh = glGetUniformLocation(freq_sep_composite_program_, "uAttenuationHigh");
-        freq_sep_composite_uniforms_.uEdgeWeight = glGetUniformLocation(freq_sep_composite_program_, "uEdgeWeight");
-        freq_sep_composite_uniforms_.uChromaWeight = glGetUniformLocation(freq_sep_composite_program_, "uChromaWeight");
-        freq_sep_composite_uniforms_.uToneLift = glGetUniformLocation(freq_sep_composite_program_, "uToneLift");
-        freq_sep_composite_uniforms_.uTextureBlendFloor = glGetUniformLocation(freq_sep_composite_program_, "uTextureBlendFloor");
-        freq_sep_composite_uniforms_.uDebugMode = glGetUniformLocation(freq_sep_composite_program_, "uDebugMode");
-        freq_sep_composite_uniforms_.uSkinColorFilter = glGetUniformLocation(freq_sep_composite_program_, "uSkinColorFilter");
-    }
-
-    // Luminance Sharpen Uniforms
-    if (luminance_sharpen_program_ != 0) {
-        luminance_sharpen_uniforms_.uTexture = glGetUniformLocation(luminance_sharpen_program_, "uTexture");
-        luminance_sharpen_uniforms_.uSkinMask = glGetUniformLocation(luminance_sharpen_program_, "uSkinMask");
-        luminance_sharpen_uniforms_.uSharpenAmount = glGetUniformLocation(luminance_sharpen_program_, "uSharpenAmount");
-        luminance_sharpen_uniforms_.uTexelSize = glGetUniformLocation(luminance_sharpen_program_, "uTexelSize");
-    }
 
     // P8-W1: Skin-mask smoothing Uniforms
     if (skin_mask_fill_program_ != 0) {
@@ -508,6 +286,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
         skin_uniforms_.compositeBlurTex = glGetUniformLocation(skin_composite_program_, "uBlurTex");
         skin_uniforms_.compositeMaskTex = glGetUniformLocation(skin_composite_program_, "uSkinMaskTex");
         skin_uniforms_.compositeSkin = glGetUniformLocation(skin_composite_program_, "uSkin");
+        skin_uniforms_.compositeRadiance = glGetUniformLocation(skin_composite_program_, "uRadiance");  // P8-W3
     }
 
     LOGI("Uniform locations cached successfully");
@@ -594,21 +373,7 @@ void GPUBeautyBackend::release() {
         previous_fence_ = nullptr;
     }
 
-    // Neutral LUT 텍스처 해제
-    if (neutral_lut_texture_ != 0) {
-        glDeleteTextures(1, &neutral_lut_texture_);
-        neutral_lut_texture_ = 0;
-    }
-#endif
-
-    // Freq Sep skin mask 텍스처 해제
-#if IRIS_SDK_GPU_AVAILABLE
-    if (skin_mask_texture_ != 0) {
-        glDeleteTextures(1, &skin_mask_texture_);
-        skin_mask_texture_ = 0;
-    }
-    skin_mask_width_ = 0;
-    skin_mask_height_ = 0;
+    // (P8-W2 제거) neutral LUT / FreqSep skin mask 텍스처 해제 — 곁가지 제거로 dead.
 
     // P8-W1: landmark-masked smoothing 타깃 해제
     destroySkinTargets();
@@ -638,19 +403,11 @@ void GPUBeautyBackend::release() {
 
     resetTemporalFilters();
 
-    // 프로그램 ID 초기화
+    // 프로그램 ID 초기화 ((P8-W2) 곁가지 프로그램 제거 — 잔존 4종 + skin 3종)
     passthrough_program_ = 0;
-    smoothing_program_ = 0;
-    whitening_program_ = 0;
-    color_balance_program_ = 0;
-    soft_focus_program_ = 0;
     brightness_program_ = 0;
     masking_program_ = 0;
     combined_color_program_ = 0;
-    freq_sep_gaussian_program_ = 0;
-    freq_sep_composite_program_ = 0;
-    luminance_sharpen_program_ = 0;
-    vivid_program_ = 0;
     skin_mask_fill_program_ = 0;
     skin_blur_program_ = 0;
     skin_composite_program_ = 0;
@@ -659,7 +416,7 @@ void GPUBeautyBackend::release() {
 }
 
 void GPUBeautyBackend::resetTemporalFilters() {
-    skin_radius_filter_.reset();
+    // (P8-W2) skin_radius_filter_(FreqSep blur_radius)는 dead — face_rect center만 리셋.
     mask_center_x_filter_.reset();
     mask_center_y_filter_.reset();
 }
@@ -744,9 +501,8 @@ IrisSdkError GPUBeautyBackend::applyTexture(
         return IRIS_SDK_INVALID_PARAM;
     }
 
-    bool needsVivid = config.vividIntensity > 0.01f;
-    if (!config.enabled && !needsVivid) {
-        // beauty 비활성 + vivid 비활성: 입력을 그대로 출력으로
+    // (P8-W2) vivid 곁가지 제거 — beauty enabled 게이트로 단순화.
+    if (!config.enabled) {
         output = input;
         return IRIS_SDK_OK;
     }
@@ -798,55 +554,17 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     // 필터 체인 실행 (최적화됨 + 프로파일링)
     bool profiling = profiler_ && profiler_->isEnabled();
 
-    // 1. 스무딩 (Bilateral Filter) - 단독 패스
-    if (effective_config.smoothing > 0.01f) {
-        if (profiling) profiler_->begin("Smoothing");
-        executeSmoothingPass(current_input, current_output->fbo_id,
-                             width, height, effective_config);
-        if (profiling) profiler_->end("Smoothing");
-        current_input = current_output->texture_id;
-        current_output = (current_output == ping) ? pong : ping;
-    }
-
-    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
-    //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
+    // (P8-W2) 곁가지 제거: Bilateral 스무딩 / SoftFocus / Vivid / whitening·colorBalance.
+    // 통합 Color Adjustment (brightness 잔존)
     bool needsBrightness = std::abs(effective_config.brightness - 1.0f) > 0.01f;
-    bool needsBalance = std::abs(effective_config.colorBalance) > 0.01f;
-    bool needsWhitening = effective_config.whitening > 0.01f;
-
-    if (needsBrightness || needsBalance || needsWhitening) {
+    if (needsBrightness) {
         if (profiling) profiler_->begin("CombinedColor");
         executeCombinedColorPass(current_input, current_output->fbo_id,
                                  width, height,
-                                 effective_config.brightness,
-                                 effective_config.colorBalance,
-                                 effective_config.whitening);
+                                 effective_config.brightness);
         if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
         current_output = (current_output == ping) ? pong : ping;
-    }
-
-    // 3. 소프트 포커스 - 단독 패스 (blur 필요)
-    if (effective_config.softFocus > 0.01f) {
-        if (profiling) profiler_->begin("SoftFocus");
-        executeSoftFocusPass(current_input, current_output->fbo_id,
-                             width, height, effective_config.softFocus);
-        if (profiling) profiler_->end("SoftFocus");
-        current_input = current_output->texture_id;
-        if (pong) current_output = (current_output == ping) ? pong : ping;
-    }
-
-    // 4. Vivid 포스트프로세싱 (전체 프레임, beauty enabled와 독립)
-    if (needsVivid) {
-        if (profiling) profiler_->begin("Vivid");
-        executeVividPass(current_input, current_output->fbo_id,
-                         width, height,
-                         config.vividIntensity,
-                         config.vividSaturation,
-                         config.vividBrightness,
-                         config.vividWarmth);
-        if (profiling) profiler_->end("Vivid");
-        current_input = current_output->texture_id;
     }
 
     // 출력 텍스처 핸들 설정
@@ -889,119 +607,8 @@ IrisSdkError GPUBeautyBackend::applyTexture(
     return IRIS_SDK_OK;
 }
 
-void GPUBeautyBackend::executeSmoothingPass(
-    GLuint input_tex, GLuint output_fbo,
-    int width, int height,
-    const BeautyFilterConfigV2& config) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    glUseProgram(smoothing_program_);
-
-    // 캐시된 Uniform Location 사용 (성능 최적화)
-    glUniform1i(smoothing_uniforms_.uTexture, 0);
-    glUniform2f(smoothing_uniforms_.uTexelSize, 1.0f / width, 1.0f / height);
-    glUniform1f(smoothing_uniforms_.uStrength, config.smoothing);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-
-    renderFullscreenQuad();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-#else
-    (void)input_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-    (void)config;
-#endif
-}
-
-void GPUBeautyBackend::executeWhiteningPass(
-    GLuint input_tex, GLuint output_fbo,
-    int width, int height,
-    float whitening) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    glUseProgram(whitening_program_);
-
-    // 캐시된 Uniform Location 사용
-    glUniform1i(whitening_uniforms_.uTexture, 0);
-    glUniform1f(whitening_uniforms_.uWhiteningStrength, whitening);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-
-    renderFullscreenQuad();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-#else
-    (void)input_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-    (void)whitening;
-#endif
-}
-
-void GPUBeautyBackend::executeColorBalancePass(
-    GLuint input_tex, GLuint output_fbo,
-    int width, int height,
-    float balance) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    glUseProgram(color_balance_program_);
-
-    // 캐시된 Uniform Location 사용
-    glUniform1i(color_balance_uniforms_.uTexture, 0);
-    glUniform1f(color_balance_uniforms_.uBalance, balance);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-
-    renderFullscreenQuad();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-#else
-    (void)input_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-    (void)balance;
-#endif
-}
-
-void GPUBeautyBackend::executeSoftFocusPass(
-    GLuint input_tex, GLuint output_fbo,
-    int width, int height,
-    float strength) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    glUseProgram(soft_focus_program_);
-
-    // 캐시된 Uniform Location 사용
-    glUniform1i(soft_focus_uniforms_.uTexture, 0);
-    glUniform2f(soft_focus_uniforms_.uSoftFocusTexelSize, 1.0f / width, 1.0f / height);
-    glUniform1f(soft_focus_uniforms_.uSoftFocusStrength, strength);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-
-    renderFullscreenQuad();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-#else
-    (void)input_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-    (void)strength;
-#endif
-}
+// (P8-W2 제거) executeSmoothingPass(Bilateral) / executeWhiteningPass /
+//             executeColorBalancePass / executeSoftFocusPass — 곁가지 패스 전체 제거.
 
 void GPUBeautyBackend::executeBrightnessPass(
     GLuint input_tex, GLuint output_fbo,
@@ -1031,41 +638,7 @@ void GPUBeautyBackend::executeBrightnessPass(
 #endif
 }
 
-void GPUBeautyBackend::executeVividPass(
-    GLuint input_tex, GLuint output_fbo,
-    int width, int height,
-    float intensity, float saturation,
-    float brightness, float warmth) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    if (vivid_program_ == 0) return;
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    glViewport(0, 0, width, height);
-    glUseProgram(vivid_program_);
-
-    glUniform1i(vivid_uniforms_.uTexture, 0);
-    glUniform1f(vivid_uniforms_.uIntensity, intensity);
-    glUniform1f(vivid_uniforms_.uSaturation, saturation);
-    glUniform1f(vivid_uniforms_.uBrightness, brightness);
-    glUniform1f(vivid_uniforms_.uWarmth, warmth);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-
-    renderFullscreenQuad();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-#else
-    (void)input_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-    (void)intensity;
-    (void)saturation;
-    (void)brightness;
-    (void)warmth;
-#endif
-}
+// (P8-W2 제거) executeVividPass — Vivid 곁가지 패스 제거.
 
 void GPUBeautyBackend::applyMasking(
     GLuint filtered_tex, GLuint original_tex,
@@ -1109,8 +682,7 @@ void GPUBeautyBackend::applyMasking(
 void GPUBeautyBackend::executeCombinedColorPass(
     GLuint input_tex, GLuint output_fbo,
     int width, int height,
-    float brightness, float balance, float whitening,
-    GLuint lut_texture, float lut_intensity) {
+    float brightness) {
 
 #if IRIS_SDK_GPU_AVAILABLE
     glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
@@ -1143,34 +715,12 @@ void GPUBeautyBackend::executeCombinedColorPass(
     }
 #endif
 
-    // 캐시된 Uniform Location 사용
+    // 캐시된 Uniform Location 사용 ((P8-W2) balance/whitening/LUT 곁가지 제거 — brightness 잔존)
     glUniform1i(combined_color_uniforms_.uTexture, 0);
     glUniform1f(combined_color_uniforms_.uCombinedBrightness, brightness);
-    glUniform1f(combined_color_uniforms_.uCombinedBalance, balance);
-    glUniform1f(combined_color_uniforms_.uCombinedWhitening, whitening);
-
-    // LUT: C++ controls activation - if no texture, force intensity to 0
-    float effective_lut_intensity = (lut_texture != 0) ? lut_intensity : 0.0f;
-    glUniform1f(combined_color_uniforms_.uCombinedLutIntensity, effective_lut_intensity);
-
-    // P0-FIX: sampler2D(unit0) / sampler3D(unit1) 충돌 방지
-    // uCombinedLutTexture는 LUT 활성 여부와 관계없이 항상 TEXTURE1에 바인딩.
-    // LUT 비활성 시 uniform 기본값(0)이 TEXTURE0을 가리키면
-    // sampler2D와 sampler3D가 동일 유닛을 공유 → GL_INVALID_OPERATION.
-    glUniform1i(combined_color_uniforms_.uCombinedLutTexture, 1);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, input_tex);
-
-    // TEXTURE1: LUT 텍스처 또는 neutral identity fallback
-    glActiveTexture(GL_TEXTURE1);
-    if (lut_texture != 0 && lut_intensity > 0.01f) {
-        glBindTexture(GL_TEXTURE_3D, lut_texture);
-    } else {
-        // Neutral 1x1x1 identity LUT로 sampler3D 경로 안정화
-        // glBindTexture(GL_TEXTURE_3D, 0) 대신 사용하여 드라이버 호환성 확보
-        glBindTexture(GL_TEXTURE_3D, neutral_lut_texture_);
-    }
 
     renderFullscreenQuad();
 
@@ -1182,12 +732,6 @@ void GPUBeautyBackend::executeCombinedColorPass(
     }
 #endif
 
-    // Cleanup (B2 idx4): unit1의 3D, unit0의 2D를 각각 해제하고
-    // active unit을 TEXTURE0으로 복귀시켜 종료한다.
-    // 이전 구현은 unit1에서 2D unbind를 실행해 unit0의 input_tex 바인딩이 남고
-    // active unit이 TEXTURE1인 채 종료되어 후속 패스/호스트 상태를 오염시켰다.
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_3D, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, 0);
 #else
@@ -1196,203 +740,15 @@ void GPUBeautyBackend::executeCombinedColorPass(
     (void)width;
     (void)height;
     (void)brightness;
-    (void)balance;
-    (void)whitening;
-    (void)lut_texture;
-    (void)lut_intensity;
 #endif
 }
 
-GLuint GPUBeautyBackend::uploadSkinMask(
-    const std::vector<uint8_t>& combined_mask,
-    int mask_width, int mask_height) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    if (combined_mask.empty() || mask_width <= 0 || mask_height <= 0) {
-        return 0;
-    }
-
-    const size_t expected_size = static_cast<size_t>(mask_width) * mask_height;
-    if (combined_mask.size() < expected_size) {
-        LOGE("uploadSkinMask: buffer size mismatch (got %zu, expected %zu)",
-             combined_mask.size(), expected_size);
-        return 0;
-    }
-
-    if (skin_mask_texture_ == 0) {
-        glGenTextures(1, &skin_mask_texture_);
-    }
-
-    glBindTexture(GL_TEXTURE_2D, skin_mask_texture_);
-
-    // GL_RED single channel: row width may not be 4-byte aligned
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-    if (mask_width != skin_mask_width_ || mask_height != skin_mask_height_) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8,
-                     mask_width, mask_height, 0,
-                     GL_RED, GL_UNSIGNED_BYTE,
-                     combined_mask.data());
-        skin_mask_width_ = mask_width;
-        skin_mask_height_ = mask_height;
-    } else {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                        mask_width, mask_height,
-                        GL_RED, GL_UNSIGNED_BYTE,
-                        combined_mask.data());
-    }
-
-    // Restore alignment
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-    return skin_mask_texture_;
-#else
-    (void)combined_mask;
-    (void)mask_width;
-    (void)mask_height;
-    return 0;
-#endif
-}
-
-GPUBeautyBackend::FreqSepParams
-GPUBeautyBackend::mapSkinQuality(float skin_quality, int face_width) {
-    FreqSepParams p;
-
-    if (skin_quality <= 0.0f) {
-        p.enabled = false;
-        return p;
-    }
-
-    p.enabled = true;
-
-    // S-curve mapping (smoothstep for natural transition)
-    float t = std::clamp(skin_quality, 0.0f, 1.0f);
-    float s = t * t * (3.0f - 2.0f * t);  // smoothstep
-
-    // blur_radius: still biased toward pore / fine texture compression,
-    // but strong settings should remain visibly effective.
-    const float ratio = 0.018f + s * 0.014f;
-    p.blur_radius = std::clamp(
-        static_cast<int>(face_width * ratio),
-        5, 16
-    );
-
-    // high_freq_preserve: strong enough to visibly compress pores, while
-    // large details are still protected later in the composite shader.
-    p.high_freq_preserve = 0.72f - s * 0.42f;
-
-    // low_freq_smooth: slightly stronger than the previous pass so the result
-    // reads as a real skin finish, not "no-op".
-    p.low_freq_smooth_radius_ratio = 0.22f + s * 0.10f;
-
-    // attenuation window: target fine repetitive texture a bit more aggressively.
-    p.attenuation_low = 0.005f;
-    p.attenuation_high = 0.016f + s * 0.010f;
-
-    // Keep protecting strong edges / chroma outliers, but not so much that
-    // the skin finish becomes imperceptible.
-    p.edge_weight = 0.42f + s * 0.16f;     // 0.42 ~ 0.58
-    p.chroma_weight = 0.28f + s * 0.20f;   // 0.28 ~ 0.48
-
-    // Foundation-like face finish: visible but still restrained.
-    p.tone_lift = 0.020f + s * 0.030f;
-
-    // Restore pores / lash line crispness after the stronger smoothing.
-    p.sharpen_amount = 0.11f + s * 0.05f;
-
-    // texture_blend_floor는 레거시 모드에서 기본값 유지
-    p.texture_blend_floor = 0.38f;
-
-    return p;
-}
-
-GPUBeautyBackend::FreqSepParams
-GPUBeautyBackend::mapSmoothingAndPore(float smooth_intensity, float pore_reduction, int face_width) {
-    FreqSepParams p;
-
-    // 둘 다 0이면 비활성
-    if (smooth_intensity <= 0.0f && pore_reduction <= 0.0f) {
-        p.enabled = false;
-        return p;
-    }
-
-    p.enabled = true;
-
-    // S-curve
-    float ss = std::clamp(smooth_intensity, 0.0f, 1.0f);
-    float sp = std::clamp(pore_reduction, 0.0f, 1.0f);
-    float s_smooth = ss * ss * (3.0f - 2.0f * ss);
-    float s_pore = sp * sp * (3.0f - 2.0f * sp);
-
-    // blur_radius: 두 축 중 더 큰 요구에 맞춤
-    // 극단 테스트: face_w=240 기준 radius 28 수준
-    float smooth_ratio = 0.018f + s_smooth * 0.120f;  // 0.018~0.138
-    float pore_ratio = 0.018f + s_pore * 0.014f;      // 모공: 기존과 동일
-    const float ratio = std::max(smooth_ratio, pore_ratio);
-    p.blur_radius = std::clamp(static_cast<int>(face_width * ratio), 5, 28);
-
-    // === 매끈하게 축 (극단 테스트) ===
-    p.low_freq_smooth_radius_ratio = 0.22f + s_smooth * 0.48f;  // 0.22~0.70
-    p.texture_blend_floor = 0.38f + s_smooth * 0.57f;           // 0.38~0.95
-    p.tone_lift = 0.002f + s_smooth * 0.005f;                   // 거의 0 → 완전 매트
-
-    // === 모공 축 ===
-    // high_freq_preserve: 매끈하게와 모공 모두 영향. 둘 중 더 강하게 낮추는 쪽을 따름.
-    float hfp_smooth = 0.72f - s_smooth * 0.55f;                // 매끈하게: 0.72~0.17
-    float hfp_pore   = 0.72f - s_pore * 0.52f;                  // 모공: 0.72~0.20
-    p.high_freq_preserve = std::min(hfp_smooth, hfp_pore);      // 둘 중 더 낮은 값
-    p.attenuation_low = 0.005f;
-    p.attenuation_high = 0.016f + s_pore * 0.020f;              // 0.016~0.036
-
-    // === 공통 ===
-    float s_max = std::max(s_smooth, s_pore);
-    p.edge_weight = 0.42f + s_max * 0.20f;                      // 에지 보호 강화
-    p.chroma_weight = 0.28f + s_max * 0.20f;
-    // 샤프닝: 매끈하게가 강할수록 더 강한 샤프닝으로 선명도 복구 (뿌연 느낌 방지)
-    float sharpen_smooth = s_smooth * 0.14f;                     // 매끈하게: 0~0.14
-    float sharpen_pore = s_pore * 0.05f;                         // 모공: 0~0.05
-    p.sharpen_amount = 0.11f + std::max(sharpen_smooth, sharpen_pore);
-
-    return p;
-}
-
-void GPUBeautyBackend::executeSmoothingWithFallbackStrength(
-    GLuint input_tex, GLuint output_fbo,
-    int width, int height,
-    const BeautyFilterConfigV2& config) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    BeautyFilterConfigV2 fallback_config = config;
-    float effective_smoothing = computeFallbackSmoothing(
-        config.skinQuality, config.smoothIntensity, config.poreReduction);
-    if (fallback_config.smoothing < effective_smoothing) {
-        fallback_config.smoothing = effective_smoothing;
-    }
-    LOGW("FreqSep fallback using bilateral smoothing=%.2f (skinQuality=%.2f smooth=%.2f pore=%.2f)",
-         fallback_config.smoothing, config.skinQuality,
-         config.smoothIntensity, config.poreReduction);
-    executeSmoothingPass(input_tex, output_fbo, width, height, fallback_config);
-#else
-    (void)input_tex; (void)output_fbo;
-    (void)width; (void)height; (void)config;
-#endif
-}
-
-bool GPUBeautyBackend::executeFreqSepPipeline(
-    GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
-    int width, int height, const FreqSepParams& params) {
-    return executeFreqSepPipelineImpl(input_tex, mask_tex, output_fbo,
-        width, height, params, {1, false, "", ""});
-}
+// (P8-W2 제거) uploadSkinMask / mapSkinQuality / mapSmoothingAndPore /
+//             executeSmoothingWithFallbackStrength / executeFreqSepPipeline —
+//             FreqSep 곁가지 전체 제거.
 
 // =============================================================================
-// Device Tier 감지 (P4-W3-04)
+// Device Tier 분류 (classifyGpuRenderer — 단위 테스트 + 분류 유틸 한정으로 보존)
 // =============================================================================
 
 GPUBeautyBackend::DeviceTier
@@ -1461,260 +817,8 @@ GPUBeautyBackend::classifyGpuRenderer(const std::string& gpu) {
     return DeviceTier::LOW;
 }
 
-GPUBeautyBackend::DeviceTier GPUBeautyBackend::detectDeviceTier() {
-#if IRIS_SDK_GPU_AVAILABLE
-    const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
-    if (!renderer) return DeviceTier::LOW;
-    LOGI("GPU Renderer: %s", renderer);
-    return classifyGpuRenderer(std::string(renderer));
-#else
-    return DeviceTier::HIGH;
-#endif
-}
-
-// =============================================================================
-// MID 디바이스 하프 해상도 FreqSep 파이프라인 (P4-W3-04)
-// =============================================================================
-
-bool GPUBeautyBackend::executeFreqSepPipelineHalfRes(
-    GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
-    int width, int height, const FreqSepParams& params) {
-    return executeFreqSepPipelineImpl(input_tex, mask_tex, output_fbo,
-        width, height, params, {2, true, "_Half", "_Full"});
-}
-
-// =============================================================================
-// FreqSep 공통 구현 (full-res / half-res 통합)
-// =============================================================================
-
-bool GPUBeautyBackend::executeFreqSepPipelineImpl(
-    GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
-    int width, int height,
-    const FreqSepParams& params,
-    const FreqSepExecConfig& cfg) {
-#if IRIS_SDK_GPU_AVAILABLE
-    const int blur_w = width / cfg.res_divisor;
-    const int blur_h = height / cfg.res_divisor;
-
-    // 최소 해상도 보장 (0 나누기 방지)
-    if (blur_w < 1 || blur_h < 1) {
-        LOGW("FreqSep: resolution too small (%dx%d, divisor=%d)", width, height, cfg.res_divisor);
-        return false;
-    }
-
-    // Acquire intermediate buffers from texture pool
-    auto* lowFreq = texture_pool_->acquireRenderTarget(blur_w, blur_h);
-    auto* smoothedLow = texture_pool_->acquireRenderTarget(blur_w, blur_h);
-    auto* temp = texture_pool_->acquireRenderTarget(blur_w, blur_h);
-
-    if (!lowFreq || !smoothedLow || !temp) {
-        LOGE("FreqSep: Failed to acquire render targets");
-        if (lowFreq) texture_pool_->releaseTexture(lowFreq);
-        if (smoothedLow) texture_pool_->releaseTexture(smoothedLow);
-        if (temp) texture_pool_->releaseTexture(temp);
-        return false;
-    }
-
-    bool profiling = profiler_ && profiler_->isEnabled();
-
-    // blur_radius: half-res일 때 물리적 blur 범위 보존을 위해 축소
-    const int blur_radius = (cfg.res_divisor == 1)
-        ? params.blur_radius
-        : std::max(3, params.blur_radius / cfg.res_divisor);
-
-    // Precompute Gaussian weights (Pass 1a/1b)
-    float weights[kMaxGaussianRadius + 1];
-    computeGaussianWeights(blur_radius, weights);
-
-    // half-res일 때 blur 패스 viewport 축소
-    if (cfg.res_divisor > 1) {
-        glViewport(0, 0, blur_w, blur_h);
-    }
-
-    // Profiler 태그 버퍼 (고정 크기, 스택 할당)
-    char tag[48];
-
-    // Pass 1a: Horizontal Gaussian → temp
-    std::snprintf(tag, sizeof(tag), "FreqSep_GaussianH%s", cfg.blur_profiler_suffix);
-    if (profiling) profiler_->begin(tag);
-    glUseProgram(freq_sep_gaussian_program_);
-    glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / blur_w, 0.0f);
-    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, blur_radius);
-    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
-    glUniform1i(freq_sep_gaussian_uniforms_.uLinearize, 1);  // Pass 1a: sRGB→Linear 변환 활성화
-    glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end(tag);
-
-    // Pass 1b: Vertical Gaussian → lowFreq
-    std::snprintf(tag, sizeof(tag), "FreqSep_GaussianV%s", cfg.blur_profiler_suffix);
-    if (profiling) profiler_->begin(tag);
-    glUniform1i(freq_sep_gaussian_uniforms_.uLinearize, 0);  // Pass 1b 이후: linearize 비활성화
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / blur_h);
-    glBindFramebuffer(GL_FRAMEBUFFER, lowFreq->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, temp->texture_id);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end(tag);
-
-    // Precompute Gaussian weights for low_radius (Pass 2a/2b)
-    int low_radius = std::max(3,
-        static_cast<int>(blur_radius * params.low_freq_smooth_radius_ratio));
-    computeGaussianWeights(low_radius, weights);
-
-    // Pass 2a: Low Freq additional Gaussian H → temp
-    std::snprintf(tag, sizeof(tag), "FreqSep_LowSmoothH%s", cfg.blur_profiler_suffix);
-    if (profiling) profiler_->begin(tag);
-    glUseProgram(freq_sep_gaussian_program_);
-    glUniform1i(freq_sep_gaussian_uniforms_.uLinearize, 0);  // Pass 2a/2b: 이미 Linear — 변환 불필요
-    glUniform1i(freq_sep_gaussian_uniforms_.uTexture, 0);
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 1.0f / blur_w, 0.0f);
-    glUniform1i(freq_sep_gaussian_uniforms_.uRadius, low_radius);
-    glUniform1fv(freq_sep_gaussian_uniforms_.uWeights, 29, weights);
-    glBindFramebuffer(GL_FRAMEBUFFER, temp->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end(tag);
-
-    // Pass 2b: Low Freq additional Gaussian V → smoothedLow
-    std::snprintf(tag, sizeof(tag), "FreqSep_LowSmoothV%s", cfg.blur_profiler_suffix);
-    if (profiling) profiler_->begin(tag);
-    glUniform2f(freq_sep_gaussian_uniforms_.uDirection, 0.0f, 1.0f / blur_h);
-    glBindFramebuffer(GL_FRAMEBUFFER, smoothedLow->fbo_id);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, temp->texture_id);
-    renderFullscreenQuad();
-    if (profiling) profiler_->end(tag);
-
-    // Composite 전 full-res viewport 복원
-    if (cfg.res_divisor > 1) {
-        glViewport(0, 0, width, height);
-    }
-
-    // ① sharpen 활성 여부 판정
-    bool sharpen_enabled = (luminance_sharpen_program_ != 0 && params.sharpen_amount > 0.01f);
-
-    // temp 조기 릴리스: Pass 2b 완료 후 더 이상 사용하지 않으므로
-    // 풀 슬롯을 확보하여 compositeRT 할당 실패를 방지
-    texture_pool_->releaseTexture(temp);
-    temp = nullptr;
-
-    // ② full-res compositeRT 할당 (temp 릴리스로 풀 슬롯 확보됨)
-    TexturePool::TextureInfo* compositeRT = nullptr;
-    if (sharpen_enabled) {
-        compositeRT = texture_pool_->acquireRenderTarget(width, height);
-        if (!compositeRT) {
-            LOGW("FreqSep: Failed to acquire compositeRT, sharpen disabled");
-            sharpen_enabled = false;
-        }
-    }
-
-    // Pass 3: Composite — re-synthesis + mask blending
-    std::snprintf(tag, sizeof(tag), "FreqSep_Composite%s", cfg.composite_profiler_suffix);
-    if (profiling) profiler_->begin(tag);
-
-    // GL_LINEAR 업샘플링 (half-res → full-res composite 입력)
-    if (cfg.linear_upsample) {
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, smoothedLow->texture_id);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    }
-
-    glUseProgram(freq_sep_composite_program_);
-    glUniform1f(freq_sep_composite_uniforms_.uHighFreqPreserve, params.high_freq_preserve);
-    glUniform1f(freq_sep_composite_uniforms_.uAttenuationLow, params.attenuation_low);
-    glUniform1f(freq_sep_composite_uniforms_.uAttenuationHigh, params.attenuation_high);
-    glUniform1f(freq_sep_composite_uniforms_.uEdgeWeight, params.edge_weight);
-    glUniform1f(freq_sep_composite_uniforms_.uChromaWeight, params.chroma_weight);
-    glUniform1f(freq_sep_composite_uniforms_.uToneLift, params.tone_lift);
-    glUniform1f(freq_sep_composite_uniforms_.uTextureBlendFloor, params.texture_blend_floor);
-    glUniform1i(freq_sep_composite_uniforms_.uDebugMode, freqsep_debug_mode_);
-    glUniform1i(freq_sep_composite_uniforms_.uSkinColorFilter, skin_color_filter_ ? 1 : 0);
-
-    glUniform1i(freq_sep_composite_uniforms_.uSmoothedLow, 0);
-    glUniform1i(freq_sep_composite_uniforms_.uLowFreq, 1);
-    glUniform1i(freq_sep_composite_uniforms_.uOriginal, 2);
-    glUniform1i(freq_sep_composite_uniforms_.uSkinMask, 3);
-
-    if (!cfg.linear_upsample) {
-        // full-res: 텍스처 바인딩 필요
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, smoothedLow->texture_id);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, lowFreq->texture_id);
-    }
-    // linear_upsample 경로에서는 unit0/unit1 이미 바인딩됨
-
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, mask_tex);
-
-    // Composite 출력: sharpen 활성 시 compositeRT, 아니면 output_fbo
-    glBindFramebuffer(GL_FRAMEBUFFER, sharpen_enabled ? compositeRT->fbo_id : output_fbo);
-    renderFullscreenQuad();
-
-    // Cleanup texture bindings
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    if (profiling) profiler_->end(tag);
-
-    // Pass 4: Luminance Sharpen (sharpen_enabled일 때만)
-    if (sharpen_enabled) {
-        std::snprintf(tag, sizeof(tag), "FreqSep_Sharpen%s", cfg.composite_profiler_suffix);
-        if (profiling) profiler_->begin(tag);
-
-        glUseProgram(luminance_sharpen_program_);
-        glUniform1i(luminance_sharpen_uniforms_.uTexture, 0);
-        glUniform1i(luminance_sharpen_uniforms_.uSkinMask, 1);
-        glUniform1f(luminance_sharpen_uniforms_.uSharpenAmount, params.sharpen_amount);
-        glUniform2f(luminance_sharpen_uniforms_.uTexelSize, 1.0f / width, 1.0f / height);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, compositeRT->texture_id);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, mask_tex);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-        renderFullscreenQuad();
-
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, 0);
-
-        if (profiling) profiler_->end(tag);
-
-        texture_pool_->releaseTexture(compositeRT);
-    }
-
-    // Release textures back to pool
-    texture_pool_->releaseTexture(lowFreq);
-    texture_pool_->releaseTexture(smoothedLow);
-    if (temp) texture_pool_->releaseTexture(temp);
-    return true;
-#else
-    (void)input_tex; (void)mask_tex; (void)output_fbo;
-    (void)width; (void)height; (void)params; (void)cfg;
-    return false;
-#endif
-}
+// (P8-W2 제거) detectDeviceTier() / executeFreqSepPipelineHalfRes() /
+//             executeFreqSepPipelineImpl() — FreqSep half-res 분기 + 공통 구현 제거.
 
 void GPUBeautyBackend::onMemoryPressure(int level) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1751,9 +855,14 @@ std::string GPUBeautyBackend::getProfilingReport() const {
 // P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
 //=============================================================================
 
+// P8-W3: skin mask 경로(smoothing + radiance) 활성 여부.
+// 독립 게이팅 — (smoothing 모드 enabled & strength>0) OR (radiance>0) 중 하나라도 켜지면
+// 마스크/블러 base 패스 + composite를 돌린다. enabled_ 토글은 **smoothing만** 게이트하고,
+// radiance는 strength>0으로 독립 활성(setSkinRadiance가 strength만 설정 — enabled 무관).
+// (smoothing off & radiance>0이면 composite의 uSkin=0으로 스무딩 mix가 no-op, radiance 블록만 적용.)
 bool GPUBeautyBackend::skinMaskSmoothingActive(const IrisResult* detection) const {
-    return skin_mask_smoothing_enabled_
-        && skin_mask_smoothing_strength_ > 0.0f
+    return ((skin_mask_smoothing_enabled_ && skin_mask_smoothing_strength_ > 0.0f)
+            || skin_radiance_strength_ > 0.0f)
         && detection != nullptr
         && detection->detected
         && detection->face_mesh_valid
@@ -1978,6 +1087,7 @@ void GPUBeautyBackend::renderSkinComposite(GLuint base_tex, GLuint output_fbo,
     glUniform1i(skin_uniforms_.compositeBlurTex, 1);
     glUniform1i(skin_uniforms_.compositeMaskTex, 2);
     glUniform1f(skin_uniforms_.compositeSkin, strength);
+    glUniform1f(skin_uniforms_.compositeRadiance, skin_radiance_strength_);  // P8-W3
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, base_tex);
     glActiveTexture(GL_TEXTURE1);
@@ -2023,8 +1133,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         return IRIS_SDK_INVALID_PARAM;
     }
 
-    bool needsVivid = config.vividIntensity > 0.01f;
-    if (!config.enabled && !needsVivid) {
+    // (P8-W2) vivid 곁가지 제거 — beauty enabled 게이트로 단순화.
+    if (!config.enabled) {
         // [B2 idx20-(3)] 필터를 끄는 프레임에서도 이전 프레임이 이월한 풀 텍스처
         // 2장과 fence를 즉시 정리한다. 이전 구현은 이 조기 반환이 정리 블록보다
         // 앞서 있어, 필터 비활성 동안 풀 텍스처 2장이 in_use로, fence 1개가 미삭제로
@@ -2092,24 +1202,23 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
     BeautyFilterConfigV2 effective_config = buildEffectiveConfig(config);
 
-    // P8-W1: landmark-masked smoothing 모드 — 활성 시 FreqSep/Bilateral 스무딩을 대체한다.
+    // (P8-W2) LUT 곁가지 제거 — 시그니처는 D단계까지 유지, 전달값은 무시.
+    (void)lut_texture_id;
+    (void)lut_intensity;
+
+    // P8-W1: landmark-masked smoothing 모드 — 활성 시 스무딩을 적용한다.
     // 강도 0 / 모드 OFF / face_mesh 무효면 false → 마스크·블러·필터·타깃 전부 생략(비용 0).
+    // (P8-W2) skin mask가 OFF면 스무딩 없음 = 의도된 종착(레거시 FreqSep/Bilateral 폴백 제거).
     const bool use_skin_mask = config.enabled && skinMaskSmoothingActive(detection);
 
     // 활성 필터 수에 따라 동적으로 텍스처 할당
+    // (P8-W2) 잔존 패스: ① skin mask smoothing + ② brightness(통합 Color).
     int active_filter_count = 0;
-    if (use_skin_mask
-        || effective_config.skinQuality > 0.0f || effective_config.smoothing > 0.01f
-        || effective_config.smoothIntensity > 0.0f || effective_config.poreReduction > 0.0f) {
+    if (use_skin_mask) {
         active_filter_count++;
     }
     bool needsBrightness = std::abs(effective_config.brightness - 1.0f) > 0.01f;
-    bool needsBalance = std::abs(effective_config.colorBalance) > 0.01f;
-    bool needsWhitening = effective_config.whitening > 0.01f;
-    bool needsLut = config.enabled && (lut_texture_id != 0 && lut_intensity > 0.01f);
-    if (needsBrightness || needsBalance || needsWhitening || needsLut) active_filter_count++;
-    if (effective_config.softFocus > 0.01f) active_filter_count++;
-    if (needsVivid) active_filter_count++;
+    if (needsBrightness) active_filter_count++;
 
     // 필터 0개: 패스스루 (텍스처 할당 불필요)
     if (active_filter_count == 0) {
@@ -2148,14 +1257,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
     // ROI passthrough: scissor 활성화 전에 출력 FBO를 원본으로 채움
     // → scissor 외부 픽셀이 stale 데이터가 되는 것을 방지
+    // (P8-W2) brightness=1.0 중립값으로 원본 그대로 채운다(balance/whitening/LUT 인자 제거).
     if (roi_ptr && roi_ptr->valid) {
-        executeCombinedColorPass(input_tex_id, ping->fbo_id,
-                                 width, height,
-                                 1.0f, 0.0f, 0.0f, 0, 0.0f);
+        executeCombinedColorPass(input_tex_id, ping->fbo_id, width, height, 1.0f);
         if (pong) {
-            executeCombinedColorPass(input_tex_id, pong->fbo_id,
-                                     width, height,
-                                     1.0f, 0.0f, 0.0f, 0, 0.0f);
+            executeCombinedColorPass(input_tex_id, pong->fbo_id, width, height, 1.0f);
         }
     }
 
@@ -2215,17 +1321,10 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
                  roi_ptr->face_rect.width, roi_ptr->face_rect.height);
         } else {
             // roiOnly 정책: 교집합이 비어있으면 beauty 필터 스킵
+            // (P8-W2) vivid 곁가지 제거 — 입력을 그대로 반환.
             LOGW("ROI Scissor skipped: intersection empty (rect=%d,%d,%d,%d frame=%dx%d)",
                  rect_x, rect_y, rect_w, rect_h, width, height);
-            if (needsVivid) {
-                executeVividPass(current_input, ping->fbo_id,
-                                 width, height, config.vividIntensity,
-                                 config.vividSaturation, config.vividBrightness,
-                                 config.vividWarmth);
-                *output_texture = ping->texture_id;
-            } else {
-                *output_texture = current_input;
-            }
+            *output_texture = current_input;
             if (ping) { previous_output_ping_ = ping; }
             if (pong) { previous_output_pong_ = pong; }
             previous_fence_ = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -2237,7 +1336,8 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // 필터 체인 실행 (최적화됨 + 프로파일링)
     bool profiling = profiler_ && profiler_->isEnabled();
 
-    // 1. 스무딩 (P8-W1): landmark-masked smoothing 모드면 FreqSep/Bilateral을 대체.
+    // 1. 스무딩 (P8-W1): landmark-masked skin smoothing (① 핵심).
+    //    (P8-W2) 곁가지 제거 — skin mask OFF면 스무딩 없음(의도된 종착, FreqSep/Bilateral 폴백 제거).
     //    실패(타깃 생성 실패 등) 시 안전하게 스무딩만 생략 (다른 패스는 정상).
     if (use_skin_mask) {
         if (profiling) profiler_->begin("SkinMaskSmoothing");
@@ -2255,165 +1355,27 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         if (scissor_active) glEnable(GL_SCISSOR_TEST);
         if (profiling) profiler_->end("SkinMaskSmoothing");
     } else {
-    // 스킨 모드가 이 프레임에 동작하지 않음 → 다음 활성 프레임에 필터 reset 하도록 표시
-    // (얼굴 재획득 시 묵은 필터 상태로 인한 마스크 경계 글라이드 방지 — 원본 FaceTracker)
-    skin_filters_active_ = false;
-    // 1b. 기존 경로: Freq Sep (skinQuality > 0 또는 2축 모드) 또는 Bilateral (기존)
-    int face_w = 0;
-    if (roi_ptr && roi_ptr->valid) {
-        face_w = static_cast<int>(roi_ptr->face_rect.width);
-    }
-    FreqSepParams freq_sep_params;
-    if (effective_config.smoothIntensity > 0.0f || effective_config.poreReduction > 0.0f) {
-        // 2축 모드: smoothIntensity/poreReduction이 0보다 크면 skinQuality 무시
-        freq_sep_params = mapSmoothingAndPore(
-            effective_config.smoothIntensity,
-            effective_config.poreReduction,
-            face_w);
-        LOGI("[2AXIS] smooth=%.2f pore=%.2f face_w=%d enabled=%d blur_r=%d blendFloor=%.2f toneLift=%.3f hfp=%.2f",
-             effective_config.smoothIntensity, effective_config.poreReduction,
-             face_w, freq_sep_params.enabled ? 1 : 0, freq_sep_params.blur_radius,
-             freq_sep_params.texture_blend_floor, freq_sep_params.tone_lift,
-             freq_sep_params.high_freq_preserve);
-    } else {
-        // 레거시 호환: skinQuality 단일 슬라이더
-        freq_sep_params = mapSkinQuality(effective_config.skinQuality, face_w);
+        // 스킨 모드가 이 프레임에 동작하지 않음 → 다음 활성 프레임에 필터 reset 하도록 표시
+        // (얼굴 재획득 시 묵은 필터 상태로 인한 마스크 경계 글라이드 방지 — 원본 FaceTracker)
+        skin_filters_active_ = false;
     }
 
-    // Temporal stability: One Euro Filter for blur_radius (P4-W3-04)
-    // frame_ts는 위에서 캡처된 동일 프레임 타임스탬프
-    if (freq_sep_params.enabled) {
-        float raw_radius = static_cast<float>(freq_sep_params.blur_radius);
-        float filtered_radius = skin_radius_filter_.filter(raw_radius, frame_ts);
-        freq_sep_params.blur_radius = static_cast<int>(std::round(filtered_radius));
-        freq_sep_params.blur_radius = std::max(3, freq_sep_params.blur_radius);
-    }
-
-    // Bilateral fallback 헬퍼 (FreqSep 실패 시 공통 경로)
-    auto runBilateralFallback = [&](const char* reason) {
-        LOGW("FreqSep unavailable (%s); using bilateral fallback", reason);
-        if (profiling) profiler_->begin("Smoothing_Fallback");
-        executeSmoothingWithFallbackStrength(current_input, current_output->fbo_id,
-                                             width, height, effective_config);
-        if (profiling) profiler_->end("Smoothing_Fallback");
-        current_input = current_output->texture_id;
-        if (pong) current_output = (current_output == ping) ? pong : ping;
-    };
-
-    if (freq_sep_params.enabled
-        && freq_sep_gaussian_program_ != 0 && freq_sep_composite_program_ != 0
-        && roi_ptr && roi_ptr->valid && !roi_ptr->combined_mask.empty()) {
-
-        // LOW tier: FreqSep 전체 건너뛰기 → Bilateral fallback
-        if (device_tier_ == DeviceTier::LOW) {
-            runBilateralFallback("device-tier-low");
-        } else {
-            // HIGH 또는 MID: skin mask 업로드 후 파이프라인 실행
-            GLuint mask_tex = uploadSkinMask(
-                roi_ptr->combined_mask,
-                roi_ptr->mask_width, roi_ptr->mask_height);
-            if (mask_tex != 0) {
-                // FreqSep 멀티패스 Gaussian은 전체 프레임 중간 텍스처가 필요하므로
-                // ROI scissor를 비활성화 (Composite 셰이더의 uSkinMask가 ROI 마스킹 담당)
-                if (scissor_active) {
-                    glDisable(GL_SCISSOR_TEST);
-                }
-
-                bool freq_sep_ok = false;
-                if (device_tier_ == DeviceTier::MID) {
-                    // MID: blur half-res, composite full-res (하이브리드 해상도)
-                    LOGD("FreqSep path: MID half-res blur_radius=%d mask=%dx%d quality=%.2f",
-                         freq_sep_params.blur_radius,
-                         roi_ptr->mask_width, roi_ptr->mask_height,
-                         effective_config.skinQuality);
-                    freq_sep_ok = executeFreqSepPipelineHalfRes(
-                        current_input, mask_tex,
-                        current_output->fbo_id,
-                        width, height, freq_sep_params);
-                } else {
-                    // HIGH: full resolution
-                    LOGD("FreqSep path: HIGH full-res blur_radius=%d mask=%dx%d quality=%.2f",
-                         freq_sep_params.blur_radius,
-                         roi_ptr->mask_width, roi_ptr->mask_height,
-                         effective_config.skinQuality);
-                    freq_sep_ok = executeFreqSepPipeline(
-                        current_input, mask_tex,
-                        current_output->fbo_id,
-                        width, height, freq_sep_params);
-                }
-
-                // Scissor 복원
-                if (scissor_active) {
-                    glEnable(GL_SCISSOR_TEST);
-                }
-                if (freq_sep_ok) {
-                    current_input = current_output->texture_id;
-                    if (pong) current_output = (current_output == ping) ? pong : ping;
-                } else {
-                    runBilateralFallback("freq-sep-pipeline-failed");
-                }
-            } else {
-                // mask upload failed → Bilateral fallback
-                runBilateralFallback("mask-upload-failed");
-            }
-        }
-    } else if (freq_sep_params.enabled) {
-        // skinQuality > 0 but FreqSep cannot run (shader not compiled / no valid ROI/mask)
-        // → Bilateral fallback with minimum strength
-        runBilateralFallback("preconditions-not-met");
-    } else if (effective_config.smoothing > 0.01f) {
-        // Original Bilateral path (skinQuality = 0)
-        if (profiling) profiler_->begin("Smoothing");
-        executeSmoothingPass(current_input, current_output->fbo_id,
-                             width, height, effective_config);
-        if (profiling) profiler_->end("Smoothing");
-        current_input = current_output->texture_id;
-        if (pong) current_output = (current_output == ping) ? pong : ping;
-    }
-    }  // end else (use_skin_mask 미사용 — 기존 FreqSep/Bilateral 경로)
-
-    // 2. 통합 Color Adjustment (Brightness + ColorBalance + Whitening + LUT)
-    //    기존 3개 패스를 1개로 병합하여 FBO 전환 오버헤드 감소
-    if (needsBrightness || needsBalance || needsWhitening || needsLut) {
+    // 2. 통합 Color Adjustment ((P8-W2) brightness 잔존, balance/whitening/LUT 곁가지 제거)
+    if (needsBrightness) {
         if (profiling) profiler_->begin("CombinedColor");
         executeCombinedColorPass(current_input, current_output->fbo_id,
                                  width, height,
-                                 effective_config.brightness,
-                                 effective_config.colorBalance,
-                                 effective_config.whitening,
-                                 static_cast<GLuint>(lut_texture_id),
-                                 lut_intensity);
+                                 effective_config.brightness);
         if (profiling) profiler_->end("CombinedColor");
         current_input = current_output->texture_id;
         if (pong) current_output = (current_output == ping) ? pong : ping;
     }
 
-    // 3. 소프트 포커스 - 단독 패스 (blur 필요)
-    if (effective_config.softFocus > 0.01f) {
-        if (profiling) profiler_->begin("SoftFocus");
-        executeSoftFocusPass(current_input, current_output->fbo_id,
-                             width, height, effective_config.softFocus);
-        if (profiling) profiler_->end("SoftFocus");
-        current_input = current_output->texture_id;
-        if (pong) current_output = (current_output == ping) ? pong : ping;
-    }
+    // (P8-W2 제거) 소프트 포커스 / Vivid 포스트프로세싱 곁가지 제거.
 
     // ROI Scissor 해제
     if (scissor_active) {
         glDisable(GL_SCISSOR_TEST);
-    }
-
-    // 4. Vivid 포스트프로세싱 (전체 프레임, ROI 무관)
-    if (needsVivid) {
-        if (profiling) profiler_->begin("Vivid");
-        executeVividPass(current_input, current_output->fbo_id,
-                         width, height,
-                         config.vividIntensity,
-                         config.vividSaturation,
-                         config.vividBrightness,
-                         config.vividWarmth);
-        if (profiling) profiler_->end("Vivid");
-        current_input = current_output->texture_id;
     }
 
     *output_texture = current_input;

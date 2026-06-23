@@ -39,19 +39,17 @@ namespace iris_sdk {
  *
  * 실시간 뷰티 필터를 GPU 셰이더로 적용합니다.
  *
- * **파이프라인 구조**:
- * - Frequency Separation (skinQuality > 0): 6-subpass GPU 파이프라인 (Sharpen 패스 포함)
- *   - DeviceTier::HIGH → full-res, MID → hybrid half-res blur
- * - Bilateral Filter (skinQuality == 0 또는 FreqSep 실패 시 fallback)
- * - Combined Color Pass (brightness + balance + whitening + LUT)
+ * **파이프라인 구조** (P8-W2 곁가지 제거 후):
+ * - ① landmark-masked skin smoothing (use_skin_mask 채널)
+ * - ② Combined Color Pass (brightness 잔존)
+ *   (FreqSep/Bilateral/whitening/colorBalance/softFocus/LUT/vivid 곁가지 제거)
  *
- * **Temporal Stability** (P4-W3-04):
- * - One Euro Filter로 blur_radius 및 face_rect center jitter 억제
- * - DeviceTier 기반 half-res 분기 (GPU 렌더러 문자열 파싱)
+ * **Temporal Stability**:
+ * - One Euro Filter로 face_rect center jitter 억제 (ROI scissor 경계 안정화)
  *
  * **Thread Safety**: 모든 public 메서드는 mutex_로 보호됩니다.
  *
- * @see FreqSepParams, DeviceTier, OneEuroFilter
+ * @see DeviceTier, OneEuroFilter
  */
 class GPUBeautyBackend : public IBeautyBackend {
 public:
@@ -227,43 +225,18 @@ public:
     void releaseTexture(uint32_t texture);
 
     //=========================================================================
-    // Frequency Separation
+    // GPU 디바이스 성능 등급 분류 (단위 테스트 + 분류 유틸 한정)
     //=========================================================================
-
-    /// Freq Sep 내부 파라미터
-    struct FreqSepParams {
-        int blur_radius = 15;
-        float high_freq_preserve = 0.45f;
-        float low_freq_smooth_radius_ratio = 0.5f;
-        float attenuation_low = 0.02f;
-        float attenuation_high = 0.15f;
-        float edge_weight = 0.5f;      // 에지 보존 강도
-        float chroma_weight = 0.3f;    // 색소침착 감지 강도
-        float tone_lift = 0.15f;      // 미드톤 리프트 강도
-        float sharpen_amount = 0.15f; // Luminance sharpen 강도
-        float texture_blend_floor = 0.38f; // Composite textureBlend 하한 (기본 0.38)
-        bool enabled = false;
-    };
-
-    /// skinQuality → FreqSepParams 매핑 (레거시 호환)
-    static FreqSepParams mapSkinQuality(float skin_quality, int face_width);
-
-    /// smoothIntensity/poreReduction 2축 → FreqSepParams 매핑
-    static FreqSepParams mapSmoothingAndPore(float smooth_intensity, float pore_reduction, int face_width);
 
     /**
      * @brief GPU 디바이스 성능 등급
      *
-     * GL_RENDERER 문자열을 파싱하여 결정됩니다 (detectDeviceTier()).
+     * GL_RENDERER 문자열을 파싱하여 결정됩니다 (classifyGpuRenderer()).
      *
-     * 파이프라인 동작 차이:
-     * - HIGH: FreqSep full-res 6-subpass (blur + composite + sharpen, 모두 원본 해상도)
-     * - MID:  FreqSep hybrid half-res (blur는 1/2 해상도, composite는 full-res)
-     * - LOW:  FreqSep 비활성 → Bilateral fallback
-     *
-     * @note Mali 분류 비대칭: Adreno는 100 단위 시리즈(6xx/7xx),
+     * @note (P8-W2) FreqSep half-res 분기는 곁가지 제거로 사라졌고,
+     *       현재는 classifyGpuRenderer() 분류 유틸 + 단위 테스트에서만 사용됩니다.
+     *       Mali 분류 비대칭: Adreno는 100 단위 시리즈(6xx/7xx),
      *       Mali-G는 2자리 vs 3자리(G7x/G710+)로 분류 기준이 다름.
-     *       Mali-G78은 MID, Mali-G710은 HIGH로 분류됨.
      */
     enum class DeviceTier {
         HIGH,   ///< Adreno 7xx, Mali-G710+, Apple GPU, Desktop GPU
@@ -278,9 +251,6 @@ private:
     //=========================================================================
     // 초기화 헬퍼
     //=========================================================================
-
-    /// GPU 렌더러 문자열 기반 디바이스 등급 감지 (GL 컨텍스트 활성 상태에서만 호출)
-    DeviceTier detectDeviceTier();
 
     /// Temporal filter 일괄 리셋 (release/얼굴 추적 끊김 시 공통 호출)
     void resetTemporalFilters();
@@ -302,26 +272,6 @@ private:
     // 필터 패스
     //=========================================================================
 
-    /// 스무딩 패스 (Bilateral Filter)
-    void executeSmoothingPass(GLuint input_tex, GLuint output_fbo,
-                              int width, int height,
-                              const BeautyFilterConfigV2& config);
-
-    /// 화이트닝 패스
-    void executeWhiteningPass(GLuint input_tex, GLuint output_fbo,
-                              int width, int height,
-                              float whitening);
-
-    /// 컬러 밸런스 패스
-    void executeColorBalancePass(GLuint input_tex, GLuint output_fbo,
-                                 int width, int height,
-                                 float balance);
-
-    /// 소프트 포커스 패스
-    void executeSoftFocusPass(GLuint input_tex, GLuint output_fbo,
-                              int width, int height,
-                              float strength);
-
     /// 밝기 패스
     void executeBrightnessPass(GLuint input_tex, GLuint output_fbo,
                                int width, int height,
@@ -332,66 +282,11 @@ private:
                       GLuint mask_tex, GLuint output_fbo,
                       int width, int height);
 
-    /// 통합 Color Adjustment 패스 (Brightness + ColorBalance + Whitening)
-    /// 3개 패스를 1개로 병합하여 성능 최적화
+    /// 통합 Color Adjustment 패스 (Brightness)
+    /// (P8-W2) whitening/LUT 곁가지 제거 — brightness만 잔존.
     void executeCombinedColorPass(GLuint input_tex, GLuint output_fbo,
                                   int width, int height,
-                                  float brightness, float balance, float whitening,
-                                  GLuint lut_texture = 0, float lut_intensity = 0.0f);
-
-    /// Frequency Separation Gaussian blur 셰이더 초기화
-    bool initializeFreqSepShaders();
-
-    /// FreqSep 파이프라인 실행 설정 (full-res / half-res 분기 매개변수화)
-    struct FreqSepExecConfig {
-        int res_divisor;                       ///< 1 = full-res, 2 = half-res
-        bool linear_upsample;                  ///< true: composite 입력에 GL_LINEAR 설정
-        const char* blur_profiler_suffix;      ///< "" 또는 "_Half"
-        const char* composite_profiler_suffix; ///< "" 또는 "_Full"
-    };
-
-    /// Frequency Separation 6서브패스 파이프라인 (full-res, sharpen 포함)
-    /// @return true: 파이프라인 정상 완료, false: 텍스처 할당 실패 등 (호출자가 fallback 처리)
-    bool executeFreqSepPipeline(
-        GLuint input_tex,
-        GLuint mask_tex,
-        GLuint output_fbo,
-        int width, int height,
-        const FreqSepParams& params);
-
-    /// Frequency Separation MID 디바이스 하프 해상도 파이프라인
-    /// blur 패스는 half-res, composite 패스는 full-res로 실행
-    /// @return true: 파이프라인 정상 완료
-    bool executeFreqSepPipelineHalfRes(
-        GLuint input_tex,
-        GLuint mask_tex,
-        GLuint output_fbo,
-        int width, int height,
-        const FreqSepParams& params);
-
-    /// FreqSep 공통 구현 (full-res / half-res 통합)
-    bool executeFreqSepPipelineImpl(
-        GLuint input_tex, GLuint mask_tex, GLuint output_fbo,
-        int width, int height,
-        const FreqSepParams& params,
-        const FreqSepExecConfig& exec_cfg);
-
-    /// CPU combined_mask → GPU 텍스처 업로드
-    GLuint uploadSkinMask(
-        const std::vector<uint8_t>& combined_mask,
-        int mask_width, int mask_height);
-
-    /// Vivid 포스트프로세싱 패스 (전체 프레임, ROI 무관)
-    void executeVividPass(GLuint input_tex, GLuint output_fbo,
-                          int width, int height,
-                          float intensity, float saturation,
-                          float brightness, float warmth);
-
-    /// Freq Sep 불가 시 Bilateral fallback (공통 최소 강도 정책)
-    void executeSmoothingWithFallbackStrength(
-        GLuint input_tex, GLuint output_fbo,
-        int width, int height,
-        const BeautyFilterConfigV2& config);
+                                  float brightness);
 
     //=========================================================================
     // P8-W1: landmark-masked skin smoothing (LensSimulator 이식)
@@ -441,25 +336,12 @@ private:
     GLuint quad_vbo_ = 0;
 
     // 셰이더 프로그램 ID
+    // (P8-W2 제거) 곁가지 프로그램: smoothing(Bilateral)/whitening/color_balance/
+    //             soft_focus/freq_sep_gaussian/freq_sep_composite/luminance_sharpen/vivid.
     GLuint passthrough_program_ = 0;
-    GLuint smoothing_program_ = 0;
-    GLuint whitening_program_ = 0;
-    GLuint color_balance_program_ = 0;
-    GLuint soft_focus_program_ = 0;
     GLuint brightness_program_ = 0;
     GLuint masking_program_ = 0;
-    GLuint combined_color_program_ = 0;  // 통합 Color Adjustment (최적화)
-
-    // Freq Sep 셰이더 프로그램
-    GLuint freq_sep_gaussian_program_ = 0;
-    GLuint freq_sep_composite_program_ = 0;
-    GLuint luminance_sharpen_program_ = 0;
-    GLuint vivid_program_ = 0;
-
-    // Skin mask GPU 텍스처
-    GLuint skin_mask_texture_ = 0;
-    int skin_mask_width_ = 0;
-    int skin_mask_height_ = 0;
+    GLuint combined_color_program_ = 0;  // 통합 Color Adjustment (brightness 잔존)
 
     //=========================================================================
     // P8-W1: landmark-masked skin smoothing 상태
@@ -497,6 +379,9 @@ private:
     // 모드 토글 (internal API)
     bool skin_mask_smoothing_enabled_ = false;
     float skin_mask_smoothing_strength_ = 0.0f;
+    // P8-W3: skin 화사함(soft-glow radiance) 강도. skin mask 경로(blur/mask) 공유.
+    // smoothing=0이어도 radiance>0이면 skin 경로가 활성화되어 radiance만 단독 적용된다.
+    float skin_radiance_strength_ = 0.0f;
 
     // 팬 정점 버퍼 (NDC, position만) + 픽셀 좌표 작업 버퍼 (프레임당 할당 금지)
     std::array<float, kSkinFanFloats> skin_fan_{};
@@ -517,6 +402,7 @@ private:
         GLint compositeBlurTex = -1;
         GLint compositeMaskTex = -1;
         GLint compositeSkin = -1;
+        GLint compositeRadiance = -1;  // P8-W3: uRadiance
     } skin_uniforms_;
 
     // [B2 idx18] passthrough 셰이더 uTexture location 캐시
@@ -529,120 +415,41 @@ private:
     //=========================================================================
 
     /// 셰이더별 Uniform Location 캐시 구조체
+    /// (P8-W2) 곁가지 제거: Smoothing/Whitening/ColorBalance/SoftFocus/Combined-Whitening/
+    ///         Combined-LUT 멤버 삭제. Brightness/Masking/Combined-Brightness 잔존.
     struct UniformLocations {
         // 공통
         GLint uTexture = -1;
 
-        // Smoothing (Bilateral Filter)
-        GLint uTexelSize = -1;
-        GLint uStrength = -1;
-
         // Brightness
         GLint uBrightness = -1;
-
-        // Whitening
-        GLint uWhiteningStrength = -1;
-
-        // Color Balance
-        GLint uBalance = -1;
-
-        // Soft Focus
-        GLint uSoftFocusTexelSize = -1;
-        GLint uSoftFocusStrength = -1;
 
         // Masking
         GLint uFiltered = -1;
         GLint uOriginal = -1;
         GLint uMask = -1;
 
-        // Combined Color Adjustment (통합 필터)
+        // Combined Color Adjustment (brightness 잔존)
         GLint uCombinedBrightness = -1;
-        GLint uCombinedBalance = -1;
-        GLint uCombinedWhitening = -1;
-
-        // Combined Color + LUT
-        GLint uCombinedLutTexture = -1;
-        GLint uCombinedLutIntensity = -1;
     };
 
     /// 프로그램별 Uniform Location 캐시
-    UniformLocations smoothing_uniforms_;
-    UniformLocations whitening_uniforms_;
-    UniformLocations color_balance_uniforms_;
-    UniformLocations soft_focus_uniforms_;
     UniformLocations brightness_uniforms_;
     UniformLocations masking_uniforms_;
-    UniformLocations combined_color_uniforms_;  // 통합 Color Adjustment
-
-    // Freq Sep Gaussian Uniform 캐시
-    struct FreqSepGaussianUniforms {
-        GLint uTexture = -1;
-        GLint uDirection = -1;
-        GLint uRadius = -1;
-        GLint uWeights = -1;
-        GLint uLinearize = -1;  // sRGB→Linear 변환 플래그
-    } freq_sep_gaussian_uniforms_;
-
-    // Freq Sep Composite Uniform 캐시
-    struct FreqSepCompositeUniforms {
-        GLint uSmoothedLow = -1;
-        GLint uLowFreq = -1;
-        GLint uOriginal = -1;
-        GLint uSkinMask = -1;
-        GLint uHighFreqPreserve = -1;
-        GLint uAttenuationLow = -1;
-        GLint uAttenuationHigh = -1;
-        GLint uEdgeWeight = -1;
-        GLint uChromaWeight = -1;
-        GLint uToneLift = -1;
-        GLint uTextureBlendFloor = -1;
-        GLint uDebugMode = -1;
-        GLint uSkinColorFilter = -1;
-    } freq_sep_composite_uniforms_;
-
-    // Luminance Sharpen Uniform 캐시
-    struct LuminanceSharpenUniforms {
-        GLint uTexture = -1;
-        GLint uSkinMask = -1;
-        GLint uSharpenAmount = -1;
-        GLint uTexelSize = -1;
-    } luminance_sharpen_uniforms_;
-
-    // Vivid Postprocess Uniform 캐시
-    struct VividUniforms {
-        GLint uTexture = -1;
-        GLint uIntensity = -1;
-        GLint uSaturation = -1;
-        GLint uBrightness = -1;
-        GLint uWarmth = -1;
-    } vivid_uniforms_;
+    UniformLocations combined_color_uniforms_;  // 통합 Color Adjustment (brightness)
 
     // Temporal stability용 One Euro Filter (P4-W3-04)
     // 모든 필터는 mutex_ lock 하에서만 접근 (applyTextureId → public → lock_guard)
-    //
-    // 파라미터 선택 근거:
-    //   skin_radius: min_cutoff=0.5 (강한 스무딩 — radius 변화가 급격하면 블러 플리커 발생)
-    //                beta=0.01 (느린 추종 — radius는 급변할 이유가 없음)
-    //   face_rect center: min_cutoff=1.0 (적당한 스무딩 — 자연스러운 이동 허용)
-    //                     beta=0.02 (빠른 머리 움직임에 약간 반응)
-    OneEuroFilter skin_radius_filter_{0.5f, 0.01f, 1.0f};
+    // (P8-W2) skin_radius_filter_(FreqSep blur_radius 안정화)는 곁가지 제거로 dead.
+    //   face_rect center 필터는 ROI scissor 경계 안정화에 잔존.
     OneEuroFilter mask_center_x_filter_{1.0f, 0.02f, 1.0f};  ///< face_rect 중심 X 안정화
     OneEuroFilter mask_center_y_filter_{1.0f, 0.02f, 1.0f};  ///< face_rect 중심 Y 안정화
 
-    // 디바이스 성능 등급 (P4-W3-04)
-    DeviceTier device_tier_ = DeviceTier::HIGH;
-
-    // FreqSep 디버그 모드 (0=off, 1=magnitude, 2=compression, 3=mask)
-    int freqsep_debug_mode_ = 0;
-    bool skin_color_filter_ = false;
+    // (P8-W2 제거) freqsep_debug_mode_ / skin_color_filter_ 필드 + set/get 4종은
+    //             FreqSep·색보정 곁가지 제거로 dead. (C API 시그니처는 D단계까지 no-op로 유지)
 public:
-    void setFreqSepDebugMode(int mode) { freqsep_debug_mode_ = mode; }
-    int getFreqSepDebugMode() const { return freqsep_debug_mode_; }
-    void setSkinColorFilter(bool enabled) { skin_color_filter_ = enabled; }
-    bool getSkinColorFilter() const { return skin_color_filter_; }
-
     /// P8-W1: landmark-masked skin smoothing 모드 토글 (internal/벤치용).
-    /// 활성 시 기존 FreqSep/Bilateral 스무딩을 대체한다 (다른 패스는 불변).
+    /// 활성 시 스무딩을 적용한다 (다른 패스는 불변).
     /// strength=0 또는 enabled=false면 마스크/블러/필터/타깃 전부 생략 (비용 0).
     void setSkinMaskSmoothing(bool enabled, float strength) {
         skin_mask_smoothing_enabled_ = enabled;
@@ -650,6 +457,16 @@ public:
     }
     bool getSkinMaskSmoothingEnabled() const { return skin_mask_smoothing_enabled_; }
     float getSkinMaskSmoothingStrength() const { return skin_mask_smoothing_strength_; }
+
+    /// P8-W3: skin 화사함(soft-glow radiance) 강도 설정 (internal/벤치용).
+    /// skin mask 경로(blur/mask)를 공유한다. smoothing=0이어도 radiance>0이면
+    /// skin 경로가 활성화되어 radiance만 단독으로 적용된다(윤기/화사 단독 가능).
+    /// strength=0이면 radiance 블록은 생략된다(skin 경로 자체는 smoothing 조건에 따름).
+    void setSkinRadiance(float strength) {
+        // setSkinMaskSmoothing와 동일한 수동 clamp 관용구 (헤더에 <algorithm> 미포함).
+        skin_radiance_strength_ = (strength < 0.0f) ? 0.0f : (strength > 1.0f ? 1.0f : strength);
+    }
+    float getSkinRadianceStrength() const { return skin_radiance_strength_; }
 private:
 
     /// Uniform Location 캐싱 (초기화 시 호출)
@@ -670,8 +487,7 @@ private:
     GLsync previous_fence_ = nullptr;
 #endif
 
-    // Neutral 1x1x1 identity 3D LUT (sampler3D fallback용)
-    GLuint neutral_lut_texture_ = 0;
+    // (P8-W2 제거) neutral_lut_texture_ (sampler3D LUT fallback)는 LUT 곁가지 제거로 dead.
 
     bool initialized_ = false;
     mutable std::mutex mutex_;

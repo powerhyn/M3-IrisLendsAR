@@ -201,12 +201,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var pendingLensBitmap: Bitmap? = null
     private var pendingLensSkuId: String = ""  // P6-W7: 렌즈 SKU id (메타 연동)
 
-    // LUT 필터 (C++ Combined Color Pass로 통합 - 3D 텍스처만 관리)
-    private var lut3dTextureId: Int = 0
-    private var lutEnabled: Boolean = false
-    private var lutIntensity: Float = 1.0f
-    private var pendingLut3dTextureId: Int = -1  // -1 = no pending
-
     // 화면 크기
     private var viewWidth: Int = 0
     private var viewHeight: Int = 0
@@ -425,10 +419,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             )
         }
 
-        // 3단계: 펜딩 LUT 3D 텍스처 적용 (beauty 호출 전 준비)
-        uploadPendingLut3dTexture()
-
-        // 4단계: GPU Beauty + LUT 통합 적용 (C++ Combined Color Pass에서 LUT 포함)
+        // 4단계: GPU Beauty 적용
         val beautyApplied = beautyEnabled && beautyConfig.enabled
         var outputTexture = if (beautyApplied) {
             applyGpuBeautyFilter(currentTexture, detectionHandle)
@@ -725,31 +716,23 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val texWidth = if (frameWidth > 0) frameWidth else viewWidth
         val texHeight = if (frameHeight > 0) frameHeight else viewHeight
 
-        // LUT 파라미터 결정 (C++ Combined Color Pass에서 통합 처리)
-        val lutTextureId = if (lutEnabled && lut3dTextureId != 0) lut3dTextureId else 0
-        val lutIntensityVal = if (lutTextureId != 0) lutIntensity else 0.0f
-
         // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3, lock-free)
 
-        // 디버그: 뷰티+LUT 설정 확인
+        // 디버그: 뷰티 설정 확인
         Log.d(
             TAG,
             "Beauty filter call: enabled=${beautyConfig.enabled}, intensity=${beautyConfig.intensity}, " +
-                "smoothing=${beautyConfig.smoothing}, skinQuality=${beautyConfig.skinQuality}, " +
-                "softFocus=${beautyConfig.softFocus}, whitening=${beautyConfig.whitening}, " +
-                "brightness=${beautyConfig.brightness}, colorBalance=${beautyConfig.colorBalance}, " +
-                "lut=$lutTextureId, lutIntensity=$lutIntensityVal, detHandle=$detectionHandle"
+                "brightness=${beautyConfig.brightness}, detHandle=$detectionHandle"
         )
 
-        // GPU Beauty Backend 호출 (JNI) - LUT 통합 + Detection Handle
+        // GPU Beauty Backend 호출 (JNI) - Detection Handle
+        // (P8-W2-D: LUT 곁가지 시그니처 제거됨)
         val outputTexture = IrisLensSDK.applyBeautyFilterTextureV2(
             inputTexture,
             texWidth,
             texHeight,
             beautyConfig,
-            detectionHandle,
-            lutTextureId,
-            lutIntensityVal
+            detectionHandle
         )
 
         // 디버그: 결과 확인
@@ -766,23 +749,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             Log.w(TAG, "Beauty filter pass-through: output=$outputTexture (same as input or 0)")
             inputTexture
         }
-    }
-
-    /**
-     * 펜딩 LUT 3D 텍스처 적용 (GL 스레드에서 실행)
-     */
-    private fun uploadPendingLut3dTexture() {
-        val newTextureId = pendingLut3dTextureId
-        if (newTextureId == -1) return
-        pendingLut3dTextureId = -1
-
-        // 기존 3D 텍스처 삭제
-        if (lut3dTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(lut3dTextureId), 0)
-        }
-
-        lut3dTextureId = newTextureId
-        Log.d(TAG, "LUT 3D texture set: id=$lut3dTextureId")
     }
 
     /**
@@ -1020,47 +986,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 렌즈 활성화 여부 반환
      */
     fun isLensEnabled(): Boolean = lensEnabled
-
-    /**
-     * LUT 3D 텍스처 설정 (GL 스레드에서 호출)
-     *
-     * @param textureId LutTextureLoader에서 생성한 3D 텍스처 ID (0이면 비활성화)
-     */
-    fun setLut3dTexture(textureId: Int) {
-        // pending 슬롯에 아직 업로드되지 않은 텍스처가 있으면 누수 방지를 위해 즉시 삭제
-        val oldPending = pendingLut3dTextureId
-        if (oldPending > 0 && oldPending != textureId) {
-            GLES31.glDeleteTextures(1, intArrayOf(oldPending), 0)
-            Log.d(TAG, "Deleted overwritten pending LUT texture: id=$oldPending")
-        }
-
-        if (textureId == 0) {
-            lutEnabled = false
-            pendingLut3dTextureId = 0
-        } else {
-            pendingLut3dTextureId = textureId
-            lutEnabled = true
-        }
-    }
-
-    /**
-     * LUT 필터 활성화/비활성화
-     */
-    fun setLutEnabled(enabled: Boolean) {
-        this.lutEnabled = enabled
-    }
-
-    /**
-     * LUT 필터 강도 설정 (0.0 ~ 1.0)
-     */
-    fun setLutIntensity(intensity: Float) {
-        this.lutIntensity = intensity.coerceIn(0.0f, 1.0f)
-    }
-
-    /**
-     * LUT 활성화 여부 반환
-     */
-    fun isLutEnabled(): Boolean = lutEnabled
 
     /**
      * 카메라 프레임 크기 설정
@@ -1327,11 +1252,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glDeleteFramebuffers(1, intArrayOf(lensFboId), 0)
         }
         pendingLensBitmap = null
-
-        // LUT 3D 텍스처 해제 (LUT 셰이더/FBO는 C++ 통합으로 제거됨)
-        if (lut3dTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(lut3dTextureId), 0)
-        }
 
         surfaceTexture?.release()
         surfaceTexture = null

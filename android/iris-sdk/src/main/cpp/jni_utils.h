@@ -470,15 +470,7 @@ struct JniCache {
     jclass beautyConfigV2Class = nullptr;
     jfieldID beautyConfigV2_enabled = nullptr;
     jfieldID beautyConfigV2_intensity = nullptr;
-    jfieldID beautyConfigV2_smoothing = nullptr;
     jfieldID beautyConfigV2_brightness = nullptr;
-    jfieldID beautyConfigV2_softFocus = nullptr;
-    jfieldID beautyConfigV2_whitening = nullptr;
-    jfieldID beautyConfigV2_colorBalance = nullptr;
-    jfieldID beautyConfigV2_wrinkleRemove = nullptr;
-    jfieldID beautyConfigV2_skinQuality = nullptr;
-    jfieldID beautyConfigV2_smoothIntensity = nullptr;
-    jfieldID beautyConfigV2_poreReduction = nullptr;
     jfieldID beautyConfigV2_slimFace = nullptr;
     jfieldID beautyConfigV2_enlargeEyes = nullptr;
     jfieldID beautyConfigV2_thinChin = nullptr;
@@ -488,10 +480,6 @@ struct JniCache {
     jfieldID beautyConfigV2_protectLips = nullptr;
     jfieldID beautyConfigV2_protectNose = nullptr;
     jfieldID beautyConfigV2_downscaleFactor = nullptr;
-    jfieldID beautyConfigV2_vividIntensity = nullptr;
-    jfieldID beautyConfigV2_vividSaturation = nullptr;
-    jfieldID beautyConfigV2_vividBrightness = nullptr;
-    jfieldID beautyConfigV2_vividWarmth = nullptr;
 
     /**
      * @brief 캐시 초기화

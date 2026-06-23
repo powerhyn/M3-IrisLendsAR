@@ -122,45 +122,8 @@ TEST(DeviceTierTest, VeryLargeNumber) {
     EXPECT_EQ(GPUBeautyBackend::classifyGpuRenderer("Adreno 99999"), Tier::HIGH);
 }
 
-// ============================================================================
-// T4: mapSkinQuality + DeviceTier 파이프라인 분기 테스트
-// ============================================================================
-
-TEST(FreqSepMappingTest, ZeroQualityDisablesFreqSep) {
-    auto params = GPUBeautyBackend::mapSkinQuality(0.0f, 200);
-    EXPECT_FALSE(params.enabled);
-}
-
-TEST(FreqSepMappingTest, HighQualityEnablesFreqSep) {
-    auto params = GPUBeautyBackend::mapSkinQuality(0.8f, 200);
-    EXPECT_TRUE(params.enabled);
-    // blur_radius, high_freq_preserve 등이 유효한 범위에 있어야 함
-    EXPECT_GE(params.blur_radius, 6);
-    EXPECT_LE(params.blur_radius, 28);
-    EXPECT_GT(params.high_freq_preserve, 0.0f);
-    EXPECT_LE(params.high_freq_preserve, 1.0f);
-}
-
-TEST(FreqSepMappingTest, RadiusScalesWithFaceWidth) {
-    // face_width가 클수록 blur_radius가 커야 함 (5% of face_width)
-    auto params_small = GPUBeautyBackend::mapSkinQuality(0.5f, 100);
-    auto params_large = GPUBeautyBackend::mapSkinQuality(0.5f, 400);
-
-    EXPECT_TRUE(params_small.enabled);
-    EXPECT_TRUE(params_large.enabled);
-    // 둘 다 clamp(6, 28) 범위 내
-    EXPECT_GE(params_small.blur_radius, 6);
-    EXPECT_GE(params_large.blur_radius, 6);
-    // 400*0.05=20 > 100*0.05=5 → clamped(6) vs 20
-    EXPECT_GE(params_large.blur_radius, params_small.blur_radius);
-}
-
-TEST(FreqSepMappingTest, MinimumRadiusGuard) {
-    // 매우 작은 face_width → blur_radius가 최소값(6)으로 클램프
-    auto params = GPUBeautyBackend::mapSkinQuality(0.5f, 10);
-    EXPECT_TRUE(params.enabled);
-    EXPECT_GE(params.blur_radius, 6);
-}
+// (P8-W2 제거) T4 FreqSepMappingTest(mapSkinQuality 기반) 4건은 곁가지 FreqSep
+// 백엔드 제거로 mapSkinQuality 자체가 사라져 함께 제거. DeviceTierTest는 보존.
 
 }  // namespace test
 }  // namespace iris_sdk

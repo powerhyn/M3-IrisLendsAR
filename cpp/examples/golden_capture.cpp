@@ -455,15 +455,19 @@ void writeResultJson(const fs::path& path,
 // ---------------------------------------------------------------------------
 // 기본 V2 beauty 설정에서 결정적 효과만 켠다(GPU/vivid 제외).
 // CPU 경로(iris_sdk_apply_beauty_v2_c)만 데스크톱 골든 대상.
+//
+// P8-W2-C: 곁가지 CPU 효과(skin smoothing / soft focus / whitening / color
+//   balance 등) 제거 후, CPU beauty 경로에서 픽셀을 실제로 바꾸는 유일한
+//   생존 효과는 brightness 뿐이다. 따라서 골든이 brightness를 실측하도록
+//   smoothing/skin_quality 설정을 빼고 brightness=1.2로 켠다.
+//   (smoothing/skin_quality 필드는 D단계에서 구조체에서 물리 삭제 예정)
 // ---------------------------------------------------------------------------
 void fillBeautyConfig(IrisBeautyConfigV2& c) {
     iris_sdk_default_beauty_config_v2_c(&c);
     c.enabled = 1;
     c.use_gpu = 0;          // CPU 경로 강제
     c.intensity = 0.7f;
-    c.smoothing = 0.5f;
-    c.brightness = 1.0f;
-    c.skin_quality = 0.5f;
+    c.brightness = 1.2f;    // 곁가지 제거 후 CPU beauty 유일 생존 효과
     // vivid(GPU 전용)는 0으로 유지
 }
 

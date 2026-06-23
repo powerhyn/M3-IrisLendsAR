@@ -51,8 +51,6 @@ import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
 import com.irislenssdk.tracking.FaceTracker
 import com.irislenssdk.tracking.TasksToIrisResult
-import com.irislenssdk.demo.beauty.BeautyPreset
-import com.irislenssdk.demo.beauty.BeautyPresetFactory
 import com.irislenssdk.demo.camera.OverlayView
 import com.irislenssdk.demo.camera.gpu.CameraGLView
 import com.irislenssdk.demo.lens.LensAdapter
@@ -116,25 +114,13 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
     private lateinit var btnP8Skin: Button       // P8-W1: landmark-masked skin smoothing
+    private lateinit var btnP8Radiance: Button   // P8-W3: skin soft-glow radiance(화사함)
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
     // 뷰티 탭 UI
     private lateinit var btnToggleBeauty: Button
-    private lateinit var btnPresetNaturalGlow: Button
-    private lateinit var btnPresetSpring: Button
-    private lateinit var btnPresetStudio: Button
-    private lateinit var btnPresetGoldenHour: Button
-    private lateinit var btnPresetVividPop: Button
-    private lateinit var btnPresetCustom: Button
-    private lateinit var seekSkinQuality: SeekBar
-    private lateinit var seekSmoothIntensity: SeekBar
-    private lateinit var seekPoreReduction: SeekBar
     private lateinit var btnProtectNose: Button
-    private lateinit var seekVividIntensity: SeekBar
-    private lateinit var seekVividSaturation: SeekBar
-    private lateinit var seekVividBrightness: SeekBar
-    private lateinit var seekVividWarmth: SeekBar
 
     // 카메라
     private var cameraProvider: ProcessCameraProvider? = null
@@ -147,10 +133,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private var lensConfig = LensConfig()
 
     // 뷰티 설정
-    private var beautyConfig = BeautyPresetFactory.createCustomPreset()
+    private var beautyConfig = com.irislenssdk.BeautyFilterConfigV2.Builder().enabled(true).intensity(1.0f).build()
     private var beautyEnabled = true
-    private var currentPreset = BeautyPreset.CUSTOM
-    private var isUpdatingSliders = false
 
     //=========================================================================
     // 추적: MediaPipe Tasks 단일 경로 (W4-D — LEGACY 자체 검출 경로 제거)
@@ -230,6 +214,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
         btnP8Skin = findViewById(R.id.btnP8Skin)
+        btnP8Radiance = findViewById(R.id.btnP8Radiance)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -239,20 +224,7 @@ class GpuRenderActivity : AppCompatActivity() {
 
         // 뷰티 탭 UI
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
-        btnPresetNaturalGlow = findViewById(R.id.btnPresetNaturalGlow)
-        btnPresetSpring = findViewById(R.id.btnPresetSpring)
-        btnPresetStudio = findViewById(R.id.btnPresetStudio)
-        btnPresetGoldenHour = findViewById(R.id.btnPresetGoldenHour)
-        btnPresetVividPop = findViewById(R.id.btnPresetVividPop)
-        btnPresetCustom = findViewById(R.id.btnPresetCustom)
-        seekSkinQuality = findViewById(R.id.seekSkinQuality)
-        seekSmoothIntensity = findViewById(R.id.seekSmoothIntensity)
-        seekPoreReduction = findViewById(R.id.seekPoreReduction)
         btnProtectNose = findViewById(R.id.btnProtectNose)
-        seekVividIntensity = findViewById(R.id.seekVividIntensity)
-        seekVividSaturation = findViewById(R.id.seekVividSaturation)
-        seekVividBrightness = findViewById(R.id.seekVividBrightness)
-        seekVividWarmth = findViewById(R.id.seekVividWarmth)
 
         // GPU 초기화 콜백 설정
         cameraGLView.onGpuInitialized = { success ->
@@ -497,14 +469,24 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW7Measured.text = if (w7MeasuredOn) "lum:meas" else "lum:fb"
             Log.i(TAG, "P7-W2 measured luma → ${if (w7MeasuredOn) "on" else "off"}")
         }
-        // P8-W1: landmark-masked skin smoothing — off → 0.5 → 1.0 사이클 (FreqSep A/B).
-        // 뷰티 토글 ON 상태에서만 시각 효과. off면 기존 FreqSep 경로 그대로.
+        // P8-W1: landmark-masked skin smoothing — off → 0.5 → 1.0 사이클.
+        // 뷰티 토글 ON 상태에서만 시각 효과. off면 스무딩 없음(레거시 FreqSep/Bilateral 제거됨 — P8-W2).
         btnP8Skin.setOnClickListener {
             p8SkinIdx = (p8SkinIdx + 1) % p8SkinSweep.size
             val s = p8SkinSweep[p8SkinIdx]
             cameraGLView.setSkinMaskSmoothing(s > 0f, s)
             btnP8Skin.text = if (s > 0f) String.format("skin:%.1f", s) else "skin:off"
             Log.i(TAG, "P8-W1 skin mask smoothing → strength $s")
+        }
+        // P8-W3: skin 화사함(soft-glow radiance) — off → 0.40 → 0.60 사이클.
+        // skin 경로(블러+마스크)를 공유하되 게이트 독립 — radiance>0이면 btnP8Skin off여도 단독 적용.
+        // (Beauty 토글 ON 필요 — radiance는 뷰티 효과.)
+        btnP8Radiance.setOnClickListener {
+            p8RadianceIdx = (p8RadianceIdx + 1) % p8RadianceSweep.size
+            val s = p8RadianceSweep[p8RadianceIdx]
+            cameraGLView.setSkinRadiance(s)
+            btnP8Radiance.text = if (s > 0f) String.format("rad:%.2f", s) else "rad:off"
+            Log.i(TAG, "P8-W3 skin radiance → strength $s")
         }
     }
 
@@ -532,6 +514,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
     private val p8SkinSweep = floatArrayOf(0f, 0.5f, 1.0f)   // P8-W1: off → 0.5 → 1.0 사이클
     private var p8SkinIdx = 0         // 기본 off (SDK default와 일치 — FreqSep 경로 무회귀)
+    private val p8RadianceSweep = floatArrayOf(0f, 0.40f, 0.60f) // P8-W3: off → 0.40 → 0.60 (핸드오프 기본 0.40)
+    private var p8RadianceIdx = 0     // 기본 off (SDK default와 일치)
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]
@@ -562,54 +546,6 @@ class GpuRenderActivity : AppCompatActivity() {
             btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
         }
 
-        // Vivid 프리셋 버튼 리스너
-        btnPresetNaturalGlow.setOnClickListener { applyPreset(BeautyPreset.NATURAL_GLOW) }
-        btnPresetSpring.setOnClickListener { applyPreset(BeautyPreset.SPRING) }
-        btnPresetStudio.setOnClickListener { applyPreset(BeautyPreset.STUDIO) }
-        btnPresetGoldenHour.setOnClickListener { applyPreset(BeautyPreset.GOLDEN_HOUR) }
-        btnPresetVividPop.setOnClickListener { applyPreset(BeautyPreset.VIVID_POP) }
-        btnPresetCustom.setOnClickListener { applyPreset(BeautyPreset.CUSTOM) }
-
-        // SkinQuality (잡티 보정) 슬라이더
-        seekSkinQuality.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.skinQuality = progress / 100f
-                // 레거시 모드로 전환: 2축 값을 클리어하여 stale 값 방지
-                beautyConfig.smoothIntensity = 0f
-                beautyConfig.poreReduction = 0f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // SmoothIntensity (매끈하게) 슬라이더
-        seekSmoothIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.smoothIntensity = progress / 100f
-                // 2축 모드 진입 시 레거시 skinQuality 클리어
-                if (progress > 0) beautyConfig.skinQuality = 0f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // PoreReduction (모공) 슬라이더
-        seekPoreReduction.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.poreReduction = progress / 100f
-                // 2축 모드 진입 시 레거시 skinQuality 클리어
-                if (progress > 0) beautyConfig.skinQuality = 0f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
         // 코 보호 토글
         btnProtectNose.setOnClickListener {
             beautyConfig.protectNose = !beautyConfig.protectNose
@@ -618,120 +554,9 @@ class GpuRenderActivity : AppCompatActivity() {
             cameraGLView.setBeautyConfig(beautyConfig)
         }
 
-        // 피부색 필터 토글 (실험용, backend-local)
-        var skinColorFilterEnabled = false
-        val btnSkinColorFilter = findViewById<Button>(R.id.btnSkinColorFilter)
-        btnSkinColorFilter.setOnClickListener {
-            skinColorFilterEnabled = !skinColorFilterEnabled
-            cameraGLView.queueEvent {
-                com.irislenssdk.IrisLensSDK.setSkinColorFilter(skinColorFilterEnabled)
-            }
-            btnSkinColorFilter.text = if (skinColorFilterEnabled) "피부색필터: ON" else "피부색필터: OFF"
-            btnSkinColorFilter.setTextColor(if (skinColorFilterEnabled) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt())
-        }
-
-        // Vivid Intensity (0-100 → 0.0-1.0)
-        seekVividIntensity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.vividIntensity = progress / 100f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Vivid Saturation (0-100 → 0.0-1.0)
-        seekVividSaturation.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.vividSaturation = progress / 100f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Vivid Brightness (0-100 → 0.0-0.5)
-        seekVividBrightness.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.vividBrightness = progress / 200f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Vivid Warmth (0-100 → 0.0-1.0)
-        seekVividWarmth.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                beautyConfig.vividWarmth = progress / 100f
-                if (fromUser) onSliderManualChange()
-                cameraGLView.setBeautyConfig(beautyConfig)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // 초기 프리셋 적용 (Custom = 잡티보정만, vivid OFF)
-        syncSlidersToConfig()
-
         btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
-        updatePresetButtonHighlight()
     }
 
-    private fun applyPreset(preset: BeautyPreset) {
-        currentPreset = preset
-        beautyConfig = BeautyPresetFactory.createPreset(preset, beautyConfig)
-        BeautyPresetFactory.sanitizeConfig(beautyConfig)
-
-        beautyEnabled = true
-        beautyConfig.enabled = true
-        cameraGLView.setBeautyEnabled(true)
-        btnToggleBeauty.text = "Beauty: ON"
-
-        syncSlidersToConfig()
-        cameraGLView.setBeautyConfig(beautyConfig)
-        updatePresetButtonHighlight()
-
-        Log.d(TAG, "Preset applied: ${preset.label}, config=$beautyConfig")
-    }
-
-    private fun syncSlidersToConfig() {
-        isUpdatingSliders = true
-
-        seekSkinQuality.progress = (beautyConfig.skinQuality * 100).toInt()
-        seekSmoothIntensity.progress = (beautyConfig.smoothIntensity * 100).toInt()
-        seekPoreReduction.progress = (beautyConfig.poreReduction * 100).toInt()
-        seekVividIntensity.progress = (beautyConfig.vividIntensity * 100).toInt()
-        seekVividSaturation.progress = (beautyConfig.vividSaturation * 100).toInt()
-        seekVividBrightness.progress = (beautyConfig.vividBrightness * 200).toInt()
-        seekVividWarmth.progress = (beautyConfig.vividWarmth * 100).toInt()
-
-        isUpdatingSliders = false
-    }
-
-    private fun onSliderManualChange() {
-        if (!isUpdatingSliders && currentPreset != BeautyPreset.CUSTOM) {
-            currentPreset = BeautyPreset.CUSTOM
-            updatePresetButtonHighlight()
-        }
-    }
-
-    private fun updatePresetButtonHighlight() {
-        val buttons = mapOf(
-            BeautyPreset.NATURAL_GLOW to btnPresetNaturalGlow,
-            BeautyPreset.SPRING to btnPresetSpring,
-            BeautyPreset.STUDIO to btnPresetStudio,
-            BeautyPreset.GOLDEN_HOUR to btnPresetGoldenHour,
-            BeautyPreset.VIVID_POP to btnPresetVividPop,
-            BeautyPreset.CUSTOM to btnPresetCustom
-        )
-        buttons.forEach { (preset, btn) ->
-            btn.alpha = if (currentPreset == preset) 1.0f else 0.5f
-        }
-    }
     private fun setupDebugControls() {
         btnToggleMesh = findViewById(R.id.btnToggleMesh)
         btnToggleDebug = findViewById(R.id.btnToggleDebug)
@@ -760,16 +585,10 @@ class GpuRenderActivity : AppCompatActivity() {
             Toast.makeText(this, "Face Mesh: ${if (overlayView.showFaceMesh) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
 
-        var freqSepDebugMode = 0
-        val debugModeNames = arrayOf("OFF", "Magnitude", "MicroBand", "EdgeProt", "EffectStr", "Compression×3", "Mask", "SkinColor")
         btnToggleDebug.setOnClickListener {
-            freqSepDebugMode = (freqSepDebugMode + 1) % 8
-            cameraGLView.queueEvent {
-                com.irislenssdk.IrisLensSDK.setFreqSepDebugMode(freqSepDebugMode)
-            }
-            overlayView.debugMode = freqSepDebugMode > 0
+            overlayView.debugMode = !overlayView.debugMode
             updateButtonColors()
-            Toast.makeText(this, "FreqSep Debug: ${debugModeNames[freqSepDebugMode]}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Debug: ${if (overlayView.debugMode) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
 
         // 진단(트래킹 지연 핸드오프 §2): raw(stabilize 이전, 마젠타) + 필터(녹색) 홍채 중심 오버레이.
@@ -870,11 +689,7 @@ class GpuRenderActivity : AppCompatActivity() {
         // 기본 뷰티 설정
         beautyConfig = IrisLensSDK.getDefaultBeautyConfigV2()
         beautyConfig.enabled = true
-        beautyConfig.smoothing = 0.0f
         beautyConfig.brightness = 1.0f
-        beautyConfig.whitening = 0.0f
-        beautyConfig.colorBalance = 0.0f
-        beautyConfig.softFocus = 0.0f
         beautyConfig.roiOnly = true  // ROI 전용 모드: 얼굴 피부에만 보정 적용
 
         // GLView에 초기 뷰티 설정 전달

@@ -416,8 +416,6 @@ TEST(BeautyFilterConfigV2HelperTest, DefaultsAreValid) {
 
     EXPECT_FALSE(cfg.enabled);
     EXPECT_FLOAT_EQ(cfg.intensity, 0.5f);
-    EXPECT_FLOAT_EQ(cfg.smoothing, 0.0f);
-    EXPECT_FLOAT_EQ(cfg.softFocus, 0.0f);
     EXPECT_FLOAT_EQ(cfg.brightness, 1.0f);
     EXPECT_TRUE(cfg.useGpu);
     EXPECT_TRUE(cfg.roiOnly);
@@ -429,34 +427,28 @@ TEST(BeautyFilterConfigV2HelperTest, DefaultsAreValid) {
 
 TEST(BeautyFilterConfigV2HelperTest, ClampsOutOfRangeValues) {
     BeautyFilterConfigV2 cfg = {};
-    cfg.smoothing = 2.0f;  // 범위 초과
     cfg.brightness = 0.1f;  // 범위 미만
-    cfg.colorBalance = 5.0f;  // 범위 초과
+    cfg.slimFace = 5.0f;  // 범위 초과
 
     BeautyFilterConfigV2Helper::clamp(cfg);
 
-    EXPECT_FLOAT_EQ(cfg.smoothing, 1.0f);
     EXPECT_FLOAT_EQ(cfg.brightness, 0.5f);
-    EXPECT_FLOAT_EQ(cfg.colorBalance, 1.0f);
+    EXPECT_FLOAT_EQ(cfg.slimFace, 1.0f);
 }
 
 TEST(BeautyFilterConfigV2HelperTest, ConvertsFromV1) {
     BeautyFilterConfig v1 = {};
     v1.enabled = true;
     v1.intensity = 0.8f;
-    v1.smoothing = 0.6f;
     v1.brightness = 1.1f;
-    v1.softFocus = 0.4f;
 
     BeautyFilterConfigV2 v2 = BeautyFilterConfigV2Helper::fromV1(v1);
 
+    // V1↔V2 공통 생존 필드만 이관 (smoothing/softFocus는 V2에서 제거됨, P8-W2-D).
     EXPECT_TRUE(v2.enabled);
     EXPECT_FLOAT_EQ(v2.intensity, 0.8f);
-    EXPECT_FLOAT_EQ(v2.smoothing, 0.6f);
     EXPECT_FLOAT_EQ(v2.brightness, 1.1f);
-    EXPECT_FLOAT_EQ(v2.softFocus, 0.4f);
     // V2 전용 필드는 기본값
-    EXPECT_FLOAT_EQ(v2.whitening, 0.0f);
     EXPECT_TRUE(v2.useGpu);
 }
 
