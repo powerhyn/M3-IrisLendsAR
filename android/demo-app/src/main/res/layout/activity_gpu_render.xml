@@ -310,18 +310,6 @@
             android:backgroundTint="#66555555"
             style="@style/Widget.MaterialComponents.Button.TextButton" />
 
-        <Button
-            android:id="@+id/btnP8Slim"
-            android:layout_width="72dp"
-            android:layout_height="36dp"
-            android:text="slim:off"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
     </LinearLayout>
 
     <!-- W4-D: TASKS 단일 경로 — frame-sync 킬스위치만 유지 (추적 공급자 토글/듀얼 A/B 측정 제거) -->
@@ -647,6 +635,18 @@
                     android:textSize="11sp"
                     android:textColor="#FFAAAAAA"
                     android:backgroundTint="#44444444" />
+
+                <!-- P8-W4: 턱 V라인 슬림 워프 토글 (off→0.25→0.50) -->
+                <Button
+                    android:id="@+id/btnP8Slim"
+                    android:layout_width="match_parent"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="8dp"
+                    android:text="턱슬림(slim): off"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textAllCaps="false"
+                    android:backgroundTint="#66555555" />
 
               </LinearLayout>
             </ScrollView>

@@ -497,7 +497,7 @@ class GpuRenderActivity : AppCompatActivity() {
             val s = p8SlimSweep[p8SlimIdx]
             beautyConfig.slimFace = s
             cameraGLView.setBeautyConfig(beautyConfig)
-            btnP8Slim.text = if (s > 0f) String.format("slim:%.2f", s) else "slim:off"
+            btnP8Slim.text = if (s > 0f) String.format("턱슬림: %.2f", s) else "턱슬림(slim): off"
             Log.i(TAG, "P8-W4 slim face → $s")
         }
     }
