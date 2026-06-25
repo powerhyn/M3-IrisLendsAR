@@ -115,6 +115,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
     private lateinit var btnP8Skin: Button       // P8-W1: landmark-masked skin smoothing
     private lateinit var btnP8Radiance: Button   // P8-W3: skin soft-glow radiance(화사함)
+    private lateinit var btnP8Slim: Button        // P8-W4: 턱 V라인 슬림(slim_face)
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -215,6 +216,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW7Measured = findViewById(R.id.btnW7Measured)
         btnP8Skin = findViewById(R.id.btnP8Skin)
         btnP8Radiance = findViewById(R.id.btnP8Radiance)
+        btnP8Slim = findViewById(R.id.btnP8Slim)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -488,6 +490,16 @@ class GpuRenderActivity : AppCompatActivity() {
             btnP8Radiance.text = if (s > 0f) String.format("rad:%.2f", s) else "rad:off"
             Log.i(TAG, "P8-W3 skin radiance → strength $s")
         }
+        // P8-W4: 턱 V라인 슬림 — off → 0.25 → 0.50 (slim_face config 필드, GPU 워프 패스).
+        // Beauty 토글 ON + 얼굴 검출 필요. 눈높이 변위≈0이라 렌즈 무영향(W4-A 실데이터 검증).
+        btnP8Slim.setOnClickListener {
+            p8SlimIdx = (p8SlimIdx + 1) % p8SlimSweep.size
+            val s = p8SlimSweep[p8SlimIdx]
+            beautyConfig.slimFace = s
+            cameraGLView.setBeautyConfig(beautyConfig)
+            btnP8Slim.text = if (s > 0f) String.format("slim:%.2f", s) else "slim:off"
+            Log.i(TAG, "P8-W4 slim face → $s")
+        }
     }
 
     //=========================================================================
@@ -516,6 +528,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private var p8SkinIdx = 0         // 기본 off (SDK default와 일치 — FreqSep 경로 무회귀)
     private val p8RadianceSweep = floatArrayOf(0f, 0.40f, 0.60f) // P8-W3: off → 0.40 → 0.60 (핸드오프 기본 0.40)
     private var p8RadianceIdx = 0     // 기본 off (SDK default와 일치)
+    private val p8SlimSweep = floatArrayOf(0f, 0.25f, 0.5f) // P8-W4: off → 0.25 → 0.50 (핸드오프 데모 기본 0.25)
+    private var p8SlimIdx = 0          // 기본 off (SDK default와 일치)
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]

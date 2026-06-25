@@ -192,6 +192,9 @@ extern const char* SKIN_SEPARABLE_BLUR_FRAGMENT;
 /// 에지 가드 컴포지트 (피부 스무딩 — base/blur/mask 동일 UV)
 extern const char* SKIN_SMOOTH_COMPOSITE_FRAGMENT;
 
+/// P8-W4: 턱 V라인 워프 프래그먼트 셰이더 (fragment-direct 비정규 RBF 인버스 워프)
+extern const char* WARP_FRAGMENT;
+
 /// 렌즈 오버레이 버텍스 셰이더
 extern const char* LENS_OVERLAY_VERTEX;
 

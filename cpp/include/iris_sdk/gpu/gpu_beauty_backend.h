@@ -14,6 +14,7 @@
 #include "iris_sdk/gpu/texture_pool.h"
 #include "iris_sdk/gpu/gpu_profiler.h"
 #include "iris_sdk/one_euro_filter.h"
+#include "iris_sdk/warp/jaw_warp_geometry.h"  // P8-W4: JawWarpParams (executeWarpPass)
 
 #include <array>
 #include <memory>
@@ -318,6 +319,18 @@ private:
     bool initializeSkinSmoothingShaders();
 
     //=========================================================================
+    // P8-W4: 턱 V라인 워프 (fragment-direct 비정규 RBF)
+    //=========================================================================
+
+    /// 턱 V라인 워프 패스 (풀스크린, 인버스 워프 리샘플).
+    /// warp_program_ 사용. params(cx/cy/dx/dy/count/sigma/bounds)는 렌더 텍스처 픽셀 공간으로
+    /// 이미 정렬된 상태여야 한다(executeWarpPass는 좌표 변환을 하지 않는다 — 호출부 책임).
+    /// params.sigma_px==0 또는 count==0이면 입력을 그대로 복사한다(방어적 패스스루).
+    void executeWarpPass(GLuint input_tex, GLuint output_fbo,
+                         int width, int height,
+                         const iris_sdk::jaw_warp::JawWarpParams& params);
+
+    //=========================================================================
     // 멤버 변수
     //=========================================================================
 
@@ -342,6 +355,7 @@ private:
     GLuint brightness_program_ = 0;
     GLuint masking_program_ = 0;
     GLuint combined_color_program_ = 0;  // 통합 Color Adjustment (brightness 잔존)
+    GLuint warp_program_ = 0;            // P8-W4: 턱 V라인 워프 (fragment-direct RBF)
 
     //=========================================================================
     // P8-W1: landmark-masked skin smoothing 상태
@@ -437,6 +451,16 @@ private:
     UniformLocations brightness_uniforms_;
     UniformLocations masking_uniforms_;
     UniformLocations combined_color_uniforms_;  // 통합 Color Adjustment (brightness)
+
+    /// P8-W4: 턱 V라인 워프 셰이더 uniform location 캐시
+    struct WarpUniforms {
+        GLint uTexture = -1;
+        GLint uWarp = -1;        // vec4[14] 배열 — glUniform4fv(uWarp, count, ...)
+        GLint uWarpCount = -1;
+        GLint uWarpSigma = -1;
+        GLint uWarpBounds = -1;
+        GLint uViewportPx = -1;
+    } warp_uniforms_;
 
     // Temporal stability용 One Euro Filter (P4-W3-04)
     // 모든 필터는 mutex_ lock 하에서만 접근 (applyTextureId → public → lock_guard)

@@ -310,6 +310,18 @@
             android:backgroundTint="#66555555"
             style="@style/Widget.MaterialComponents.Button.TextButton" />
 
+        <Button
+            android:id="@+id/btnP8Slim"
+            android:layout_width="72dp"
+            android:layout_height="36dp"
+            android:text="slim:off"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:minWidth="0dp"
+            android:backgroundTint="#66555555"
+            style="@style/Widget.MaterialComponents.Button.TextButton" />
+
     </LinearLayout>
 
     <!-- W4-D: TASKS 단일 경로 — frame-sync 킬스위치만 유지 (추적 공급자 토글/듀얼 A/B 측정 제거) -->

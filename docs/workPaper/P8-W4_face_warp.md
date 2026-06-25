@@ -57,4 +57,16 @@
   face_warp_controller 미접촉(dead substrate 불변식 준수).
 - 2026-06-25: **W4-A 메인세션 검증 완료**. 빌드 exit0 신규경고0, ctest 571개(564+7) 570통과(유일실패=pre-existing GPUBeautyBackendTest.FailsWithNullContext) 신규회귀0.
   ⚠️ **EyeHeightDisplacementSmall 최초 실패→근본규명**: 합성 타원이 최상단 볼 제어점(323/93)을 눈에서 ~0.5σ에 배치(비현실적)→13% 누출. **실제 골든 랜드마크(Python 복제 검증)에선 눈꼬리 3.7%/홍채 1.6% 전부 <5% = 알고리즘 정확**. 따라서 눈높이 테스트만 **실제 face_mesh fixture**(face_closeup__rot0.result.json 24점 스냅샷)로 교체([[real-data-first]]) → 통과. 나머지 6테스트는 합성 유지(수학 속성). **눈높이≈0 렌즈정합 = 실제 데이터로 입증**(브레인스토밍 #1 리스크 해소). **다음=W4-B GPU 워프 패스.**
+- 2026-06-25: **W4-B 구현(편집 완료, 빌드/ctest/assembleDebug는 메인 세션)**. GPU 워프 패스 + 파이프라인 통합.
+  - **셰이더**: `WARP_FRAGMENT`(shader_sources.cpp) — 풀스크린 fragment-direct 비정규 RBF 인버스 워프(핸드오프 §4 이식). 유니폼 `uTexture`/`uWarp[14]`(cx,cy,dx,dy px)/`uWarpCount`/`uWarpSigma`/`uWarpBounds`/`uViewportPx`. 핸드오프의 `vUv`→SDK 규약 `vTexCoord`로 정합(FULLSCREEN_QUAD_VERTEX out). bbox+3σ early-out, sigma=0이면 패스스루. shader_manager.h extern 추가.
+  - **백엔드**: `warp_program_` + `WarpUniforms` 캐시 구조체 + `executeWarpPass(input,output_fbo,w,h,JawWarpParams)`(SoA→vec4 AoS 패킹 후 glUniform4fv). initializeShaders 등록(non-fatal, skin smoothing 패턴) + cacheUniformLocations 캐시 + release 리셋. jaw_warp_geometry.h include.
+  - **파이프라인**(applyTextureId): `needs_warp` gate=`config.enabled && (slimFace>0‖thinChin>0) && detected && face_mesh_valid && warp_program_!=0`, active_filter_count 포함. **skin→brightness→warp 순서 마지막 패스**. scissor OFF(전체 프레임, skin 1345 패턴). `jawStrength=clamp(max(slimFace,thinChin),0,1)`.
+  - 🔴 **좌표 정합**(최대 리스크): `alignWarpToRenderSpace` 헬퍼 — computeJawWarp 출력(원본 비미러·top-down 이미지 픽셀)을 렌더 텍스처 공간(미러·Y-flip)으로 변환. **prepareSkinFans 동형**: prepareSkinFans가 `mx=(1-x)·W`(미러)+NDC `ny=1-2y`(Y-flip)이므로 ⇒ `cx'=W-cx, cy'=H-cy, dx'=-dx, dy'=-dy`(선형변환 부호반전), bbox는 X·Y 뒤집혀 min↔max 교차, σ 유지. warp 셰이더가 skin composite와 동일 `vTexCoord` 공간 샘플이라 정합.
+  - **face_mesh 타입**: `detection->face_mesh`는 `iris_sdk::IrisLandmark[478]` = computeJawWarp 인자 타입 → **캐스팅 불필요**(C `::IrisResult`→`iris_sdk::IrisResult` reinterpret_cast는 C API 경계 sdk_api_v2.cpp:440에서 이미 수행, 레이아웃 동일 POD).
+  - **applyFaceWarp**: standalone 진입점은 **NOT_SUPPORTED 스텁 유지**(config 경로 applyTextureId가 정본 — 텍스처 풀 deferred-release/패스 체인 우회 방지). 주석만 P4→P8-W4-B로 정정.
+  - 보존: grid_mesh/face_warp_controller 미접촉, jaw_warp_geometry(W4-A) 미수정(사용만), skin/brightness/렌즈 무손상(추가 패스), 공개 ABI 미변경(slimFace/thinChin 기존 필드). 비-GPU 빌드 #if IRIS_SDK_GPU_AVAILABLE 가드.
+  - **다음=메인세션 빌드/ctest/assembleDebug 검증 + W4-C(SDK 표면/데모 토글) + 실기기 S23+ 육안.**
+- 2026-06-25: **W4-B 메인세션 검증 완료**: 데스크톱 빌드 exit0 신규경고0(warp 파일 0, skin_target_* pre-existing) + ctest 571개 570통과(유일실패=pre-existing) 신규회귀0.
+- 2026-06-25: **W4-C 데모 토글 + 빌드 검증**. GpuRenderActivity `btnP8Slim`(off→0.25→0.50, beautyConfig.slimFace 설정 + setBeautyConfig) + 레이아웃 btnP8Slim 위젯(btnP8Radiance 인접). applyFaceWarp 별도 C API/JNI는 스텁 유지(config 경로가 정본). **assembleDebug(iris-sdk+demo): 네이티브 W4-B(NDK arm64) + Kotlin W4-C 컴파일·패키징 성공**(compileDebugKotlin+packageDebug 에러0). ⚠️ installDebug는 S23+ 무선 adb 세션 만료로 "No connected devices" — **빌드는 통과, 설치만 기기 재연결 대기**.
+  🔴 **잔여=실기기 검증**: 기기 재연결 후 S23+ 설치 → btnP8Slim(slim:off→0.25→0.50) 토글로 턱 V라인 워프 육안. **좌표 정합(미러/회전, alignWarpToRenderSpace)·렌즈 무영향·30fps**가 device 게이트(W4-B #1 리스크). 어긋나면 alignWarpToRenderSpace 부호 조정.
 </content>

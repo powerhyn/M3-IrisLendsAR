@@ -54,6 +54,36 @@ static BeautyFilterConfigV2 buildEffectiveConfig(const BeautyFilterConfigV2& con
 
     return effective;
 }
+
+// P8-W4: computeJawWarp 출력(원본 비미러·top-down 이미지 픽셀 공간)을 렌더 텍스처
+// 픽셀 공간(전면 미러·Y-flip 적용)으로 정렬한다. prepareSkinFans 좌표 정합과 동형:
+//   prepareSkinFans: 제어점 px = (1 - x)·W (미러), py = y·H, NDC ny = 1 - 2y (Y-flip).
+//   ⇒ 렌더 텍스처 px = (1 - x)·W = W − cx,  py(vTexCoord) = (1 - y)·H = H − cy.
+// 변위는 선형변환 (x→W−x, y→H−y) 하에서 dx'=−dx, dy'=−dy. σ는 등방·거리불변이라 유지.
+// bbox는 X·Y가 뒤집히므로 min/max를 교차해 다시 정렬한다.
+// ⚠️ 이 변환이 prepareSkinFans 와 어긋나면 워프가 엉뚱한 위치/렌즈 불일치를 일으킨다.
+static iris_sdk::jaw_warp::JawWarpParams alignWarpToRenderSpace(
+    const iris_sdk::jaw_warp::JawWarpParams& in, int width, int height) {
+    iris_sdk::jaw_warp::JawWarpParams out = in;
+    const float fw = static_cast<float>(width);
+    const float fh = static_cast<float>(height);
+    const int count = (in.count < iris_sdk::jaw_warp::JawWarpParams::kMaxControlPoints)
+                          ? in.count
+                          : iris_sdk::jaw_warp::JawWarpParams::kMaxControlPoints;
+    for (int i = 0; i < count; ++i) {
+        out.cx[i] = fw - in.cx[i];   // 미러 X (prepareSkinFans mx = (1-x)·W)
+        out.cy[i] = fh - in.cy[i];   // Y-flip (vTexCoord.y = 1 - y)
+        out.dx[i] = -in.dx[i];       // 미러가 X 부호 반전
+        out.dy[i] = -in.dy[i];       // Y-flip이 Y 부호 반전
+    }
+    // bbox: X·Y가 각각 뒤집히므로 min↔max 교차.
+    out.bounds_min_x = fw - in.bounds_max_x;
+    out.bounds_max_x = fw - in.bounds_min_x;
+    out.bounds_min_y = fh - in.bounds_max_y;
+    out.bounds_max_y = fh - in.bounds_min_y;
+    // sigma_px / count 는 유지.
+    return out;
+}
 #endif
 
 // 셰이더 소스 extern 선언
@@ -69,6 +99,8 @@ extern const char* SKIN_MASK_FILL_VERTEX;
 extern const char* SKIN_MASK_FILL_FRAGMENT;
 extern const char* SKIN_SEPARABLE_BLUR_FRAGMENT;
 extern const char* SKIN_SMOOTH_COMPOSITE_FRAGMENT;
+// P8-W4: 턱 V라인 워프
+extern const char* WARP_FRAGMENT;
 }
 
 GPUBeautyBackend::GPUBeautyBackend() = default;
@@ -208,6 +240,17 @@ bool GPUBeautyBackend::initializeShaders() {
         LOGW("Failed to create skin-mask smoothing shaders (non-fatal)");
     }
 
+    // P8-W4: 턱 V라인 워프 셰이더 (non-fatal — OFF 시 영향 없음, gate가 program!=0 확인)
+    if (!shader_manager_->createProgram(
+            shaders::FULLSCREEN_QUAD_VERTEX,
+            shaders::WARP_FRAGMENT,
+            warp_program_)) {
+        LOGW("Failed to create warp program (non-fatal)");
+        warp_program_ = 0;
+    } else {
+        shader_manager_->cacheProgram("warp", warp_program_);
+    }
+
     LOGI("All %zu shader programs created successfully",
          shader_manager_->getCachedProgramCount());
     return true;
@@ -271,6 +314,16 @@ void GPUBeautyBackend::cacheUniformLocations() {
     // Combined Color Adjustment Uniforms (brightness 잔존)
     combined_color_uniforms_.uTexture = glGetUniformLocation(combined_color_program_, "uTexture");
     combined_color_uniforms_.uCombinedBrightness = glGetUniformLocation(combined_color_program_, "uBrightness");
+
+    // P8-W4: 턱 V라인 워프 Uniforms
+    if (warp_program_ != 0) {
+        warp_uniforms_.uTexture = glGetUniformLocation(warp_program_, "uTexture");
+        warp_uniforms_.uWarp = glGetUniformLocation(warp_program_, "uWarp");
+        warp_uniforms_.uWarpCount = glGetUniformLocation(warp_program_, "uWarpCount");
+        warp_uniforms_.uWarpSigma = glGetUniformLocation(warp_program_, "uWarpSigma");
+        warp_uniforms_.uWarpBounds = glGetUniformLocation(warp_program_, "uWarpBounds");
+        warp_uniforms_.uViewportPx = glGetUniformLocation(warp_program_, "uViewportPx");
+    }
 
     // P8-W1: Skin-mask smoothing Uniforms
     if (skin_mask_fill_program_ != 0) {
@@ -408,6 +461,7 @@ void GPUBeautyBackend::release() {
     brightness_program_ = 0;
     masking_program_ = 0;
     combined_color_program_ = 0;
+    warp_program_ = 0;  // P8-W4
     skin_mask_fill_program_ = 0;
     skin_blur_program_ = 0;
     skin_composite_program_ = 0;
@@ -1106,6 +1160,60 @@ void GPUBeautyBackend::renderSkinComposite(GLuint base_tex, GLuint output_fbo,
 #endif
 }
 
+// =============================================================================
+// P8-W4: 턱 V라인 워프 패스 (fragment-direct 비정규 RBF 인버스 워프)
+// =============================================================================
+
+void GPUBeautyBackend::executeWarpPass(
+    GLuint input_tex, GLuint output_fbo,
+    int width, int height,
+    const iris_sdk::jaw_warp::JawWarpParams& params) {
+#if IRIS_SDK_GPU_AVAILABLE
+    if (warp_program_ == 0) {
+        // 셰이더 미생성(non-fatal 실패) — 호출부 gate가 막지만 방어적으로 무동작.
+        return;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
+    glViewport(0, 0, width, height);
+    glUseProgram(warp_program_);
+
+    // 셰이더 §4: uWarp[14] = [cx, cy, dx, dy] (렌더 텍스처 픽셀 공간 — 호출부가 이미 정렬).
+    // params는 cx/cy/dx/dy를 SoA로 보관하므로 vec4 AoS 배열로 패킹한 뒤 한 번에 업로드.
+    const int count = (params.count < iris_sdk::jaw_warp::JawWarpParams::kMaxControlPoints)
+                          ? params.count
+                          : iris_sdk::jaw_warp::JawWarpParams::kMaxControlPoints;
+    // sigma_px==0 또는 count==0이면 셰이더 분기가 패스스루(입력 그대로 복사) — 방어적.
+    float warp_data[iris_sdk::jaw_warp::JawWarpParams::kMaxControlPoints * 4] = {0.0f};
+    for (int i = 0; i < count; ++i) {
+        warp_data[i * 4 + 0] = params.cx[i];
+        warp_data[i * 4 + 1] = params.cy[i];
+        warp_data[i * 4 + 2] = params.dx[i];
+        warp_data[i * 4 + 3] = params.dy[i];
+    }
+    // glUniform4fv count: 0이어도 안전(아무것도 안 올림). 셰이더 루프는 uWarpCount로 제한.
+    glUniform4fv(warp_uniforms_.uWarp, count, warp_data);
+    glUniform1i(warp_uniforms_.uWarpCount, count);
+    glUniform1f(warp_uniforms_.uWarpSigma, params.sigma_px);
+    glUniform4f(warp_uniforms_.uWarpBounds,
+                params.bounds_min_x, params.bounds_min_y,
+                params.bounds_max_x, params.bounds_max_y);
+    glUniform2f(warp_uniforms_.uViewportPx,
+                static_cast<float>(width), static_cast<float>(height));
+
+    glUniform1i(warp_uniforms_.uTexture, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, input_tex);
+
+    renderFullscreenQuad();
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+#else
+    (void)input_tex; (void)output_fbo; (void)width; (void)height; (void)params;
+#endif
+}
+
 //=============================================================================
 // V2 API - 텍스처 ID 기반 (C API 호환)
 //=============================================================================
@@ -1211,14 +1319,26 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // (P8-W2) skin mask가 OFF면 스무딩 없음 = 의도된 종착(레거시 FreqSep/Bilateral 폴백 제거).
     const bool use_skin_mask = config.enabled && skinMaskSmoothingActive(detection);
 
+    // P8-W4: 턱 V라인 워프 게이트. slim_face>0 또는 thin_chin>0 + face_mesh 유효 +
+    //   warp 셰이더 생성 성공일 때만 활성. computeJawWarp가 추가로 strength≤0/퇴화를 거른다.
+    const bool needs_warp = config.enabled
+        && (effective_config.slimFace > 0.0f || effective_config.thinChin > 0.0f)
+        && detection && detection->detected && detection->face_mesh_valid
+        && warp_program_ != 0;
+    // slim/chin 합성(단순): 둘 중 큰 값이 메인 강도 (브레인스토밍 §5-3).
+    const float jawStrength = needs_warp
+        ? std::clamp(std::max(effective_config.slimFace, effective_config.thinChin), 0.0f, 1.0f)
+        : 0.0f;
+
     // 활성 필터 수에 따라 동적으로 텍스처 할당
-    // (P8-W2) 잔존 패스: ① skin mask smoothing + ② brightness(통합 Color).
+    // (P8-W2) 잔존 패스: ① skin mask smoothing + ② brightness(통합 Color). + (P8-W4) ③ warp.
     int active_filter_count = 0;
     if (use_skin_mask) {
         active_filter_count++;
     }
     bool needsBrightness = std::abs(effective_config.brightness - 1.0f) > 0.01f;
     if (needsBrightness) active_filter_count++;
+    if (needs_warp) active_filter_count++;
 
     // 필터 0개: 패스스루 (텍스처 할당 불필요)
     if (active_filter_count == 0) {
@@ -1373,6 +1493,31 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
     // (P8-W2 제거) 소프트 포커스 / Vivid 포스트프로세싱 곁가지 제거.
 
+    // 3. P8-W4: 턱 V라인 워프 (skin/brightness 이후 마지막 패스).
+    //    워프장은 턱(프레임 가장자리)까지 닿으므로 ROI scissor를 끄고 전체 프레임에서 동작
+    //    (skin mask 1345 패턴과 동일). computeJawWarp가 strength≤0/퇴화면 false → 패스 생략.
+    if (needs_warp) {
+        if (profiling) profiler_->begin("JawWarp");
+        iris_sdk::jaw_warp::JawWarpParams wp{};
+        // computeJawWarp는 원본(비미러) face_mesh를 받아 이미지 픽셀 공간 제어점을 낸다.
+        // detection->face_mesh 는 iris_sdk::IrisLandmark[478] — computeJawWarp 인자 타입과
+        // 동일하므로 캐스팅 불필요(prepareSkinFans 와 동일하게 직접 접근).
+        if (iris_sdk::jaw_warp::computeJawWarp(detection->face_mesh, width, height,
+                                               jawStrength, wp)
+            && wp.sigma_px > 0.0f && wp.count > 0) {
+            // 🔴 좌표 정합: 이미지 공간 → 렌더 텍스처 공간(미러·Y-flip). prepareSkinFans 동형.
+            iris_sdk::jaw_warp::JawWarpParams wp_render =
+                alignWarpToRenderSpace(wp, width, height);
+            if (scissor_active) glDisable(GL_SCISSOR_TEST);
+            executeWarpPass(current_input, current_output->fbo_id,
+                            width, height, wp_render);
+            if (scissor_active) glEnable(GL_SCISSOR_TEST);
+            current_input = current_output->texture_id;
+            if (pong) current_output = (current_output == ping) ? pong : ping;
+        }
+        if (profiling) profiler_->end("JawWarp");
+    }
+
     // ROI Scissor 해제
     if (scissor_active) {
         glDisable(GL_SCISSOR_TEST);
@@ -1430,8 +1575,13 @@ IrisSdkError GPUBeautyBackend::applyFaceWarp(
         return IRIS_SDK_OK;
     }
 
-    // Face Warp 미구현 — P4에서 Face Mesh 기반 메시 워핑으로 구현 예정
-    LOGW("GPUBeautyBackend::applyFaceWarp() not supported. Will be implemented in P4.");
+    // P8-W4: 턱 V라인 워프의 정본 경로는 config 기반 applyTextureId() 내 warp 패스다
+    //   (gate=slimFace>0‖thinChin>0, skin→brightness→warp 순서, 텍스처 풀 deferred-release).
+    //   이 standalone 진입점은 풀 수명 관리(previous_output_*)와 패스 체인을 우회하므로
+    //   별도 정식화를 보류한다. 호출자는 iris_sdk_set_beauty_filter_v2(slim_face/thin_chin)
+    //   + iris_sdk_apply_beauty_filter_v2 경로를 사용해야 한다.
+    LOGW("GPUBeautyBackend::applyFaceWarp() standalone path not supported. "
+         "Use config-based applyTextureId (slim_face/thin_chin) — P8-W4-B.");
 
     (void)input_texture;
     (void)output_texture;
