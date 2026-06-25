@@ -1,6 +1,6 @@
 # P8-W4 — ② 형태워프 (턱 V라인 / 얼굴 슬림 / 눈 확대)
 
-> 상태: 🔄 구현 중 (2026-06-25 브레인스토밍 R1 종결 → 착수). 범위=**턱 V라인 슬림만**(slim_face/thin_chin), enlarge_eyes 제외.
+> 상태: ✅ 완료 (2026-06-25 실기기 S23+ 육안 검증 통과 — 턱선 V라인 자연스러움 + 컬러렌즈/홍채 무영향 + 30fps). 범위=**턱 V라인 슬림만**(slim_face/thin_chin), enlarge_eyes 제외.
 > 브랜치: `feature/p8-warp` (develop 8fb62fa에서 분기).
 > 구현 분할: **W4-A** computeJawWarp CPU 제어점 산출(픽셀공간, roll-robust face_width) + 7 GoogleTest → **W4-B** GPU warp 패스(셰이더+백엔드+파이프라인 gate+applyFaceWarp 구현) → **W4-C** SDK 표면(C API/JNI/Java) + 데모 토글.
 > 성격: P8 뷰티 핵심 2개 중 **② = 유일 잔여** (① skin smoothing/radiance 완료). 비즈니스 가치 최우선.
@@ -69,4 +69,5 @@
 - 2026-06-25: **W4-B 메인세션 검증 완료**: 데스크톱 빌드 exit0 신규경고0(warp 파일 0, skin_target_* pre-existing) + ctest 571개 570통과(유일실패=pre-existing) 신규회귀0.
 - 2026-06-25: **W4-C 데모 토글 + 빌드 검증**. GpuRenderActivity `btnP8Slim`(off→0.25→0.50, beautyConfig.slimFace 설정 + setBeautyConfig) + 레이아웃 btnP8Slim 위젯(btnP8Radiance 인접). applyFaceWarp 별도 C API/JNI는 스텁 유지(config 경로가 정본). **assembleDebug(iris-sdk+demo): 네이티브 W4-B(NDK arm64) + Kotlin W4-C 컴파일·패키징 성공**(compileDebugKotlin+packageDebug 에러0). ⚠️ installDebug는 S23+ 무선 adb 세션 만료로 "No connected devices" — **빌드는 통과, 설치만 기기 재연결 대기**.
   🔴 **잔여=실기기 검증**: 기기 재연결 후 S23+ 설치 → btnP8Slim(slim:off→0.25→0.50) 토글로 턱 V라인 워프 육안. **좌표 정합(미러/회전, alignWarpToRenderSpace)·렌즈 무영향·30fps**가 device 게이트(W4-B #1 리스크). 어긋나면 alignWarpToRenderSpace 부호 조정.
+- 2026-06-25: **✅ 실기기 S23+ 육안 검증 통과 → ② 형태워프 종결.** 데모 UI 개편(풀스크린+오버레이 바텀시트+뷰티 단계형 슬라이더, 커밋 6ce760e)으로 턱슬림을 기본 0.2(20%)·연속 단계로 노출 → 사용자 육안 확인: **턱선 V라인 자연스러움 + 컬러렌즈 정합(슬림 0→0.5 올려도 홍채 위 렌즈 무밀림 = 눈높이 변위≈0 불변식 실증) + 30fps**. `alignWarpToRenderSpace` 미러·Y-flip 좌표 정합 정상 — **부호 조정 불필요**(W4-B #1 리스크 해소). **P8 뷰티 핵심 2개(① skin smoothing/radiance + ② 턱 V라인 워프) 완성.** 다음=`feature/p8-warp` → develop 머지(내부 W 머지 컨벤션=PR 생략, `git merge --no-ff`).
 </content>
