@@ -718,12 +718,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3, lock-free)
 
-        // 디버그: 뷰티 설정 확인
-        Log.d(
-            TAG,
-            "Beauty filter call: enabled=${beautyConfig.enabled}, intensity=${beautyConfig.intensity}, " +
-                "brightness=${beautyConfig.brightness}, detHandle=$detectionHandle"
-        )
+        // (성능 정리) 매 프레임 뷰티 설정 Log.d 제거 — 활성 프레임마다 문자열 보간 비용이었음.
 
         // GPU Beauty Backend 호출 (JNI) - Detection Handle
         // (P8-W2-D: LUT 곁가지 시그니처 제거됨)
@@ -734,9 +729,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             beautyConfig,
             detectionHandle
         )
-
-        // 디버그: 결과 확인
-        Log.d(TAG, "Beauty filter result: input=$inputTexture, output=$outputTexture, size=${texWidth}x${texHeight}")
 
         return if (outputTexture != 0 && outputTexture != inputTexture) {
             // NOTE: 텍스처 해제는 C++ TexturePool에서 관리함

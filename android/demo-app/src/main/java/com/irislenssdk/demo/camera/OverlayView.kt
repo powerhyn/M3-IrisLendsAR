@@ -519,7 +519,10 @@ class OverlayView @JvmOverloads constructor(
 
         // [중요] 렌즈는 별도의 긴 타임아웃 사용 (깜빡임 방지)
         // 렌즈 렌더링 조건: 유효한 필터 좌표가 있고 렌즈 타임아웃 내
-        val shouldRenderLens = (hasLeftEverDetected || hasRightEverDetected) &&
+        // showLens 포함(성능): GPU 데모는 렌즈를 GL에서 그리므로 showLens=false.
+        // 이게 없으면 얼굴 검출 후 2초간 onDraw 본문(좌표변환)이 헛돈다(아무것도 안 그림).
+        val shouldRenderLens = showLens &&
+            (hasLeftEverDetected || hasRightEverDetected) &&
             (filteredLeftRadius > 0 || filteredRightRadius > 0) &&
             timeSinceLastValid < LENS_PERSISTENCE_TIMEOUT_MS
 
@@ -540,16 +543,7 @@ class OverlayView @JvmOverloads constructor(
         // 렌즈도 Mesh도 raw 진단도 렌더링할 것이 없으면 리턴
         if (!shouldRenderLens && !shouldRenderMeshAndDebug && !wantRawIris) return
 
-        // 타임아웃 상태 로깅 (디버깅용)
-        if (!hasValidDetection && timeSinceLastValid < LENS_PERSISTENCE_TIMEOUT_MS) {
-            Log.d(TAG, "Lens persistence mode (${timeSinceLastValid}ms since last valid detection)")
-        }
-
-        // DEBUG: 좌표 변환 값 로깅 (ISS-001 디버깅)
-        Log.d(TAG, "=== ISS-001 DEBUG ===")
-        Log.d(TAG, "SDK imageSize: ${imageWidth}x${imageHeight}")
-        Log.d(TAG, "View size: ${width}x${height}")
-        Log.d(TAG, "imageAspect: ${imageWidth.toFloat()/imageHeight}, viewAspect: ${width.toFloat()/height}")
+        // (성능 정리) ISS-001 진단 로그 제거 — onDraw 매 프레임 문자열 보간 + logcat I/O였음.
 
         // 좌표 변환 계산
         // FIT: min() — 이미지가 뷰 안에 맞춤 (레터박스)
@@ -566,21 +560,6 @@ class OverlayView @JvmOverloads constructor(
         // 이미지를 뷰 중앙에 배치하기 위한 오프셋
         val offsetX = (width - scaledImageWidth) / 2f
         val offsetY = (height - scaledImageHeight) / 2f
-
-        // DEBUG: 변환 파라미터 로깅 (ISS-001 디버깅)
-        Log.d(TAG, "scaleFactor: $scaleFactor, scaledImage: ${scaledImageWidth}x${scaledImageHeight}")
-        Log.d(TAG, "offset: ($offsetX, $offsetY)")
-        if (cachedFaceMeshValid && cachedFaceMesh != null) {
-            // 첫 번째 랜드마크 좌표 확인 (코 끝 - 인덱스 1)
-            val mesh = cachedFaceMesh!!
-            val x0 = mesh[1 * 3]
-            val y0 = mesh[1 * 3 + 1]
-            Log.d(TAG, "Landmark[1] normalized: ($x0, $y0)")
-            val screenX = x0 * imageWidth * scaleFactor + offsetX
-            val screenY = y0 * imageHeight * scaleFactor + offsetY
-            Log.d(TAG, "Landmark[1] screen: ($screenX, $screenY)")
-        }
-        Log.d(TAG, "=====================")
 
         // 렌즈 텍스처 렌더링 (별도의 긴 타임아웃 적용)
         // 깜빡임 방지: 검출 실패해도 3초간 마지막 위치에 렌즈 유지

@@ -972,8 +972,10 @@ class GpuRenderActivity : AppCompatActivity() {
         }
 
         // 진단(트래킹 지연 핸드오프 §2): stabilize 이전 raw 홍채 사본 — OverlayView 마젠타 오버레이용.
-        // 변환만 거친(필터 없음) 좌표라 '필터 이전부터 늦는가' 확인의 정본.
-        val rawDiagSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
+        // (성능 정리) showRawIris OFF(기본)면 매 프레임 478×3 arraycopy가 버려지므로 토글 ON일 때만 사본 생성.
+        val rawDiagSnapshot = if (overlayView.showRawIris) {
+            IrisResult().also { it.copyFrom(tasksIrisResult) }
+        } else null
 
         // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요, LEGACY 동일)
         // TASKS 전용 핸들 — 같은 코어 stabilize, LEGACY 핸들 수명 불간섭 (§5-5)
@@ -989,15 +991,9 @@ class GpuRenderActivity : AppCompatActivity() {
         val glSnapshot = IrisResult().also { it.copyFrom(tasksIrisResult) }
         cameraGLView.setIrisResult(glSnapshot)
 
-        // P4-W1-03 패리티: 홍채 5점 크로스 휘도 (LEGACY sampleIrisLuminanceNv21 대응)
-        val rawLum = if (lm != null) {
-            TasksToIrisResult.sampleCrossLuma(
-                rgba, rowStride, srcWidth, srcHeight, lm, tasksIrisResult
-            )
-        } else {
-            -1f
-        }
-        cameraGLView.setRawIrisLuminance(rawLum)
+        // (성능 정리) P4-W1-03 KT측 avgIrisLum EMA 체인 제거 — sampleCrossLuma(매 프레임 눈 픽셀
+        // 샘플) → setRawIrisLuminance → avgIrisLum 은 읽는 곳이 없는 dead. 렌즈 휘도 적응은 SDK
+        // measured-luma(roiLumaLinear, P7-W2 기본 ON)가 담당하므로 KT 샘플링 제거해도 시각 무변화.
 
         // Detection Slot 업데이트 — LEGACY와 동일 채널 공유 (렌더 경로 완전 동일).
         // LEGACY processFrame은 detectWithRotation이 미검출(detected=false)에도 항상
@@ -1015,7 +1011,7 @@ class GpuRenderActivity : AppCompatActivity() {
         val frameW = uiSnapshot.frameWidth
         val frameH = uiSnapshot.frameHeight
         runOnUiThread {
-            overlayView.setRawIris(rawDiagSnapshot)
+            rawDiagSnapshot?.let { overlayView.setRawIris(it) }
             overlayView.setIrisResult(
                 uiSnapshot, frameW, frameH,
                 lensFacing == CameraSelector.LENS_FACING_FRONT
