@@ -1,52 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    IrisLensSDK Android - GPU Render Activity Layout
+    IrisLensSDK Android - GPU Render Activity Layout (v3.0)
 
-    Tab 기반 UI: 렌즈/뷰티 탭 전환
-    - 렌즈 탭: 렌즈 선택 RecyclerView + 설정 슬라이더
-    - 뷰티 탭: 뷰티 필터 슬라이더
+    풀스크린 카메라 + 오버레이 바텀시트 UI:
+    - 카메라/오버레이: match_parent 풀스크린
+    - 하단 바텀시트(BottomSheetBehavior): peek=렌즈 썸네일 바(상시) → 확장 시 렌즈/뷰티 탭
+    - 뷰티 기능(skin/radiance/slim/brightness)은 슬라이더로 통합
+    - 개발/벤치 버튼은 기어(⚙) 토글로 접기
 
-    @version 2.0.0
+    @version 3.0.0
 -->
-<androidx.constraintlayout.widget.ConstraintLayout
+<androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <!-- GPU 렌더링 뷰 (GLSurfaceView 기반) -->
+    <!-- GPU 렌더링 뷰 (풀스크린) -->
     <com.irislenssdk.demo.camera.gpu.CameraGLView
         android:id="@+id/cameraGLView"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/controlPanel"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 
-    <!-- 디버그 오버레이 뷰 (Face Mesh, 홍채 마커, 디버그 정보) -->
+    <!-- 디버그 오버레이 뷰 (Face Mesh, 홍채 마커) — 카메라와 동일 풀스크린, COVER 매핑 -->
     <com.irislenssdk.demo.camera.OverlayView
         android:id="@+id/overlayView"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        app:layout_constraintTop_toTopOf="@id/cameraGLView"
-        app:layout_constraintBottom_toBottomOf="@id/cameraGLView"
-        app:layout_constraintStart_toStartOf="@id/cameraGLView"
-        app:layout_constraintEnd_toEndOf="@id/cameraGLView" />
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 
-    <!-- 상태 정보 오버레이 -->
+    <!-- 상태 정보 오버레이 (좌상단) -->
     <LinearLayout
         android:id="@+id/statusOverlay"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
         android:layout_margin="16dp"
         android:orientation="vertical"
         android:padding="8dp"
-        android:background="#80000000"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
+        android:background="#80000000">
 
         <TextView
             android:id="@+id/tvFps"
@@ -80,7 +72,7 @@
             android:textColor="@android:color/holo_blue_light"
             android:textSize="14sp" />
 
-        <!-- ③-3 A/B HUD 1줄 (REFACTOR-3-3 §4.2) — 추적 공급자/듀얼 측정 요약 -->
+        <!-- ③-3 A/B HUD 1줄 — 추적 공급자/듀얼 측정 요약 -->
         <TextView
             android:id="@+id/tvAbHud"
             android:layout_width="wrap_content"
@@ -91,267 +83,275 @@
 
     </LinearLayout>
 
-    <!-- 디버그 토글 버튼 -->
+    <!-- 기어(⚙) 토글 버튼 (우상단, 항상 보임) — 개발/벤치 패널 표시/숨김 -->
+    <ImageButton
+        android:id="@+id/btnGearToggle"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="12dp"
+        android:background="#80000000"
+        android:src="@android:drawable/ic_menu_manage"
+        android:contentDescription="개발자 패널 토글"
+        app:tint="#FFFFFFFF" />
+
+    <!-- 개발자/벤치 패널 컨테이너 (기본 GONE, 기어로 토글) -->
     <LinearLayout
-        android:id="@+id/debugButtonPanel"
+        android:id="@+id/devPanelContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:orientation="horizontal"
-        android:padding="4dp"
-        android:background="#80000000"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:layout_gravity="top|end"
+        android:layout_marginTop="64dp"
+        android:layout_marginEnd="12dp"
+        android:orientation="vertical"
+        android:visibility="gone">
 
-        <Button
-            android:id="@+id/btnToggleMesh"
+        <!-- 디버그 토글 버튼 -->
+        <LinearLayout
+            android:id="@+id/debugButtonPanel"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Mesh"
-            android:textSize="10sp"
-            android:textAllCaps="false"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:minWidth="0dp"
-            android:backgroundTint="#66666666"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="4dp"
+            android:background="#80000000">
 
-        <Button
-            android:id="@+id/btnToggleDebug"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Debug"
-            android:textSize="10sp"
-            android:textAllCaps="false"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:minWidth="0dp"
-            android:backgroundTint="#66666666"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
+            <Button
+                android:id="@+id/btnToggleMesh"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Mesh"
+                android:textSize="10sp"
+                android:textAllCaps="false"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:minWidth="0dp"
+                android:backgroundTint="#66666666"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
 
-        <Button
-            android:id="@+id/btnToggleIris"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Iris"
-            android:textSize="10sp"
-            android:textAllCaps="false"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:minWidth="0dp"
-            android:backgroundTint="#66666666"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
+            <Button
+                android:id="@+id/btnToggleDebug"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Debug"
+                android:textSize="10sp"
+                android:textAllCaps="false"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:minWidth="0dp"
+                android:backgroundTint="#66666666"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
 
-        <Button
-            android:id="@+id/btnToggleLog"
+            <Button
+                android:id="@+id/btnToggleIris"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Iris"
+                android:textSize="10sp"
+                android:textAllCaps="false"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:minWidth="0dp"
+                android:backgroundTint="#66666666"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnToggleLog"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Log"
+                android:textSize="10sp"
+                android:textAllCaps="false"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:minWidth="0dp"
+                android:backgroundTint="#66666666"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+        </LinearLayout>
+
+        <!-- B1/B8 4조합 블라인드 벤치 패널 (A/B/C/D) -->
+        <LinearLayout
+            android:id="@+id/lensBenchPanel"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Log"
-            android:textSize="10sp"
-            android:textAllCaps="false"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:minWidth="0dp"
-            android:backgroundTint="#66666666"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:padding="4dp"
+            android:background="#80000000">
+
+            <Button
+                android:id="@+id/btnBenchA"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="2dp"
+                android:text="A"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnBenchB"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="2dp"
+                android:text="B"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnBenchC"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="2dp"
+                android:text="C"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnBenchD"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:text="D"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+        </LinearLayout>
+
+        <!-- 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) / 측정 luma(W7) 벤치 토글 -->
+        <LinearLayout
+            android:id="@+id/w6BenchPanel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:padding="4dp"
+            android:background="#80000000">
+
+            <Button
+                android:id="@+id/btnW6Blink"
+                android:layout_width="64dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="2dp"
+                android:text="up80"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnW6Gate"
+                android:layout_width="64dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="2dp"
+                android:text="g.10"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnW6Detail"
+                android:layout_width="64dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="2dp"
+                android:text="C10:on"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnW7Measured"
+                android:layout_width="72dp"
+                android:layout_height="36dp"
+                android:text="lum:meas"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+        </LinearLayout>
+
+        <!-- TASKS frame-sync 킬스위치 -->
+        <LinearLayout
+            android:id="@+id/p33AbPanel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:padding="4dp"
+            android:background="#80000000">
+
+            <Button
+                android:id="@+id/btnFrameSync"
+                android:layout_width="80dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="2dp"
+                android:text="fsync:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
-    <!-- P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 패널 (A/B/C/D) -->
+    <!-- ===================================================================
+         바텀시트: peek=렌즈 썸네일 바(상시) → 확장 시 렌즈/뷰티 탭
+         =================================================================== -->
     <LinearLayout
-        android:id="@+id/lensBenchPanel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:layout_marginEnd="16dp"
-        android:orientation="horizontal"
-        android:padding="4dp"
-        android:background="#80000000"
-        app:layout_constraintTop_toBottomOf="@id/debugButtonPanel"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <Button
-            android:id="@+id/btnBenchA"
-            android:layout_width="40dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="2dp"
-            android:text="A"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnBenchB"
-            android:layout_width="40dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="2dp"
-            android:text="B"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnBenchC"
-            android:layout_width="40dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="2dp"
-            android:text="C"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnBenchD"
-            android:layout_width="40dp"
-            android:layout_height="36dp"
-            android:text="D"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-    </LinearLayout>
-
-    <!-- P6-W6: 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) 벤치 토글 패널 -->
-    <LinearLayout
-        android:id="@+id/w6BenchPanel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:layout_marginEnd="16dp"
-        android:orientation="horizontal"
-        android:padding="4dp"
-        android:background="#80000000"
-        app:layout_constraintTop_toBottomOf="@id/lensBenchPanel"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <Button
-            android:id="@+id/btnW6Blink"
-            android:layout_width="64dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="2dp"
-            android:text="up80"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnW6Gate"
-            android:layout_width="64dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="2dp"
-            android:text="g.10"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnW6Detail"
-            android:layout_width="64dp"
-            android:layout_height="36dp"
-            android:text="C10:on"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnW7Measured"
-            android:layout_width="72dp"
-            android:layout_height="36dp"
-            android:text="lum:meas"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnP8Skin"
-            android:layout_width="72dp"
-            android:layout_height="36dp"
-            android:text="skin:off"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-        <Button
-            android:id="@+id/btnP8Radiance"
-            android:layout_width="72dp"
-            android:layout_height="36dp"
-            android:text="rad:off"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-    </LinearLayout>
-
-    <!-- W4-D: TASKS 단일 경로 — frame-sync 킬스위치만 유지 (추적 공급자 토글/듀얼 A/B 측정 제거) -->
-    <LinearLayout
-        android:id="@+id/p33AbPanel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:layout_marginEnd="16dp"
-        android:orientation="horizontal"
-        android:padding="4dp"
-        android:background="#80000000"
-        app:layout_constraintTop_toBottomOf="@id/w6BenchPanel"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <Button
-            android:id="@+id/btnFrameSync"
-            android:layout_width="80dp"
-            android:layout_height="36dp"
-            android:layout_marginStart="2dp"
-            android:text="fsync:off"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textAllCaps="false"
-            android:minWidth="0dp"
-            android:backgroundTint="#66555555"
-            style="@style/Widget.MaterialComponents.Button.TextButton" />
-
-    </LinearLayout>
-
-    <!-- 컨트롤 패널 -->
-    <LinearLayout
-        android:id="@+id/controlPanel"
-        android:layout_width="0dp"
+        android:id="@+id/bottomSheet"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#CC000000"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:background="#66000000"
+        app:behavior_peekHeight="160dp"
+        app:behavior_hideable="false"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
-        <!-- Tab Layout -->
+        <!-- 드래그 핸들 (확장/축소 그립 + 접근성) -->
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:id="@+id/dragHandle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <!-- PEEK 영역: 렌즈 썸네일 가로 바 (상시 노출) -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvLenses"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:clipToPadding="false"
+            android:nestedScrollingEnabled="false"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp" />
+
+        <!-- 확장 영역: 탭 (렌즈/뷰티) -->
         <com.google.android.material.tabs.TabLayout
             android:id="@+id/tabLayout"
             android:layout_width="match_parent"
@@ -382,7 +382,7 @@
             android:layout_width="match_parent"
             android:layout_height="280dp">
 
-            <!-- 렌즈 탭 콘텐츠 -->
+            <!-- 렌즈 탭 콘텐츠 (rvLenses는 peek로 이동 → 세부 설정만) -->
             <ScrollView
                 android:id="@+id/lensTabContent"
                 android:layout_width="match_parent"
@@ -395,22 +395,12 @@
                 android:orientation="vertical"
                 android:padding="12dp">
 
-                <!-- 렌즈 선택 RecyclerView -->
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/rvLenses"
-                    android:layout_width="match_parent"
-                    android:layout_height="120dp"
-                    android:clipToPadding="false"
-                    android:paddingStart="4dp"
-                    android:paddingEnd="4dp" />
-
                 <!-- 렌즈 설정 슬라이더 -->
                 <LinearLayout
                     android:id="@+id/lensSettingsPanel"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:layout_marginTop="8dp"
                     android:visibility="visible">
 
                     <!-- Opacity 슬라이더 -->
@@ -513,7 +503,7 @@
 
                     </LinearLayout>
 
-                    <!-- Sclera / Shadow 토글 (P4-W2-01) -->
+                    <!-- Sclera / Shadow 토글 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -544,7 +534,7 @@
 
                     </LinearLayout>
 
-                    <!-- Ellipse 토글 (P5-W3). P7-W3: 3D Light 버튼 제거(폐기된 하이라이트). -->
+                    <!-- Ellipse 토글 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -617,7 +607,7 @@
                 android:orientation="vertical"
                 android:padding="12dp">
 
-                <!-- 뷰티 토글 버튼 -->
+                <!-- 뷰티 마스터 토글 -->
                 <Button
                     android:id="@+id/btnToggleBeauty"
                     android:layout_width="match_parent"
@@ -625,16 +615,113 @@
                     android:text="Beauty: ON"
                     android:textAllCaps="false" />
 
-                <!-- 코 보호 토글 -->
-                <Button
-                    android:id="@+id/btnProtectNose"
+                <!-- 턱슬림(slim) 슬라이더 (0~0.50) -->
+                <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
-                    android:layout_marginTop="4dp"
-                    android:text="코보호: OFF"
-                    android:textSize="11sp"
-                    android:textColor="#FFAAAAAA"
-                    android:backgroundTint="#44444444" />
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="10dp">
+
+                    <TextView
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:text="턱슬림"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekSlim"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginHorizontal="6dp"
+                        android:max="50"
+                        android:progress="0" />
+
+                    <TextView
+                        android:id="@+id/tvSlimValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="off"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:minWidth="36dp"
+                        android:gravity="end" />
+
+                </LinearLayout>
+
+                <!-- 피부(skin) 슬라이더 (0~1.0) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="8dp">
+
+                    <TextView
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:text="피부"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekSkin"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginHorizontal="6dp"
+                        android:max="100"
+                        android:progress="0" />
+
+                    <TextView
+                        android:id="@+id/tvSkinValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="off"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:minWidth="36dp"
+                        android:gravity="end" />
+
+                </LinearLayout>
+
+                <!-- 화사함(radiance) 슬라이더 (0~0.60) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="8dp">
+
+                    <TextView
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:text="화사함"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekRadiance"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginHorizontal="6dp"
+                        android:max="60"
+                        android:progress="0" />
+
+                    <TextView
+                        android:id="@+id/tvRadianceValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="off"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:minWidth="36dp"
+                        android:gravity="end" />
+
+                </LinearLayout>
 
               </LinearLayout>
             </ScrollView>
@@ -643,4 +730,4 @@
 
     </LinearLayout>
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

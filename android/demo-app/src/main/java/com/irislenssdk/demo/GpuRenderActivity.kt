@@ -25,6 +25,7 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Spinner
@@ -113,14 +114,27 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Gate: Button
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
-    private lateinit var btnP8Skin: Button       // P8-W1: landmark-masked skin smoothing
-    private lateinit var btnP8Radiance: Button   // P8-W3: skin soft-glow radiance(화사함)
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
-    // 뷰티 탭 UI
+    // 개발자 패널 토글 (기어 ⚙ — 벤치/디버그 패널 전체 표시/숨김)
+    private lateinit var btnGearToggle: ImageButton
+    private lateinit var devPanelContainer: View
+
+    // 뷰티 탭 UI — 토글 + 단계형 슬라이더 (P8 흩어진 sweep 버튼 통합)
     private lateinit var btnToggleBeauty: Button
-    private lateinit var btnProtectNose: Button
+    private lateinit var seekSlim: SeekBar          // P8-W4: 턱 V라인 슬림
+    private lateinit var tvSlimValue: TextView
+    private lateinit var seekSkin: SeekBar          // P8-W1: 피부 스무딩
+    private lateinit var tvSkinValue: TextView
+    private lateinit var seekRadiance: SeekBar      // P8-W3: 화사함 radiance
+    private lateinit var tvRadianceValue: TextView
+
+    // 뷰티 슬라이더 단계값 (기존 sweep 사전지정값 기반 + 가짓수 2배 디테일화).
+    // progress = 단계 인덱스. 기존 sweep 값을 모두 포함하고 그 사이를 보간했다.
+    private val slimSteps = floatArrayOf(0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f)   // 0.1 간격, 기본 0.2(idx 2)
+    private val skinSteps = floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1.0f)       // 기존 [0, 0.5, 1.0]
+    private val radianceSteps = floatArrayOf(0f, 0.2f, 0.4f, 0.5f, 0.6f)     // 기존 [0, 0.40, 0.60]
 
     // 카메라
     private var cameraProvider: ProcessCameraProvider? = null
@@ -150,7 +164,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private var tasksHudCounter = 0                   // 분석 스레드 전용
 
     private lateinit var btnFrameSync: Button
-    @Volatile private var frameSyncEnabled = false  // frame-sync 킬스위치 (트래킹 지연 핸드오프 §3-b)
+    @Volatile private var frameSyncEnabled = true   // frame-sync 킬스위치 (기본 ON). 트래킹 지연 핸드오프 §3-b
     private lateinit var tvAbHud: TextView
 
     // 카메라 회전 (한 번만 설정)
@@ -213,18 +227,25 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Gate = findViewById(R.id.btnW6Gate)
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
-        btnP8Skin = findViewById(R.id.btnP8Skin)
-        btnP8Radiance = findViewById(R.id.btnP8Radiance)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
+
+        // 개발자 패널 토글 (기어)
+        btnGearToggle = findViewById(R.id.btnGearToggle)
+        devPanelContainer = findViewById(R.id.devPanelContainer)
 
         // W4-D: frame-sync 킬스위치 + TASKS HUD (추적 공급자 토글/듀얼 A/B 측정 제거)
         btnFrameSync = findViewById(R.id.btnFrameSync)
         tvAbHud = findViewById(R.id.tvAbHud)
 
-        // 뷰티 탭 UI
+        // 뷰티 탭 UI — 토글 + 슬라이더
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
-        btnProtectNose = findViewById(R.id.btnProtectNose)
+        seekSlim = findViewById(R.id.seekSlim)
+        tvSlimValue = findViewById(R.id.tvSlimValue)
+        seekSkin = findViewById(R.id.seekSkin)
+        tvSkinValue = findViewById(R.id.tvSkinValue)
+        seekRadiance = findViewById(R.id.seekRadiance)
+        tvRadianceValue = findViewById(R.id.tvRadianceValue)
 
         // GPU 초기화 콜백 설정
         cameraGLView.onGpuInitialized = { success ->
@@ -243,6 +264,15 @@ class GpuRenderActivity : AppCompatActivity() {
             if (success && !lensMetaLoaded) {
                 loadLensMetadataAsset()
                 lensMetaLoaded = true
+            }
+            // 뷰티 초기/복원: GL 컨텍스트 생성·재생성 후 현재 슬라이더 상태를 적용한다.
+            // queueEvent 기반 set*는 GL init 전엔 무효화되므로, 여기서 재적용해야
+            // 초기 피부·화사함 최대값이 실제로 보인다(슬라이더를 만지지 않아도).
+            if (success) {
+                runOnUiThread {
+                    applyBeautyFromSliders()
+                    cameraGLView.setFrameSyncEnabled(frameSyncEnabled)  // GL 재생성 후 fsync 복원
+                }
             }
         }
 
@@ -469,25 +499,7 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW7Measured.text = if (w7MeasuredOn) "lum:meas" else "lum:fb"
             Log.i(TAG, "P7-W2 measured luma → ${if (w7MeasuredOn) "on" else "off"}")
         }
-        // P8-W1: landmark-masked skin smoothing — off → 0.5 → 1.0 사이클.
-        // 뷰티 토글 ON 상태에서만 시각 효과. off면 스무딩 없음(레거시 FreqSep/Bilateral 제거됨 — P8-W2).
-        btnP8Skin.setOnClickListener {
-            p8SkinIdx = (p8SkinIdx + 1) % p8SkinSweep.size
-            val s = p8SkinSweep[p8SkinIdx]
-            cameraGLView.setSkinMaskSmoothing(s > 0f, s)
-            btnP8Skin.text = if (s > 0f) String.format("skin:%.1f", s) else "skin:off"
-            Log.i(TAG, "P8-W1 skin mask smoothing → strength $s")
-        }
-        // P8-W3: skin 화사함(soft-glow radiance) — off → 0.40 → 0.60 사이클.
-        // skin 경로(블러+마스크)를 공유하되 게이트 독립 — radiance>0이면 btnP8Skin off여도 단독 적용.
-        // (Beauty 토글 ON 필요 — radiance는 뷰티 효과.)
-        btnP8Radiance.setOnClickListener {
-            p8RadianceIdx = (p8RadianceIdx + 1) % p8RadianceSweep.size
-            val s = p8RadianceSweep[p8RadianceIdx]
-            cameraGLView.setSkinRadiance(s)
-            btnP8Radiance.text = if (s > 0f) String.format("rad:%.2f", s) else "rad:off"
-            Log.i(TAG, "P8-W3 skin radiance → strength $s")
-        }
+        // (P8 통합) skin/radiance/slim sweep 버튼 → 뷰티 탭 슬라이더로 이전 (setupBeautyControls).
     }
 
     //=========================================================================
@@ -512,10 +524,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
-    private val p8SkinSweep = floatArrayOf(0f, 0.5f, 1.0f)   // P8-W1: off → 0.5 → 1.0 사이클
-    private var p8SkinIdx = 0         // 기본 off (SDK default와 일치 — FreqSep 경로 무회귀)
-    private val p8RadianceSweep = floatArrayOf(0f, 0.40f, 0.60f) // P8-W3: off → 0.40 → 0.60 (핸드오프 기본 0.40)
-    private var p8RadianceIdx = 0     // 기본 off (SDK default와 일치)
+    // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]
@@ -538,23 +547,93 @@ class GpuRenderActivity : AppCompatActivity() {
     }
 
     private fun setupBeautyControls() {
-        // 뷰티 토글
+        // 뷰티 마스터 토글 — OFF면 슬라이더도 비활성(조작해도 효과 없어 오인 방지).
         btnToggleBeauty.setOnClickListener {
             beautyEnabled = !beautyEnabled
             beautyConfig.enabled = beautyEnabled
             cameraGLView.setBeautyEnabled(beautyEnabled)
             btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
+            setBeautySlidersEnabled(beautyEnabled)
         }
-
-        // 코 보호 토글
-        btnProtectNose.setOnClickListener {
-            beautyConfig.protectNose = !beautyConfig.protectNose
-            btnProtectNose.text = if (beautyConfig.protectNose) "코보호: ON" else "코보호: OFF"
-            btnProtectNose.setTextColor(if (beautyConfig.protectNose) 0xFF00FF00.toInt() else 0xFFAAAAAA.toInt())
-            cameraGLView.setBeautyConfig(beautyConfig)
-        }
-
         btnToggleBeauty.text = if (beautyEnabled) "Beauty: ON" else "Beauty: OFF"
+
+        // === 뷰티 단계형 슬라이더 (기존 sweep 사전지정값 → 가짓수 2배 디테일) ===
+        // 각 SeekBar progress = 단계 인덱스. max·progress 먼저 → 리스너 나중(spurious 콜백 회피).
+        // skin/radiance는 기본값을 최대로 둔다. 리스너 등록 전 progress 설정은 콜백을 부르지
+        // 않으므로, 초기 효과는 아래에서 명시 적용한다.
+
+        // 턱 V라인 슬림 (slimSteps, config 경로 = slim_face GPU 워프). 기본 0.2(20%).
+        seekSlim.max = slimSteps.lastIndex
+        val slimDefaultIdx = slimSteps.indexOfFirst { it >= 0.2f }.coerceAtLeast(0)
+        seekSlim.progress = slimDefaultIdx
+        beautyConfig.slimFace = slimSteps[slimDefaultIdx]
+        tvSlimValue.text = stepLabel(slimSteps[slimDefaultIdx], "%.2f")
+        seekSlim.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val s = slimSteps[progress]
+                beautyConfig.slimFace = s
+                tvSlimValue.text = stepLabel(s, "%.2f")
+                cameraGLView.setBeautyConfig(beautyConfig)
+                Log.i(TAG, "P8-W4 slim face → $s")
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // 피부 스무딩 (skinSteps, 직접 메서드 경로). 기본 최대(1.0).
+        seekSkin.max = skinSteps.lastIndex
+        seekSkin.progress = skinSteps.lastIndex
+        tvSkinValue.text = stepLabel(skinSteps.last(), "%.2f")
+        seekSkin.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val s = skinSteps[progress]
+                tvSkinValue.text = stepLabel(s, "%.2f")
+                cameraGLView.setSkinMaskSmoothing(s > 0f, s)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // 화사함 radiance (radianceSteps, 직접 메서드 경로). 기본 최대(0.60).
+        seekRadiance.max = radianceSteps.lastIndex
+        seekRadiance.progress = radianceSteps.lastIndex
+        tvRadianceValue.text = stepLabel(radianceSteps.last(), "%.2f")
+        seekRadiance.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val s = radianceSteps[progress]
+                tvRadianceValue.text = stepLabel(s, "%.2f")
+                cameraGLView.setSkinRadiance(s)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // 초기 효과(피부·화사함 최대 등)는 GL 컨텍스트 생성 이후에야 유효하므로
+        // onGpuInitialized 콜백의 applyBeautyFromSliders()에서 적용한다(여기 queueEvent는 무효).
+
+        // 초기 슬라이더 활성 상태를 뷰티 토글과 동기화.
+        setBeautySlidersEnabled(beautyEnabled)
+    }
+
+    /** 현재 뷰티 슬라이더 상태를 GL에 적용 (GL 컨텍스트 생성/재생성 후 호출 — 초기·복원 보장). */
+    private fun applyBeautyFromSliders() {
+        cameraGLView.setBeautyEnabled(beautyEnabled)
+        val skin = skinSteps[seekSkin.progress]
+        cameraGLView.setSkinMaskSmoothing(skin > 0f, skin)
+        cameraGLView.setSkinRadiance(radianceSteps[seekRadiance.progress])
+        beautyConfig.slimFace = slimSteps[seekSlim.progress]
+        cameraGLView.setBeautyConfig(beautyConfig)
+    }
+
+    /** off-aware 단계 라벨 (값 0이면 "off"). */
+    private fun stepLabel(v: Float, fmt: String): String =
+        if (v > 0f) String.format(fmt, v) else "off"
+
+    /** 뷰티 슬라이더 일괄 활성/비활성 (Beauty OFF면 조작해도 효과 없어 오인 방지). */
+    private fun setBeautySlidersEnabled(enabled: Boolean) {
+        seekSlim.isEnabled = enabled
+        seekSkin.isEnabled = enabled
+        seekRadiance.isEnabled = enabled
     }
 
     private fun setupDebugControls() {
@@ -611,6 +690,12 @@ class GpuRenderActivity : AppCompatActivity() {
         }
 
         updateButtonColors()
+
+        // 기어(⚙) → 개발/벤치 패널 전체 표시/숨김 (기본 숨김 — 평소 카메라 화면을 가리지 않음).
+        btnGearToggle.setOnClickListener {
+            devPanelContainer.visibility =
+                if (devPanelContainer.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
     }
 
     // === StabilityLogger (P4-W1-02) ===
@@ -959,6 +1044,11 @@ class GpuRenderActivity : AppCompatActivity() {
         btnFrameSync.setOnClickListener {
             setFrameSyncEnabled(!frameSyncEnabled)
         }
+        // 기본 활성화: 버튼 상태 즉시 초기화 (실제 GL 적용은 onGpuInitialized에서 — queueEvent GL-init 타이밍).
+        btnFrameSync.text = if (frameSyncEnabled) "fsync:on" else "fsync:off"
+        btnFrameSync.setBackgroundColor(
+            if (frameSyncEnabled) 0xCC2196F3.toInt() else 0x66555555.toInt()
+        )
     }
 
     private fun setFrameSyncEnabled(enabled: Boolean) {

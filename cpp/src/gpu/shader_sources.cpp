@@ -259,6 +259,48 @@ void main() {
 )glsl";
 
 //=============================================================================
+// P8-W4: 턱 V라인 워프 (fragment-direct 비정규 RBF 인버스 워프)
+// 출처: docs/lenssim-handoff/jaw-vline-warp-handoff-from-lenssimulator.md §4 (LensSim S23+ 검증).
+// 풀스크린 패스. 제어점 14개(cx,cy,dx,dy 픽셀)를 uniform으로 받아 출력 픽셀 p의 소스를
+//   src(p) = p − Σᵢ dᵢ·exp(−|p−cᵢ|²/2σ²)  (인버스 워프)
+// 로 구해 입력 텍스처를 리샘플한다. bbox+3σ 밖이면 루프 생략(early-out), sigma=0이면 패스스루.
+// 좌표계: vTexCoord/uViewportPx 는 렌더 텍스처(미러·Y-flip 적용) 공간 — 제어점도 CPU에서
+//   prepareSkinFans 와 동형으로 같은 공간에 정렬해 넘긴다(gpu_beauty_backend.cpp executeWarpPass).
+//=============================================================================
+const char* WARP_FRAGMENT = R"glsl(
+#version 310 es
+precision highp float;
+
+uniform sampler2D uTexture;   // 입력 (skin/brightness 거친 프레임)
+uniform vec4 uWarp[14];       // [cx, cy, dx, dy] — 렌더 텍스처 픽셀 공간
+uniform int uWarpCount;       // 활성 제어점 수 (보통 14)
+uniform float uWarpSigma;     // 가우시안 σ (px). 0이면 워프 off(패스스루)
+uniform vec4 uWarpBounds;     // [minX, minY, maxX, maxY] (제어점 bbox + 3σ), px
+uniform vec2 uViewportPx;     // 뷰포트 px
+
+in vec2 vTexCoord;
+out vec4 fragColor;
+
+void main() {
+    vec2 px = vTexCoord * uViewportPx;
+    vec2 dispUv = vTexCoord;
+    // uniform 기반 분기라 타일 단위로 코히런트. bbox+3σ 밖이면 가중치 < e⁻⁴·⁵ ≈ 0.011.
+    if (uWarpSigma > 0.0 &&
+        all(greaterThanEqual(px, uWarpBounds.xy)) &&
+        all(lessThanEqual(px, uWarpBounds.zw))) {
+        vec2 disp = vec2(0.0);
+        float inv2s2 = 0.5 / (uWarpSigma * uWarpSigma);
+        for (int i = 0; i < uWarpCount; i++) {
+            vec2 d = px - uWarp[i].xy;
+            disp += uWarp[i].zw * exp(-dot(d, d) * inv2s2);
+        }
+        dispUv = (px - disp) / uViewportPx;  // 인버스 워프
+    }
+    fragColor = texture(uTexture, dispUv);
+}
+)glsl";
+
+//=============================================================================
 // 렌즈 오버레이 버텍스 셰이더 (풀스크린 쿼드, 텍스처 좌표 패스스루)
 //=============================================================================
 const char* LENS_OVERLAY_VERTEX = R"glsl(
