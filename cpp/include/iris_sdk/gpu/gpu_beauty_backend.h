@@ -273,15 +273,8 @@ private:
     // 필터 패스
     //=========================================================================
 
-    /// 밝기 패스
-    void executeBrightnessPass(GLuint input_tex, GLuint output_fbo,
-                               int width, int height,
-                               float brightness);
-
-    /// 마스킹 패스 (ROI, 눈/입술 보호)
-    void applyMasking(GLuint filtered_tex, GLuint original_tex,
-                      GLuint mask_tex, GLuint output_fbo,
-                      int width, int height);
+    // (dead 정리) executeBrightnessPass / applyMasking 선언 제거 — 호출 0.
+    //             brightness는 executeCombinedColorPass가 담당, masking 패스는 미사용.
 
     /// 통합 Color Adjustment 패스 (Brightness)
     /// (P8-W2) whitening/LUT 곁가지 제거 — brightness만 잔존.
@@ -351,9 +344,8 @@ private:
     // 셰이더 프로그램 ID
     // (P8-W2 제거) 곁가지 프로그램: smoothing(Bilateral)/whitening/color_balance/
     //             soft_focus/freq_sep_gaussian/freq_sep_composite/luminance_sharpen/vivid.
+    // (dead 정리) brightness_program_ / masking_program_ 제거 — 컴파일/호출 0.
     GLuint passthrough_program_ = 0;
-    GLuint brightness_program_ = 0;
-    GLuint masking_program_ = 0;
     GLuint combined_color_program_ = 0;  // 통합 Color Adjustment (brightness 잔존)
     GLuint warp_program_ = 0;            // P8-W4: 턱 V라인 워프 (fragment-direct RBF)
 
@@ -448,8 +440,7 @@ private:
     };
 
     /// 프로그램별 Uniform Location 캐시
-    UniformLocations brightness_uniforms_;
-    UniformLocations masking_uniforms_;
+    /// (dead 정리) brightness_uniforms_ / masking_uniforms_ 제거 — 해당 패스가 dead.
     UniformLocations combined_color_uniforms_;  // 통합 Color Adjustment (brightness)
 
     /// P8-W4: 턱 V라인 워프 셰이더 uniform location 캐시

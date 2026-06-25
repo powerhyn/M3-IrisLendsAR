@@ -52,8 +52,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         private const val GL_FILTER_BETA_EYELID = 12.0f
         private const val GL_FILTER_D_CUTOFF = 1.0f
 
-        // 얼굴 미검출 시 avgIrisLum 유지 → 기본값 리셋 타임아웃 (P4-W1-03)
-        private const val FACE_INVALID_TIMEOUT_MS = 2000L
 
         // 눈꺼풀 경계 페더링 범위 (픽셀 기반 동적 계산)
         private const val EYELID_FEATHER_MIN_PX = 2.0f
@@ -237,9 +235,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var cachedRightEyeTop: Float = 0.0f
     private var cachedRightEyeBottom: Float = 1.0f
 
-    // === Adaptive Iris Luminance: EMA (P4-W1-03) ===
-    private var avgIrisLum = 0.35f           // EMA 평균 (어두운 홍채 기본값, 한국인 평균 근사)
-    private var lastValidFaceTimeMs = 0L
+    // (P4-W1-03 정리) avgIrisLum/lastValidFaceTimeMs 제거 — dead 측정. SDK measured-luma가 담당.
 
     // 렌즈 설정
     private var lensConfig: LensConfig = LensConfig()
@@ -882,34 +878,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         this.resultReceivedAtMs = android.os.SystemClock.elapsedRealtime()
     }
 
-    /**
-     * 홍채 평균 밝기 업데이트 (EMA α=0.1)
-     *
-     * CPU 측에서 NV21 Y채널 샘플링 후 호출.
-     * @param rawLuminance 0.0~1.0 범위의 원시 밝기 (미검출 시 음수)
-     */
-    fun updateAvgIrisLum(rawLuminance: Float) {
-        val currentTimeMs = System.currentTimeMillis()
-        if (rawLuminance >= 0f) {
-            lastValidFaceTimeMs = currentTimeMs
-            avgIrisLum = avgIrisLum * 0.9f + rawLuminance * 0.1f
-            avgIrisLum = avgIrisLum.coerceIn(0.05f, 0.95f)
-        } else {
-            // Hold: 미검출 시 마지막 유효값 유지, 타임아웃 시 기본값 리셋
-            if (currentTimeMs - lastValidFaceTimeMs > FACE_INVALID_TIMEOUT_MS) {
-                avgIrisLum = 0.35f
-            }
-        }
-    }
-
-    /**
-     * Temporal 상태 리셋 (onResume 시 호출)
-     *
-     * resume 후 dt 기반 연산의 cold-start 폭주 방지.
-     */
-    fun resetTemporalState() {
-        lastValidFaceTimeMs = 0L
-    }
+    // (P4-W1-03 정리) updateAvgIrisLum/avgIrisLum EMA + resetTemporalState 제거 —
+    // avgIrisLum은 읽는 곳 0의 dead. resetTemporalState는 dead가 된 lastValidFaceTimeMs 전용이었음
+    // (블링크·눈꺼풀 EMA는 자체 dt 관리라 무관).
 
     /**
      * 렌즈 설정

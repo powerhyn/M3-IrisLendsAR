@@ -161,17 +161,10 @@ extern const char* FULLSCREEN_QUAD_VERTEX;
 /// 패스스루 프래그먼트 셰이더 (텍스처 그대로 출력)
 extern const char* PASSTHROUGH_FRAGMENT;
 
-/// 밝기 조정 프래그먼트 셰이더
-extern const char* BRIGHTNESS_FRAGMENT;
-
+// (dead 정리) BRIGHTNESS_FRAGMENT / MASKING_FRAGMENT / GAUSSIAN_BLUR_FRAGMENT 선언 제거 — 호출 0.
+//             brightness는 COMBINED_COLOR_ADJUSTMENT가 담당, masking·gaussian-blur는 미사용.
 // (P8-W2 제거) Bilateral/Whitening/ColorBalance/SoftFocus/FreqSep Gaussian·Composite/
 //             LuminanceSharpen 곁가지 셰이더 선언 제거.
-
-/// 마스킹(ROI 블렌딩) 프래그먼트 셰이더
-extern const char* MASKING_FRAGMENT;
-
-/// Gaussian Blur 프래그먼트 셰이더
-extern const char* GAUSSIAN_BLUR_FRAGMENT;
 
 /// 통합 Color Adjustment 셰이더 (Brightness 잔존)
 extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;

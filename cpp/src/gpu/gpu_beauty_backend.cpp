@@ -91,8 +91,8 @@ static iris_sdk::jaw_warp::JawWarpParams alignWarpToRenderSpace(
 namespace shaders {
 extern const char* FULLSCREEN_QUAD_VERTEX;
 extern const char* PASSTHROUGH_FRAGMENT;
-extern const char* BRIGHTNESS_FRAGMENT;
-extern const char* MASKING_FRAGMENT;
+// (dead 정리) BRIGHTNESS_FRAGMENT / MASKING_FRAGMENT extern 제거 — 호출 0.
+//             brightness는 COMBINED_COLOR_ADJUSTMENT가 담당, masking 패스는 미사용.
 extern const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT;
 // P8-W1: landmark-masked skin smoothing
 extern const char* SKIN_MASK_FILL_VERTEX;
@@ -202,26 +202,8 @@ bool GPUBeautyBackend::initializeShaders() {
     shader_manager_->cacheProgram("passthrough", passthrough_program_);
 
     // (P8-W2 제거) 곁가지 프로그램: smoothing(Bilateral)/whitening/color_balance/soft_focus.
-
-    // 밝기
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::BRIGHTNESS_FRAGMENT,
-            brightness_program_)) {
-        LOGE("Failed to create brightness program");
-        return false;
-    }
-    shader_manager_->cacheProgram("brightness", brightness_program_);
-
-    // 마스킹
-    if (!shader_manager_->createProgram(
-            shaders::FULLSCREEN_QUAD_VERTEX,
-            shaders::MASKING_FRAGMENT,
-            masking_program_)) {
-        LOGE("Failed to create masking program");
-        return false;
-    }
-    shader_manager_->cacheProgram("masking", masking_program_);
+    // (dead 정리) brightness/masking 프로그램 컴파일 제거 — 호출 0.
+    //             brightness는 아래 combined_color 패스가 담당, masking 패스는 미사용.
 
     // 통합 Color Adjustment (Brightness + ColorBalance + Whitening)
     if (!shader_manager_->createProgram(
@@ -301,15 +283,7 @@ void GPUBeautyBackend::cacheUniformLocations() {
     }
 
     // (P8-W2 제거) Smoothing/Whitening/ColorBalance/SoftFocus/Vivid/FreqSep/Sharpen 유니폼 캐시.
-
-    // Brightness Uniforms
-    brightness_uniforms_.uTexture = glGetUniformLocation(brightness_program_, "uTexture");
-    brightness_uniforms_.uBrightness = glGetUniformLocation(brightness_program_, "uBrightness");
-
-    // Masking Uniforms
-    masking_uniforms_.uFiltered = glGetUniformLocation(masking_program_, "uFiltered");
-    masking_uniforms_.uOriginal = glGetUniformLocation(masking_program_, "uOriginal");
-    masking_uniforms_.uMask = glGetUniformLocation(masking_program_, "uMask");
+    // (dead 정리) brightness/masking 유니폼 캐시 제거 — 해당 프로그램/패스가 dead.
 
     // Combined Color Adjustment Uniforms (brightness 잔존)
     combined_color_uniforms_.uTexture = glGetUniformLocation(combined_color_program_, "uTexture");
@@ -456,10 +430,9 @@ void GPUBeautyBackend::release() {
 
     resetTemporalFilters();
 
-    // 프로그램 ID 초기화 ((P8-W2) 곁가지 프로그램 제거 — 잔존 4종 + skin 3종)
+    // 프로그램 ID 초기화 ((P8-W2) 곁가지 프로그램 제거 — 잔존 2종 + skin 3종)
+    // (dead 정리) brightness/masking program 리셋 제거 — 컴파일 자체가 사라짐.
     passthrough_program_ = 0;
-    brightness_program_ = 0;
-    masking_program_ = 0;
     combined_color_program_ = 0;
     warp_program_ = 0;  // P8-W4
     skin_mask_fill_program_ = 0;
@@ -664,74 +637,10 @@ IrisSdkError GPUBeautyBackend::applyTexture(
 // (P8-W2 제거) executeSmoothingPass(Bilateral) / executeWhiteningPass /
 //             executeColorBalancePass / executeSoftFocusPass — 곁가지 패스 전체 제거.
 
-void GPUBeautyBackend::executeBrightnessPass(
-    GLuint input_tex, GLuint output_fbo,
-    int width, int height,
-    float brightness) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    glUseProgram(brightness_program_);
-
-    // 캐시된 Uniform Location 사용
-    glUniform1i(brightness_uniforms_.uTexture, 0);
-    glUniform1f(brightness_uniforms_.uBrightness, brightness);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, input_tex);
-
-    renderFullscreenQuad();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-#else
-    (void)input_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-    (void)brightness;
-#endif
-}
-
+// (dead 정리) executeBrightnessPass / applyMasking 제거 — 호출 0.
+//             brightness는 executeCombinedColorPass(COMBINED_COLOR_ADJUSTMENT)가 담당,
+//             masking 패스는 어디서도 호출되지 않음.
 // (P8-W2 제거) executeVividPass — Vivid 곁가지 패스 제거.
-
-void GPUBeautyBackend::applyMasking(
-    GLuint filtered_tex, GLuint original_tex,
-    GLuint mask_tex, GLuint output_fbo,
-    int width, int height) {
-
-#if IRIS_SDK_GPU_AVAILABLE
-    glBindFramebuffer(GL_FRAMEBUFFER, output_fbo);
-    glUseProgram(masking_program_);
-
-    // 캐시된 Uniform Location 사용
-    glUniform1i(masking_uniforms_.uFiltered, 0);
-    glUniform1i(masking_uniforms_.uOriginal, 1);
-    glUniform1i(masking_uniforms_.uMask, 2);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, filtered_tex);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, original_tex);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, mask_tex);
-
-    renderFullscreenQuad();
-
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-#else
-    (void)filtered_tex;
-    (void)original_tex;
-    (void)mask_tex;
-    (void)output_fbo;
-    (void)width;
-    (void)height;
-#endif
-}
 
 void GPUBeautyBackend::executeCombinedColorPass(
     GLuint input_tex, GLuint output_fbo,

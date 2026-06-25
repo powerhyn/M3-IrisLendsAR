@@ -84,15 +84,8 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
-    /**
-     * 홍채 평균 밝기 업데이트 (P4-W1-03: Luminance Tint)
-     * CPU 측 NV21 Y채널 샘플링 결과를 GL 스레드로 전달.
-     */
-    fun setRawIrisLuminance(luminance: Float) {
-        queueEvent {
-            glRenderer.updateAvgIrisLum(luminance)
-        }
-    }
+    // (P4-W1-03 정리) setRawIrisLuminance/avgIrisLum EMA 제거 — 읽는 곳 0의 dead 측정.
+    // 렌즈 휘도 적응은 SDK measured-luma(roiLumaLinear, P7-W2) 경로가 담당.
 
     // W4-B3: setLandmarkFrameTimestamp 제거 — 분석 프레임 센서 ns는 이제 IrisLensSDK.updateDetectionSlot(
     // result, frameTsNs)로 렌즈 좌표와 한 슬롯에 원자 결속된다. 별도 ts 사이드채널 폐기로 frame-sync
@@ -105,14 +98,6 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
-    /**
-     * Temporal 상태 리셋 (onResume 시 호출)
-     */
-    fun resetTemporalState() {
-        queueEvent {
-            glRenderer.resetTemporalState()
-        }
-    }
 
     // 펜딩 SurfaceRequest (GL 초기화 전 Preview.setSurfaceProvider 호출 시)
     private var pendingSurfaceRequest: SurfaceRequest? = null

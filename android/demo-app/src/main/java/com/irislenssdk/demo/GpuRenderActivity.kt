@@ -1123,7 +1123,6 @@ class GpuRenderActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         cameraGLView.onResume()
-        cameraGLView.resetTemporalState()  // P4-W1-03: resume jump 방지
         // P6-W4 env_map 로드는 onGpuInitialized 콜백에서 처리 (GPU lens init 완료 보장).
     }
 

@@ -46,58 +46,10 @@ void main() {
 )glsl";
 
 //=============================================================================
-// 밝기 조정 프래그먼트 셰이더
-//=============================================================================
-const char* BRIGHTNESS_FRAGMENT = R"glsl(
-#version 310 es
-precision highp float;
-
-uniform sampler2D uTexture;
-uniform float uBrightness;  // 0.5 ~ 1.5, 1.0 = 원본
-
-in vec2 vTexCoord;
-out vec4 fragColor;
-
-void main() {
-    vec4 color = texture(uTexture, vTexCoord);
-
-    // 밝기 조정 (RGB만, 알파 유지)
-    color.rgb *= uBrightness;
-
-    // 클램핑
-    fragColor = vec4(clamp(color.rgb, 0.0, 1.0), color.a);
-}
-)glsl";
-
-//=============================================================================
+// (dead 정리) BRIGHTNESS_FRAGMENT / MASKING_FRAGMENT 셰이더 제거 — 호출 0.
+//             brightness는 COMBINED_COLOR_ADJUSTMENT_FRAGMENT가 담당, masking은 미사용.
 // (P8-W2 제거) Bilateral Filter / 화이트닝 / 컬러 밸런스 / 소프트 포커스 곁가지 셰이더 제거.
 //=============================================================================
-
-//=============================================================================
-// 마스킹 프래그먼트 셰이더 (ROI 블렌딩)
-//=============================================================================
-const char* MASKING_FRAGMENT = R"glsl(
-#version 310 es
-precision highp float;
-
-uniform sampler2D uFiltered;   // 필터 적용된 텍스처
-uniform sampler2D uOriginal;   // 원본 텍스처
-uniform sampler2D uMask;       // 마스크 (R 채널 사용, 1=필터, 0=원본)
-
-in vec2 vTexCoord;
-out vec4 fragColor;
-
-void main() {
-    vec4 filtered = texture(uFiltered, vTexCoord);
-    vec4 original = texture(uOriginal, vTexCoord);
-    float mask = texture(uMask, vTexCoord).r;
-
-    // 마스크에 따라 블렌딩
-    // mask = 1.0: 필터 적용된 영역 (피부)
-    // mask = 0.0: 원본 유지 영역 (눈, 입술)
-    fragColor = mix(original, filtered, mask);
-}
-)glsl";
 
 //=============================================================================
 // 통합 Color Adjustment 프래그먼트 셰이더 (Brightness 잔존)
@@ -127,36 +79,8 @@ void main() {
 )glsl";
 
 //=============================================================================
-// Gaussian Blur 프래그먼트 셰이더 (추후 사용)
-//=============================================================================
-const char* GAUSSIAN_BLUR_FRAGMENT = R"glsl(
-#version 310 es
-precision highp float;
-
-uniform sampler2D uTexture;
-uniform vec2 uTexelSize;
-uniform vec2 uDirection;  // (1,0) = horizontal, (0,1) = vertical
-
-in vec2 vTexCoord;
-out vec4 fragColor;
-
-// 9-tap Gaussian weights (sigma ~= 2.0)
-const float weights[5] = float[](0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);
-
-void main() {
-    vec3 result = texture(uTexture, vTexCoord).rgb * weights[0];
-
-    for (int i = 1; i < 5; i++) {
-        vec2 offset = uDirection * uTexelSize * float(i);
-        result += texture(uTexture, vTexCoord + offset).rgb * weights[i];
-        result += texture(uTexture, vTexCoord - offset).rgb * weights[i];
-    }
-
-    fragColor = vec4(result, 1.0);
-}
-)glsl";
-
-//=============================================================================
+// (dead 정리) GAUSSIAN_BLUR_FRAGMENT 제거 — createProgram 호출조차 없는 완전 dead.
+//             skin smoothing은 SKIN_SEPARABLE_BLUR_FRAGMENT가 담당.
 // (P8-W2 제거) FreqSep Gaussian / FreqSep Composite / Luminance Sharpen /
 //             Vivid Postprocess 곁가지 셰이더 제거.
 //=============================================================================
