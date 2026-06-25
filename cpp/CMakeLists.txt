@@ -76,6 +76,8 @@ set(IRIS_SDK_SOURCES
     # Warp module
     src/warp/grid_mesh.cpp
     src/warp/face_warp_controller.cpp
+    # Jaw V-line warp control-point geometry (P8-W4-A — pure CPU, no GL)
+    src/warp/jaw_warp_geometry.cpp
     # (P8-W2 제거) FreqSep 전용 부가 인프라: quality_metrics / ab_compare /
     #             release_gate / param_tuner — 곁가지 뷰티 제거로 dead.
     # Temporal stabilizer (P5-W1)
@@ -112,6 +114,8 @@ set(IRIS_SDK_HEADERS
     # Warp module headers
     include/iris_sdk/warp/grid_mesh.h
     include/iris_sdk/warp/face_warp_controller.h
+    # Jaw V-line warp control-point geometry (P8-W4-A)
+    include/iris_sdk/warp/jaw_warp_geometry.h
     # (P8-W2 제거) FreqSep 전용 부가 인프라 헤더 — 곁가지 뷰티 제거로 dead.
     # Temporal stabilizer headers (P5-W1)
     include/iris_sdk/temporal_stabilizer.h

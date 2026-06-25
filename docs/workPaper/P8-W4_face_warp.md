@@ -46,4 +46,15 @@
 
 ## 7. 변경 이력
 - 2026-06-25: 착수 + 브레인스토밍 R1 프레이밍. ② 정본 2문서 + audit 4결함 검증 반영. §6 5쟁점 확정.
+- 2026-06-25: **W4-A 구현(편집 완료, 빌드/ctest는 메인 세션)**. 신규 순수 기하 모듈
+  `cpp/include/iris_sdk/warp/jaw_warp_geometry.h` + `cpp/src/warp/jaw_warp_geometry.cpp`
+  (`iris_sdk::jaw_warp` 네임스페이스, GL/OpenCV 무의존). `computeJawWarp`(픽셀공간 제어점
+  14 산출, face_width=유클리드 roll-robust, 퇴화방어 축<1px·폭<8px) + `evaluateWarpDisplacement`
+  (검증용 비정규 RBF, bbox+3σ early-out). 핸드오프 §1 파라미터 정확 반영(테이퍼
+  [0.2,0.45,0.65,0.85,1.0,0.85,0.6]/3.2%/13%/14점/3σ). GoogleTest 7종
+  `cpp/tests/test_jaw_warp_geometry.cpp`(방향/strength0/눈높이<5%/3σbbox/퇴화/대칭/roll).
+  CMake 등록(라이브러리 소스·헤더 + test_skin_mask_geometry 블록 미러). grid_mesh/
+  face_warp_controller 미접촉(dead substrate 불변식 준수).
+- 2026-06-25: **W4-A 메인세션 검증 완료**. 빌드 exit0 신규경고0, ctest 571개(564+7) 570통과(유일실패=pre-existing GPUBeautyBackendTest.FailsWithNullContext) 신규회귀0.
+  ⚠️ **EyeHeightDisplacementSmall 최초 실패→근본규명**: 합성 타원이 최상단 볼 제어점(323/93)을 눈에서 ~0.5σ에 배치(비현실적)→13% 누출. **실제 골든 랜드마크(Python 복제 검증)에선 눈꼬리 3.7%/홍채 1.6% 전부 <5% = 알고리즘 정확**. 따라서 눈높이 테스트만 **실제 face_mesh fixture**(face_closeup__rot0.result.json 24점 스냅샷)로 교체([[real-data-first]]) → 통과. 나머지 6테스트는 합성 유지(수학 속성). **눈높이≈0 렌즈정합 = 실제 데이터로 입증**(브레인스토밍 #1 리스크 해소). **다음=W4-B GPU 워프 패스.**
 </content>

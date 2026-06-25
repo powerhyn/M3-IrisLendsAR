@@ -353,6 +353,19 @@ target_link_libraries(test_skin_mask_geometry PRIVATE
 gtest_discover_tests(test_skin_mask_geometry DISCOVERY_TIMEOUT 60)
 
 # ============================================================
+# P8-W4-A: 턱 V라인 워프 CPU 제어점 산출 순수 함수 테스트
+# ============================================================
+add_executable(test_jaw_warp_geometry test_jaw_warp_geometry.cpp)
+target_include_directories(test_jaw_warp_geometry PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_jaw_warp_geometry PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_jaw_warp_geometry DISCOVERY_TIMEOUT 60)
+
+# ============================================================
 # ③-1: 랜드마크 주입 경계 — 파생 어댑터 + seqlock 더블버퍼 테스트 (ADR-0001 §6)
 # ============================================================
 add_executable(test_landmark_injection test_landmark_injection.cpp)
