@@ -19,7 +19,6 @@ import android.graphics.SurfaceTexture
 import android.opengl.GLES11Ext
 import android.opengl.GLES31
 import android.opengl.GLSurfaceView
-import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.Log
 import com.irislenssdk.BeautyFilterConfigV2
@@ -194,8 +193,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var lensFboId: Int = 0
     private var lensOutputTextureId: Int = 0
 
-    // 렌즈 텍스처 (렌즈 이미지)
-    private var lensImageTextureId: Int = 0
+    // 렌즈 텍스처 상태
+    // (KT fallback 셰이더 제거 후) KT측 GL 렌즈 텍스처는 native 렌더에 쓰이지 않는다.
+    // 렌즈는 native GPULensRenderer(lens_texture_)로만 업로드하며, 렌더 게이트는 native 로드 성공
+    // 여부(nativeLensLoaded)로 판정한다. EGL 컨텍스트 재생성 시 native lens_texture_가 해제되므로
+    // onSurfaceCreated에서 false로 리셋되고, GpuRenderActivity가 현재 렌즈를 재업로드한다.
+    private var nativeLensLoaded: Boolean = false
     private var pendingLensBitmap: Bitmap? = null
     private var pendingLensSkuId: String = ""  // P6-W7: 렌즈 SKU id (메타 연동)
 
@@ -298,8 +301,42 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     // GLSurfaceView.Renderer 구현
     //=========================================================================
 
+    /**
+     * EGL 컨텍스트 손실 후 stale GL 핸들 일괄 무효화.
+     *
+     * 구 컨텍스트의 GL 객체는 이미 파괴됐으므로 glDelete를 호출하면 안 된다(대상이 없거나,
+     * 더 위험하게는 새 컨텍스트에서 같은 id로 갓 생성된 객체를 오삭제). 단순히 핸들을 0으로
+     * 리셋해, 이후 recreateIntermediateBuffers()/createLensFbo()의 조건부 'delete-before-recreate'가
+     * 무해한 no-op이 되도록 한다. nativeLensLoaded도 함께 내려 native lens 재업로드 전까지 게이트를 닫는다.
+     */
+    private fun markGlHandlesStale() {
+        oesTextureId = 0
+        oesToRgbProgram = 0
+        passthroughProgram = 0
+        quadVao = 0
+        quadVbo = 0
+        beautyOutputTextureId = 0
+        lensFboId = 0
+        lensOutputTextureId = 0
+        nativeLensLoaded = false
+        for (i in 0 until ringSize) {
+            ringTex[i] = 0
+            ringFbo[i] = 0
+        }
+        ringWrite = 0
+        ringCount = 0
+        // 구 SurfaceTexture는 파괴된 컨텍스트의 OES에 묶였던 stale — release 후 새로 만든다.
+        surfaceTexture?.let { runCatching { it.release() } }
+        surfaceTexture = null
+    }
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         Log.d(TAG, "onSurfaceCreated")
+
+        // EGL 컨텍스트 (재)생성: 구 컨텍스트의 모든 GL 핸들은 무효다. 0으로 리셋하지 않으면
+        // 이후 recreateIntermediateBuffers/createLensFbo의 'delete-before-recreate'가 stale id를
+        // 삭제하다가 새 컨텍스트의 갓 생성된 텍스처(id 충돌)를 지워버려 블랙스크린을 유발한다.
+        markGlHandlesStale()
 
         // OpenGL ES 버전 확인
         val version = GLES31.glGetString(GLES31.GL_VERSION)
@@ -361,8 +398,18 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         GLES31.glViewport(0, 0, width, height)
 
-        // 중간 텍스처/FBO 재생성 (크기 변경)
-        recreateIntermediateBuffers(width, height)
+        // 중간 ring/FBO는 '카메라 프레임 크기' 기준이다(뷰 크기 아님 — 디스플레이는 Cover 스케일).
+        // 카메라 프레임 크기를 이미 알면(setFrameSize 후/복귀) 그 크기로 재생성하고, 최초엔 뷰 크기로
+        // 임시 생성한 뒤 카메라 연결 시 setFrameSize가 교정한다.
+        // ※ 백그라운드 복귀 시 컨텍스트 보존(preserveEGLContextOnPause)으로 onSurfaceCreated는 생략되나
+        //   window surface 재생성으로 onSurfaceChanged는 호출된다. 이때 ring을 뷰 크기(예: 1080x2140)로
+        //   덮으면, setFrameSize는 frameWidth 불변(640==640)이라 no-op → ring이 뷰 종횡비에 갇혀
+        //   화면이 깨진다(상단 블랙 + 하단 압축). 따라서 알려진 프레임 크기를 우선한다.
+        if (frameWidth > 0 && frameHeight > 0) {
+            recreateIntermediateBuffers(frameWidth, frameHeight)
+        } else {
+            recreateIntermediateBuffers(width, height)
+        }
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -401,9 +448,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // 2단계: 렌즈 오버레이 (홍채 위치에 렌즈 합성). 게이트는 슬롯 detected(좌표와 동일 스냅샷).
         var currentTexture = ringTex[sourceIdx]
-        if (lensEnabled && lensImageTextureId != 0 && slotDetected) {
+        if (lensEnabled && nativeLensLoaded && slotDetected) {
             currentTexture = applyGpuLensRenderer(currentTexture, detectionHandle)
-        } else if (stabilityLogEnabled && lensEnabled && lensImageTextureId != 0) {
+        } else if (stabilityLogEnabled && lensEnabled && nativeLensLoaded) {
             // 렌즈 파이프라인 활성 상태에서 검출 실패 시에만 기록
             // (렌즈 미선택/텍스처 미준비 시에는 기록하지 않음)
             onStabilityFrame?.invoke(
@@ -558,41 +605,22 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     private fun uploadPendingLensTexture() {
         val bitmap = pendingLensBitmap ?: return
-        val skuId = pendingLensSkuId  // P6-W7: 스레드 안전하게 로컬 캡처
+        // GPU lens 미초기화면 이번 프레임은 보류하고 비트맵을 유지해 다음 프레임 재시도한다
+        // (컨텍스트 재생성 직후 initGpuLens 완료 전 호출되어도 렌즈가 영구 소실되지 않게).
+        if (!IrisLensSDK.isGpuLensInitialized()) {
+            return
+        }
         pendingLensBitmap = null
+        val skuId = pendingLensSkuId  // P6-W7: 스레드 안전하게 로컬 캡처
 
-        // 기존 텍스처 삭제
-        if (lensImageTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(lensImageTextureId), 0)
-        }
-
-        // 새 텍스처 생성
-        val textures = IntArray(1)
-        GLES31.glGenTextures(1, textures, 0)
-        lensImageTextureId = textures[0]
-
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, lensImageTextureId)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MAG_FILTER, GLES31.GL_LINEAR)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_S, GLES31.GL_CLAMP_TO_EDGE)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_T, GLES31.GL_CLAMP_TO_EDGE)
-
-        // 비트맵 업로드 + mipmap 생성 (축소 시 shimmer/aliasing 방지)
-        GLUtils.texImage2D(GLES31.GL_TEXTURE_2D, 0, bitmap, 0)
-        GLES31.glGenerateMipmap(GLES31.GL_TEXTURE_2D)
-        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR_MIPMAP_LINEAR)
-
-        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, 0)
-
-        // SDK GPULensRenderer에도 렌즈 텍스처 전달 (RGBA 바이트)
-        if (IrisLensSDK.isGpuLensInitialized()) {
-            val rgbaBytes = ByteArray(bitmap.width * bitmap.height * 4)
-            val buffer = java.nio.ByteBuffer.wrap(rgbaBytes)
-            bitmap.copyPixelsToBuffer(buffer)
-            val loadResult = IrisLensSDK.loadLensTexture(rgbaBytes, bitmap.width, bitmap.height, skuId)
-            Log.d(TAG, "SDK lens texture loaded: ${bitmap.width}x${bitmap.height}, sku=$skuId, result=$loadResult")
-        }
-
-        Log.d(TAG, "Lens texture uploaded: ${bitmap.width}x${bitmap.height}, id=$lensImageTextureId")
+        // KT GL 텍스처 업로드는 제거(KT fallback 셰이더 폐지 후 native 렌더에 미사용 — 게이트/삭제
+        // 위험만 만들던 vestigial 경로). native GPULensRenderer로만 RGBA 업로드하고, 로드 성공
+        // 여부를 렌더 게이트(nativeLensLoaded)로 사용한다.
+        val rgbaBytes = ByteArray(bitmap.width * bitmap.height * 4)
+        bitmap.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(rgbaBytes))
+        val loadResult = IrisLensSDK.loadLensTexture(rgbaBytes, bitmap.width, bitmap.height, skuId)
+        nativeLensLoaded = (loadResult == IrisLensSDK.OK)
+        Log.d(TAG, "SDK lens texture loaded: ${bitmap.width}x${bitmap.height}, sku=$skuId, result=$loadResult, ok=$nativeLensLoaded")
     }
 
 
@@ -933,10 +961,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setLensTexture(bitmap: Bitmap?, skuId: String = "") {
         if (bitmap == null) {
-            // 렌즈 제거
+            // 렌즈 제거 — 게이트를 닫는다(native 텍스처는 다음 렌즈 선택 시 덮어쓰기됨).
             pendingLensBitmap = null
             pendingLensSkuId = ""  // P6-W7
             lensEnabled = false
+            nativeLensLoaded = false
         } else {
             // 새 렌즈 설정 (GL 스레드에서 업로드)
             pendingLensBitmap = bitmap
@@ -1205,9 +1234,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glDeleteProgram(passthroughProgram)
         }
 
-        if (lensImageTextureId != 0) {
-            GLES31.glDeleteTextures(1, intArrayOf(lensImageTextureId), 0)
-        }
         if (lensOutputTextureId != 0) {
             GLES31.glDeleteTextures(1, intArrayOf(lensOutputTextureId), 0)
         }
@@ -1215,6 +1241,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             GLES31.glDeleteFramebuffers(1, intArrayOf(lensFboId), 0)
         }
         pendingLensBitmap = null
+        nativeLensLoaded = false
 
         surfaceTexture?.release()
         surfaceTexture = null

@@ -364,6 +364,30 @@ private:
     };
     EllipseCache ellipse_cache_[2];
 
+    // ========================================
+    // per-eye 마지막 정상 홍채 pose hold (BUGFIX: 눈 일부 감김 시 렌즈 드롭 방지)
+    // ========================================
+    // 반쯤 감은 눈은 MediaPipe 홍채 5점이 [0,1] 밖으로 튀어 left/right_detected=false가
+    // 되지만, 눈꺼풀(face mesh)은 계속 추적된다. 드롭 프레임의 현재 홍채 중심은 garbage라
+    // 못 쓰므로 마지막 정상 pose를 hold해 렌즈를 제자리에 유지하고, 셰이더 Y-slab이
+    // 보이는 영역으로 클리핑하게 한다. (public detected 의미는 불변 — render-only)
+    // 좌표 규약은 iris_result.left_iris[0]와 동일(정규화, Y-flip 前 raw). 반경은 정규화값.
+    // hold 수명은 eyelid_cache_.valid_frames에 연동(얼굴이 EYELID_HOLD_FRAMES 동안
+    // 사라지면 함께 정리) — 별도 카운터 없이 캐시 수명 재사용(과설계 회피).
+    float held_iris_cx_[2] = {0.0f, 0.0f};
+    float held_iris_cy_[2] = {0.0f, 0.0f};
+    float held_iris_r_[2]  = {0.0f, 0.0f};
+    bool  has_held_pose_[2] = {false, false};
+
+    // [BUGFIX] blink-ramp(render_alpha fade) 토글 — 기본 OFF(실기기 결정).
+    //   가시성은 셰이더 eyelidMask(눈꺼풀 클립)만으로 제어한다. 실기기 실측 결과:
+    //   (1) 클립이 반쯤 감음을 깔끔히 처리하고, (2) 완전 감음 시 MediaPipe 눈꺼풀 잔여 gap으로
+    //   얇은 띠만 남는 경미한 한계가 있으나, (3) eye_opening 신호가 0.005~0.012로 작고 프레임
+    //   노이즈(±0.002)가 커 fade 임계값을 안정적으로 잡을 수 없다(뜬 눈도 투명해지는 부작용).
+    //   → fade를 끄고 클립에 일임하는 게 단순·견고. (원래 "반쯤 감으면 렌즈 사라짐" 버그의
+    //   근본 트리거가 이 fade였다 — held/반쯤 감음에서 과발동.)
+    bool blink_ramp_enabled_ = false;
+
     // 이전 출력 텍스처 추적
     GLuint previous_output_texture_ = 0;
 
@@ -421,7 +445,8 @@ private:
 
     // W6 §1.3: down ramp는 고정(생리적 눈 감김이 뜸보다 빠름).
     static constexpr float kBlinkDownMs        = 60.0f;
-    static constexpr float kBlinkCloseThreshold = 0.02f;  // eyeOpening 이하면 눈 감김 판정
+    // eyeOpening 이하면 눈 감김 판정 (blink_ramp_enabled_ ON일 때만 사용 — 기본 OFF).
+    static constexpr float kBlinkCloseThreshold = 0.02f;
     static constexpr float kDtClampMinMs       = 1.0f;
     static constexpr float kDtClampMaxMs       = 100.0f;  // 앱 복귀 등 큰 dt 튐 방지
     static constexpr float kDefaultDtMs        = 16.67f;  // 첫 프레임 dt

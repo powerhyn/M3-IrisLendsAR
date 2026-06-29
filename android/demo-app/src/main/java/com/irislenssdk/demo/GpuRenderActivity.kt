@@ -159,6 +159,12 @@ class GpuRenderActivity : AppCompatActivity() {
 
     /** TASKS stabilizer 핸들 — 분석 스레드 전용 (코어 stabilize 단일 적용). */
     private var tasksStabilizerHandle: Long = 0
+
+    // 눈 일부 감김 시 얼굴 전체 dropout(MediaPipe 0 faces, 실측 ~1s)을 버티도록 stabilizer
+    // dropout hold 연장(코어 기본 5프레임 → 이 값). hold 동안 마지막 유효 프레임(face_mesh+
+    // iris+detected=true)이 슬롯에 유지되어 렌즈가 제자리+눈꺼풀 클립으로 유지된다.
+    // 실기기 육안 튜닝 포인트 — 너무 크면 얼굴이 실제로 프레임을 떠난 뒤 렌즈 잔상.
+    private val stabilizerHoldFrames = 30
     @Volatile private var tasksUsingGpu = false
     @Volatile private var lastTasksInferMs = 0f
     private var tasksHudCounter = 0                   // 분석 스레드 전용
@@ -255,23 +261,22 @@ class GpuRenderActivity : AppCompatActivity() {
                 tvGpuStatus.text = "GPU: Available (init: $success)"
                 Log.d(TAG, "GPU initialized: $success")
             }
-            // P6-W4 §5.7: GPU lens init 완료 후 env_map 로드 (NOT_INITIALIZED 회피).
-            if (success && !envMapLoaded) {
-                loadEnvMapAsset()
-                envMapLoaded = true
-            }
-            // P6-W7: GPU lens init 완료 후 lens_meta.json 등록 (즉시 주입 보장).
-            if (success && !lensMetaLoaded) {
-                loadLensMetadataAsset()
-                lensMetaLoaded = true
-            }
-            // 뷰티 초기/복원: GL 컨텍스트 생성·재생성 후 현재 슬라이더 상태를 적용한다.
-            // queueEvent 기반 set*는 GL init 전엔 무효화되므로, 여기서 재적용해야
-            // 초기 피부·화사함 최대값이 실제로 보인다(슬라이더를 만지지 않아도).
             if (success) {
+                // P6-W4 §5.7: env_map은 GL 텍스처라 EGL 컨텍스트 (재)생성마다 소실된다
+                //   → 1회 가드 없이 매번 재로드해야 백그라운드 복귀 후 반사가 동작한다.
+                //   (lens_meta는 코어 CPU 상태 g_sku_registry라 컨텍스트와 무관하게 생존 → 1회 가드 유지.)
+                loadEnvMapAsset()
+                if (!lensMetaLoaded) {
+                    loadLensMetadataAsset()
+                    lensMetaLoaded = true
+                }
+                // 뷰티·렌즈·렌더 토글 복원: GL 컨텍스트 (재)생성 후 native 렌더러 상태가 기본값으로
+                // 리셋되므로 현재 UI 상태를 재적용한다. queueEvent 기반 set*는 GL init 전엔 무효화되므로
+                // 여기서 재적용해야 초기/복귀 시 피부·렌즈·반사가 실제로 반영된다(슬라이더/렌즈 재선택 없이).
                 runOnUiThread {
                     applyBeautyFromSliders()
                     cameraGLView.setFrameSyncEnabled(frameSyncEnabled)  // GL 재생성 후 fsync 복원
+                    restoreLensRenderState()
                 }
             }
         }
@@ -623,6 +628,34 @@ class GpuRenderActivity : AppCompatActivity() {
         cameraGLView.setSkinRadiance(radianceSteps[seekRadiance.progress])
         beautyConfig.slimFace = slimSteps[seekSlim.progress]
         cameraGLView.setBeautyConfig(beautyConfig)
+    }
+
+    /**
+     * EGL 컨텍스트 (재)생성 후 native 렌즈 렌더 상태 복원.
+     *
+     * onSurfaceCreated가 releaseGpuLens()+initGpuLens()로 GPULensRenderer를 새 컨텍스트에 재생성하면
+     * reflection/measured-luma/detail/렌즈 텍스처 등 native 멤버가 기본값/미로드로 돌아간다.
+     * 백그라운드 복귀 시 렌즈 소멸·반사 미동작을 막기 위해 현재 UI 상태를 재주입한다.
+     */
+    private fun restoreLensRenderState() {
+        // 반사 모드/강도 (native GPULensRenderer 멤버 — 컨텍스트 재생성 시 기본값으로 리셋됨)
+        cameraGLView.setReflectionMode(reflectionMode)
+        cameraGLView.setReflectionIntensity(intensitySweep[intensitySweepIdx])
+        // 렌더 품질 토글(현재 UI 상태)
+        cameraGLView.setUseMeasuredLuma(w7MeasuredOn)
+        cameraGLView.setDetailReinject(w6DetailOn)
+        // 현재 선택 렌즈 텍스처 재업로드 (stale native texture는 onSurfaceCreated에서 이미 해제됨).
+        if (::lensManager.isInitialized) {
+            lensManager.currentLens?.let { lens ->
+                if (lens.id != NoLens.ID) {
+                    lensManager.getTexture(lens)?.let { bmp ->
+                        cameraGLView.setLensTexture(bmp, lens.id)
+                        cameraGLView.setLensConfig(lensConfig)
+                        cameraGLView.setLensEnabled(true)
+                    }
+                }
+            }
+        }
     }
 
     /** off-aware 단계 라벨 (값 0이면 "off"). */
@@ -980,7 +1013,8 @@ class GpuRenderActivity : AppCompatActivity() {
         // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요, LEGACY 동일)
         // TASKS 전용 핸들 — 같은 코어 stabilize, LEGACY 핸들 수명 불간섭 (§5-5)
         if (tasksStabilizerHandle == 0L) {
-            tasksStabilizerHandle = IrisLensSDK.createStabilizer()
+            // hold 연장본으로 생성 — 눈 일부 감김 시 얼굴 dropout 동안 렌즈 유지(stabilizerHoldFrames 주석 참조).
+            tasksStabilizerHandle = IrisLensSDK.createStabilizer(stabilizerHoldFrames)
         }
         if (tasksStabilizerHandle != 0L) {
             val timestampSec = System.nanoTime() / 1_000_000_000.0
@@ -1130,8 +1164,8 @@ class GpuRenderActivity : AppCompatActivity() {
     // P6-W4: 환경 반사 벤치 (env_map 로드 + 3 프로토타입 토글)
     //=========================================================================
 
-    private var envMapLoaded = false
-    private var lensMetaLoaded = false  // P6-W7: lens_meta.json 1회 등록 가드
+    // env_map은 GL 텍스처라 컨텍스트 (재)생성마다 재로드(onGpuInitialized) — 1회 가드 없음.
+    private var lensMetaLoaded = false  // P6-W7: lens_meta.json 1회 등록 가드(코어 CPU 상태라 생존)
     private var reflectionMode = 0  // 0=OFF, 1=EnvMap, 2=Periphery
 
     // P6-W4 Phase A 보완: intensity sweep (W3 §5.7 기본 0.3, clamp 0~5 확장).

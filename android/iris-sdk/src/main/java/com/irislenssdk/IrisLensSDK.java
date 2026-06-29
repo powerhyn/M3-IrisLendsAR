@@ -1257,6 +1257,22 @@ public final class IrisLensSDK {
     }
 
     /**
+     * Temporal Stabilizer를 dropout hold 프레임 수를 지정하여 생성합니다.
+     *
+     * <p>검출 손실 시 마지막 유효 결과(face_mesh + iris + detected)를 hold하는 프레임 수입니다.
+     * 값이 클수록 일시적 미검출(예: 눈 일부 감김으로 인한 얼굴 dropout) 동안 결과가 더 오래
+     * 유지되어 렌즈 등 다운스트림 소비자가 제자리를 유지합니다. 기본 {@link #createStabilizer()}는
+     * 코어 기본값(5)을 사용합니다. 과대 시 얼굴이 실제로 프레임을 떠난 뒤에도 잔상이 남을 수 있습니다.</p>
+     *
+     * @param holdFrames dropout hold 프레임 수 (기본 5)
+     * @return Stabilizer 핸들 (0이면 실패)
+     */
+    public static long createStabilizer(int holdFrames) {
+        if (!sLibraryLoaded) return 0;
+        return nativeCreateStabilizerWithHold(holdFrames);
+    }
+
+    /**
      * 검출 결과를 스무딩합니다 (in-place).
      *
      * <p>전달된 IrisResult 객체의 값이 스무딩된 결과로 덮어씌워집니다.
@@ -1487,6 +1503,7 @@ public final class IrisLensSDK {
     // ========================================================================
 
     private static native long nativeCreateStabilizer();
+    private static native long nativeCreateStabilizerWithHold(int holdFrames);
     private static native float nativeStabilize(long handle, IrisResult result, double timestampSec);
     private static native void nativeDestroyStabilizer(long handle);
 

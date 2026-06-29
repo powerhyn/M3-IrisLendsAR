@@ -219,6 +219,11 @@ void GPULensRenderer::release() {
         ellipse_filters_[i].rotation.reset();
         eyelid_cache_[i] = EyelidCache{};
         ellipse_cache_[i] = EllipseCache{};
+        // BUGFIX: per-eye held pose 캐시도 초기화 (eyelid/ellipse 캐시와 동일 패턴)
+        has_held_pose_[i] = false;
+        held_iris_cx_[i]  = 0.0f;
+        held_iris_cy_[i]  = 0.0f;
+        held_iris_r_[i]   = 0.0f;
     }
 
     initialized_ = false;
@@ -732,7 +737,7 @@ float GPULensRenderer::medianLandmarkY(
 
 void GPULensRenderer::updateEyelidCache(const IrisResult& iris_result) {
     if (!iris_result.face_mesh_valid) {
-        // 검출 실패: 홀드 프레임 감소
+        // 얼굴 없음: 홀드 프레임 감소
         for (int i = 0; i < 2; ++i) {
             if (eyelid_cache_[i].valid_frames > 0) {
                 eyelid_cache_[i].valid_frames--;
@@ -741,8 +746,13 @@ void GPULensRenderer::updateEyelidCache(const IrisResult& iris_result) {
         return;
     }
 
-    // 왼쪽 눈
-    if (iris_result.left_detected) {
+    // BUGFIX(눈 일부 감김 렌즈 드롭): 눈꺼풀 랜드마크는 홍채가 가려져도 face mesh에서
+    //   계속 추적된다. 기존 per-eye left/right_detected 게이트를 제거하고 face_mesh_valid
+    //   이면 항상 좌/우 눈꺼풀을 갱신 → 홍채 검출 드롭 프레임에도 셰이더 Y-slab 입력이
+    //   stale되지 않는다. (홍채 pose hold와 짝을 이뤄 렌즈를 제자리에 유지)
+
+    // 왼쪽 눈 (피험자 좌안)
+    {
         float top_raw = medianLandmarkY(iris_result.face_mesh,
                                          LEFT_UPPER_EYELID, EYELID_INDEX_COUNT);
         float bot_raw = medianLandmarkY(iris_result.face_mesh,
@@ -750,12 +760,10 @@ void GPULensRenderer::updateEyelidCache(const IrisResult& iris_result) {
         eyelid_cache_[0].top = eyelid_top_filters_[0].filter(top_raw);
         eyelid_cache_[0].bottom = eyelid_bottom_filters_[0].filter(bot_raw);
         eyelid_cache_[0].valid_frames = EYELID_HOLD_FRAMES;
-    } else if (eyelid_cache_[0].valid_frames > 0) {
-        eyelid_cache_[0].valid_frames--;
     }
 
-    // 오른쪽 눈
-    if (iris_result.right_detected) {
+    // 오른쪽 눈 (피험자 우안)
+    {
         float top_raw = medianLandmarkY(iris_result.face_mesh,
                                          RIGHT_UPPER_EYELID, EYELID_INDEX_COUNT);
         float bot_raw = medianLandmarkY(iris_result.face_mesh,
@@ -763,8 +771,6 @@ void GPULensRenderer::updateEyelidCache(const IrisResult& iris_result) {
         eyelid_cache_[1].top = eyelid_top_filters_[1].filter(top_raw);
         eyelid_cache_[1].bottom = eyelid_bottom_filters_[1].filter(bot_raw);
         eyelid_cache_[1].valid_frames = EYELID_HOLD_FRAMES;
-    } else if (eyelid_cache_[1].valid_frames > 0) {
-        eyelid_cache_[1].valid_frames--;
     }
 }
 
@@ -778,15 +784,9 @@ void GPULensRenderer::updateEllipseCache(const IrisResult& iris_result) {
         return;
     }
 
+    // BUGFIX(일관성): 타원도 face mesh 윤곽에서 피팅되므로 eyelid와 동일하게 per-eye
+    //   홍채 검출 게이트를 제거하고 face_mesh_valid이면 항상 갱신. (ellipse는 기본 비활성)
     for (int eye = 0; eye < 2; ++eye) {
-        bool detected = (eye == 0) ? iris_result.left_detected : iris_result.right_detected;
-        if (!detected) {
-            if (ellipse_cache_[eye].valid_frames > 0) {
-                ellipse_cache_[eye].valid_frames--;
-            }
-            continue;
-        }
-
         float cx, cy, rx_inner, rx_outer, ry, rotation;
         fitEyeEllipse(iris_result.face_mesh, (eye == 0),
                        cx, cy, rx_inner, rx_outer, ry, rotation);
@@ -882,8 +882,27 @@ ErrorCode GPULensRenderer::renderToTexture(
     if (lens_texture_ == 0) {
         return ErrorCode::NoTextureLoaded;
     }
-    if (!iris_result.detected) {
-        // 검출 실패 시 입력을 그대로 반환
+
+    // BUGFIX(render-only): 캐시 갱신을 검출 게이트 앞으로 이동.
+    //   눈꺼풀/타원 캐시는 홍채 검출이 끊겨도 face mesh 기준으로 계속 갱신해야 셰이더
+    //   마스크 입력이 stale되지 않는다. 둘 다 GL 무관 CPU 연산이라 early-return·
+    //   makeCurrent 앞에서 안전하게 호출 가능.
+    updateEyelidCache(iris_result);
+    updateEllipseCache(iris_result);
+
+    // per-eye held pose 만료: 얼굴이 EYELID_HOLD_FRAMES 동안 사라지면(eyelid cache가
+    //   0으로 소진) hold도 함께 정리. (별도 카운터 없이 캐시 수명에 연동 — 과설계 회피)
+    for (int i = 0; i < 2; ++i) {
+        if (eyelid_cache_[i].valid_frames == 0) {
+            has_held_pose_[i] = false;
+        }
+    }
+
+    // early-return 완화: 진짜 얼굴이 없을 때만(face mesh 무효 + 양쪽 held pose 없음)
+    //   입력 그대로 passthrough. 얼굴이 있거나 held pose가 살아있으면 계속 진행해
+    //   렌즈를 그린다(홍채 검출 드롭에도 렌즈 유지). public detected 게이트는 제거하되
+    //   per-eye uApply가 "검출 || held" 기준이라 detected 의미 자체는 불변(render-only).
+    if (!iris_result.face_mesh_valid && !has_held_pose_[0] && !has_held_pose_[1]) {
         *output_texture = input_texture;
         return ErrorCode::Success;
     }
@@ -892,10 +911,6 @@ ErrorCode GPULensRenderer::renderToTexture(
     if (render_context_) {
         render_context_->makeCurrent();
     }
-
-    // 캐시 업데이트
-    updateEyelidCache(iris_result);
-    updateEllipseCache(iris_result);
 
     // W1: 내부 EyeRenderPacket 경유. avg_iris_luma 실측은 W6 이관, 현 단계는
     // packet 경로(미연결) → hold → fallback 0.35 만 동작. uniform은 매 프레임 주입.
@@ -918,6 +933,12 @@ ErrorCode GPULensRenderer::renderToTexture(
 
     // 좌/우 별도 eyeOpening 판정. eyelid 캐시 무효 시 open 취급(envelope 유지/복귀).
     for (int i = 0; i < 2; ++i) {
+        // blink-ramp 기본 OFF(헤더 blink_ramp_enabled_ 주석 참조) — 알파 1 고정, 가시성은
+        //   셰이더 eyelidMask(눈꺼풀 클립)만으로 제어. 활성 시에만 '거의 완전 감음'에서 fade.
+        if (!blink_ramp_enabled_) {
+            render_alpha_[i] = 1.0f;
+            continue;
+        }
         const float eye_opening = eyelid_cache_[i].valid_frames > 0
             ? std::fabs(eyelid_cache_[i].top - eyelid_cache_[i].bottom)
             : 1.0f;
@@ -975,18 +996,45 @@ ErrorCode GPULensRenderer::renderToTexture(
     float normalized_left_r = iris_result.left_radius / det_hf;
     float normalized_right_r = iris_result.right_radius / det_hf;
 
+    // BUGFIX(눈 일부 감김 렌즈 드롭): per-eye 마지막 정상 홍채 pose hold 갱신.
+    //   현재 프레임 검출이 유효하면 그 눈의 raw 중심/반경을 hold에 저장. 좌표는
+    //   iris_result.left_iris[0]와 동일 규약(정규화, Y-flip 前 raw)이라 아래 변환 경로
+    //   (Y-flip/mirror)를 그대로 탄다. 반경은 정규화값(normalized_*_r).
+    if (iris_result.left_detected) {
+        held_iris_cx_[0]  = iris_result.left_iris[0].x;
+        held_iris_cy_[0]  = iris_result.left_iris[0].y;
+        held_iris_r_[0]   = normalized_left_r;
+        has_held_pose_[0] = true;
+    }
+    if (iris_result.right_detected) {
+        held_iris_cx_[1]  = iris_result.right_iris[0].x;
+        held_iris_cy_[1]  = iris_result.right_iris[0].y;
+        held_iris_r_[1]   = normalized_right_r;
+        has_held_pose_[1] = true;
+    }
+
+    // per-eye 렌더 좌표 결정: 현재 검출 유효면 현재값, 아니면 held pose.
+    //   검출 드롭 프레임의 현재 홍채 중심은 garbage라 절대 쓰지 않고 held를 쓴다.
+    //   렌더 게이트도 "검출"이 아니라 "현재검출 || held 보유" 기준 → 홍채가 끊겨도
+    //   렌즈가 제자리에 유지되고, 셰이더 Y-slab(눈꺼풀)이 보이는 영역으로 클리핑한다.
+    //   완전히 감으면 blink ramp(eye_opening<kBlinkCloseThreshold)가 alpha를 0으로 fade.
+    bool left_use  = iris_result.left_detected  || has_held_pose_[0];
+    bool right_use = iris_result.right_detected || has_held_pose_[1];
+
     // 홍채 좌표 (Y-flip 후, mirror 시 X-flip만)
     // ④ §R3/ADR §7.4: 미러는 렌더 X-flip 단일책임. L/R 라벨은 피험자 기준 유지(eye-swap 금지).
     //   X-flip만으로 각 눈 좌표가 미러 화면 위치로 정확히 이동한다(피험자 우안 sensor low-x
     //   → 1-x high → 미러 화면 우측). 기존 std::swap 4종은 불필요한 이중처리라 제거.
-    float left_x = iris_result.left_iris[0].x;
-    float left_y = 1.0f - iris_result.left_iris[0].y;
-    float right_x = iris_result.right_iris[0].x;
-    float right_y = 1.0f - iris_result.right_iris[0].y;
-    float left_r = normalized_left_r;
-    float right_r = normalized_right_r;
-    bool left_det = iris_result.left_detected;
-    bool right_det = iris_result.right_detected;
+    float left_x  = iris_result.left_detected  ? iris_result.left_iris[0].x  : held_iris_cx_[0];
+    float left_y  = iris_result.left_detected  ? iris_result.left_iris[0].y  : held_iris_cy_[0];
+    float right_x = iris_result.right_detected ? iris_result.right_iris[0].x : held_iris_cx_[1];
+    float right_y = iris_result.right_detected ? iris_result.right_iris[0].y : held_iris_cy_[1];
+    float left_r  = iris_result.left_detected  ? normalized_left_r           : held_iris_r_[0];
+    float right_r = iris_result.right_detected ? normalized_right_r          : held_iris_r_[1];
+
+    // Y-flip (셰이더 좌상단 원점 규약 — 기존과 동일)
+    left_y  = 1.0f - left_y;
+    right_y = 1.0f - right_y;
 
     if (config.is_mirror) {
         left_x = 1.0f - left_x;
@@ -1001,7 +1049,9 @@ ErrorCode GPULensRenderer::renderToTexture(
         first_frame_logged = true;
     }
 
-    if (left_det && config.apply_left) {
+    // per-eye 렌더 게이트: "현재검출 || held pose" + config.apply_* 일 때 적용.
+    //   (검출만으로 게이트하던 기존 방식이 눈 일부 감김 시 렌즈 통째 드롭의 원인이었음)
+    if (left_use && config.apply_left) {
         glUniform2f(lens_uniforms_.uLeftIrisCenter, left_x, left_y);
         glUniform1f(lens_uniforms_.uLeftIrisRadius, left_r);
         glUniform1i(lens_uniforms_.uApplyLeft, 1);
@@ -1009,7 +1059,7 @@ ErrorCode GPULensRenderer::renderToTexture(
         glUniform1i(lens_uniforms_.uApplyLeft, 0);
     }
 
-    if (right_det && config.apply_right) {
+    if (right_use && config.apply_right) {
         glUniform2f(lens_uniforms_.uRightIrisCenter, right_x, right_y);
         glUniform1f(lens_uniforms_.uRightIrisRadius, right_r);
         glUniform1i(lens_uniforms_.uApplyRight, 1);

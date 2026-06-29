@@ -1752,6 +1752,34 @@ Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizer(
 }
 
 /**
+ * @brief Temporal Stabilizer 생성 (dropout hold 프레임 지정)
+ *
+ * Java: native long nativeCreateStabilizerWithHold(int holdFrames);
+ * 기본 config에서 hold_frames만 덮어쓴다(코어 default·다른 소비자 불변 — scoped).
+ * 눈 일부 감김 시 얼굴 전체 미검출(fillNoFace)이 수십 프레임 지속될 때, 마지막 유효
+ * 프레임(face_mesh + iris + detected=true)을 더 오래 hold해 렌즈가 제자리에 유지되게 한다.
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerWithHold(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jint holdFrames) {
+
+    IrisStabilizerConfig config;
+    iris_sdk_default_stabilizer_config(&config);
+    config.hold_frames = static_cast<int>(holdFrames);
+
+    int64_t handle = iris_sdk_create_stabilizer(&config);
+    if (handle == 0) {
+        LOGE("Failed to create stabilizer (hold=%d)", static_cast<int>(holdFrames));
+    } else {
+        LOGI("Stabilizer created: handle=%lld hold=%d",
+             static_cast<long long>(handle), static_cast<int>(holdFrames));
+    }
+    return static_cast<jlong>(handle);
+}
+
+/**
  * @brief 검출 결과 스무딩 (Java IrisResult를 in-place로 수정)
  *
  * Java: native float nativeStabilize(long handle, IrisResult result, double timestampSec);
