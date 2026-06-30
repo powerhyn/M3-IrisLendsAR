@@ -37,7 +37,9 @@
 - **림발은 렌즈 에셋 책임** — 셰이더 절차 darkening 금지([[limbal-in-asset-not-shader]]).
 
 ### 후속 진행 후보 (A-1 실기기 결과에 따라 분기)
-- **A-2 (ellipse 부족 시) — 눈 contour 폴리곤 클립**: `OverlayView.kt`의 16점 `buildEyePath`(레퍼런스, 현재 런타임 dead) → GPU stencil 또는 프래그먼트 point-in-polygon으로 이식. C++(cpp-pro). **주의**: GPU는 좌표 Y-flip(1-y)+미러 X-flip 규약, CPU OverlayView는 다른 공간 → 좌표 규약 정합 필수. smoothstep 페더 연속성·16변 분기 비용 평가. GPU측 `LEFT/RIGHT_EYE_CONTOUR` 16점이 이미 fitEyeEllipse 입력으로 들어오므로 새 랜드마크 플러밍은 불필요.
+- **A-2 (ellipse 부족 시) — 눈 contour 폴리곤 클립**: `OverlayView.kt:820 buildEyePath`(16점 레퍼런스, 현재 런타임 dead) → GPU stencil 또는 프래그먼트 point-in-polygon으로 이식. C++(cpp-pro). **주의**: GPU는 좌표 Y-flip(1-y)+미러 X-flip 규약, CPU OverlayView는 다른 공간 → 좌표 규약 정합 필수. GPU측 `LEFT/RIGHT_EYE_CONTOUR` 16점이 이미 fitEyeEllipse 입력으로 들어오므로 새 랜드마크 플러밍 불필요.
+  - **연산 비용 (마스크 = 풀스크린 쿼드 × 눈2 × 매프레임)**: Y-slab(~6~10 ALU)≈ellipse(~15~25 ALU) **둘 다 무시 가능 → 성능은 결정요소 아님, 보기로 선택**. contour는 16변 inside판정+페더(에지-거리/sqrt)로 마스크 수식만 ~150~300 ALU(≈20~40배). **단** 렌즈 셰이더는 이미 9-tap 디테일재주입 등 더 무거운 일을 해 contour조차 전체 프래그먼트의 소수 지분일 가능성↑. **필수 완화 = AABB early-out**(눈 바운딩박스 밖 픽셀은 16변 루프 통째 스킵 → 화면 대부분 비용 0); 페더 근사/stencil 별도패스도 대안.
+  - **⚖️ tier-adaptive 폴백 = 측정 게이트 후에만(미리 분기 금지)**: 인프라는 이미 있음(`GpuRenderActivity.kt:736 detectGpuTier`/`gpuTier` + RAM 해상도 tier `:830-846`). 그러나 (a) ellipse로 충분하면 contour 자체 불요, (b) contour+AABB면 저티어도 거의 공짜 가능, (c) tier 정의 유동적([[mid-low-tier-2026-redefine]]), (d) 기기별 시각 불일치·QA비용 → **선설계 금지**. 순서: contour+AABB 구현 → **저티어 실기기 FPS/frame-time A/B 실측**(아래 §4) → **실제 프레임 드롭 시에만** `when(gpuTier){HIGH→contour; else→ellipse/Y-slab}` 폴백 추가(그 시점 1줄, 미루는 비용≈0). 개발 중엔 A-1 수동 토글로 A/B, 출시 시점에만 tier 바인딩.
 - **A-3 — 완전 감음 잔여 띠**: MediaPipe 눈꺼풀 상/하 랜드마크 잔여 gap이 원인. ellipse/contour로 해소 안 되면 재검토. (eye_opening 기반 alpha fade = blink-ramp는 신호가 0.005~0.02로 작고 노이즈 커 임계값 불안정 → 이번 트랙에서 기각, 근거 `BUGFIX_resume_and_eye_clipping.md §3차`)
 - **env png(낮은 우선순위 — 깨진 게 아님)**: `android/demo-app/src/main/assets/env/env_default_256x128.png`는 디스크 유효 PNG(256x128, `file`로 확인)이고 LFS OID 불변(`git lfs status` → `51192df → 51192df`). git M·`diff --stat Bin 5222→129`는 `*.png filter=lfs`(`.gitattributes:14`)의 LFS smudge/포인터 표시 아티팩트(콘텐츠 변화 없음). **별도 조치 불필요**. ⚠️ `git checkout`은 LFS 포인터로 덮을 수 있으니 함부로 하지 말 것(거슬리면 `git lfs checkout`으로만 정리).
 
@@ -51,6 +53,7 @@
 - 빌드(A-1): `cd android && ./gradlew :demo-app:assembleDebug` → `BUILD SUCCESSFUL`.
 - 배선 확인: `grep -rn "setLensEllipseMask" android/demo-app/src` → 호출처 **1+ (현재 0)**.
 - 실기기: S23+ 설치 후 **Ellipse 버튼 토글 시 마스크 형상이 실제로 변함**(현재는 안 변함 = dead 증거).
+- (A-2 시) **성능 게이트**: contour+AABB 적용 후 데모 HUD `Render FPS` + SDK `gpu_profiler`로 ON/OFF·저티어 기기 frame-time A/B 실측 → **드롭 확인된 경우에만** tier 폴백 추가.
 
 ## 5. 워킹트리 주의 — 커밋 금지 의도적 제외분 (정상 잔존, 중단 잔여물 아님)
 직전 버그픽스 커밋(`ed6ceab`)에서 **의도적으로 뺀** 3개가 워킹트리에 남아있음:
