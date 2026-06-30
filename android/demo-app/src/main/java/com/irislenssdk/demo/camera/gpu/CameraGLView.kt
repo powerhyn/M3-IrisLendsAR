@@ -44,9 +44,6 @@ class CameraGLView @JvmOverloads constructor(
     private var cameraSurfaceTexture: SurfaceTexture? = null
     private var cameraSurface: Surface? = null
 
-    // 초기화 상태
-    private var isGLInitialized = false
-
     // GPU 초기화 콜백
     var onGpuInitialized: ((Boolean) -> Unit)? = null
         set(value) {
@@ -99,8 +96,10 @@ class CameraGLView @JvmOverloads constructor(
     }
 
 
-    // 펜딩 SurfaceRequest (GL 초기화 전 Preview.setSurfaceProvider 호출 시)
-    private var pendingSurfaceRequest: SurfaceRequest? = null
+    // 펜딩 SurfaceRequest (최신 1건) — GL 컨텍스트 (재)생성 후 새 surface로 충족한다.
+    // GL 스레드(fulfill)·메인 스레드(getSurfaceProvider)·surfaceExecutor(취소 리스너)가 접근 → 잠금 보호.
+    @Volatile private var pendingSurfaceRequest: SurfaceRequest? = null
+    private val surfaceLock = Any()
 
     // Executor for surface release
     private val surfaceExecutor = Executors.newSingleThreadExecutor()
@@ -113,22 +112,27 @@ class CameraGLView @JvmOverloads constructor(
         setEGLConfigChooser(8, 8, 8, 8, 16, 0)
         holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
 
+        // 백그라운드 복귀 시 EGL 컨텍스트 파괴를 가능한 기기에서 회피(주 완화책).
+        // 단 보존은 드라이버 의존이라 보장되지 않으므로, 컨텍스트 손실 복원 경로
+        // (아래 surface 핸드오프 + CameraGLRenderer.onSurfaceCreated의 stale 핸들 리셋 +
+        //  GpuRenderActivity.onGpuInitialized의 렌즈/env_map 재적용)와 반드시 함께 동작한다.
+        preserveEGLContextOnPause = true
+
         // 렌더러 설정
         setRenderer(glRenderer)
         renderMode = RENDERMODE_CONTINUOUSLY
 
-        // SurfaceTexture 콜백 설정
+        // SurfaceTexture 콜백 — EGL 컨텍스트가 (재)생성될 때마다 새 SurfaceTexture가 만들어진다.
+        // 컨텍스트가 보존되면 호출되지 않는다. 구 컨텍스트 surface를 정리·교체하고,
+        // 대기 중인 CameraX 요청을 새 surface로 충족한다.
         glRenderer.onSurfaceTextureAvailable = { surfaceTexture ->
             Log.d(TAG, "SurfaceTexture available from GL")
+            // 구 컨텍스트의 surface는 stale — 정리. 컨텍스트 재생성 시점엔 CameraX가 재bind 과정에서
+            // 구 request를 이미 취소했으므로 release가 BufferQueue를 abandon시킬 위험이 없다.
+            cameraSurface?.let { old -> runCatching { old.release() } }
             cameraSurfaceTexture = surfaceTexture
             cameraSurface = Surface(surfaceTexture)
-            isGLInitialized = true
-
-            // 펜딩 요청 처리
-            pendingSurfaceRequest?.let { request ->
-                provideSurfaceToRequest(request)
-                pendingSurfaceRequest = null
-            }
+            fulfillPendingSurfaceRequest()
         }
     }
 
@@ -140,40 +144,56 @@ class CameraGLView @JvmOverloads constructor(
     fun getSurfaceProvider(): Preview.SurfaceProvider {
         return Preview.SurfaceProvider { request ->
             Log.d(TAG, "SurfaceProvider received request: ${request.resolution}")
-
-            if (isGLInitialized && cameraSurface != null) {
-                provideSurfaceToRequest(request)
-            } else {
-                // GL 초기화 전이면 펜딩
-                Log.d(TAG, "GL not initialized, pending request")
+            synchronized(surfaceLock) {
+                // 한 request엔 provideSurface/willNotProvideSurface 정확히 1회만 허용 —
+                // 직전 미충족 pending이 있으면 willNotProvideSurface로 정리한다(재bind 시 중복 방지).
+                pendingSurfaceRequest?.let { old ->
+                    if (old !== request) runCatching { old.willNotProvideSurface() }
+                }
                 pendingSurfaceRequest = request
             }
+            // CameraX가 이 request를 취소하면(재bind/언바인드 등) 참조를 정리한다.
+            request.addRequestCancellationListener(surfaceExecutor) {
+                synchronized(surfaceLock) {
+                    if (pendingSurfaceRequest === request) pendingSurfaceRequest = null
+                }
+            }
+            // 충족은 GL 스레드에서만 — '현재 유효한' cameraSurface(컨텍스트 보존 또는 재생성 후)로만
+            // 제공해 구(파괴된 컨텍스트의) stale surface 제공을 원천 차단한다. GL 스레드가 일시정지
+            // 상태(백그라운드)면 복귀 후 onSurfaceCreated→fulfill 또는 이 큐 이벤트가 실행되어 충족된다.
+            queueEvent { fulfillPendingSurfaceRequest() }
         }
     }
 
     /**
-     * SurfaceRequest에 Surface 제공
+     * 대기 중인 CameraX SurfaceRequest를 현재 유효한 cameraSurface로 충족한다.
+     *
+     * GL 스레드(onSurfaceTextureAvailable / getSurfaceProvider의 queueEvent)에서 호출된다.
+     * pendingSurfaceRequest·cameraSurface 캡처는 잠금으로 원자화하고, 실제 provideSurface는
+     * 잠금 밖에서 수행한다.
      */
-    private fun provideSurfaceToRequest(request: SurfaceRequest) {
-        val surface = cameraSurface ?: run {
-            Log.e(TAG, "Surface is null")
-            return
+    private fun fulfillPendingSurfaceRequest() {
+        val request: SurfaceRequest
+        val surface: Surface
+        synchronized(surfaceLock) {
+            request = pendingSurfaceRequest ?: return
+            surface = cameraSurface ?: return
+            pendingSurfaceRequest = null
         }
 
-        // SurfaceTexture 크기 설정
         val resolution = request.resolution
         cameraSurfaceTexture?.setDefaultBufferSize(resolution.width, resolution.height)
-
         // GL 스레드에서 프레임 크기 설정 (FBO 재생성 포함)
         queueEvent {
             glRenderer.setFrameSize(resolution.width, resolution.height)
         }
 
         Log.d(TAG, "Providing surface: ${resolution.width}x${resolution.height}")
-
-        request.provideSurface(surface, surfaceExecutor) { result ->
-            Log.d(TAG, "Surface result: ${result.resultCode}")
-        }
+        runCatching {
+            request.provideSurface(surface, surfaceExecutor) { result ->
+                Log.d(TAG, "Surface result: ${result.resultCode}")
+            }
+        }.onFailure { Log.e(TAG, "provideSurface failed: ${it.message}") }
     }
 
     //=========================================================================
