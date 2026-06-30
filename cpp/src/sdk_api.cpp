@@ -779,7 +779,10 @@ void iris_sdk_default_stabilizer_config(IrisStabilizerConfig* config) {
     config->hold_frames = 5;
     config->outlier_radius_multiplier = 4.0f;
     config->outlier_confirm_frames = 1;
-    config->blink_ear_threshold = 0.2f;
+    // EYECLIP(실기기 검증): 0.2 → 0.05. 데모 stabilizer의 실효 진입점(헤더 기본값은 nullptr
+    // 경로 전용이라 데모에 미반영). squint(EAR~0.1-0.15)에서 blink-hold 홍채 고정을 끄고
+    // 거의 완전 감음(EAR<0.05)에만 hold. 눈꺼풀 가림은 렌더 클리핑이 처리.
+    config->blink_ear_threshold = 0.05f;
 }
 
 int64_t iris_sdk_create_stabilizer(const IrisStabilizerConfig* config) {

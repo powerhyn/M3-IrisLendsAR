@@ -39,7 +39,11 @@ struct StabilizerConfig {
     int outlier_confirm_frames = 1;            // 1프레임만 확인 (지연 최소화)
 
     // Blink detection (Eye Aspect Ratio)
-    float blink_ear_threshold = 0.2f;
+    // EYECLIP(실기기 검증): 0.2 → 0.05. squint(약간 감음, EAR~0.1-0.15)에서 blink-hold가
+    // 발동해 홍채 좌표가 고정(렌즈 박힘)되던 것을, 거의 완전 감음(EAR<0.05)에만 hold하도록.
+    // squint 동안 홍채를 계속 추적 → 렌즈가 눈동자를 따라감. 눈꺼풀 가림은 렌더 클리핑이 처리.
+    // ※ 데모 실효 진입점은 sdk_api.cpp default config(이 헤더 기본값은 nullptr 경로 전용).
+    float blink_ear_threshold = 0.05f;
 };
 
 // ============================================================
