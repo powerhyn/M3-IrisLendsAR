@@ -65,3 +65,30 @@
 - 작업 문서(이 kickoff 또는 새 `EYECLIP_*` 문서) 갱신 + 분할 커밋.
 - 머지: 직전 트랙처럼 `develop`에 `--no-ff` 직접 머지 + push (사용자 기본 방식). 또는 브랜치+PR — 사용자 확인.
 - 메모리 갱신: [[bugfix-resume-eye-clipping]](후속 진행 반영), [[demo-ellipse-mask-dead-wiring]](배선 완료 시 dead 해소로 갱신/삭제).
+
+---
+
+## 7. 실행 결과 (2026-06-30 세션)
+
+### A-1 (타원 마스크 native 배선) — ✅ 완료
+- `CameraGLView.setEllipseMask` → `IrisLensSDK.setLensEllipseMask(enabled)` 직접 호출로 배선(기존 dead `glRenderer` 경로 대체). `ellipseOn` 멤버 승격 + `restoreLensRenderState()` 복원. dead `CameraGLRenderer.setEllipseMask`/`ellipseMaskEnabled` 제거.
+- 검증: 빌드 OK, 호출처 0→1, 실기기 S23+ Ellipse OFF↔ON 토글 동작 확인. **커밋 `dd7bbfb`**.
+
+### squint-freeze 버그 — A-1 검증 중 발견·해결 (예상 밖 핵심 성과)
+- **증상**: 눈을 약간 감으면(squint) 렌즈가 화면에 박혀 머리를 못 따라옴. A-1(ellipse)과 무관(실기기 OFF/ON A/B로 확인).
+- **사용자 통찰(결정적)**: "클리핑은 렌더인데 왜 트래킹이 끊겨?" → 정확. 눈꺼풀 클리핑(셰이더 Y-slab/ellipse)은 검출과 독립. 클리핑·박힘은 "눈 감음" 공통 원인의 상관일 뿐.
+- **진단 경로(측정 게이트로 단계 확정)**:
+  - dropout freeze(`temporal_stabilizer.cpp:207-217`, faces=0 시 전역 pose freeze) → numFaces=1로 faces=0 정량 0 됐으나 **체감 박힘 그대로 = 주범 아님**. numFaces=1은 러버밴딩(내부 One-Euro 부활) 부작용만 추가 → 원복.
+  - rank1(FaceTracker presence/tracking 0.5→0.3) → 무력. conf가 detected→1.0/0.0 상수(`TasksToIrisResult.kt:120`)라 MediaPipe 내부 score 미관측 + numFaces=2가 tracking 경로 차단. 원복.
+  - **진범 = blink-hold**(`temporal_stabilizer.cpp:159-200`): squint로 EAR<0.2면 blink 판정 → 홍채 좌표를 직전 값에 hold → 렌즈가 이전 위치에 박힘. 검출 끊김 아님(faces=1 유지)이라 numFaces로 안 고쳐짐(모순 해소).
+- **처방(Option A)**: `blink_ear_threshold 0.2→0.05`. **실효 진입점은 `sdk_api.cpp:782` default config**(헤더 `temporal_stabilizer.h:45` 기본값은 nullptr 경로 전용 — cpp-pro 발견, [[verify-loadbearing-facts]] 사례). squint(EAR~0.1-0.15)엔 hold 미발동 → 홍채 라이브 추적, 거의 완전 감음(EAR<0.05)에만 hold. 눈꺼풀 가림은 렌더 클리핑이 처리.
+- **검증**: 실기기 S23+ — squint 박힘 사라짐(렌즈가 눈동자 추적), 완전 깜빡임 튐은 수용 가능(클리핑이 대부분 가림).
+- **안전성(cpp-pro 조사)**: blink-hold ≠ "per-eye held-pose" 불변식(후자는 렌더러 드롭아웃 hold `gpu_lens_renderer.cpp:999`, 트리거 `left_detected==false`로 별개 메커니즘). `blink_ramp_enabled_=false`/`detected`(render-only)/미러 X-flip 모두 불변. 완화 안전.
+- **테스트**: `test_temporal_stability.cpp`에 squint(EAR~0.1-0.15) 회귀 케이스 추가 — 기존 `BlinkHoldCoordinatesStable`은 완전 blink(EAR~0.02)만 검증해 이 버그가 통과한 갭 메움.
+
+### 곁가지 정리 / 보류
+- numFaces, presence/tracking 임계 변경 → 전부 원복(blink 처방으로 불필요).
+- Option B(blink-hold 완전 제거)는 깜빡임 튐 악화 위험으로 보류(필요 시 후속).
+
+### 커밋/머지
+- A-1: `dd7bbfb`. blink 처방: cpp 3파일(`sdk_api.h`/`sdk_api.cpp`/`temporal_stabilizer.h`) + squint 회귀 테스트. **머지는 보류**(사용자 요청 — 커밋만).
