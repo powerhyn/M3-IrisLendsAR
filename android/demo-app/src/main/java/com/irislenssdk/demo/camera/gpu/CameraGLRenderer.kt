@@ -250,7 +250,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var contactShadowEnabled: Boolean = false   // 기본 OFF
     private var shadowIntensity: Float = 0.15f          // 기본 강도
     private var maxDetailValue: Float = 1.2f             // 홍채 밝기 보정 상한
-    private var ellipseMaskEnabled: Boolean = false      // P4-W2-02: 기본 OFF (기존 Y-slab 유지)
 
     // === One Euro Filter: 눈꺼풀 경계 안정화 (Kotlin 파생 값 — SDK 코어 미커버) ===
     private val glLeftEyeTopFilter = OneEuroFilter(GL_FILTER_MIN_CUTOFF, GL_FILTER_BETA_EYELID, GL_FILTER_D_CUTOFF)
@@ -944,14 +943,6 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      */
     fun setMaxDetail(value: Float) {
         this.maxDetailValue = value.coerceIn(0.5f, 1.5f)
-    }
-
-    /**
-     * 비대칭 타원 Eye Mask 활성화/비활성화 (P4-W2-02)
-     * OFF 시 기존 Y-slab 마스킹 사용
-     */
-    fun setEllipseMask(enabled: Boolean) {
-        this.ellipseMaskEnabled = enabled
     }
 
     /**

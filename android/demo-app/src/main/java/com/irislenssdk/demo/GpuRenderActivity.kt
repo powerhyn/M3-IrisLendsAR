@@ -451,7 +451,6 @@ class GpuRenderActivity : AppCompatActivity() {
         }
 
         // 비대칭 타원 Eye Mask 토글 (P4-W2-02, 기본 OFF)
-        var ellipseOn = false
         btnToggleEllipse.setOnClickListener {
             ellipseOn = !ellipseOn
             cameraGLView.setEllipseMask(ellipseOn)
@@ -529,6 +528,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
+    private var ellipseOn = false      // EYECLIP A-1: 타원 눈마스크 토글(기본 OFF=Y-slab). 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
     private fun applyBenchCombo(idx: Int) {
@@ -644,6 +644,8 @@ class GpuRenderActivity : AppCompatActivity() {
         // 렌더 품질 토글(현재 UI 상태)
         cameraGLView.setUseMeasuredLuma(w7MeasuredOn)
         cameraGLView.setDetailReinject(w6DetailOn)
+        // EYECLIP A-1: use_ellipse_mask_는 releaseGpuLens()로 리셋 → 복귀 시 현재 UI 상태 재적용.
+        cameraGLView.setEllipseMask(ellipseOn)
         // 현재 선택 렌즈 텍스처 재업로드 (stale native texture는 onSurfaceCreated에서 이미 해제됨).
         if (::lensManager.isInitialized) {
             lensManager.currentLens?.let { lens ->
