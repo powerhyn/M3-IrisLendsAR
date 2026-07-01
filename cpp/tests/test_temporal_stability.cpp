@@ -81,22 +81,28 @@ static IrisResult makeResult(float cx, float cy, float radius,
     return r;
 }
 
-/// EAR 랜드마크를 눈 깜빡임 상태로 설정 (기존 단위 테스트의 setEARLandmarks 참고).
-static void setBlinkEAR(IrisResult& r, bool blinking) {
+/// EAR 랜드마크를 지정한 수직 offset으로 합성한다.
+///
+/// computeEAR()(temporal_stabilizer.cpp:316) 식 역산:
+///   EAR = (|p2-p6| + |p3-p5|) / (2·|p1-p4|)
+/// 본 레이아웃은 수평 |p1-p4| = 0.1(고정), 수직 |p2-p6| = |p3-p5| = 2·offset 이므로
+///   EAR = (2·offset + 2·offset) / (2·0.1) = 20·offset.
+/// 좌/우안 동일 EAR. 예) offset 0.015→EAR 0.30(개안), 0.001→0.02(완전 감음),
+///   0.006→0.12(squint, 임계 0.05<EAR<0.2 구간).
+/// 인덱스는 ④ §7.3 canonical: 33그룹=피험자 우안(kRightEAR), 362그룹=피험자 좌안(kLeftEAR).
+static void setEAR(IrisResult& r, float offset) {
     r.face_mesh_valid = true;
     const float mid = 0.4f;
     const float cx_left = 0.35f;
     const float cx_right = 0.65f;
 
-    // EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)
-    // Left: 33, 160, 158, 133, 153, 144
-    // Right: 362, 385, 387, 263, 373, 380
+    // 수평 p1/p4 (offset 무관) — Right: 33,133 / Left: 362,263
     r.face_mesh[33]  = {0.3f, mid, 0.0f, 1.0f};
     r.face_mesh[133] = {0.4f, mid, 0.0f, 1.0f};
     r.face_mesh[362] = {0.6f, mid, 0.0f, 1.0f};
     r.face_mesh[263] = {0.7f, mid, 0.0f, 1.0f};
 
-    const float offset = blinking ? 0.001f : 0.015f;
+    // 수직 p2/p3/p5/p6 (±offset) — Right: 160,158,153,144 / Left: 385,387,373,380
     r.face_mesh[160] = {cx_left, mid + offset, 0, 1};
     r.face_mesh[144] = {cx_left, mid - offset, 0, 1};
     r.face_mesh[158] = {cx_left, mid + offset, 0, 1};
@@ -106,6 +112,12 @@ static void setBlinkEAR(IrisResult& r, bool blinking) {
     r.face_mesh[380] = {cx_right, mid - offset, 0, 1};
     r.face_mesh[387] = {cx_right, mid + offset, 0, 1};
     r.face_mesh[373] = {cx_right, mid - offset, 0, 1};
+}
+
+/// EAR 랜드마크를 눈 깜빡임 상태로 설정 (기존 단위 테스트의 setEARLandmarks 참고).
+/// open=0.015(EAR 0.30) / blink=0.001(EAR 0.02). 값은 종전과 동일(setEAR 위임).
+static void setBlinkEAR(IrisResult& r, bool blinking) {
+    setEAR(r, blinking ? 0.001f : 0.015f);
 }
 
 /// 표준편차 계산 유틸리티.
@@ -418,6 +430,91 @@ TEST_F(TemporalStabilityTest, BlinkHoldCoordinatesStable) {
     // 마지막 프레임은 목표 위치에 수렴해야 함
     EXPECT_NEAR(recovery_x.back(), post_blink_x, 0.03f)
         << "Post-blink recovery did not converge to new position";
+}
+
+// ----------------------------------------------------------------------------
+// Squint 회귀 가드 — squint(반쯤 감음)에서는 blink-hold가 발동하면 안 된다.
+//
+// 배경(BUGFIX_resume_and_eye_clipping / EYECLIP): blink_ear_threshold=0.2 시절,
+//   squint(EAR~0.1-0.15)가 blink으로 오판되어 홍채 좌표가 직전 프레임에 hold(고정)
+//   되었다. 머리를 움직이면 렌즈가 화면에 박혀 따라오지 못하는 버그. 처방으로
+//   임계값을 0.05로 낮춰 squint에선 추적을 유지하고 '거의 완전 감음(EAR<0.05)'에만
+//   hold하도록 했다(완전 감음 가시성은 셰이더 눈꺼풀 클리핑이 책임).
+//
+// 기존 BlinkHoldCoordinatesStable은 완전 감음(EAR~0.02)만 검증해 이 버그가
+//   테스트를 통과했다. 본 테스트는 동일 입력에 대해
+//     (a) 0.05(처방):  squint 중에도 stabilized가 raw 머리 이동을 추종(고정 안 됨)
+//     (b) 0.2(구버전): squint가 blink로 오판되어 stabilized가 고정(버그 재현)
+//   을 대조해 squint 회귀를 가드한다.
+// ----------------------------------------------------------------------------
+TEST_F(TemporalStabilityTest, SquintDoesNotHoldIris) {
+    // setEAR: EAR = 20·offset. squint offset=0.006 ⇒ EAR=0.12 (0.05<0.12<0.2).
+    constexpr float kSquintOffset = 0.006f;
+    constexpr float kOpenOffset   = 0.015f;  // 개안 EAR=0.30
+    const float synth_ear = 20.0f * kSquintOffset;
+
+    // 전제 보호: 합성 EAR이 처방 임계(0.05)와 구버전 임계(0.2) 사이에 있어야
+    //   두 분기를 실제로 가른다.
+    ASSERT_GT(synth_ear, 0.05f) << "squint EAR must exceed 처방 임계값(0.05)";
+    ASSERT_LT(synth_ear, 0.2f)  << "squint EAR must be below 구버전 임계값(0.2)";
+
+    // 머리 이동 궤적: 홍채 절대 x를 0.3 → 0.7 로 등속 이동(squint 동안 옆으로 움직임).
+    constexpr int kWarm = 20;
+    constexpr int kMove = 40;
+    constexpr float x_start = 0.3f, x_end = 0.7f, fixed_y = 0.5f;
+
+    // 주어진 EAR 임계값으로 stabilizer를 돌리고, squint 이동 종료 시점의
+    // stabilized 홍채 x를 반환한다.
+    auto run_with_threshold = [&](float ear_threshold) -> float {
+        StabilizerConfig cfg;
+        cfg.blink_ear_threshold = ear_threshold;
+        TemporalStabilizer stab(cfg);
+
+        double t = 0.0;
+        // 개안 상태로 워밍업 (last_valid 확립 + One-Euro 수렴 → hold가 잡을 기준 마련).
+        for (int i = 0; i < kWarm; ++i) {
+            t += kFrameInterval;
+            auto r = makeResult(x_start, fixed_y, 10.0f);
+            r.timestamp_ms = static_cast<int64_t>(t * 1000);
+            setEAR(r, kOpenOffset);
+            stab.stabilize(r, t);
+        }
+
+        // squint 상태로 머리를 이동시키며 추적.
+        float last_stab_x = x_start;
+        for (int i = 0; i < kMove; ++i) {
+            t += kFrameInterval;
+            const float head_x = x_start + (x_end - x_start) *
+                (static_cast<float>(i + 1) / static_cast<float>(kMove));
+            auto r = makeResult(head_x, fixed_y, 10.0f);
+            r.timestamp_ms = static_cast<int64_t>(t * 1000);
+            setEAR(r, kSquintOffset);
+            auto out = stab.stabilize(r, t);
+            last_stab_x = out.stabilized.left_iris[0].x;
+        }
+        return last_stab_x;
+    };
+
+    const float tracked_x = run_with_threshold(0.05f);  // 처방
+    const float held_x    = run_with_threshold(0.2f);   // 구버전(버그)
+
+    std::fprintf(stderr,
+        "[Squint] EAR=%.3f | x: %.2f->%.2f | tracked(0.05)=%.4f held(0.2)=%.4f\n",
+        synth_ear, x_start, x_end, tracked_x, held_x);
+
+    // (a) 처방(0.05): squint 중 stabilized가 머리 이동을 추종 — 직전 프레임에
+    //     고정되지 않는다. One-Euro 지연을 감안해도 종점(0.7)에 충분히 근접.
+    EXPECT_NEAR(tracked_x, x_end, 0.05f)
+        << "squint 중 홍채가 머리 이동을 추종하지 못함 (blink-hold 오발동 의심)";
+    EXPECT_GT(tracked_x, 0.6f)
+        << "squint 중 stabilized가 시작 위치 근처에 고정됨 (추적 실패)";
+
+    // (b) 구버전(0.2): squint가 blink로 오판되어 stabilized가 시작 위치에 고정
+    //     (= 본 테스트가 가드하는 회귀). 처방이 구버전보다 훨씬 더 이동했음을 확인.
+    EXPECT_NEAR(held_x, x_start, 0.03f)
+        << "0.2 임계값에서 squint가 hold되지 않음 (테스트 전제 붕괴)";
+    EXPECT_GT(tracked_x - held_x, 0.3f)
+        << "처방(추적)과 구버전(고정)의 변위 차이가 충분히 크지 않음";
 }
 
 // ============================================================================

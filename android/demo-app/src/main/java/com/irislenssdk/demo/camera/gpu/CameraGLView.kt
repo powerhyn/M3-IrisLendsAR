@@ -405,11 +405,12 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
-     * 비대칭 타원 Eye Mask 활성화/비활성화 (P4-W2-02)
+     * 비대칭 타원 Eye Mask 활성화/비활성화 (P4-W2-02 → EYECLIP A-1 배선).
+     * native GPULensRenderer(use_ellipse_mask_)를 직접 구동 — OFF 시 기존 Y-slab 마스킹.
      */
     fun setEllipseMask(enabled: Boolean) {
         queueEvent {
-            glRenderer.setEllipseMask(enabled)
+            com.irislenssdk.IrisLensSDK.setLensEllipseMask(enabled)
         }
     }
 

@@ -885,7 +885,7 @@ typedef struct IrisStabilizerConfig {
     int hold_frames;                /**< Dropout hold 프레임 수 (기본 5) */
     float outlier_radius_multiplier;/**< 아웃라이어 판정 반지름 배수 (기본 4.0 — 코드 정합) */
     int outlier_confirm_frames;     /**< 아웃라이어 확인 프레임 수 (기본 1 — 코드 정합; ≥2라야 단일프레임 reject 활성) */
-    float blink_ear_threshold;      /**< 눈깜빡임 EAR 임계값 (기본 0.2) */
+    float blink_ear_threshold;      /**< 눈깜빡임 EAR 임계값 (기본 0.05 — squint hold 회피, EYECLIP) */
 } IrisStabilizerConfig;
 
 /**
