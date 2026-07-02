@@ -621,12 +621,12 @@ void iris_sdk_default_lens_config(IrisLensConfig* config) {
     }
 
     config->opacity = 0.7f;
-    config->scale = 1.0f;
+    config->scale = 1.3f;  // 실기기 튜닝(989fdac/6f596a2) canonical 승격 (P6-W2 §5.12 패턴)
     config->offset_x = 0.0f;
     config->offset_y = 0.0f;
     config->rotation = 0.0f;
     config->blend_mode = IRIS_BLEND_LUMINANCE_TINT_LINEAR;  // P6-W2 §5.12 canonical default
-    config->edge_feather = 0.1f;
+    config->edge_feather = 0.15f;  // 실기기 튜닝(989fdac/6f596a2) canonical 승격
     config->apply_left = true;
     config->apply_right = true;
     config->is_mirror = false;

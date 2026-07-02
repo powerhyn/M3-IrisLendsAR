@@ -283,12 +283,12 @@ TEST_F(SdkApiTest, DefaultLensConfigSetsCorrectValues) {
     iris_sdk_default_lens_config(&config);
 
     EXPECT_FLOAT_EQ(0.7f, config.opacity);
-    EXPECT_FLOAT_EQ(1.0f, config.scale);
+    EXPECT_FLOAT_EQ(1.3f, config.scale);  // 실기기 튜닝 canonical 승격 (989fdac/6f596a2)
     EXPECT_FLOAT_EQ(0.0f, config.offset_x);
     EXPECT_FLOAT_EQ(0.0f, config.offset_y);
     EXPECT_FLOAT_EQ(0.0f, config.rotation);
     EXPECT_EQ(IRIS_BLEND_LUMINANCE_TINT_LINEAR, config.blend_mode);  // P6-W2 §5.12 canonical default
-    EXPECT_FLOAT_EQ(0.1f, config.edge_feather);
+    EXPECT_FLOAT_EQ(0.15f, config.edge_feather);  // 실기기 튜닝 canonical 승격
     EXPECT_TRUE(config.apply_left);
     EXPECT_TRUE(config.apply_right);
 }

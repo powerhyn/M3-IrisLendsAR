@@ -2011,8 +2011,8 @@ Java_com_irislenssdk_IrisLensSDK_nativeRenderLensTexture(
     } else {
         // 기본값
         config.opacity = 0.7f;
-        config.scale = 1.0f;
-        config.edge_feather = 0.1f;
+        config.scale = 1.3f;        // 실기기 튜닝(989fdac/6f596a2) canonical 승격 (P6-W2 §5.12 패턴)
+        config.edge_feather = 0.15f;
         config.apply_left = true;
         config.apply_right = true;
         config.blend_mode = IRIS_BLEND_LUMINANCE_TINT_LINEAR;  // P6-W2 §5.12 canonical default
