@@ -91,4 +91,22 @@
 - Option B(blink-hold 완전 제거)는 깜빡임 튐 악화 위험으로 보류(필요 시 후속).
 
 ### 커밋/머지
-- A-1: `dd7bbfb`. blink 처방: cpp 3파일(`sdk_api.h`/`sdk_api.cpp`/`temporal_stabilizer.h`) + squint 회귀 테스트. **머지는 보류**(사용자 요청 — 커밋만).
+- A-1: `dd7bbfb`. blink 처방: cpp 3파일(`sdk_api.h`/`sdk_api.cpp`/`temporal_stabilizer.h`) + squint 회귀 테스트. ~~머지 보류~~ → **develop 머지 완료(`4a25d1b`) + origin push**.
+
+## 8. A-2 실행 결과 (2026-07-01~02 세션, 브랜치 `feat/eyeclip-clip-quality`)
+
+### 판단 도구 — MaskDebug 오버레이 (`b8e2639`)
+- 셰이더 경계선 방식은 실기기에서 "잘 안 보임"(사용자) → 폐기, **OverlayView CPU 오버레이**로 재구현: 초록=실제 눈꺼풀 16점 폴리곤, 시안=GPU fitEyeEllipse 화면좌표 복제 타원(비대칭+회전, 폴리라인). 기어 패널 MaskEdge 버튼.
+- **판정(사용자, S23+)**: "초록이 확실히 타이트" → **A-2 contour 채택** + 방향 확정: S23+급=contour, 하위 티어=폴백(단 tier 바인딩은 실측 후 — kickoff §3 결정 준수).
+
+### A-2 구현 — 16점 contour 폴리곤 마스크 (`fda6fb1`)
+- 설계: 병렬 3차원 조사(셰이더/렌더러/표면) → 명세 확정 후 cpp-pro 구현. **fragment point-in-polygon**(IQ sdPolygon, crossing-parity=winding 무관이라 미러 안전), stencil 기각(EGL_STENCIL_SIZE=0).
+- 셰이더: `uUseEllipseMask` 0/1/2 확장(기존 Y-slab/ellipse 문자 그대로 보존=폴백), `vec2 uL/REyeContour[16]` + `vec4 AABB×2`(페더 확장, invalid→Y-slab 폴백), **AABB early-out**(눈 밖 픽셀 비교 4회), 페더 ±4px `1-smoothstep(-f,+f,sd)` 정방향(역순 undefined 금지), 순수 ALU(Adreno §8.9 안전).
+- 렌더러: `ContourCache/ContourFilters`(per-point OneEuro 4.0/15.0/1.0, 프레임당 ts 1회 공유) — `updateEllipseCache` 규약 복제(face_mesh_valid 게이트, EYELID_HOLD_FRAMES=5, per-eye held-pose 정합). 업로드 시 Y-flip→미러 X-flip→**aspect 사전곱(adjusted 공간, 등방 4px)**.
+- API: 기존 `setLensEllipseMask(bool)` 불변(어댑터 mode 0/1). 신규 internal `setLensEyelidMaskMode(int)` — bench_toggles 패턴(C/JNI/Java/KT). 데모 Ellipse 버튼→**3-way 순환(Mask: Y-slab/Ellipse/Contour)** + `restoreLensRenderState` 재적용.
+- 검증: ctest **572/572**(stale 단정 `30fbf9a` 수정 포함), 실기기 S23+ 셰이더 컴파일+**uniforms 45/45**, **contour 클립 시각 확인(사용자 "잘 먹네")**, 홈→복귀 Contour 유지.
+
+### 잔여 (다음 스텝)
+- **A23(저티어) FPS 실측** → 실제 드롭 시에만 tier 폴백 1줄(`when(gpuTier)`) 바인딩.
+- **A-3**: 완전 감음 잔여 띠가 contour로 해소됐는지 실기기 확인 → 잔존 시 재검토.
+- feat/eyeclip-clip-quality → develop 머지.
