@@ -826,4 +826,17 @@ void iris_sdk_set_use_measured_luma(int enabled) {
 #endif
 }
 
+// P7-W4 §5.8: TintLinearV2 흰자 빛남 cap internal C API (유효 틴트 배율 상한).
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출(gate_threshold와 동일 패턴).
+void iris_sdk_set_lens_sclera_tint_max(float cap) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setScleraTintMax(cap);
+    }
+#else
+    (void)cap;
+#endif
+}
+
 } // extern "C"

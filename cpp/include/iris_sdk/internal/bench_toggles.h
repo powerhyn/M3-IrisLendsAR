@@ -52,6 +52,8 @@ void iris_sdk_set_lens_blink_up_ms(float ms);
 void iris_sdk_set_lens_gate_threshold(float threshold);
 void iris_sdk_set_lens_detail_reinject(int enabled);
 void iris_sdk_set_use_measured_luma(int enabled);
+// P7-W4 §5.8: TintLinearV2 흰자 빛남 cap 벤치 토글 (유효 틴트 배율 상한).
+void iris_sdk_set_lens_sclera_tint_max(float cap);
 
 #ifdef __cplusplus
 }  // extern "C"

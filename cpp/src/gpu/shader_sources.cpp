@@ -272,6 +272,8 @@ uniform float uRightEyeTop;
 uniform float uRightEyeBottom;
 uniform float uEyelidFeather;
 uniform float uAvgIrisLum;
+// P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap). OFF=1e6 센티널(비트 동일).
+uniform float uScleraTintMax;
 uniform float uDetH;
 
 uniform int uScleraProtect;
@@ -346,7 +348,8 @@ vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
     vec3 baseL = toLinearFast(base);
     float lum = dot(baseL, LUMA_709_LENS);
     float scale = clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0);
-    vec3 tinted = toLinearFast(blend) * lum * scale;
+    float tintMul = min(lum * scale, uScleraTintMax);
+    vec3 tinted = toLinearFast(blend) * tintMul;
     vec3 result = mix(baseL, tinted, opacity);
     return toSRGBFast(result);
 }
