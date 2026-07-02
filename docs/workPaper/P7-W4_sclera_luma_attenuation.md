@@ -1,6 +1,7 @@
 # P7-W4: 흰자 빛남 1단계 — sclera luma attenuation (W5 Phase C 트랙)
 
-> **상태**: ✅ 브레인스토밍 R1 종료 + §5 확정 반영 (2026-06-10, 사용자 승인) — 3/3 합의 5건 + 2/3 다수결 1건(6.2→(c)), R2 불필요. 구현 대기 (`ar-lens-implement`). 첫 작업: 코드 전 S23+ 재베이스라인 (§5.7, 두 조명 조건).
+> **⭐ NLR 트랙 승계 (2026-07-02)**: 본 W는 **NLR-W1**으로 흡수됨 — 트랙 인덱스 `NLR-W0_index.md`, 계획서 `docs/plans/iridescent-dreaming-neumann.md`. §5 확정 사항 그대로 유효. 브랜치 develop(075a5de) 위로 rebase 완료.
+> **상태**: ✅ 브레인스토밍 R1 종료 + §5 확정 반영 (2026-06-10, 사용자 승인) — 3/3 합의 5건 + 2/3 다수결 1건(6.2→(c)), R2 불필요. 🔄 재베이스라인 진행 중 (§5.7, 두 조명 조건).
 > **작성**: 2026-06-10
 > **선행 의존**: ✅ P7-W2 완료 (avg_iris_luma 실측 default ON, develop 머지 `5dc1a04`)
 > **소요 추정**: 2.0~4.0 작업일 (P7-W0 §1.5)
@@ -93,10 +94,10 @@ SKU 6 누드 애쉬 로제(**가장 강함**) > SKU 2 런웨이 그레이 ≥ SK
 
 ### 4.1 Definition of Done (R1 확정 반영)
 
-- [ ] **(실기기)** 재베이스라인: W2 실측 ON 상태, **두 조명 조건(일반 실내 + 밝은 조명)** × SKU 2/5/6+대조군 1 빛남 잔존 확인 (§5.7). "잔존 미미"(SKU 6 본인 체감 기준)면 **코드 0줄 조기 종결**
-- [ ] **(코드)** 비율 cap 구현 (§5.8: `min(lum*scale, uScleraTintMax)`, 초기 cap≈1.275) + uniform 토글
-- [ ] **(코드)** internal API + demo 토글 체인 (W2 패턴)
-- [ ] **(실기기)** SKU 2/5/6 빛남 체감 ~50% 이상 감소 (재베이스라인 대비, 본인 실시간 토글 체감)
+- [x] **(실기기)** 재베이스라인: SKU 6 빛남 **meas/fb 모두 ②(거슬림)** → **구현 진행 판정** (2026-07-02, APK b281, `docs/bench/P7-W4/rebaseline_checklist.md` 결과 기입란). ⭐신규 관측: **lum:fb 선호(패턴 가시성)** — 틴트 강도 축은 NLR-W2/W6 이월
+- [x] **(코드)** 비율 cap 구현 (§5.8: `min(lum*scale, uScleraTintMax)`, 초기 cap=1.275) — `shader_sources.cpp` + `gpu_lens_renderer.{h,cpp}` (2026-07-02)
+- [x] **(코드)** internal API + demo 토글 체인 — `bench_toggles.h`/`sdk_api_v2.cpp`/JNI/Java/`CameraGLView.kt`/데모 `btnW4Cap` sweep {1.275, 1.5, 2.0, OFF(1e6)}. **+ NLR-W1 확장: `restoreLensRenderState()` 기존 미복원 갭 일괄 보수** (gate/blinkUp/vetoMode/scleraProtect·contactShadow 필드 승격)
+- [ ] **(실기기)** SKU 2/5/6 빛남 체감 ~50% 이상 감소 (재베이스라인 대비, 본인 실시간 토글 체감) — **cap sweep 벤치 대기**
 - [ ] **(실기기)** SKU 1(대조군) 포함 6 SKU 자연도 무회귀 + **sclera 경계 평탄화/하이라이트 칙칙함 육안 확인** (§5.8 Gemini 소수 의견 검증 항목)
 - [ ] **(판정)** 만족 → 종결 / 부족 → soft-knee fallback(§5.8) 또는 P7-Spike-A 진입점 명시
 
@@ -240,3 +241,4 @@ docs/workPaper/P7-W4_brainstorm/{codex|gemini}_w4.md로 저장.
 | 2026-06-10 | 초안 — P7-W0 §2.P7-W4 + 코드 실측(§1.2~1.5) + W2 교정 후 베이스라인 문제(§1.6) 반영. 브레인스토밍 R1 준비. |
 | 2026-06-10 | R1 완료 — Codex/Gemini/Claude 3모델 응답 + 종합(`P7-W4_brainstorm/synthesis.md`). 3/3 합의 5건(6.1/6.4/6.5/6.6/6.7) + 2/3 다수결 1건(6.2→(c) 비율 cap, Gemini 소수 (a)) + 파생 소멸 1건(6.3 임계). §5 이동은 사용자 승인 대기. |
 | 2026-06-10 | **사용자 §5 이동 승인** — §5.7~5.13 확정 추가, §6 닫힘(6.0 요약표 + 6.8 구현 중 판정), §4.1 DoD 갱신(두 조명 재베이스라인 + (c) cap 구현 + 평탄화 검증 항목). 구현 대기 상태. |
+| 2026-07-02 | **NLR-W1 승계 + 재베이스라인 + 구현** — NLR 트랙 흡수(`NLR-W0_index.md`), 브랜치 develop(075a5de) rebase. 재베이스라인 판정 ②(구현 진행) + fb 선호 신규 관측. §5.8 cap 7단 배선 구현 완료(cpp-pro 위임 + Android 직접) + `restoreLensRenderState` 갭 4종 일괄 보수. **cap sweep 실기기 벤치 대기.** |
