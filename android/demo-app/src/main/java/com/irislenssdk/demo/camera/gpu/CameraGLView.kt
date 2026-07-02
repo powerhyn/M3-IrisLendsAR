@@ -415,6 +415,15 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * EYECLIP A-2: 눈꺼풀 마스크 모드 (0=Y-slab, 1=ellipse, 2=contour). GL 스레드 마샬링.
+     */
+    fun setEyelidMaskMode(mode: Int) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setLensEyelidMaskMode(mode)
+        }
+    }
+
+    /**
      * 리소스 해제
      */
     fun release() {

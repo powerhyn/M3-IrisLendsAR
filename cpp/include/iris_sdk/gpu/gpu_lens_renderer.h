@@ -140,6 +140,8 @@ public:
     void setContactShadowEnabled(bool enabled);
     void setContactShadowIntensity(float intensity);
     void setEllipseMaskEnabled(bool enabled);
+    /// EYECLIP A-2: 눈꺼풀 마스크 모드 (0=Y-slab, 1=ellipse, 2=contour). 범위 외 clamp[0,2].
+    void setEyelidMaskMode(int mode);
 
     // ========================================
     // P6-W6: 블링크 ramp(B5) / 저조도 디테일 gate(B9) / C10 디테일 재주입 토글
@@ -199,6 +201,7 @@ private:
     void renderFullscreenQuad();
     void updateEyelidCache(const IrisResult& iris_result);
     void updateEllipseCache(const IrisResult& iris_result);
+    void updateContourCache(const IrisResult& iris_result);  // EYECLIP A-2
 
     /// W1 §5.3 fallback chain (실측 source 미연결 버전).
     /// 1) packet.avg_iris_luma → 2) hold(직전 유효값) < kAvgLumaMaxHoldFrames → 3) fallback 상수.
@@ -242,7 +245,7 @@ private:
     int sclera_veto_mode_ = 0;  // P6-W5: 0=legacy, 1=color-veto(Codex), 2=luma-only(Gemini)
     bool contact_shadow_ = false;
     float shadow_intensity_ = 0.15f;
-    bool use_ellipse_mask_ = false;
+    int eyelid_mask_mode_ = 0;  // EYECLIP A-2: 0=Y-slab, 1=ellipse, 2=contour (기존 use_ellipse_mask_ 대체)
     // P5-W3-05 S1 D5: highlight_enabled_ 멤버 제거 (uniform/기능 모두 폐기)
 
     // P6-W7: SKU 레지스트리 (외부 소유, null 허용). 림발 셰이더 기능은 제거됐고
@@ -293,6 +296,11 @@ private:
         GLint uRightEyeEllipseCenter = -1;
         GLint uRightEyeEllipseRadii = -1;
         GLint uRightEyeEllipseRot = -1;
+        // EYECLIP A-2: contour 마스크 (모두 GLint — valid-count reinterpret_cast 루프 :519 보호)
+        GLint uLeftEyeContour = -1;
+        GLint uRightEyeContour = -1;
+        GLint uLeftContourAABB = -1;
+        GLint uRightContourAABB = -1;
 
         // 기타
         GLint uAvgIrisLum = -1;
@@ -344,6 +352,19 @@ private:
     };
     EllipseFilters ellipse_filters_[2];  // [0]=left, [1]=right
 
+    // EYECLIP A-2: contour 16점 per-point 필터 (ellipse와 동일 소스 랜드마크 → 동일 계수)
+    struct ContourFilters {
+        OneEuroFilter x[16];
+        OneEuroFilter y[16];
+        ContourFilters() {
+            for (int i = 0; i < 16; ++i) {
+                x[i] = OneEuroFilter(FILTER_MIN_CUTOFF, FILTER_BETA, FILTER_D_CUTOFF);
+                y[i] = OneEuroFilter(FILTER_MIN_CUTOFF, FILTER_BETA, FILTER_D_CUTOFF);
+            }
+        }
+    };
+    ContourFilters contour_filters_[2];  // [0]=left, [1]=right
+
     // ========================================
     // 눈꺼풀 캐시 (홀드 프레임)
     // ========================================
@@ -363,6 +384,14 @@ private:
         int valid_frames = 0;
     };
     EllipseCache ellipse_cache_[2];
+
+    // EYECLIP A-2: contour 16점 캐시 (raw 이미지 공간 저장 — 변환은 업로드 시점만)
+    struct ContourCache {
+        float x[16];
+        float y[16];
+        int valid_frames = 0;
+    };
+    ContourCache contour_cache_[2];  // [0]=left, [1]=right
 
     // ========================================
     // per-eye 마지막 정상 홍채 pose hold (BUGFIX: 눈 일부 감김 시 렌즈 드롭 방지)

@@ -288,13 +288,20 @@ uniform int uSourceType;            // 0=OFF, 1=EnvMap, 2=Periphery
 uniform float uReflectionIntensity; // 0.0~1.0, W3 기본 0.3
 uniform sampler2D uEnvMap;          // W4 env-map 프로토타입용 (W3 미사용)
 
-uniform int uUseEllipseMask;
+uniform int uUseEllipseMask;  // EYECLIP 눈꺼풀 마스크 모드: 0=Y-slab, 1=ellipse, 2=contour
 uniform vec2 uLeftEyeEllipseCenter;
 uniform vec3 uLeftEyeEllipseRadii;
 uniform float uLeftEyeEllipseRot;
 uniform vec2 uRightEyeEllipseCenter;
 uniform vec3 uRightEyeEllipseRadii;
 uniform float uRightEyeEllipseRot;
+
+// EYECLIP A-2: 16점 contour 눈꺼풀 마스크 (uUseEllipseMask==2).
+// 좌표는 adjusted 공간: CPU에서 Y-flip(1-y) → 미러 시 X-flip(1-x) → x*=detW/detH 적용 후 업로드.
+uniform vec2 uLeftEyeContour[16];
+uniform vec2 uRightEyeContour[16];
+uniform vec4 uLeftContourAABB;   // (minX,minY,maxX,maxY) adjusted 공간, feather 확장. z<=x이면 invalid(기본 0).
+uniform vec4 uRightContourAABB;
 
 // P6-W6 §5.2/§5.7: C10 홍채 디테일 재주입 + B9 저조도 gate.
 uniform vec2  uTexelSize;        // C10 3x3 blur 샘플 간격 (1/width, 1/height)
@@ -363,6 +370,23 @@ float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, fl
     float ry = radii.z;
     float ellipseDist = length(vec2(d.x / max(rx, 1e-5), d.y / max(ry, 1e-5)));
     return smoothstep(1.0, 1.0 - feather, ellipseDist);
+}
+
+// EYECLIP A-2: 16점 폴리곤 signed distance 마스크 (내부 음수, IQ sdPolygon 변형).
+// crossing-parity 부호 — winding 방향 무관(미러 X-flip의 winding 반전에 안전). 순수 ALU(texture 0회).
+float contourEyelidMask(vec2 p, vec2 pts[16], float featherUV) {
+    float d2 = 1e10;
+    float s = 1.0;
+    for (int i = 0, j = 15; i < 16; j = i, ++i) {
+        vec2 e = pts[j] - pts[i];
+        vec2 w = p - pts[i];
+        vec2 b = w - e * clamp(dot(w, e) / max(dot(e, e), 1e-12), 0.0, 1.0);
+        d2 = min(d2, dot(b, b));
+        bvec3 c = bvec3(p.y >= pts[i].y, p.y < pts[j].y, e.x * w.y > e.y * w.x);
+        if (all(c) || all(not(c))) s = -s;
+    }
+    float sd = s * sqrt(d2);
+    return 1.0 - smoothstep(-featherUV, featherUV, sd);
 }
 
 float calcScleraFactor(vec3 cameraColor) {
@@ -436,7 +460,7 @@ float calcFresnel(float dist) {
 vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio,
                float eyeTop, float eyeBottom,
                vec2 ellipseCenter, vec3 ellipseRadii, float ellipseRot,
-               float renderAlpha) {
+               int eyeIdx, float renderAlpha) {
     if (irisRadius <= 0.0) return camera;
 
     vec2 adjustedCoord = vec2(vTexCoord.x * aspectRatio, vTexCoord.y);
@@ -462,8 +486,17 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     float minY = min(eyeTop, eyeBottom);
     float maxY = max(eyeTop, eyeBottom);
     float eyelidMask;
-
-    if (uUseEllipseMask == 1 && ellipseRadii.z > 0.0) {
+    vec4 caabb = (eyeIdx == 0) ? uLeftContourAABB : uRightContourAABB;
+    if (uUseEllipseMask == 2 && caabb.z > caabb.x) {
+        // AABB early-out: 순수 ALU 루프만 스킵 — texture() fetch는 위에서 무조건 실행됨(Adreno §8.9 안전).
+        if (all(greaterThanEqual(adjustedCoord, caabb.xy)) && all(lessThanEqual(adjustedCoord, caabb.zw))) {
+            eyelidMask = (eyeIdx == 0)
+                ? contourEyelidMask(adjustedCoord, uLeftEyeContour, eyelidFeather)
+                : contourEyelidMask(adjustedCoord, uRightEyeContour, eyelidFeather);
+        } else {
+            eyelidMask = 0.0;
+        }
+    } else if (uUseEllipseMask == 1 && ellipseRadii.z > 0.0) {
         eyelidMask = asymmetricEllipseMask(vTexCoord, ellipseCenter, ellipseRadii, ellipseRot, eyelidFeather * 3.0);
     } else {
         float topClip = smoothstep(minY - eyelidFeather, minY + eyelidFeather, vTexCoord.y);
@@ -607,14 +640,14 @@ void main() {
         result = applyLens(result, uLeftIrisCenter, uLeftIrisRadius, aspectRatio,
                            uLeftEyeTop, uLeftEyeBottom,
                            uLeftEyeEllipseCenter, uLeftEyeEllipseRadii, uLeftEyeEllipseRot,
-                           uLeftRenderAlpha);
+                           0, uLeftRenderAlpha);
     }
 
     if (uApplyRight == 1 && uRightIrisRadius > 0.0) {
         result = applyLens(result, uRightIrisCenter, uRightIrisRadius, aspectRatio,
                            uRightEyeTop, uRightEyeBottom,
                            uRightEyeEllipseCenter, uRightEyeEllipseRadii, uRightEyeEllipseRot,
-                           uRightRenderAlpha);
+                           1, uRightRenderAlpha);
     }
 
     fragColor = result;

@@ -451,12 +451,20 @@ class GpuRenderActivity : AppCompatActivity() {
             btnToggleShadow.setBackgroundColor(if (shadowOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
-        // 비대칭 타원 Eye Mask 토글 (P4-W2-02, 기본 OFF)
+        // EYECLIP A-2: 눈꺼풀 마스크 모드 3-way 순환 (Y-slab → Ellipse → Contour)
         btnToggleEllipse.setOnClickListener {
-            ellipseOn = !ellipseOn
-            cameraGLView.setEllipseMask(ellipseOn)
-            btnToggleEllipse.text = if (ellipseOn) "Ellipse: ON" else "Ellipse: OFF"
-            btnToggleEllipse.setBackgroundColor(if (ellipseOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+            maskMode = (maskMode + 1) % 3
+            cameraGLView.setEyelidMaskMode(maskMode)
+            btnToggleEllipse.text = when (maskMode) {
+                1 -> "Mask: Ellipse"
+                2 -> "Mask: Contour"
+                else -> "Mask: Y-slab"
+            }
+            btnToggleEllipse.setBackgroundColor(when (maskMode) {
+                1 -> 0x4400CC00.toInt()
+                2 -> 0x440066FF.toInt()
+                else -> 0x44FF0000.toInt()
+            })
         }
 
 
@@ -529,7 +537,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
-    private var ellipseOn = false      // EYECLIP A-1: 타원 눈마스크 토글(기본 OFF=Y-slab). 컨텍스트 재생성 후 restoreLensRenderState로 복원.
+    private var maskMode = 0      // EYECLIP A-2: 눈꺼풀 마스크 모드 0=Y-slab, 1=ellipse, 2=contour. 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
     private fun applyBenchCombo(idx: Int) {
@@ -645,8 +653,9 @@ class GpuRenderActivity : AppCompatActivity() {
         // 렌더 품질 토글(현재 UI 상태)
         cameraGLView.setUseMeasuredLuma(w7MeasuredOn)
         cameraGLView.setDetailReinject(w6DetailOn)
-        // EYECLIP A-1: use_ellipse_mask_는 releaseGpuLens()로 리셋 → 복귀 시 현재 UI 상태 재적용.
-        cameraGLView.setEllipseMask(ellipseOn)
+        // EYECLIP A-2: eyelid_mask_mode_는 releaseGpuLens()로 리셋 → 복귀 시 현재 UI 상태 재적용
+        //   (누락 시 백그라운드 복귀 후 Y-slab로 강등됨).
+        cameraGLView.setEyelidMaskMode(maskMode)
         // 현재 선택 렌즈 텍스처 재업로드 (stale native texture는 onSurfaceCreated에서 이미 해제됨).
         if (::lensManager.isInitialized) {
             lensManager.currentLens?.let { lens ->

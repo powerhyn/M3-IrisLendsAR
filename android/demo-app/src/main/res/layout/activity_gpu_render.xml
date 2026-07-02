@@ -560,7 +560,7 @@
                             android:layout_width="0dp"
                             android:layout_height="36dp"
                             android:layout_weight="1"
-                            android:text="Ellipse: OFF"
+                            android:text="Mask: Y-slab"
                             android:textSize="12sp"
                             android:textAllCaps="false"
                             android:background="#44FF0000" />

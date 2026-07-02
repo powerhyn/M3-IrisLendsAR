@@ -701,6 +701,19 @@ void iris_sdk_set_lens_ellipse_mask(int enabled) {
 #endif
 }
 
+// EYECLIP A-2: 눈꺼풀 마스크 모드 토글 internal C API (0=Y-slab, 1=ellipse, 2=contour).
+// JNI 파일에서 bench_toggles.h로 선언·호출. 공개 sdk_api.h 미노출.
+void iris_sdk_set_lens_eyelid_mask_mode(int mode) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setEyelidMaskMode(mode);
+    }
+#else
+    (void)mode;
+#endif
+}
+
 // P5-W3-05 S1 D5: iris_sdk_set_lens_highlight는 no-op으로 축소.
 // 고정 조명 하이라이트 기능 폐기. 공개 C API 호환성을 위해 심볼은 유지.
 // C5 환경 반사 가산 계층(B2 결과 후)이 대체 역할 수행.

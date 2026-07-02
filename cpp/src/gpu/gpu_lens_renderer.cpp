@@ -498,6 +498,11 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uRightEyeEllipseCenter = glGetUniformLocation(lens_program_, "uRightEyeEllipseCenter");
     lens_uniforms_.uRightEyeEllipseRadii = glGetUniformLocation(lens_program_, "uRightEyeEllipseRadii");
     lens_uniforms_.uRightEyeEllipseRot = glGetUniformLocation(lens_program_, "uRightEyeEllipseRot");
+    // EYECLIP A-2: contour 마스크 (배열은 base 이름으로 location 획득 → glUniform2fv 일괄 업로드)
+    lens_uniforms_.uLeftEyeContour = glGetUniformLocation(lens_program_, "uLeftEyeContour");
+    lens_uniforms_.uRightEyeContour = glGetUniformLocation(lens_program_, "uRightEyeContour");
+    lens_uniforms_.uLeftContourAABB = glGetUniformLocation(lens_program_, "uLeftContourAABB");
+    lens_uniforms_.uRightContourAABB = glGetUniformLocation(lens_program_, "uRightContourAABB");
 
     lens_uniforms_.uAvgIrisLum = glGetUniformLocation(lens_program_, "uAvgIrisLum");
     lens_uniforms_.uDetH = glGetUniformLocation(lens_program_, "uDetH");
@@ -610,7 +615,12 @@ void GPULensRenderer::setContactShadowIntensity(float intensity) {
 
 void GPULensRenderer::setEllipseMaskEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(mutex_);
-    use_ellipse_mask_ = enabled;
+    eyelid_mask_mode_ = enabled ? 1 : 0;  // 하위호환 어댑터 (bool ↔ mode 0/1)
+}
+
+void GPULensRenderer::setEyelidMaskMode(int mode) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    eyelid_mask_mode_ = std::clamp(mode, 0, 2);
 }
 
 // P6-W6 §5.5 B5: 블링크 up ramp 토글 (60/80/120ms). 실기기 벤치로 확정.
@@ -802,6 +812,34 @@ void GPULensRenderer::updateEllipseCache(const IrisResult& iris_result) {
     }
 }
 
+// EYECLIP A-2: 16점 contour 캐시. updateEllipseCache 규약 정밀 복제 —
+//   face_mesh_valid 게이트, per-eye 홍채 검출 게이트 없음, valid_frames=EYELID_HOLD_FRAMES.
+//   프레임당 timestamp 1회 계산 후 filter(v, ts)로 64필터 간 steady_clock 호출 1회 공유(dt 정합).
+void GPULensRenderer::updateContourCache(const IrisResult& iris_result) {
+    if (!iris_result.face_mesh_valid) {
+        for (int i = 0; i < 2; ++i) {
+            if (contour_cache_[i].valid_frames > 0) {
+                contour_cache_[i].valid_frames--;
+            }
+        }
+        return;
+    }
+
+    const double ts = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    for (int eye = 0; eye < 2; ++eye) {
+        const int* contour = (eye == 0) ? LEFT_EYE_CONTOUR : RIGHT_EYE_CONTOUR;
+        for (int i = 0; i < 16; ++i) {
+            contour_cache_[eye].x[i] =
+                contour_filters_[eye].x[i].filter(iris_result.face_mesh[contour[i]].x, ts);
+            contour_cache_[eye].y[i] =
+                contour_filters_[eye].y[i].filter(iris_result.face_mesh[contour[i]].y, ts);
+        }
+        contour_cache_[eye].valid_frames = EYELID_HOLD_FRAMES;
+    }
+}
+
 // ============================================================================
 // P6-W1: avg_iris_luma fallback chain (실측 source 미연결)
 // ============================================================================
@@ -889,6 +927,7 @@ ErrorCode GPULensRenderer::renderToTexture(
     //   makeCurrent 앞에서 안전하게 호출 가능.
     updateEyelidCache(iris_result);
     updateEllipseCache(iris_result);
+    updateContourCache(iris_result);  // EYECLIP A-2 (모드 무관 항상 실행 — 필터 워밍 유지)
 
     // per-eye held pose 만료: 얼굴이 EYELID_HOLD_FRAMES 동안 사라지면(eyelid cache가
     //   0으로 소진) hold도 함께 정리. (별도 카운터 없이 캐시 수명에 연동 — 과설계 회피)
@@ -1126,10 +1165,10 @@ ErrorCode GPULensRenderer::renderToTexture(
     }
     glUniform1i(lens_uniforms_.uEnvMap, 2);
 
-    // 비대칭 타원 마스크
-    glUniform1i(lens_uniforms_.uUseEllipseMask, use_ellipse_mask_ ? 1 : 0);
+    // 눈꺼풀 마스크 모드 (0=Y-slab, 1=ellipse, 2=contour)
+    glUniform1i(lens_uniforms_.uUseEllipseMask, eyelid_mask_mode_);
 
-    if (use_ellipse_mask_) {
+    if (eyelid_mask_mode_ == 1) {
         // Y-flip: cy = 1 - cy, rot = -rot
         float l_cx = ellipse_cache_[0].cx;
         float l_cy = 1.0f - ellipse_cache_[0].cy;
@@ -1169,6 +1208,35 @@ ErrorCode GPULensRenderer::renderToTexture(
             glUniform2f(lens_uniforms_.uRightEyeEllipseCenter, r_cx, r_cy);
             glUniform3f(lens_uniforms_.uRightEyeEllipseRadii, r_rxi, r_rxo, r_ry);
             glUniform1f(lens_uniforms_.uRightEyeEllipseRot, r_rot);
+        }
+    }
+
+    // EYECLIP A-2: contour 16점 업로드 (adjusted 공간: Y-flip → 미러 X-flip → aspect 사전곱).
+    if (eyelid_mask_mode_ == 2) {
+        const float aspect = det_wf / det_hf;
+        const float feather_uv = feather_px / det_hf;   // = uEyelidFeather와 동일 값
+        const float margin = feather_uv + 1e-4f;        // 페더 + ε 만큼 AABB 확장
+        for (int eye = 0; eye < 2; ++eye) {
+            if (contour_cache_[eye].valid_frames <= 0) continue;  // 미유효 → AABB 기본 0 → 셰이더 Y-slab 폴백
+            float buf[32];
+            float mnx = 1e9f, mny = 1e9f, mxx = -1e9f, mxy = -1e9f;
+            for (int i = 0; i < 16; ++i) {
+                float x = contour_cache_[eye].x[i];
+                float y = 1.0f - contour_cache_[eye].y[i];        // Y-flip (홍채/ellipse cy 규약)
+                if (config.is_mirror) x = 1.0f - x;               // ④ §R3: 미러=per-eye X-flip 단일책임 (eye-swap 금지)
+                x *= aspect;                                      // adjusted 공간 사전곱 (셰이더 adjustedCoord와 동일)
+                buf[i * 2] = x;
+                buf[i * 2 + 1] = y;
+                mnx = std::min(mnx, x); mny = std::min(mny, y);
+                mxx = std::max(mxx, x); mxy = std::max(mxy, y);
+            }
+            if (eye == 0) {
+                glUniform2fv(lens_uniforms_.uLeftEyeContour, 16, buf);
+                glUniform4f(lens_uniforms_.uLeftContourAABB, mnx - margin, mny - margin, mxx + margin, mxy + margin);
+            } else {
+                glUniform2fv(lens_uniforms_.uRightEyeContour, 16, buf);
+                glUniform4f(lens_uniforms_.uRightContourAABB, mnx - margin, mny - margin, mxx + margin, mxy + margin);
+            }
         }
     }
 
