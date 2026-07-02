@@ -127,7 +127,8 @@ TEST(TemporalStabilizerTest, DefaultConstruction) {
     EXPECT_NEAR(cfg.fade_in_ms, 100.0f, 1e-3);
     EXPECT_NEAR(cfg.fade_out_ms, 200.0f, 1e-3);
     EXPECT_EQ(cfg.hold_frames, 5);
-    EXPECT_NEAR(cfg.blink_ear_threshold, 0.2f, 1e-3);
+    // EYECLIP: squint hold 회피 처방으로 0.2 → 0.05 (temporal_stabilizer.h 기본값과 정합)
+    EXPECT_NEAR(cfg.blink_ear_threshold, 0.05f, 1e-3);
 }
 
 TEST(TemporalStabilizerTest, CustomConfig) {
