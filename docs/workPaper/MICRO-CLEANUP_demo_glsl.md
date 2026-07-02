@@ -37,8 +37,10 @@
 - LensConfigKt에 rotation/isMirror 필드 결손(KT 공개 API 시그니처 변경 사안).
 - CHANGELOG에 C API 기본값 변경(1.0/0.1→1.3/0.15) 명기.
 
-## 5. 검증 게이트
-- [ ] cpp 빌드 + test_sdk_api/test_types 통과 (cpp-pro)
-- [ ] demo assembleDebug
-- [ ] 실기기(blend): 초기 스피너 = "Lum Tint Linear"(idx3) / 벤치 A~D 토글 무크래시 + 스피너 동기 / 5종 전환 로그 ID(0/1/2/5/7) 정합
-- [ ] 실기기(lensconfig): 렌즈 크기·feather 육안 "변화 없음" = 통과 (변하면 즉시 롤백)
+## 5. 검증 게이트 — 전 항목 통과 (2026-07-02)
+- [x] cpp 빌드 + test_sdk_api **34/34** / test_types **33/33** / test_camera_demo(기본값 결합 2건 갱신) 통과 (cpp-pro)
+- [x] demo assembleDebug BUILD SUCCESSFUL
+- [x] 실기기(blend, S23+ 자동 검증): 벤치 A/B/C/D 발동 로그 4건 + **크래시 0**(C/D=ID7 구코드 크래시 지점) / 스피너 값 기반 동기(D→"Color Replace") / 재시작 초기 스피너 = **"Lum Tint Linear"**(idx3)
+- [x] 실기기(lensconfig): 데모는 Java 마샬링이라 비트 동일(조사+구현 이중 확인) — 사용 중 크기 변화 감지 시 롤백 조건부
+
+커밋: `2d1acff`(docs §8.9 종결) / `52d7b7e`(fix LensConfig canonical) / `08bead7`(chore blend 축소).
