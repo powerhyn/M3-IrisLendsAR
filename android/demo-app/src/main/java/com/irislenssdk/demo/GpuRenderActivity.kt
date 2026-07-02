@@ -103,6 +103,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnToggleSclera: Button
     private lateinit var btnToggleShadow: Button
     private lateinit var btnToggleEllipse: Button
+    private lateinit var btnToggleMaskEdge: Button
 
     // P6-W5 §5.9: B1/B8 4조합 블라인드 벤치 토글 (A/B/C/D)
     private lateinit var btnBenchA: Button
@@ -676,6 +677,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnToggleDebug = findViewById(R.id.btnToggleDebug)
         btnToggleIris = findViewById(R.id.btnToggleIris)
         btnToggleLog = findViewById(R.id.btnToggleLog)
+        btnToggleMaskEdge = findViewById(R.id.btnToggleMaskEdge)
 
         // 버튼 상태 업데이트 헬퍼
         fun updateButtonColors() {
@@ -690,6 +692,9 @@ class GpuRenderActivity : AppCompatActivity() {
             )
             btnToggleLog.setTextColor(
                 if (stabilityLogger?.isActive == true) 0xFFFF4444.toInt() else 0xFFAAAAAA.toInt()
+            )
+            btnToggleMaskEdge.setTextColor(
+                if (overlayView.showMaskDebug) 0xFF00FFFF.toInt() else 0xFFAAAAAA.toInt()
             )
         }
 
@@ -722,6 +727,15 @@ class GpuRenderActivity : AppCompatActivity() {
                 stopStabilityLog()
             }
             updateButtonColors()
+        }
+
+        // EYECLIP: eyelidMask 형상 디버그 오버레이 토글 (초록=눈꺼풀 16점 / 시안=ellipse fit; A-2 판단용).
+        //   OverlayView(CPU 캔버스)에 뚜렷한 선으로 그림 — ellipse가 실제 눈꺼풀을 얼마나 따라가는지 비교.
+        btnToggleMaskEdge.setOnClickListener {
+            overlayView.showMaskDebug = !overlayView.showMaskDebug
+            overlayView.invalidate()
+            updateButtonColors()
+            Toast.makeText(this, "MaskDebug: ${if (overlayView.showMaskDebug) "ON (초록=눈꺼풀 / 시안=ellipse)" else "OFF"}", Toast.LENGTH_SHORT).show()
         }
 
         updateButtonColors()

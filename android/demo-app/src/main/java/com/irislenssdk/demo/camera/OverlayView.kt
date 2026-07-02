@@ -27,7 +27,11 @@ import android.view.View
 import com.irislenssdk.IrisResult
 import com.irislenssdk.LensConfig
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
@@ -111,6 +115,11 @@ class OverlayView @JvmOverloads constructor(
         private val RIGHT_EYE_CONTOUR_INDICES = intArrayOf(
             33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7
         )
+        // 내안각/외안각 인덱스 (GPU fitEyeEllipse와 동일, ④ §R2 canonical: inner=코쪽, outer=귀쪽)
+        private const val LEFT_INNER_CORNER = 362
+        private const val LEFT_OUTER_CORNER = 263
+        private const val RIGHT_INNER_CORNER = 133
+        private const val RIGHT_OUTER_CORNER = 33
     }
 
     // 검출 결과
@@ -193,6 +202,9 @@ class OverlayView @JvmOverloads constructor(
     // Face Mesh 표시 모드
     var showFaceMesh: Boolean = false
 
+    // EYECLIP: eyelidMask 형상 디버그 (초록=실제 눈꺼풀 16점, 시안=ellipse fit). showFaceMesh와 독립.
+    var showMaskDebug: Boolean = false
+
     // 얼굴 검출 영역 표시 (Face Detection 결과)
     var showFaceRect: Boolean = false
 
@@ -217,6 +229,21 @@ class OverlayView @JvmOverloads constructor(
         style = Paint.Style.FILL
         isAntiAlias = true
     }
+
+    // EYECLIP MaskDebug: 초록=실제 눈꺼풀 16점 윤곽, 시안=ellipse fit (형상 비교)
+    private val maskContourPaint = Paint().apply {
+        color = 0xFF00FF00.toInt()   // 초록 = 실제 눈꺼풀 contour
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+        isAntiAlias = true
+    }
+    private val maskEllipsePaint = Paint().apply {
+        color = 0xFF00E5FF.toInt()   // 시안 = ellipse fit 마스크
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+        isAntiAlias = true
+    }
+    private val maskDebugPath = Path()
 
     private val faceRectPaint = Paint().apply {
         color = COLOR_FACE_RECT
@@ -677,6 +704,11 @@ class OverlayView @JvmOverloads constructor(
                 drawDebugInfo(canvas, result, scaleFactor, offsetX, offsetY)
             }
         }
+
+        // EYECLIP: eyelidMask 형상 디버그 오버레이 (showFaceMesh 독립, cachedFaceMesh만 필요).
+        if (showMaskDebug && cachedFaceMeshValid && cachedFaceMesh != null) {
+            drawMaskDebug(canvas, cachedFaceMesh!!, scaleFactor, offsetX, offsetY)
+        }
     }
 
     /**
@@ -857,6 +889,105 @@ class OverlayView @JvmOverloads constructor(
 
         // Path 닫기
         path.close()
+    }
+
+    /**
+     * EYECLIP 디버그: eyelidMask 형상 비교 오버레이 (순수 디버그, A-2 판단용).
+     *   초록 = 실제 눈꺼풀 16점 윤곽(buildEyePath 재사용) — 눈이 실제로 감기는 모양.
+     *   시안 = ellipse fit — GPU fitEyeEllipse(gpu_lens_renderer.cpp:664~718)를 화면좌표에서 복제한
+     *          비대칭 타원 = ellipse 모드가 실제로 클립하는 형상.
+     *   둘의 어긋남 = "ellipse가 눈꺼풀을 못 따라가는 정도" → contour 이식 필요성 근거.
+     *   좌표는 buildEyePath와 동일 매핑(정규화→화면 + isMirror)을 재사용 → 미러/스케일 자동 정합.
+     */
+    private fun drawMaskDebug(
+        canvas: Canvas, mesh: FloatArray,
+        scaleFactor: Float, offsetX: Float, offsetY: Float
+    ) {
+        drawOneEyeMask(canvas, mesh, LEFT_EYE_CONTOUR_INDICES,
+            LEFT_INNER_CORNER, LEFT_OUTER_CORNER, scaleFactor, offsetX, offsetY)
+        drawOneEyeMask(canvas, mesh, RIGHT_EYE_CONTOUR_INDICES,
+            RIGHT_INNER_CORNER, RIGHT_OUTER_CORNER, scaleFactor, offsetX, offsetY)
+    }
+
+    private fun drawOneEyeMask(
+        canvas: Canvas, mesh: FloatArray, indices: IntArray,
+        innerIdx: Int, outerIdx: Int,
+        scaleFactor: Float, offsetX: Float, offsetY: Float
+    ) {
+        val n = indices.size
+        if (n == 0) return
+
+        // 정규화 랜드마크 → 화면좌표 (buildEyePath와 동일: coerce + scale + isMirror X-flip)
+        fun screenX(idx: Int): Float {
+            var s = mesh[idx * 3].coerceIn(0f, 1f) * imageWidth * scaleFactor + offsetX
+            if (isMirror) s = width - s
+            return s
+        }
+        fun screenY(idx: Int): Float =
+            mesh[idx * 3 + 1].coerceIn(0f, 1f) * imageHeight * scaleFactor + offsetY
+
+        // (a) 초록 = 실제 눈꺼풀 16점 윤곽 (클립에 쓰이는 buildEyePath 그대로)
+        buildEyePath(maskDebugPath, mesh, indices, scaleFactor, offsetX, offsetY)
+        canvas.drawPath(maskDebugPath, maskContourPaint)
+
+        // (b) 시안 = ellipse fit — 화면좌표에서 GPU fitEyeEllipse 복제.
+        //   화면(y-down) 공간에서 직접 fit → GPU의 Y-flip/미러 부기(1-cy, π-rot, rxi/rxo swap) 불필요.
+        //   fit 정의: center=16점 평균, rot=atan2(outer-inner), rx_outer=|outer|, rx_inner=|inner|·0.85,
+        //   ry=회전프레임 최대 |y|.
+        val sxArr = FloatArray(n)
+        val syArr = FloatArray(n)
+        var cx = 0f
+        var cy = 0f
+        for (i in 0 until n) {
+            val x = screenX(indices[i])
+            val y = screenY(indices[i])
+            sxArr[i] = x
+            syArr[i] = y
+            cx += x
+            cy += y
+        }
+        cx /= n
+        cy /= n
+
+        val innerX = screenX(innerIdx)
+        val innerY = screenY(innerIdx)
+        val outerX = screenX(outerIdx)
+        val outerY = screenY(outerIdx)
+
+        val rotation = atan2(outerY - innerY, outerX - innerX)
+        val rxInner = hypot(innerX - cx, innerY - cy) * 0.85f  // GPU: dist_inner * 0.85
+        val rxOuter = hypot(outerX - cx, outerY - cy) * 1.0f   // GPU: dist_outer * 1.0
+
+        // ry = 회전프레임 최대 |y| (fitEyeEllipse Step4와 동일 수식)
+        val cosNeg = cos(-rotation)
+        val sinNeg = sin(-rotation)
+        var ry = 0f
+        for (i in 0 until n) {
+            val px = sxArr[i] - cx
+            val py = syArr[i] - cy
+            val rotY = -px * sinNeg + py * cosNeg
+            ry = max(ry, abs(rotY))
+        }
+
+        // 비대칭 타원을 폴리라인으로 그림(drawOval은 비대칭+회전 불가). shader asymmetricEllipseMask와
+        //   동일: major(+, inner→outer)=rx_outer / major(-)=rx_inner / minor(직교 수직)=ry.
+        val cosR = cos(rotation)
+        val sinR = sin(rotation)
+        val steps = 48
+        maskDebugPath.reset()
+        for (i in 0..steps) {
+            val th = 2.0 * Math.PI * i / steps
+            val ct = cos(th).toFloat()
+            val st = sin(th).toFloat()
+            val rx = if (ct >= 0f) rxOuter else rxInner
+            val lx = rx * ct
+            val ly = ry * st
+            val ex = cx + lx * cosR - ly * sinR
+            val ey = cy + lx * sinR + ly * cosR
+            if (i == 0) maskDebugPath.moveTo(ex, ey) else maskDebugPath.lineTo(ex, ey)
+        }
+        maskDebugPath.close()
+        canvas.drawPath(maskDebugPath, maskEllipsePaint)
     }
 
     /**

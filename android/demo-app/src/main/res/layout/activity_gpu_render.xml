@@ -167,6 +167,20 @@
                 android:backgroundTint="#66666666"
                 style="@style/Widget.MaterialComponents.Button.TextButton" />
 
+            <!-- EYECLIP: eyelidMask 경계 디버그 오버레이 토글 (ellipse vs Y-slab 형상 비교) -->
+            <Button
+                android:id="@+id/btnToggleMaskEdge"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="MaskEdge"
+                android:textSize="10sp"
+                android:textAllCaps="false"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:minWidth="0dp"
+                android:backgroundTint="#66666666"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
         </LinearLayout>
 
         <!-- B1/B8 4조합 블라인드 벤치 패널 (A/B/C/D) -->
