@@ -407,16 +407,7 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // 블렌드 모드 선택
-        // P6-W1 검증용으로 Mode 5 (Luminance Tint Linear) 임시 노출.
-        // W1이 S1에서 비운 uAvgIrisLum 주입을 실측으로 복구했고, LTL이 그 값을
-        // 직접 쓰는 유일한 모드라 시각 확인이 여기서만 가능하다. ISS-005 B-2 존치
-        // 판정은 W2 블렌드 3종 확정 단계에서 재검토 예정.
-        val blendModeEntries = arrayOf(
-            "Normal" to 0, "Multiply" to 1, "Screen" to 2, "Overlay" to 3,
-            "Luminance Tint" to 4, "Luminance Tint Linear" to 5,
-            "Soft Light" to 6, "Color Replace" to 7
-        )
+        // 블렌드 모드 선택 — 활성 ID {0,1,2,5,7}만 노출 (micro-cleanup, sdk_api.h IrisBlendMode 정합).
         spinnerBlendMode.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item, blendModeEntries.map { it.first }.toTypedArray()
         )
@@ -540,13 +531,23 @@ class GpuRenderActivity : AppCompatActivity() {
     private var maskMode = 0      // EYECLIP A-2: 눈꺼풀 마스크 모드 0=Y-slab, 1=ellipse, 2=contour. 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
+    // 활성 blend ID {0,1,2,5,7}만 노출 — deprecated 3/4/6(Overlay/LumTint/SoftLight)은 셰이더가
+    // ID5로 fallback시키는 거짓 UI라 제외(shader_sources.cpp 분기 = 0/1/2/5/7만 존재).
+    // 스피너 position ≠ blend ID이므로 선택/복원은 반드시 값 기반 역조회(indexOfFirst)로.
+    private val blendModeEntries = arrayOf(
+        "Normal" to 0, "Multiply" to 1, "Screen Linear" to 2,
+        "Lum Tint Linear" to 5, "Color Replace" to 7
+    )
+
     private fun applyBenchCombo(idx: Int) {
         val combo = benchCombos[idx]
         lensConfig.blendMode = combo.blendMode
         cameraGLView.setLensConfig(lensConfig)
         cameraGLView.setScleraVetoMode(combo.vetoMode)
-        // blendMode 0/7은 spinner index와 1:1 매핑 (Normal=0, ColorReplace=7)
-        spinnerBlendMode.setSelection(combo.blendMode)
+        // 축소 스피너(5종)에서 position ≠ blend ID — 값 기반 역조회.
+        // (구 setSelection(blendMode)은 ID7이 어댑터 범위 초과 → IndexOutOfBounds 크래시)
+        val benchIdx = blendModeEntries.indexOfFirst { it.second == combo.blendMode }
+        if (benchIdx >= 0) spinnerBlendMode.setSelection(benchIdx)
         currentBenchIdx = idx
         updateBenchButtonHighlight()
         Toast.makeText(this, "Bench ${combo.label}", Toast.LENGTH_SHORT).show()
