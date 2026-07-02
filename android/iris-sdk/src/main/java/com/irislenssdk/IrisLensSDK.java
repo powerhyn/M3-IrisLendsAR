@@ -1015,6 +1015,16 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 토글 (벤치용 — 흰자 빛남 cap).
+     * @param cap 1.275(기본)/1.5/2.0, OFF=1e6 센티널(비트 동일 출력). C++ setter가 [1.0, 1e6] clamp.
+     */
+    public static void setScleraTintMax(float cap) {
+        if (sLibraryLoaded) {
+            nativeSetScleraTintMax(cap);
+        }
+    }
+
+    /**
      * P6-W6 C10: 홍채 디테일 재주입 on/off 토글 (벤치용).
      * @param enabled true=on(기본), false=off.
      */
@@ -1508,6 +1518,8 @@ public final class IrisLensSDK {
     private static native void nativeSetGateThreshold(float threshold);
     private static native void nativeSetDetailReinject(boolean enabled);
     private static native void nativeSetUseMeasuredLuma(boolean enabled);
+    // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap 벤치 토글
+    private static native void nativeSetScleraTintMax(float cap);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods

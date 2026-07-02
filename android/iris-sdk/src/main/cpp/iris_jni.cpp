@@ -2185,6 +2185,18 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetGateThreshold(
 }
 
 /**
+ * Java: native void nativeSetScleraTintMax(float cap);
+ * P7-W4 §5.8: TintLinearV2 흰자 빛남 cap (토글 1.275/1.5/2.0/OFF=1e6).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetScleraTintMax(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat cap)
+{
+    iris_sdk_set_lens_sclera_tint_max(static_cast<float>(cap));
+}
+
+/**
  * Java: native void nativeSetDetailReinject(boolean enabled);
  * P6-W6 C10: 홍채 디테일 재주입 on/off.
  */
