@@ -338,6 +338,15 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * P7-W4 §5.8: TintLinearV2 흰자 빛남 cap 토글 (1.275/1.5/2.0/OFF=1e6).
+     */
+    fun setScleraTintMax(cap: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setScleraTintMax(cap)
+        }
+    }
+
+    /**
      * P6-W6 C10: 홍채 디테일 재주입 on/off.
      */
     fun setDetailReinject(enabled: Boolean) {

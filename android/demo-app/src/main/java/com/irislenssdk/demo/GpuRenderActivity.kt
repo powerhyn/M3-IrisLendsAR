@@ -115,6 +115,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Gate: Button
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
+    private lateinit var btnW4Cap: Button        // P7-W4 §5.8: 흰자 빛남 cap sweep
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -234,6 +235,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Gate = findViewById(R.id.btnW6Gate)
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
+        btnW4Cap = findViewById(R.id.btnW4Cap)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -424,22 +426,20 @@ class GpuRenderActivity : AppCompatActivity() {
         val defaultIdx = blendModeEntries.indexOfFirst { it.second == lensConfig.blendMode }
         if (defaultIdx >= 0) spinnerBlendMode.setSelection(defaultIdx)
 
-        // Sclera Protection 토글 (P4-W2-01, 기본 ON)
-        var scleraOn = true
+        // Sclera Protection 토글 (P4-W2-01, 기본 ON) — NLR-W1: 복원 가능하도록 필드 승격
         btnToggleSclera.setOnClickListener {
-            scleraOn = !scleraOn
-            cameraGLView.setScleraProtect(scleraOn)
-            btnToggleSclera.text = if (scleraOn) "Sclera: ON" else "Sclera: OFF"
-            btnToggleSclera.setBackgroundColor(if (scleraOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+            scleraProtectOn = !scleraProtectOn
+            cameraGLView.setScleraProtect(scleraProtectOn)
+            btnToggleSclera.text = if (scleraProtectOn) "Sclera: ON" else "Sclera: OFF"
+            btnToggleSclera.setBackgroundColor(if (scleraProtectOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
-        // Contact Shadow 토글 (P4-W2-01, 기본 OFF)
-        var shadowOn = false
+        // Contact Shadow 토글 (P4-W2-01, 기본 OFF) — NLR-W1: 복원 가능하도록 필드 승격
         btnToggleShadow.setOnClickListener {
-            shadowOn = !shadowOn
-            cameraGLView.setContactShadow(shadowOn)
-            btnToggleShadow.text = if (shadowOn) "Shadow: ON" else "Shadow: OFF"
-            btnToggleShadow.setBackgroundColor(if (shadowOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+            contactShadowOn = !contactShadowOn
+            cameraGLView.setContactShadow(contactShadowOn)
+            btnToggleShadow.text = if (contactShadowOn) "Shadow: ON" else "Shadow: OFF"
+            btnToggleShadow.setBackgroundColor(if (contactShadowOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
         // EYECLIP A-2: 눈꺼풀 마스크 모드 3-way 순환 (Y-slab → Ellipse → Contour)
@@ -503,6 +503,14 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW7Measured.text = if (w7MeasuredOn) "lum:meas" else "lum:fb"
             Log.i(TAG, "P7-W2 measured luma → ${if (w7MeasuredOn) "on" else "off"}")
         }
+        // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap sweep (1.275/1.5/2.0/OFF).
+        btnW4Cap.setOnClickListener {
+            w4CapIdx = (w4CapIdx + 1) % w4CapSweep.size
+            val cap = w4CapSweep[w4CapIdx]
+            cameraGLView.setScleraTintMax(cap)
+            btnW4Cap.text = if (cap >= 1.0e5f) "cap:off" else String.format("cap%.2f", cap)
+            Log.i(TAG, "P7-W4 sclera tint cap → ${if (cap >= 1.0e5f) "off" else "$cap"}")
+        }
         // (P8 통합) skin/radiance/slim sweep 버튼 → 뷰티 탭 슬라이더로 이전 (setupBeautyControls).
     }
 
@@ -528,6 +536,16 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
+
+    // P7-W4 §5.8: 흰자 빛남 cap sweep. 기본 1.275(=0.85×1.5, 코어 기본과 일치), 마지막 = OFF 센티널(1e6, 비트 동일 출력).
+    private val w4CapSweep = floatArrayOf(1.275f, 1.5f, 2.0f, 1.0e6f)
+    private var w4CapIdx = 0
+
+    // NLR-W1 복원 갭 보수: 컨텍스트 재생성 시 native 기본값으로 리셋되는 상태들의 UI 측 진실값.
+    // (기존 지역 변수라 restoreLensRenderState가 복원 불가했던 구조 결함 — 필드 승격)
+    private var scleraProtectOn = true    // 코어 기본 ON과 일치
+    private var contactShadowOn = false   // 코어 기본 OFF와 일치
+    private var currentVetoMode = 0       // P6-W5 B8 미판정 — legacy 0 유지 (§5.10)
     private var maskMode = 0      // EYECLIP A-2: 눈꺼풀 마스크 모드 0=Y-slab, 1=ellipse, 2=contour. 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
@@ -544,6 +562,7 @@ class GpuRenderActivity : AppCompatActivity() {
         lensConfig.blendMode = combo.blendMode
         cameraGLView.setLensConfig(lensConfig)
         cameraGLView.setScleraVetoMode(combo.vetoMode)
+        currentVetoMode = combo.vetoMode  // NLR-W1: 컨텍스트 재생성 복원용 진실값
         // 축소 스피너(5종)에서 position ≠ blend ID — 값 기반 역조회.
         // (구 setSelection(blendMode)은 ID7이 어댑터 범위 초과 → IndexOutOfBounds 크래시)
         val benchIdx = blendModeEntries.indexOfFirst { it.second == combo.blendMode }
@@ -657,6 +676,15 @@ class GpuRenderActivity : AppCompatActivity() {
         // EYECLIP A-2: eyelid_mask_mode_는 releaseGpuLens()로 리셋 → 복귀 시 현재 UI 상태 재적용
         //   (누락 시 백그라운드 복귀 후 Y-slab로 강등됨).
         cameraGLView.setEyelidMaskMode(maskMode)
+        // NLR-W1: 기존 미복원 갭 일괄 보수 — 아래 native 상태들도 컨텍스트 재생성 시 기본값으로
+        //   리셋되나 복원 대상에서 빠져 있었음 (벤치 중 백그라운드 복귀 시 판정 조건이 조용히 어긋남).
+        cameraGLView.setBlinkUpMs(w6BlinkUpSweep[w6BlinkIdx])
+        cameraGLView.setGateThreshold(w6GateSweep[w6GateIdx])
+        cameraGLView.setScleraVetoMode(currentVetoMode)
+        cameraGLView.setScleraProtect(scleraProtectOn)
+        cameraGLView.setContactShadow(contactShadowOn)
+        // P7-W4 §5.8: 흰자 빛남 cap — 현재 sweep 값 재주입
+        cameraGLView.setScleraTintMax(w4CapSweep[w4CapIdx])
         // 현재 선택 렌즈 텍스처 재업로드 (stale native texture는 onSurfaceCreated에서 이미 해제됨).
         if (::lensManager.isInitialized) {
             lensManager.currentLens?.let { lens ->

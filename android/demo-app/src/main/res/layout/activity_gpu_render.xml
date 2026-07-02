@@ -307,6 +307,18 @@
                 android:backgroundTint="#66555555"
                 style="@style/Widget.MaterialComponents.Button.TextButton" />
 
+            <Button
+                android:id="@+id/btnW4Cap"
+                android:layout_width="72dp"
+                android:layout_height="36dp"
+                android:text="cap1.28"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
         </LinearLayout>
 
         <!-- TASKS frame-sync 킬스위치 -->
