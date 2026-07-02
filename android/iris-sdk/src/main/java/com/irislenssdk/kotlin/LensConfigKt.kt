@@ -36,11 +36,11 @@ import com.irislenssdk.LensConfig as JavaLensConfig
  * ```
  *
  * @property opacity 렌즈 투명도 (0.0 ~ 1.0, 기본값 0.7)
- * @property scale 렌즈 크기 배율 (기본값 1.0)
+ * @property scale 렌즈 크기 배율 (기본값 1.3 — 실기기 튜닝 canonical)
  * @property offsetX X축 오프셋 (-1.0 ~ 1.0, 기본값 0.0)
  * @property offsetY Y축 오프셋 (-1.0 ~ 1.0, 기본값 0.0)
  * @property blendMode 블렌드 모드 (기본값 LUMINANCE_TINT_LINEAR, P6-W2 §5.12 canonical default)
- * @property edgeFeather 가장자리 페더링 (0.0 ~ 1.0, 기본값 0.1)
+ * @property edgeFeather 가장자리 페더링 (0.0 ~ 1.0, 기본값 0.15 — 실기기 튜닝 canonical)
  * @property applyLeft 왼쪽 눈 적용 여부 (기본값 true)
  * @property applyRight 오른쪽 눈 적용 여부 (기본값 true)
  */
@@ -122,9 +122,9 @@ data class LensConfigKt(
 
     companion object {
         private const val DEFAULT_OPACITY = 0.7f
-        private const val DEFAULT_SCALE = 1.0f
+        private const val DEFAULT_SCALE = 1.3f  // 실기기 튜닝(989fdac/6f596a2) canonical 승격 (P6-W2 §5.12 패턴)
         private const val DEFAULT_OFFSET = 0.0f
-        private const val DEFAULT_FEATHER = 0.1f
+        private const val DEFAULT_FEATHER = 0.15f  // 실기기 튜닝(989fdac/6f596a2) canonical 승격
 
         /** 기본 설정 */
         val Default = LensConfigKt()

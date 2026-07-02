@@ -78,7 +78,7 @@ TEST_F(CameraDemoBasicTest, LensConfigDefaults) {
     iris_sdk::LensConfig config;
 
     EXPECT_FLOAT_EQ(config.opacity, 0.7f);
-    EXPECT_FLOAT_EQ(config.scale, 1.0f);
+    EXPECT_FLOAT_EQ(config.scale, 1.3f);  // 실기기 튜닝 canonical 승격 (989fdac/6f596a2)
     EXPECT_FLOAT_EQ(config.offset_x, 0.0f);
     EXPECT_FLOAT_EQ(config.offset_y, 0.0f);
     EXPECT_EQ(config.blend_mode, iris_sdk::BlendMode::LuminanceTintLinear);  // P6-W2 §5.12 canonical default
@@ -106,12 +106,12 @@ TEST_F(CameraDemoBasicTest, LensConfigRangeAdjustment) {
     config.opacity = std::clamp(config.opacity - 2.0f, 0.0f, 1.0f);
     EXPECT_FLOAT_EQ(config.opacity, 0.0f);
 
-    // 크기 조절 시뮬레이션 ([/] 키)
+    // 크기 조절 시뮬레이션 ([/] 키). 기본 scale 1.3(실기기 튜닝 canonical) 기준 상대 조절.
     config.scale = std::clamp(config.scale + 0.05f, 0.5f, 2.0f);
-    EXPECT_NEAR(config.scale, 1.05f, 0.01f);
+    EXPECT_NEAR(config.scale, 1.35f, 0.01f);
 
     config.scale = std::clamp(config.scale - 0.1f, 0.5f, 2.0f);
-    EXPECT_NEAR(config.scale, 0.95f, 0.01f);
+    EXPECT_NEAR(config.scale, 1.25f, 0.01f);
 }
 
 /**

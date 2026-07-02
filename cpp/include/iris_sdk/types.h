@@ -198,12 +198,12 @@ struct IrisResult {
  */
 struct LensConfig {
     float opacity = 0.7f;       ///< 투명도 (0.0~1.0)
-    float scale = 1.0f;         ///< 크기 배율
+    float scale = 1.3f;         ///< 크기 배율 — 실기기 튜닝(989fdac/6f596a2) canonical 승격 (P6-W2 §5.12 패턴)
     float offset_x = 0.0f;      ///< X 오프셋 (정규화)
     float offset_y = 0.0f;      ///< Y 오프셋 (정규화)
     float rotation = 0.0f;      ///< 회전 각도 (라디안, -PI~PI)
     BlendMode blend_mode = BlendMode::LuminanceTintLinear;  ///< 블렌드 모드 — P6-W2 §5.12 canonical default (ID=5, TintLinearV2)
-    float edge_feather = 0.1f;  ///< 가장자리 페더링 (0.0~1.0)
+    float edge_feather = 0.15f; ///< 가장자리 페더링 (0.0~1.0) — 실기기 튜닝(989fdac/6f596a2) canonical 승격
     bool apply_left = true;     ///< 왼쪽 눈 적용 여부
     bool apply_right = true;    ///< 오른쪽 눈 적용 여부
     bool is_mirror = false;     ///< 전면 카메라 mirror (X-flip + 좌우 swap)

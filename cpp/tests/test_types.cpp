@@ -259,12 +259,12 @@ TEST_F(LensConfigTest, DefaultValues) {
 
     // 기본값 검증
     EXPECT_FLOAT_EQ(config.opacity, 0.7f);
-    EXPECT_FLOAT_EQ(config.scale, 1.0f);
+    EXPECT_FLOAT_EQ(config.scale, 1.3f);  // 실기기 튜닝 canonical 승격 (989fdac/6f596a2)
     EXPECT_FLOAT_EQ(config.offset_x, 0.0f);
     EXPECT_FLOAT_EQ(config.offset_y, 0.0f);
     EXPECT_FLOAT_EQ(config.rotation, 0.0f);
     EXPECT_EQ(config.blend_mode, BlendMode::LuminanceTintLinear);  // P6-W2 §5.12 canonical default
-    EXPECT_FLOAT_EQ(config.edge_feather, 0.1f);
+    EXPECT_FLOAT_EQ(config.edge_feather, 0.15f);  // 실기기 튜닝 canonical 승격
     EXPECT_TRUE(config.apply_left);
     EXPECT_TRUE(config.apply_right);
 }
