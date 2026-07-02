@@ -106,7 +106,10 @@
 - API: 기존 `setLensEllipseMask(bool)` 불변(어댑터 mode 0/1). 신규 internal `setLensEyelidMaskMode(int)` — bench_toggles 패턴(C/JNI/Java/KT). 데모 Ellipse 버튼→**3-way 순환(Mask: Y-slab/Ellipse/Contour)** + `restoreLensRenderState` 재적용.
 - 검증: ctest **572/572**(stale 단정 `30fbf9a` 수정 포함), 실기기 S23+ 셰이더 컴파일+**uniforms 45/45**, **contour 클립 시각 확인(사용자 "잘 먹네")**, 홈→복귀 Contour 유지.
 
-### 잔여 (다음 스텝)
-- **A23(저티어) FPS 실측** → 실제 드롭 시에만 tier 폴백 1줄(`when(gpuTier)`) 바인딩.
-- **A-3**: 완전 감음 잔여 띠가 contour로 해소됐는지 실기기 확인 → 잔존 시 재검토.
-- feat/eyeclip-clip-quality → develop 머지.
+### 트랙 종결 (2026-07-02) — 후속 트랙 후보로 이월
+사용자 결정: 더 급한 이슈 우선으로 EYECLIP 트랙은 여기서 마무리. develop 머지. 아래 2건은 **후속 트랙 후보**로 남긴다:
+
+1. **[후속 후보] A-3 완전 감음 잔여 띠** — contour 모드에서도 잔존 확인(실기기 S23+, 사용자). 수용하고 종결. 원인=MediaPipe 눈꺼풀 상/하 랜드마크가 완전 감음에도 gap을 남김(마스크 형상 무관, 입력 데이터 한계). ⚠️ 재도전 시 주의: alpha fade/blink-ramp는 기각 이력(eye_opening 0.005~0.02 노이즈, BUGFIX §3차) — 다른 접근 필요(예: EAR 기반 contour 폴리곤 강제 붕괴, gap 임계 시 상/하 꺼풀 스냅 등, 미검토).
+2. **[후속 후보] A23(저티어) FPS 실측 + tier 폴백** — contour ON/OFF frame-time A/B 미실측(기기 상태로 세션 내 미완). kickoff §3 결정대로 **출시 시점에만** `when(gpuTier){HIGH→contour; else→ellipse/Y-slab}` 1줄 바인딩(실제 드롭 확인 시에만). 개발 중에는 3-way 수동 토글로 충분. AABB early-out이 있어 저티어도 거의 공짜일 가능성 높음(설계 분석).
+
+- 머지: feat/eyeclip-clip-quality → develop `--no-ff` + push.
