@@ -985,6 +985,16 @@ public final class IrisLensSDK {
     }
 
     /**
+     * EYECLIP A-2: 눈꺼풀 마스크 모드 토글 (벤치용).
+     * @param mode 0=Y-slab(기본), 1=ellipse, 2=contour. 범위 외 값은 네이티브에서 clamp.
+     */
+    public static void setLensEyelidMaskMode(int mode) {
+        if (sLibraryLoaded) {
+            nativeSetLensEyelidMaskMode(mode);
+        }
+    }
+
+    /**
      * P6-W6 B5: 블링크 up ramp 시간 토글 (벤치용).
      * @param ms 60/80/120ms (자동 clamp [30,200]). 기본 80.
      */
@@ -1484,6 +1494,7 @@ public final class IrisLensSDK {
     private static native void nativeSetLensScleraProtect(boolean enabled);
     private static native void nativeSetScleraVetoMode(int mode);  // P6-W5 §5.9
     private static native void nativeSetLensEllipseMask(boolean enabled);
+    private static native void nativeSetLensEyelidMaskMode(int mode);  // EYECLIP A-2
     private static native void nativeSetLensHighlight(boolean enabled);
 
     // P6-W4 §5.7/§5.11: 환경 반사 (env_map + 모드 토글 + 강도)

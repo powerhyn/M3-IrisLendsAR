@@ -2059,6 +2059,18 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetScleraVetoMode(
 }
 
 /**
+ * Java: native void nativeSetLensEyelidMaskMode(int mode);
+ * EYECLIP A-2: 0=Y-slab, 1=ellipse, 2=contour.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensEyelidMaskMode(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jint mode)
+{
+    iris_sdk_set_lens_eyelid_mask_mode(static_cast<int>(mode));
+}
+
+/**
  * Java: native void nativeSetLensEllipseMask(boolean enabled);
  */
 JNIEXPORT void JNICALL
