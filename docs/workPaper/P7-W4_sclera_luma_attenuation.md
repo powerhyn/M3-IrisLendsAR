@@ -97,9 +97,8 @@ SKU 6 누드 애쉬 로제(**가장 강함**) > SKU 2 런웨이 그레이 ≥ SK
 - [x] **(실기기)** 재베이스라인: SKU 6 빛남 **meas/fb 모두 ②(거슬림)** → **구현 진행 판정** (2026-07-02, APK b281, `docs/bench/P7-W4/rebaseline_checklist.md` 결과 기입란). ⭐신규 관측: **lum:fb 선호(패턴 가시성)** — 틴트 강도 축은 NLR-W2/W6 이월
 - [x] **(코드)** 비율 cap 구현 (§5.8: `min(lum*scale, uScleraTintMax)`, 초기 cap=1.275) — `shader_sources.cpp` + `gpu_lens_renderer.{h,cpp}` (2026-07-02)
 - [x] **(코드)** internal API + demo 토글 체인 — `bench_toggles.h`/`sdk_api_v2.cpp`/JNI/Java/`CameraGLView.kt`/데모 `btnW4Cap` sweep {1.275, 1.5, 2.0, OFF(1e6)}. **+ NLR-W1 확장: `restoreLensRenderState()` 기존 미복원 갭 일괄 보수** (gate/blinkUp/vetoMode/scleraProtect·contactShadow 필드 승격)
-- [ ] **(실기기)** SKU 2/5/6 빛남 체감 ~50% 이상 감소 (재베이스라인 대비, 본인 실시간 토글 체감) — **cap sweep 벤치 대기**
-- [ ] **(실기기)** SKU 1(대조군) 포함 6 SKU 자연도 무회귀 + **sclera 경계 평탄화/하이라이트 칙칙함 육안 확인** (§5.8 Gemini 소수 의견 검증 항목)
-- [ ] **(판정)** 만족 → 종결 / 부족 → soft-knee fallback(§5.8) 또는 P7-Spike-A 진입점 명시
+- [x] **(실기기)** cap sweep 벤치 완료(2026-07-03) — **빛남 감소 목표 미달 = cap 무효 판정** (OFF/1.275/1.5/2.0 체감 차이 없음; Normal 진단으로 "증폭≠원인" 확정). 상세: `docs/bench/P7-W4/cap_sweep_result.md`
+- [x] **(판정)** "부족" 분기 — 단 soft-knee/Spike-A가 아니라 **문제 재정의로 종결**: 빛남의 실체 = 휘도 비례 틴트의 경계 톤 불연속 (사용자 인사이트). 처방은 합성 수식 원점 재조사(deep-research → Codex 교차)로 이관, cap 코드는 OFF 보존(제거는 NLR-W6)
 
 ---
 
@@ -242,3 +241,4 @@ docs/workPaper/P7-W4_brainstorm/{codex|gemini}_w4.md로 저장.
 | 2026-06-10 | R1 완료 — Codex/Gemini/Claude 3모델 응답 + 종합(`P7-W4_brainstorm/synthesis.md`). 3/3 합의 5건(6.1/6.4/6.5/6.6/6.7) + 2/3 다수결 1건(6.2→(c) 비율 cap, Gemini 소수 (a)) + 파생 소멸 1건(6.3 임계). §5 이동은 사용자 승인 대기. |
 | 2026-06-10 | **사용자 §5 이동 승인** — §5.7~5.13 확정 추가, §6 닫힘(6.0 요약표 + 6.8 구현 중 판정), §4.1 DoD 갱신(두 조명 재베이스라인 + (c) cap 구현 + 평탄화 검증 항목). 구현 대기 상태. |
 | 2026-07-02 | **NLR-W1 승계 + 재베이스라인 + 구현** — NLR 트랙 흡수(`NLR-W0_index.md`), 브랜치 develop(075a5de) rebase. 재베이스라인 판정 ②(구현 진행) + fb 선호 신규 관측. §5.8 cap 7단 배선 구현 완료(cpp-pro 위임 + Android 직접) + `restoreLensRenderState` 갭 4종 일괄 보수. **cap sweep 실기기 벤치 대기.** |
+| 2026-07-03 | **cap sweep 벤치 → 무효 판정 + W1 종결** — OFF/1.275/1.5/2.0 체감·캡처 차이 없음, Normal 진단으로 증폭 원인론 기각(visibility budget 누락 = R1 물리 가정 오류). **문제 재정의**: 경계 톤 불연속(사용자 인사이트). 합성 수식 원점 재조사(deep-research) 개시. 상세 `docs/bench/P7-W4/cap_sweep_result.md`. |
