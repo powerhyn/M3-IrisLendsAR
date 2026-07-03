@@ -364,6 +364,102 @@ vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDeta
     return toSRGBFast(mix(baseL, colored, opacity));
 }
 
+// NLR-W2 R1 벤치 후보 A/B/C (임시 — 채택 시 W6에서 정식 ID 부여)
+// 후보 A: KM 반투명 코팅. 계보=Kubelka-Munk coating (Li et al. CVPR15) + white-back constraint.
+vec3 blendKMCoating(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = clamp(toLinearFast(blend), vec3(0.0), vec3(0.98));
+
+    // Rc: 안료층 자체 반사. 0.80은 R1 bench 상수.
+    // Tc2는 base=1.0일 때 coated ~= lensL가 되도록 역산:
+    // lensL = Rc + Tc2 / (1 - Rc)  =>  Tc2 = (lensL - Rc) * (1 - Rc)
+    vec3 Rc = clamp(lensL * 0.80, vec3(0.0), vec3(0.95));
+    vec3 Tc2 = max(lensL - Rc, vec3(0.0)) * (vec3(1.0) - Rc);
+
+    vec3 denom = max(vec3(1.0) - Rc * baseL, vec3(1e-4));
+    vec3 coated = Rc + (Tc2 * baseL) / denom;
+
+    vec3 outL = mix(baseL, clamp(coated, vec3(0.0), vec3(1.0)), clamp(opacity, 0.0, 1.0));
+    return toSRGBFast(outL);
+}
+
+// NLR-W2 R1 벤치 후보 A/B/C (임시 — 채택 시 W6에서 정식 ID 부여)
+// 후보 B: Oklab 가산 mean-shift + 흰자 guard. 계보=Shiseido 계열 mean-shift recolor + 흰자 guard(min-pivot).
+vec3 linearSrgbToOklab(vec3 c) {
+    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+
+    vec3 lms = pow(max(vec3(l, m, s), vec3(1e-6)), vec3(1.0 / 3.0));
+    return vec3(
+        0.2104542553 * lms.x + 0.7936177850 * lms.y - 0.0040720468 * lms.z,
+        1.9779984951 * lms.x - 2.4285922050 * lms.y + 0.4505937099 * lms.z,
+        0.0259040371 * lms.x + 0.7827717662 * lms.y - 0.8086757660 * lms.z
+    );
+}
+
+vec3 oklabToLinearSrgb(vec3 c) {
+    float l_ = c.x + 0.3963377774 * c.y + 0.2158037573 * c.z;
+    float m_ = c.x - 0.1055613458 * c.y - 0.0638541728 * c.z;
+    float s_ = c.x - 0.0894841775 * c.y - 1.2914855480 * c.z;
+
+    float l = l_ * l_ * l_;
+    float m = m_ * m_ * m_;
+    float s = s_ * s_ * s_;
+
+    return vec3(
+         4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    );
+}
+
+vec3 blendOklabMeanShiftGuard(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = clamp(toLinearFast(blend), vec3(0.0), vec3(1.0));
+
+    vec3 baseOk = linearSrgbToOklab(baseL);
+    vec3 lensOk = linearSrgbToOklab(lensL);
+
+    // uAvgIrisLum은 linear Rec.709 luma이므로 neutral gray의 Oklab L 근사로 변환한다.
+    float irisPivotOk = pow(clamp(uAvgIrisLum, 1e-4, 1.0), 1.0 / 3.0);
+
+    // 원식 그대로: lensOk.x + (baseOk.x - irisPivotOk)
+    // 프로젝트 적응: 흰자처럼 pivot보다 밝은 픽셀은 mean-shift 상승분을 차단한다.
+    float guardedBaseL = min(baseOk.x, irisPivotOk);
+    float targetOkL = clamp(lensOk.x + (guardedBaseL - irisPivotOk), 0.0, 1.0);
+
+    vec3 targetL = oklabToLinearSrgb(vec3(targetOkL, lensOk.yz));
+    vec3 outL = mix(baseL, clamp(targetL, vec3(0.0), vec3(1.0)), clamp(opacity, 0.0, 1.0));
+    return toSRGBFast(outL);
+}
+
+// NLR-W2 R1 벤치 후보 A/B/C (임시 — 채택 시 W6에서 정식 ID 부여)
+// 후보 C: 국소 피벗 양방향 blend. 계보=Meta 계열 2밴드(shadow multiply / highlight screen) single-tap 근사.
+vec3 blendPivotBiDir(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = clamp(toLinearFast(blend), vec3(0.0), vec3(1.0));
+
+    float lum = dot(baseL, LUMA_709_LENS);
+    float pivot = clamp(uAvgIrisLum, 0.03, 0.80);
+
+    // Low side: 피벗보다 어두운 곳은 multiply 성분으로 가라앉힌다.
+    // lum==pivot이면 lensL, lum<pivot이면 lensL보다 어두워진다.
+    float lowRatio = clamp(lum / pivot, 0.0, 1.0);
+    vec3 multiplyHalf = mix(lensL, lensL * lowRatio, 0.50);
+
+    // High side: 밝은 곳은 screen을 허용하되 50%만 섞어 과한 흰자 부양을 막는다.
+    vec3 screened = vec3(1.0) - (vec3(1.0) - baseL) * (vec3(1.0) - lensL);
+    vec3 screenHalf = mix(lensL, screened, 0.50);
+
+    float highEdge = max(pivot + 0.08, 0.65);
+    float highW = smoothstep(pivot, highEdge, lum);
+    vec3 targetL = mix(multiplyHalf, screenHalf, highW);
+
+    vec3 outL = mix(baseL, clamp(targetL, vec3(0.0), vec3(1.0)), clamp(opacity, 0.0, 1.0));
+    return toSRGBFast(outL);
+}
+
 float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
     vec2 d = uv - center;
     float cosR = cos(rotation);
@@ -545,7 +641,10 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
     //   - ID 2 ScreenLinear: 선형 공간 (W2 sRGB Screen 대체)
     //   - ID 5 TintLinearV2: canonical default
     //   - ID 7 ColorReplaceLinear: W2 활성 — W5 B1 벤치 대상, 채택 확정 아님
-    //   - ID 3/4/6/기타: TintLinearV2 fallback (디버그 로그는 CPU 측에서 1회)
+    // NLR-W2 벤치 기간 임시 재배선(develop 머지 금지): deprecated ID 3/4/6이 원래
+    //   TintLinearV2(5)로 fallback하던 것을 R1 확정 후보 A/B/C로 임시 매핑한다.
+    //   3→blendKMCoating(A), 4→blendOklabMeanShiftGuard(B), 6→blendPivotBiDir(C).
+    //   채택 시 W6에서 새 ID 8/9/10으로 승격 예정. 그 외 미등록 ID는 여전히 TintLinearV2 fallback.
     vec3 blended;
     if (uBlendMode == 0) {
         blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
@@ -553,8 +652,14 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 2) {
         blended = blendScreenLinear(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 3) {
+        blended = blendKMCoating(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 4) {
+        blended = blendOklabMeanShiftGuard(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 5) {
         blended = blendTintLinearV2(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 6) {
+        blended = blendPivotBiDir(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 7) {
         blended = blendColorReplaceLinear(camera.rgb, lens.rgb, finalAlpha, maxDetail);
     } else {

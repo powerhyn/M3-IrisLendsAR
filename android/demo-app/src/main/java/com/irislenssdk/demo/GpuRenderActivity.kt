@@ -521,11 +521,13 @@ class GpuRenderActivity : AppCompatActivity() {
 
     private data class BenchCombo(val label: String, val blendMode: Int, val vetoMode: Int, val desc: String)
 
+    // NLR-W2 수식 후보 블라인드 벤치 (codex_r1.md §5): veto는 전 조합 legacy 0 고정(§5.10 변수 분리),
+    // lum:meas 고정 권장. 정답표는 여기에만 — 평가자에겐 A/B/C/D 라벨만.
     private val benchCombos = listOf(
-        BenchCombo("A", 0, 1, "Normal + color-veto(Codex)"),
-        BenchCombo("B", 0, 2, "Normal + luma-only(Gemini)"),
-        BenchCombo("C", 7, 1, "CRL + color-veto(Codex)"),
-        BenchCombo("D", 7, 2, "CRL + luma-only(Gemini)"),
+        BenchCombo("A", 5, 0, "current TintLinearV2 (control)"),
+        BenchCombo("B", 3, 0, "KM coating (Li CVPR15)"),
+        BenchCombo("C", 4, 0, "Oklab mean-shift + sclera guard"),
+        BenchCombo("D", 6, 0, "Pivot bidirectional (Meta 근사)"),
     )
     private var currentBenchIdx = -1
 
@@ -549,12 +551,14 @@ class GpuRenderActivity : AppCompatActivity() {
     private var maskMode = 0      // EYECLIP A-2: 눈꺼풀 마스크 모드 0=Y-slab, 1=ellipse, 2=contour. 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
-    // 활성 blend ID {0,1,2,5,7}만 노출 — deprecated 3/4/6(Overlay/LumTint/SoftLight)은 셰이더가
-    // ID5로 fallback시키는 거짓 UI라 제외(shader_sources.cpp 분기 = 0/1/2/5/7만 존재).
+    // 활성 blend ID {0,1,2,5,7} + NLR-W2 벤치 임시 슬롯 {3,4,6}.
+    // ⚠️ 3/4/6은 벤치 기간 한정 재배선(KM/OkShift/Pivot — codex_r1.md §5) — develop 머지 금지,
+    //   채택 시 W6에서 정식 ID 부여 후 원래 "deprecated → ID5 fallback"으로 복원.
     // 스피너 position ≠ blend ID이므로 선택/복원은 반드시 값 기반 역조회(indexOfFirst)로.
     private val blendModeEntries = arrayOf(
         "Normal" to 0, "Multiply" to 1, "Screen Linear" to 2,
-        "Lum Tint Linear" to 5, "Color Replace" to 7
+        "Lum Tint Linear" to 5, "Color Replace" to 7,
+        "KM Coat†" to 3, "OkShift†" to 4, "Pivot†" to 6
     )
 
     private fun applyBenchCombo(idx: Int) {
