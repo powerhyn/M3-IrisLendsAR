@@ -80,6 +80,18 @@ class FaceTracker(
 
     @Volatile private var usingGpu = false
 
+    // NLR-트래킹 A/B: RunningMode.IMAGE 토글 (mediapipe-internal-smoothing-bypass 핸드오프).
+    // VIDEO 경로는 numFaces=2 트릭으로 내부 스무딩을 이미 우회했다고 가정하나(아래 주석),
+    // 그 가정의 실증 + ROI 추적 유무 지연 차이를 실기기 A/B로 확인한다.
+    // 요청은 아무 스레드나, 실제 재생성은 분석 스레드(ensureLandmarker)에서만.
+    @Volatile private var imageModeRequested = false
+    private var imageModeActive = false
+
+    /** IMAGE 모드 A/B 토글 — 어느 스레드에서나 안전. 다음 analyze에서 landmarker 재생성. */
+    fun setImageMode(enabled: Boolean) {
+        imageModeRequested = enabled
+    }
+
     /** GPU 추론 중 런타임 오류 발생 시 분석 스레드에서 CPU로 재생성하기 위한 플래그 */
     @Volatile private var cpuFallbackRequested = false
     private var cpuForced = false
@@ -190,8 +202,14 @@ class FaceTracker(
         try {
             // 동기 추론 — 결과를 즉시 반영 (LIVE_STREAM 내부 큐잉 지연 제거).
             // 추론 동안 이 스레드가 점유되어 CameraX가 자동으로 최신 프레임만 남긴다.
-            val result = lm.detectForVideo(mpImage, processingOptions(rotation), ts)
-            onResult(result, mpImage, frameTimestampNs)
+            // IMAGE 모드: result.timestampMs()가 무의미(핸드오프 §3-3) — 아래 onResult가
+            // 제출 시각 ts를 별도 운반하므로 두 모드 모두 시간 계약이 동일하게 유지된다.
+            val result = if (imageModeActive) {
+                lm.detect(mpImage, processingOptions(rotation))
+            } else {
+                lm.detectForVideo(mpImage, processingOptions(rotation), ts)
+            }
+            onResult(result, mpImage, frameTimestampNs, ts)
             // ③-3: 원시 결과 탭 — imageProxy close 전(버퍼 유효 구간)·통계 산출 후 동기 호출.
             // 소비자 예외는 격리한다 — detect 오류 처리(handleDetectError)로 흘러가면
             // GPU 폴백을 오판하기 때문.
@@ -244,9 +262,22 @@ class FaceTracker(
             cpuFallbackRequested = false
             resetFilters()
         }
+        // IMAGE↔VIDEO 모드 전환 — running mode는 생성 시점 고정이라 재생성 필수 (핸드오프 §3-4).
+        // 필터 리셋 동반 (모드 간 시간 특성이 달라 오래된 필터 상태가 글라이드 유발).
+        if (landmarker != null && imageModeRequested != imageModeActive) {
+            try {
+                landmarker?.close()
+            } catch (_: RuntimeException) {
+            }
+            landmarker = null
+            creationFailed = false
+            resetFilters()
+            hadFace = false
+        }
         if (landmarker != null || creationFailed) return
 
         val wantGpu = preferGpu && !cpuForced && !EmulatorDetector.isEmulator
+        imageModeActive = imageModeRequested
         landmarker = try {
             createLandmarker(wantGpu).also { usingGpu = wantGpu }
         } catch (e: RuntimeException) {
@@ -279,7 +310,8 @@ class FaceTracker(
             .build()
         val options = FaceLandmarker.FaceLandmarkerOptions.builder()
             .setBaseOptions(baseOptions)
-            .setRunningMode(RunningMode.VIDEO)
+            // IMAGE = 내부 스무딩·ROI 추적 없는 동기 모드 (A/B 토글 — setImageMode)
+            .setRunningMode(if (imageModeActive) RunningMode.IMAGE else RunningMode.VIDEO)
             // ③-3: numFaces=2로 MediaPipe face_landmarker 그래프의 내부
             // LandmarksSmoothingCalculator(One-Euro 0.05/80) 노드를 우회한다 —
             // 이 노드는 num_faces==1 + 스트림 모드(VIDEO)에서만 활성화되며
@@ -323,12 +355,17 @@ class FaceTracker(
         }
     }
 
-    /** 분석 스레드에서 detectForVideo 직후 동기 호출되는 결과 처리. */
-    private fun onResult(result: FaceLandmarkerResult, input: MPImage, frameTimestampNs: Long) {
+    /**
+     * 분석 스레드에서 detect(ForVideo) 직후 동기 호출되는 결과 처리.
+     * [submitTs] = detect 제출 시각(uptime ms) — IMAGE 모드는 result.timestampMs()가
+     * 무의미하므로 모든 시간 소비(추론 계측·필터 tSec·스냅샷 ts)를 이 값으로 통일한다.
+     * (VIDEO 모드에선 detectForVideo가 제출 ts를 그대로 반환하므로 동작 불변.)
+     */
+    private fun onResult(result: FaceLandmarkerResult, input: MPImage, frameTimestampNs: Long, submitTs: Long) {
         if (closed) return
 
-        // 추론 시간 = detect 제출(타임스탬프) → 결과 처리 시점
-        val inferenceMs = (SystemClock.uptimeMillis() - result.timestampMs()).toFloat()
+        // 추론 시간 = detect 제출 → 결과 처리 시점
+        val inferenceMs = (SystemClock.uptimeMillis() - submitTs).toFloat()
         onInferenceStats(inferenceMs, usingGpu)
 
         // 주의: ImageProcessingOptions.rotationDegrees를 줘도 MediaPipe는 출력 랜드마크를
@@ -344,13 +381,13 @@ class FaceTracker(
             if (hadFace) resetFilters() // 재획득 시 글라이드 방지
             hadFace = false
             rawIrisCacheValid = false // 직전 랜드마크 없음 — 휘도 측정 생략 (EMA 값은 유지)
-            onSnapshot(TrackingSnapshot.noFace(result.timestampMs(), frameTimestampNs))
+            onSnapshot(TrackingSnapshot.noFace(submitTs, frameTimestampNs))
             return
         }
         hadFace = true
 
         val lm = faces[0]
-        val tSec = result.timestampMs() / 1000.0
+        val tSec = submitTs / 1000.0
 
         // 다음 analyze의 휘도 샘플용 원시(센서) 홍채 캐시 — upright/미러 변환 전 좌표
         cacheRawIris(lm, input.width.toFloat(), input.height.toFloat())
@@ -381,7 +418,7 @@ class FaceTracker(
 
         onSnapshot(
             TrackingSnapshot.face(
-                timestampMs = result.timestampMs(),
+                timestampMs = submitTs,
                 frameTimestampNs = frameTimestampNs,
                 srcAspect = upW / upH,
                 rightEye = rightEye,

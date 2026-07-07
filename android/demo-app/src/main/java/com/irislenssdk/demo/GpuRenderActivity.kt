@@ -116,6 +116,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
     private lateinit var btnW4Cap: Button        // P7-W4 §5.8: 흰자 빛남 cap sweep
+    private lateinit var btnImgMode: Button      // NLR 트래킹 A/B: MediaPipe IMAGE 모드 (내부 스무딩·ROI 우회)
+    private lateinit var btnStabFast: Button     // NLR 트래킹 A/B: stabilizer near-raw 프리셋
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -236,6 +238,8 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
         btnW4Cap = findViewById(R.id.btnW4Cap)
+        btnImgMode = findViewById(R.id.btnImgMode)
+        btnStabFast = findViewById(R.id.btnStabFast)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -460,11 +464,14 @@ class GpuRenderActivity : AppCompatActivity() {
 
 
         // 홍채 밝기 보정 슬라이더 (P4-W2-01, 0.8~1.4 / 0.1 스텝 / 기본 1.2)
+        // NLR-W2 R5: dead 슬라이더(구 setMaxDetail — 소비처 없음) → 흰자 페이드 시작점 재배선.
+        // C(기하 디버그) 켠 채 드래그하면 빨강 창이 움직임 → 빛나는 링을 덮게 맞춘 뒤 D로 결과 확인.
         seekMaxDetail.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val value = 0.8f + progress * 0.1f
-                tvMaxDetailValue.text = String.format("%.1f", value)
-                cameraGLView.setMaxDetail(value)
+                fadeStartV = value
+                tvMaxDetailValue.text = String.format("f%.1f", value)
+                cameraGLView.setLensFadeStart(value)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -503,6 +510,24 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW7Measured.text = if (w7MeasuredOn) "lum:meas" else "lum:fb"
             Log.i(TAG, "P7-W2 measured luma → ${if (w7MeasuredOn) "on" else "off"}")
         }
+        // NLR 트래킹 A/B: MediaPipe RunningMode.IMAGE 토글 — 내부 스무딩·ROI 추적 우회
+        // (mediapipe-internal-smoothing-bypass 핸드오프). 전환 시 landmarker는 분석 스레드에서
+        // 자동 재생성(필터 리셋 포함) — 1~2프레임 렌즈 드롭은 정상.
+        btnImgMode.setOnClickListener {
+            imgModeOn = !imgModeOn
+            faceTracker?.setImageMode(imgModeOn)
+            btnImgMode.text = if (imgModeOn) "img:on" else "img:off"
+            btnImgMode.setBackgroundColor(if (imgModeOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Log.i(TAG, "NLR tracking mode → ${if (imgModeOn) "IMAGE(스무딩·ROI 우회)" else "VIDEO"}")
+        }
+        // NLR 트래킹 A/B: stabilizer near-raw 프리셋 토글 — 분석 스레드에서 재생성 (플래그 방식).
+        btnStabFast.setOnClickListener {
+            stabFastOn = !stabFastOn
+            stabRecreateRequested = true
+            btnStabFast.text = if (stabFastOn) "stab:fast" else "stab:norm"
+            btnStabFast.setBackgroundColor(if (stabFastOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Log.i(TAG, "NLR stabilizer → ${if (stabFastOn) "FAST(near-raw 3.0/200)" else "NORM(4.0/15)"}")
+        }
         // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap sweep (1.275/1.5/2.0/OFF).
         btnW4Cap.setOnClickListener {
             w4CapIdx = (w4CapIdx + 1) % w4CapSweep.size
@@ -525,9 +550,9 @@ class GpuRenderActivity : AppCompatActivity() {
     // lum:meas 고정 권장. 정답표는 여기에만 — 평가자에겐 A/B/C/D 라벨만.
     private val benchCombos = listOf(
         BenchCombo("A", 5, 0, "current TintLinearV2 (control)"),
-        BenchCombo("B", 3, 0, "KM coating (Li CVPR15)"),
-        BenchCombo("C", 4, 0, "Oklab mean-shift + sclera guard"),
-        BenchCombo("D", 6, 0, "Pivot bidirectional (Meta 근사)"),
+        BenchCombo("B", 3, 0, "R6: TintLinear 고정 scale K=3.4 (장면 적응만 제거, lum 곱셈 유지)"),
+        BenchCombo("C", 4, 0, "R5: 기하 디버그 (초록<0.95/빨강 0.95-1.15/파랑>1.15)"),
+        BenchCombo("D", 6, 0, "E-v3: V2 수식 + 흰자 조기 페이드만"),
     )
     private var currentBenchIdx = -1
 
@@ -539,15 +564,23 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w6DetailOn = true
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
 
-    // P7-W4 §5.8: 흰자 빛남 cap sweep. 기본 1.275(=0.85×1.5, 코어 기본과 일치), 마지막 = OFF 센티널(1e6, 비트 동일 출력).
-    private val w4CapSweep = floatArrayOf(1.275f, 1.5f, 2.0f, 1.0e6f)
-    private var w4CapIdx = 0
+    // P7-W4 §5.8 → NLR-W2 R4 재조정: 유효 구간(0.95~1.15)으로 sweep 교체. 마지막 = OFF 센티널(1e6).
+    // D(V2+페이드) + cap 조합 = 후보 H 라이브 튜닝 (cap이 렌즈 내 밝은 픽셀 과증폭 상한 역할).
+    private val w4CapSweep = floatArrayOf(0.95f, 1.05f, 1.15f, 1.0e6f)
+    private var w4CapIdx = 3   // 시작 = OFF (코어 기본 1.275는 사실상 무효 구간이라 OFF와 동일 취급)
 
     // NLR-W1 복원 갭 보수: 컨텍스트 재생성 시 native 기본값으로 리셋되는 상태들의 UI 측 진실값.
     // (기존 지역 변수라 restoreLensRenderState가 복원 불가했던 구조 결함 — 필드 승격)
     private var scleraProtectOn = true    // 코어 기본 ON과 일치
     private var contactShadowOn = false   // 코어 기본 OFF와 일치
     private var currentVetoMode = 0       // P6-W5 B8 미판정 — legacy 0 유지 (§5.10)
+    private var fadeStartV = 0.95f        // NLR-W2 R5: 흰자 페이드 시작점 (코어 기본 0.95와 일치)
+    private var imgModeOn = false         // NLR 트래킹 A/B: IMAGE 모드 (기본 VIDEO — 트래커 재생성 시 재적용)
+
+    // NLR 트래킹 A/B: stabilizer near-raw 프리셋 (3.0/200 — LensSim 등가). 핸들은 분석 스레드
+    // 전용이라 UI에서 직접 destroy 금지 — 재생성 요청 플래그만 세우고 분석 경로에서 처리.
+    @Volatile private var stabFastOn = false
+    @Volatile private var stabRecreateRequested = false
     private var maskMode = 0      // EYECLIP A-2: 눈꺼풀 마스크 모드 0=Y-slab, 1=ellipse, 2=contour. 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
@@ -558,7 +591,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private val blendModeEntries = arrayOf(
         "Normal" to 0, "Multiply" to 1, "Screen Linear" to 2,
         "Lum Tint Linear" to 5, "Color Replace" to 7,
-        "KM Coat†" to 3, "OkShift†" to 4, "Pivot†" to 6
+        "Quot†" to 3, "Quot+F†" to 4, "V2+Fade†" to 6
     )
 
     private fun applyBenchCombo(idx: Int) {
@@ -689,6 +722,8 @@ class GpuRenderActivity : AppCompatActivity() {
         cameraGLView.setContactShadow(contactShadowOn)
         // P7-W4 §5.8: 흰자 빛남 cap — 현재 sweep 값 재주입
         cameraGLView.setScleraTintMax(w4CapSweep[w4CapIdx])
+        // NLR-W2 R5: 흰자 페이드 시작점 — 현재 슬라이더 값 재주입
+        cameraGLView.setLensFadeStart(fadeStartV)
         // 현재 선택 렌즈 텍스처 재업로드 (stale native texture는 onSurfaceCreated에서 이미 해제됨).
         if (::lensManager.isInitialized) {
             lensManager.currentLens?.let { lens ->
@@ -1006,6 +1041,7 @@ class GpuRenderActivity : AppCompatActivity() {
             onError = { msg -> Log.w(TAG, "③-3 FaceTracker: $msg") },
         )
         tracker.onRawResult = ::onTasksRawResult
+        tracker.setImageMode(imgModeOn) // 트래커 재생성 시 현재 A/B 상태 재적용
         faceTracker = tracker
         return tracker
     }
@@ -1070,9 +1106,21 @@ class GpuRenderActivity : AppCompatActivity() {
 
         // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요, LEGACY 동일)
         // TASKS 전용 핸들 — 같은 코어 stabilize, LEGACY 핸들 수명 불간섭 (§5-5)
+        // NLR A/B: 프리셋 전환 요청 시 분석 스레드(여기)에서 재생성 — 핸들 스레드 안전.
+        if (stabRecreateRequested) {
+            if (tasksStabilizerHandle != 0L) {
+                IrisLensSDK.destroyStabilizer(tasksStabilizerHandle)
+                tasksStabilizerHandle = 0L
+            }
+            stabRecreateRequested = false
+        }
         if (tasksStabilizerHandle == 0L) {
             // hold 연장본으로 생성 — 눈 일부 감김 시 얼굴 dropout 동안 렌즈 유지(stabilizerHoldFrames 주석 참조).
-            tasksStabilizerHandle = IrisLensSDK.createStabilizer(stabilizerHoldFrames)
+            tasksStabilizerHandle = if (stabFastOn) {
+                IrisLensSDK.createStabilizerFast(stabilizerHoldFrames)
+            } else {
+                IrisLensSDK.createStabilizer(stabilizerHoldFrames)
+            }
         }
         if (tasksStabilizerHandle != 0L) {
             val timestampSec = System.nanoTime() / 1_000_000_000.0

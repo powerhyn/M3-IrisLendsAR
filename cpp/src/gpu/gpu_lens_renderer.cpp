@@ -517,6 +517,7 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uTexelSize = glGetUniformLocation(lens_program_, "uTexelSize");
     lens_uniforms_.uGateThreshold = glGetUniformLocation(lens_program_, "uGateThreshold");
     lens_uniforms_.uScleraTintMax = glGetUniformLocation(lens_program_, "uScleraTintMax");
+    lens_uniforms_.uFadeStart = glGetUniformLocation(lens_program_, "uFadeStart");
     lens_uniforms_.uDetailReinject = glGetUniformLocation(lens_program_, "uDetailReinject");
     lens_uniforms_.uLowLightActive = glGetUniformLocation(lens_program_, "uLowLightActive");
     lens_uniforms_.uLeftRenderAlpha = glGetUniformLocation(lens_program_, "uLeftRenderAlpha");
@@ -636,11 +637,19 @@ void GPULensRenderer::setGateThreshold(float t) {
     gate_threshold_ = std::clamp(t, 0.0f, 1.0f);
 }
 
-// P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap). 하한 1.0=cap이
-// 홍채 자체 틴트(≈0.85)를 깎지 않는 최소값, 상한 1e6=OFF 센티널.
+// P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap). 상한 1e6=OFF 센티널.
+// NLR-W2 R4: 하한 1.0 → 0.85 확장 — R1 합의(≥1.275)는 출력 클리핑 위 구간이라 비가시였고,
+// 유효 작동 구간은 0.85~1.15(홍채 평균 틴트 근방)로 실측 확인. 0.85 밑은 홍채 자체 틴트 훼손이라 유지.
 void GPULensRenderer::setScleraTintMax(float v) {
     std::lock_guard<std::mutex> lock(mutex_);
-    sclera_tint_max_ = std::clamp(v, 1.0f, 1.0e6f);
+    sclera_tint_max_ = std::clamp(v, 0.85f, 1.0e6f);
+}
+
+// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝 — 검출 반경 오차 보정용.
+// clamp[0.5, 1.4]: 홍채 안쪽(<1.0)부터 바깥까지 창을 이동. 창 폭은 셰이더에서 +0.20 고정.
+void GPULensRenderer::setLensFadeStart(float v) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fade_start_ = std::clamp(v, 0.5f, 1.4f);
 }
 
 // P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off.
@@ -1255,6 +1264,8 @@ ErrorCode GPULensRenderer::renderToTexture(
     glUniform1f(lens_uniforms_.uAvgIrisLum, avg_luma);
     // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 업로드 (흰자 빛남 cap).
     glUniform1f(lens_uniforms_.uScleraTintMax, sclera_tint_max_);
+    // NLR-W2 R5: 흰자 페이드 시작점 업로드 (홍채 반경 단위) — 라이브 튜닝.
+    glUniform1f(lens_uniforms_.uFadeStart, fade_start_);
 
     // 검출 높이 (Bug B: 픽셀 높이를 그대로 전달 — Kotlin의 detHf와 동일)
     glUniform1f(lens_uniforms_.uDetH, det_hf);

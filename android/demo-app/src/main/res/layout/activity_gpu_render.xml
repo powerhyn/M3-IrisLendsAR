@@ -311,7 +311,19 @@
                 android:id="@+id/btnW4Cap"
                 android:layout_width="72dp"
                 android:layout_height="36dp"
-                android:text="cap1.28"
+                android:text="cap:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnImgMode"
+                android:layout_width="68dp"
+                android:layout_height="36dp"
+                android:text="img:off"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:textAllCaps="false"
@@ -337,6 +349,19 @@
                 android:layout_height="36dp"
                 android:layout_marginStart="2dp"
                 android:text="fsync:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnStabFast"
+                android:layout_width="86dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="2dp"
+                android:text="stab:norm"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:textAllCaps="false"

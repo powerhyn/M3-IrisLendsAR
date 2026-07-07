@@ -54,6 +54,8 @@ void iris_sdk_set_lens_detail_reinject(int enabled);
 void iris_sdk_set_use_measured_luma(int enabled);
 // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap 벤치 토글 (유효 틴트 배율 상한).
 void iris_sdk_set_lens_sclera_tint_max(float cap);
+// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝 토글 — 검출 반경 오차 보정용. 창 폭 +0.20 고정.
+void iris_sdk_set_lens_fade_start(float v);
 
 #ifdef __cplusplus
 }  // extern "C"

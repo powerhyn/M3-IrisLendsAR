@@ -153,6 +153,8 @@ public:
     /// P7-W4 §5.8: TintLinearV2(ID=5) 유효 틴트 배율 상한 — 흰자 고휘도 픽셀 빛남 cap.
     /// clamp[1.0, 1e6]. 하한 1.0=홍채 자체 틴트(≈0.85) 불변, OFF 센티널=1e6.
     void setScleraTintMax(float v);
+    /// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝. clamp[0.5, 1.4], 창 폭 +0.20 고정.
+    void setLensFadeStart(float v);
     /// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off (기본 on).
     void setDetailReinject(bool enabled);
     /// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 false=fallback, 안전 롤백).
@@ -319,6 +321,7 @@ private:
         GLint uTexelSize = -1;
         GLint uGateThreshold = -1;
         GLint uScleraTintMax = -1;  // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap)
+        GLint uFadeStart = -1;      // NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위) 라이브 튜닝
         GLint uDetailReinject = -1;
         GLint uLowLightActive = -1;  // P7-W2 §5.4: gate 전용 저조도 래치 상태 (0..1)
         GLint uLeftRenderAlpha = -1;
@@ -464,6 +467,8 @@ private:
     // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한. 기본값 근거 = 0.85×1.5 (P7-W4 §5.8),
     // OFF 센티널 1e6.
     float sclera_tint_max_ = 1.275f;
+    // NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위). 검출 반경 오차 보정용 라이브 튜닝, 창 폭 +0.20 고정.
+    float fade_start_ = 0.95f;
     bool  detail_reinject_ = true;  // C10 on/off
 
     // P7-W2 §5.6: 실측 luma A/B 토글. false면 packet 실측을 무시하고 fallback 0.1225만.

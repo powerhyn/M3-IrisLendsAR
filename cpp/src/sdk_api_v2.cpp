@@ -839,4 +839,17 @@ void iris_sdk_set_lens_sclera_tint_max(float cap) {
 #endif
 }
 
+// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝 internal C API.
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출(sclera_tint_max와 동일 패턴).
+void iris_sdk_set_lens_fade_start(float v) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setLensFadeStart(v);
+    }
+#else
+    (void)v;
+#endif
+}
+
 } // extern "C"

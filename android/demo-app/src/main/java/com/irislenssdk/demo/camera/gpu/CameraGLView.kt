@@ -347,6 +347,15 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위) — 벤치 라이브 튜닝.
+     */
+    fun setLensFadeStart(v: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setLensFadeStart(v)
+        }
+    }
+
+    /**
      * P6-W6 C10: 홍채 디테일 재주입 on/off.
      */
     fun setDetailReinject(enabled: Boolean) {

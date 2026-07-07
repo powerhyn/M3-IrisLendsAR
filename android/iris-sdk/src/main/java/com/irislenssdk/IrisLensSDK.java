@@ -1025,6 +1025,15 @@ public final class IrisLensSDK {
     }
 
     /**
+     * NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위, C++ clamp [0.5, 1.4]) — 벤치 라이브 튜닝.
+     */
+    public static void setLensFadeStart(float v) {
+        if (sLibraryLoaded) {
+            nativeSetLensFadeStart(v);
+        }
+    }
+
+    /**
      * P6-W6 C10: 홍채 디테일 재주입 on/off 토글 (벤치용).
      * @param enabled true=on(기본), false=off.
      */
@@ -1293,6 +1302,15 @@ public final class IrisLensSDK {
     }
 
     /**
+     * NLR 트래킹 A/B: near-raw 필터 프리셋 Stabilizer (3.0/200 — LensSim 픽셀 공간 3.0/0.3 등가).
+     * 사카드 추종 상한 실측용 벤치 API. hold 등 필터 외 파라미터는 기본과 동일.
+     */
+    public static long createStabilizerFast(int holdFrames) {
+        if (!sLibraryLoaded) return 0;
+        return nativeCreateStabilizerFast(holdFrames);
+    }
+
+    /**
      * 검출 결과를 스무딩합니다 (in-place).
      *
      * <p>전달된 IrisResult 객체의 값이 스무딩된 결과로 덮어씌워집니다.
@@ -1520,6 +1538,8 @@ public final class IrisLensSDK {
     private static native void nativeSetUseMeasuredLuma(boolean enabled);
     // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap 벤치 토글
     private static native void nativeSetScleraTintMax(float cap);
+    // NLR-W2 R5: 흰자 페이드 시작점 벤치 토글
+    private static native void nativeSetLensFadeStart(float v);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods
@@ -1527,6 +1547,7 @@ public final class IrisLensSDK {
 
     private static native long nativeCreateStabilizer();
     private static native long nativeCreateStabilizerWithHold(int holdFrames);
+    private static native long nativeCreateStabilizerFast(int holdFrames);  // NLR 트래킹 A/B
     private static native float nativeStabilize(long handle, IrisResult result, double timestampSec);
     private static native void nativeDestroyStabilizer(long handle);
 

@@ -1780,6 +1780,38 @@ Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerWithHold(
 }
 
 /**
+ * Java: native long nativeCreateStabilizerFast(int holdFrames);
+ * NLR 트래킹 A/B: near-raw 필터 프리셋 — LensSim FaceTracker(픽셀 공간 3.0/0.3) 등가를
+ * 코어 정규화 공간으로 환산(beta 0.3 × 분석폭 ~640px ≈ 200). 사카드 추종 상한 실측용.
+ * 필터 외 파라미터(hold/hysteresis/outlier/blink)는 기본 config 그대로.
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerFast(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jint holdFrames) {
+
+    IrisStabilizerConfig config;
+    iris_sdk_default_stabilizer_config(&config);
+    config.hold_frames = static_cast<int>(holdFrames);
+    config.iris_min_cutoff = 3.0f;
+    config.iris_beta = 200.0f;
+    config.radius_min_cutoff = 3.0f;
+    config.radius_beta = 200.0f;
+    config.eyelid_min_cutoff = 3.0f;
+    config.eyelid_beta = 200.0f;
+
+    int64_t handle = iris_sdk_create_stabilizer(&config);
+    if (handle == 0) {
+        LOGE("Failed to create FAST stabilizer (hold=%d)", static_cast<int>(holdFrames));
+    } else {
+        LOGI("FAST stabilizer created: handle=%lld hold=%d (near-raw 3.0/200)",
+             static_cast<long long>(handle), static_cast<int>(holdFrames));
+    }
+    return static_cast<jlong>(handle);
+}
+
+/**
  * @brief 검출 결과 스무딩 (Java IrisResult를 in-place로 수정)
  *
  * Java: native float nativeStabilize(long handle, IrisResult result, double timestampSec);
@@ -2194,6 +2226,18 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetScleraTintMax(
     jfloat cap)
 {
     iris_sdk_set_lens_sclera_tint_max(static_cast<float>(cap));
+}
+
+/**
+ * Java: native void nativeSetLensFadeStart(float v);
+ * NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위, 0.5~1.4) — 검출 반경 오차 라이브 보정.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensFadeStart(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat v)
+{
+    iris_sdk_set_lens_fade_start(static_cast<float>(v));
 }
 
 /**
