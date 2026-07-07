@@ -99,10 +99,12 @@ Meta: 제품색에 mid-대역을 screen(~50%, 밝은 곳을 밝힘) → low-대�
 
 ① 도메인 전이 유추: 검증된 수식 선례는 전부 립스틱/피부 메이크업 도메인이다(Meta·Shiseido·Chanel·ModiFace·Guo&Sim·Li·Jin). 콘택트렌즈 도메인 직접 증거는 Banuba뿐이며 그것은 수식 없는 마케팅 주장 — '입술도 명암 큰 곡면'이라는 유사성에 기반한 합리적 유추이지 렌즈 전용 검증이 아니다. ② chroma-only의 표현력 한계(중요): 바탕 L 통과형(계열 1)은 어두운 홍채 위에 더 밝은 렌즈색을 만들 수 없다 — Guo&Sim·Jin 모두 이 이유로 별도 L 수정 수단을 추가했고, 'chroma-only로 충분'이라는 취지의 claim 2건은 적대 검증에서 3-0으로 refute됐다. 밝은 렌즈 표현에는 Shiseido식 mean-shift 항이나 screen 계열 항이 필요하며, 여기서 avg_iris_luma가 μ_base로 쓰인다. ③ IP: Meta US11069094B1은 Expired-Fee Related로 확인됐으나 Shiseido US11344102B2·Chanel US11594071B2는 Active 등록 특허다. 특정 특허의 청구 방식을 그대로 제품화할 경우 검토 여지가 있다(본 조사는 기술 선례 조사이며 법률 자문 아님). ④ 실시간성: Chanel(레퍼런스 DB 기반)·Li(오프라인 ~1.5s)·Guo&Sim(Poisson 솔버)은 원리 선례이지 그대로 single-pass 이식 대상이 아니다. 셰이더 번안(KM을 raw RGB에, mean-shift를 Oklab 근사에)은 본 종합의 제안이지 검증된 사실이 아니며, 프로젝트 원칙대로 실기기 육안 A/B로 판정해야 한다. ⑤ 미완 검증 5건 사용 금지: Google US11250632(shadows/mid-tones/highlights 3-밴드 분해 + 블렌드 시퀀스 + 정규화 불변성) 관련 3건과 실물 서클렌즈 잉크 설계(간헐 도트 패턴, 외곽 어두운 잉크 집중) 2건은 검증 votes가 미완(INCOMPLETE)으로 checkpoint의 pending_claims에 남아 있다 — 본 보고서에서 제외했고 근거로 인용하면 안 된다. ⑥ 합성 프롬프트가 12,000자에서 절단되어 있었으나, harvest JSON(102 vote records)에서 16개 생존 claim 전체(각 3-0)를 재구성해 종합했다 — 절단으로 인한 누락은 없다.
 
+> ⚠️ **정정 (2026-07-03, caveat ⑤·아래 미완 2줄은 스테일)**: 종합 프롬프트의 구 지시문을 따라 남은 문구다. 실제로는 연속 워크플로(wf_d3e6b386)에서 해당 5건 — **Google US11250632B2** 3건(3-밴드 분해 + 블렌드 시퀀스 + 사전 정규화) + **실물 서클렌즈 잉크 설계 US6,827,440** 2건(간헐 도트 패턴 투과, 최암 잉크 외곽 최대 밀도) — **전부 재검증 통과(반박 0)**. 인용 가능하며, US6,827,440은 "흰자 쪽 밝은 틴트는 실물과 반대"의 물리 근거로 확정.
+
 ## Open Questions
 
-- Google US11250632B2('High Quality AR Cosmetics Simulation via Image Filtering Techniques', Sokal et al.)의 3-밴드(shadows/mid-tones/highlights) 분해 + screen/add/multiply 블렌드 시퀀스 + 사전 정규화(탈채도·levels/gamma) 3개 claim이 검증 미완 — 모바일 실시간(MediaPipe 계열 Google 저자) 특허라 본 프로젝트와 가장 가까운 선례일 수 있어 재검증 가치가 높다 (스크래치패드에 US11250632.txt 원문 확보됨)
-- 실물 서클렌즈 잉크 설계 특허 2건(간헐 도트 패턴으로 바탕 홍채가 비쳐 보임; 가장 어두운 잉크가 외곽 둘레에 최대 밀도) 검증 미완 — '흰자 쪽에서 틴트가 밝게 뜨는 것은 실물과 반대 방향'이라는 물리 근거를 확정하려면 재검증 필요
+- ~~Google US11250632B2 3개 claim 검증 미완~~ → 상단 정정 참조 (검증 통과). 모바일 실시간(Google 저자) 특허라 본 프로젝트와 가장 가까운 선례 — 3-밴드 분해는 후보 G의 확장 방향으로 유효
+- ~~실물 서클렌즈 잉크 설계 특허 2건 검증 미완~~ → 상단 정정 참조 (검증 통과, US6,827,440)
 - Oklab vs CIELAB의 모바일 GPU 변환 비용·품질 비교는 검증된 claim이 없음 — 계열 1 채택 시 셰이더에서 어느 근사를 쓸지는 실측 필요
 - 눈물막 모사(흰자 겹침부 채도/명도 가라앉힘, specular 처리) 관행은 검증된 선례를 확보하지 못함
 - avg_iris_luma 단일 스칼라만으로 충분한가 vs Meta 4×8 그리드/Chanel 셀 통계처럼 흰자 쪽 국소 평균이 별도로 필요한가 — 현 P7-W4 uScleraTintMax cap과의 조합을 실기기 A/B로 판정 필요
