@@ -550,8 +550,8 @@ class GpuRenderActivity : AppCompatActivity() {
     // lum:meas 고정 권장. 정답표는 여기에만 — 평가자에겐 A/B/C/D 라벨만.
     private val benchCombos = listOf(
         BenchCombo("A", 5, 0, "current TintLinearV2 (control)"),
-        BenchCombo("B", 3, 0, "R6: TintLinear 고정 scale K=3.4 (장면 적응만 제거, lum 곱셈 유지)"),
-        BenchCombo("C", 4, 0, "R5: 기하 디버그 (초록<0.95/빨강 0.95-1.15/파랑>1.15)"),
+        BenchCombo("B", 3, 0, "R7: TintLinear 고정 K=4.2 + 슬라이더=채도 부스트(1.0~2.2)"),
+        BenchCombo("C", 4, 0, "R6b: 기하 디버그 (초록<f/빨강 f~f+0.2/파랑>f+0.2, 슬라이더 연동 + cap≤1.2 보라)"),
         BenchCombo("D", 6, 0, "E-v3: V2 수식 + 흰자 조기 페이드만"),
     )
     private var currentBenchIdx = -1

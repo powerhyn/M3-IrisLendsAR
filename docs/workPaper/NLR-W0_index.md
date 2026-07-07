@@ -12,7 +12,7 @@
 | W | 내용 | 상태 |
 |---|---|---|
 | **NLR-W1** | sclera tint cap (`uScleraTintMax`) — P7-W4 승계 | ✅ 종결(2026-07-03) — **cap 무효 판정 + 문제 재정의**: 빛남의 실체는 휘도 비례 틴트의 **경계 톤 불연속** (`docs/bench/P7-W4/cap_sweep_result.md`). cap 코드는 OFF 보존. 처방은 합성 수식 원점 재조사(deep-research)로 이관 |
-| **NLR-W2** | deep-research 갭 6주제 + Codex R1 → tone_class 메타 + effective alpha + CRL 역할 | ⏳ W1 판정 대기 |
+| **NLR-W2** | (재스코프) 합성 수식 원점 재조사 → canonical 확정: deep-research 21클레임 + Codex R1 + 실기기 7라운드로 병인 분해(빛남 임계 K≈4.4) + 트래킹 A/B(stab:fast). tone_class/effective alpha는 후속 W로 이월 | 🔄 판정 6건 대기 — **진입점 `NLR-W2_resume_kickoff.md`** |
 | **NLR-W3** | 캐치라이트 보존 레이어 (iris/lens 마스크 한정 + 재합성 상한) | ⏳ |
 | **NLR-W4** | radial ramp (alpha/pupil/edge 전이 완화 한정, 기각이 기본 자세) | ⏳ |
 | **NLR-W5** | (조건부) 노출/WB 색 매칭 — 진입 조건 2중 | ⏳ |
