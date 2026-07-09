@@ -520,13 +520,17 @@ class GpuRenderActivity : AppCompatActivity() {
             btnImgMode.setBackgroundColor(if (imgModeOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
             Log.i(TAG, "NLR tracking mode → ${if (imgModeOn) "IMAGE(스무딩·ROI 우회)" else "VIDEO"}")
         }
-        // NLR 트래킹 A/B: stabilizer near-raw 프리셋 토글 — 분석 스레드에서 재생성 (플래그 방식).
+        // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 — 분석 스레드에서 재생성 (플래그 방식).
+        // 프리셋 구성·라운드별 판정 근거는 stabPresets 선언부 주석 참조.
         btnStabFast.setOnClickListener {
-            stabFastOn = !stabFastOn
+            stabPresetIdx = (stabPresetIdx + 1) % stabPresets.size
             stabRecreateRequested = true
-            btnStabFast.text = if (stabFastOn) "stab:fast" else "stab:norm"
-            btnStabFast.setBackgroundColor(if (stabFastOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
-            Log.i(TAG, "NLR stabilizer → ${if (stabFastOn) "FAST(near-raw 3.0/200)" else "NORM(4.0/15)"}")
+            val p = stabPresets[stabPresetIdx]
+            btnStabFast.text = "stab:${p.label}"
+            btnStabFast.setBackgroundColor(if (stabPresetIdx != 0) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Log.i(TAG, "NLR stabilizer → ${p.label}" +
+                if (stabPresetIdx == 0) " (코어 기본 4.0/15)"
+                else " (${p.minCutoff}/${p.beta} ${if (p.allAxes) "all" else "center"})")
         }
         // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap sweep (1.275/1.5/2.0/OFF).
         btnW4Cap.setOnClickListener {
@@ -577,9 +581,21 @@ class GpuRenderActivity : AppCompatActivity() {
     private var fadeStartV = 0.95f        // NLR-W2 R5: 흰자 페이드 시작점 (코어 기본 0.95와 일치)
     private var imgModeOn = false         // NLR 트래킹 A/B: IMAGE 모드 (기본 VIDEO — 트래커 재생성 시 재적용)
 
-    // NLR 트래킹 A/B: stabilizer near-raw 프리셋 (3.0/200 — LensSim 등가). 핸들은 분석 스레드
-    // 전용이라 UI에서 직접 destroy 금지 — 재생성 요청 플래그만 세우고 분석 경로에서 처리.
-    @Volatile private var stabFastOn = false
+    // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 (idx 0 = 코어 기본 4.0/15).
+    // 핸들은 분석 스레드 전용이라 UI에서 직접 destroy 금지 — 재생성 요청 플래그만 세우고
+    // 분석 경로에서 처리. minCutoff/beta 의미는 버튼 리스너 주석 참조.
+    private data class StabPreset(
+        val label: String, val minCutoff: Float, val beta: Float, val allAxes: Boolean = true)
+    // R2 판정: 지연 노브=beta 확정(150 합격·100 분기점·70↓ 붕괴), 단 2/150도 정지 지터 잔존.
+    // R3 축 분리 가설: 사카드에서 빨라야 하는 축은 iris 중심뿐 — radius(크기)·eyelid까지
+    // 근생화한 게 정지 "크기 숨쉬기" 지터의 주범일 수 있음. a=세 축 전부, c=중심만.
+    private val stabPresets = listOf(
+        StabPreset("norm", 0f, 0f),                // 코어 기본 (createStabilizer 경로)
+        StabPreset("2/150a", 2.0f, 150f),          // R2 최선 그대로 — 지터 기준점
+        StabPreset("2/150c", 2.0f, 150f, false),   // 중심만 — radius/eyelid 코어 기본
+        StabPreset("1/150c", 1.0f, 150f, false),   // 중심만 + minCutoff 인하 (잔여 지터용)
+    )
+    @Volatile private var stabPresetIdx = 0
     @Volatile private var stabRecreateRequested = false
     private var maskMode = 0      // EYECLIP A-2: 눈꺼풀 마스크 모드 0=Y-slab, 1=ellipse, 2=contour. 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
@@ -1116,8 +1132,9 @@ class GpuRenderActivity : AppCompatActivity() {
         }
         if (tasksStabilizerHandle == 0L) {
             // hold 연장본으로 생성 — 눈 일부 감김 시 얼굴 dropout 동안 렌즈 유지(stabilizerHoldFrames 주석 참조).
-            tasksStabilizerHandle = if (stabFastOn) {
-                IrisLensSDK.createStabilizerFast(stabilizerHoldFrames)
+            val preset = stabPresets[stabPresetIdx]
+            tasksStabilizerHandle = if (stabPresetIdx != 0) {
+                IrisLensSDK.createStabilizerTuned(stabilizerHoldFrames, preset.minCutoff, preset.beta, preset.allAxes)
             } else {
                 IrisLensSDK.createStabilizer(stabilizerHoldFrames)
             }

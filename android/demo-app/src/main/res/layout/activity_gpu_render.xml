@@ -358,7 +358,7 @@
 
             <Button
                 android:id="@+id/btnStabFast"
-                android:layout_width="86dp"
+                android:layout_width="104dp"
                 android:layout_height="36dp"
                 android:layout_marginStart="2dp"
                 android:text="stab:norm"

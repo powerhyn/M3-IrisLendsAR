@@ -1780,33 +1780,46 @@ Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerWithHold(
 }
 
 /**
- * Java: native long nativeCreateStabilizerFast(int holdFrames);
- * NLR 트래킹 A/B: near-raw 필터 프리셋 — LensSim FaceTracker(픽셀 공간 3.0/0.3) 등가를
- * 코어 정규화 공간으로 환산(beta 0.3 × 분석폭 ~640px ≈ 200). 사카드 추종 상한 실측용.
+ * Java: native long nativeCreateStabilizerTuned(int holdFrames, float minCutoff, float beta,
+ *                                               boolean allAxes);
+ * NLR 트래킹 A/B: OneEuro 상수 스윕용 벤치 API — near-raw(3.0/200, LensSim 픽셀 공간
+ * 3.0/0.3 등가 — beta 0.3 × 분석폭 ~640px ≈ 200)에서 정지 지터 임계를 찾기 위해
+ * (minCutoff, beta)를 데모에서 주입.
+ * allAxes=false면 iris 중심에만 적용하고 radius/eyelid는 코어 기본 유지 —
+ * 사카드에서 빨라야 하는 축은 중심뿐이라, 반경 근생화가 만드는 정지 "크기 숨쉬기"
+ * 지터를 분리 검증(R3 축 분리 가설).
  * 필터 외 파라미터(hold/hysteresis/outlier/blink)는 기본 config 그대로.
  */
 JNIEXPORT jlong JNICALL
-Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerFast(
+Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerTuned(
     JNIEnv* /* env */,
     jclass /* clazz */,
-    jint holdFrames) {
+    jint holdFrames,
+    jfloat minCutoff,
+    jfloat beta,
+    jboolean allAxes) {
 
     IrisStabilizerConfig config;
     iris_sdk_default_stabilizer_config(&config);
     config.hold_frames = static_cast<int>(holdFrames);
-    config.iris_min_cutoff = 3.0f;
-    config.iris_beta = 200.0f;
-    config.radius_min_cutoff = 3.0f;
-    config.radius_beta = 200.0f;
-    config.eyelid_min_cutoff = 3.0f;
-    config.eyelid_beta = 200.0f;
+    config.iris_min_cutoff = static_cast<float>(minCutoff);
+    config.iris_beta = static_cast<float>(beta);
+    if (allAxes == JNI_TRUE) {
+        config.radius_min_cutoff = static_cast<float>(minCutoff);
+        config.radius_beta = static_cast<float>(beta);
+        config.eyelid_min_cutoff = static_cast<float>(minCutoff);
+        config.eyelid_beta = static_cast<float>(beta);
+    }
 
     int64_t handle = iris_sdk_create_stabilizer(&config);
     if (handle == 0) {
-        LOGE("Failed to create FAST stabilizer (hold=%d)", static_cast<int>(holdFrames));
+        LOGE("Failed to create TUNED stabilizer (hold=%d %.2f/%.0f axes=%s)",
+             static_cast<int>(holdFrames), minCutoff, beta,
+             allAxes == JNI_TRUE ? "all" : "center");
     } else {
-        LOGI("FAST stabilizer created: handle=%lld hold=%d (near-raw 3.0/200)",
-             static_cast<long long>(handle), static_cast<int>(holdFrames));
+        LOGI("TUNED stabilizer created: handle=%lld hold=%d (%.2f/%.0f axes=%s)",
+             static_cast<long long>(handle), static_cast<int>(holdFrames),
+             minCutoff, beta, allAxes == JNI_TRUE ? "all" : "center");
     }
     return static_cast<jlong>(handle);
 }

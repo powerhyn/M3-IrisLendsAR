@@ -1302,12 +1302,14 @@ public final class IrisLensSDK {
     }
 
     /**
-     * NLR 트래킹 A/B: near-raw 필터 프리셋 Stabilizer (3.0/200 — LensSim 픽셀 공간 3.0/0.3 등가).
-     * 사카드 추종 상한 실측용 벤치 API. hold 등 필터 외 파라미터는 기본과 동일.
+     * NLR 트래킹 A/B: OneEuro 상수 스윕 Stabilizer — (minCutoff, beta)를 직접 주입.
+     * near-raw(3.0/200 — LensSim 픽셀 공간 3.0/0.3 등가)에서 정지 지터 임계 탐색용 벤치 API.
+     * allAxes=false면 iris 중심에만 적용, radius/eyelid는 코어 기본(R3 축 분리).
+     * hold 등 필터 외 파라미터는 기본과 동일.
      */
-    public static long createStabilizerFast(int holdFrames) {
+    public static long createStabilizerTuned(int holdFrames, float minCutoff, float beta, boolean allAxes) {
         if (!sLibraryLoaded) return 0;
-        return nativeCreateStabilizerFast(holdFrames);
+        return nativeCreateStabilizerTuned(holdFrames, minCutoff, beta, allAxes);
     }
 
     /**
@@ -1547,7 +1549,7 @@ public final class IrisLensSDK {
 
     private static native long nativeCreateStabilizer();
     private static native long nativeCreateStabilizerWithHold(int holdFrames);
-    private static native long nativeCreateStabilizerFast(int holdFrames);  // NLR 트래킹 A/B
+    private static native long nativeCreateStabilizerTuned(int holdFrames, float minCutoff, float beta, boolean allAxes);  // NLR 트래킹 A/B
     private static native float nativeStabilize(long handle, IrisResult result, double timestampSec);
     private static native void nativeDestroyStabilizer(long handle);
 
