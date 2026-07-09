@@ -7,7 +7,7 @@
 
 - **필독 순서**: 이 문서 → `docs/bench/NLR-W2/formula_bench_notes.md`(**라운드별 판정 전체 기록 — 가장 중요**) → `docs/workPaper/NLR-W2_blend_formula_research.md`(검증 리서치 + 정정 주석) → `docs/workPaper/NLR-W2_brainstorm/codex_r1.md`(Codex 수식 검토). 트래킹 축 배경: `docs/lenssim-handoff/mediapipe-internal-smoothing-bypass-handoff-from-lenssimulator.md`.
 - **브랜치**: `feature/P7-W4-sclera-luma-atten` (develop `075a5de` 위, **미머지**). 최근 커밋: `fcf01f2`(벤치 인프라 R5~R7+트래킹 A/B), `60a5df5`(수식 후보 1차), `d506051`(리서치), `839c9bc`(W1 종결).
-- **기기**: S23+ `ANDROID_SERIAL="adb-R3CW20BBFCM-HZeo2S._adb-tls-connect._tcp"`, **b298 설치됨**(모든 토글 포함). 무선 adb는 폰 화면 꺼지면 세션 만료 — 재연결 후 `adb devices`에 S916N 보이는지 확인. 빌드는 `./scripts/build_and_install.sh`(⚠️ cpp 빌드는 `cpp/cmake-build-debug` 재사용, 새 디렉토리 금지).
+- **기기**: S23+ `ANDROID_SERIAL="adb-R3CW20BBFCM-HZeo2S._adb-tls-connect._tcp"`, **b301 설치됨**(모든 토글 + 트래킹 스윕 R3 프리셋 사이클: norm/2/150a/2/150c/1/150c). 무선 adb는 폰 화면 꺼지면 세션 만료 — 재연결 후 `adb devices`에 S916N 보이는지 확인. 빌드는 `./scripts/build_and_install.sh`(⚠️ cpp 빌드는 `cpp/cmake-build-debug` 재사용, 새 디렉토리 금지).
 - **동반 에이전트**: `cpp/` 수정은 `systems-programming:cpp-pro`. Codex 교차는 **Codex 단독**(tmux `20_CGG-Backend:3.1` — 재개 시 `tmux list-panes -a ... | grep codex`로 재확인, 세션 죽어있으면 `codex --dangerously-bypass-approvals-and-sandbox`로 기동 후 텍스트/Enter 분리 송신).
 
 ## 1. 목표 + 왜 지금
@@ -29,21 +29,21 @@
 2. **리서치**(21클레임 검증): 휘도 곱셈 주입은 상용 선례 없음. 3계열 대안 → **전부 스티커 판정** (질감 전달 부족).
 3. **곱셈 골격은 유지가 정답** (A가 홍채 자연도 최고) — 병인은 **적응 증폭의 상한 7.0**. **빛남 임계 K≈4.4 실측** (B 스윕 f1.1) → canonical = scale 상한 4.0~4.2로 인하.
 4. 기하 디버그로 **검출 홍채 반경 > 실제** 확정 (빛나는 링이 초록 존까지 침범) → 반경 보정 계수 필요(트래킹 레벨). 서클렌즈 의도 겹침(착색부/홍채 ≈ 1.1~1.2)은 완벽 트래킹에도 존재 — 실물은 외곽 최암 잉크(US6,827,440 검증)라 얌전함.
-5. **트래킹**: img 효과 미미 = numFaces=2 우회 실증. **stab:fast(3.0/200) 효과 큼** = LensSim 델타 주범은 코어 필터 보수 튜닝(4.0/15). 환산 근거: LensSim 픽셀 공간 beta 0.3 × 분석폭 640 ≈ 200.
+5. **트래킹**: img 효과 미미 = numFaces=2 우회 실증. **stab:fast(3.0/200) 효과 큼** = LensSim 델타 주범은 코어 필터 보수 튜닝(4.0/15). 환산 근거: LensSim 픽셀 공간 beta 0.3 × 분석폭 640 ≈ 200. → **후속 스윕 R1~R3(b299~b301)로 ③④ 종결: canonical = iris 중심 1.0/150(중심만)** — bench_notes §트래킹 인사이트 참조.
 
-### ⚠️ 남은 판정 6건 (사용자 실기기 — 재개 시 첫 작업)
+### ⚠️ 남은 판정 — 렌더 4건 잔여 (①②⑤⑥; 트래킹 ③④는 2026-07-09 종결)
 | # | 판정 | 방법 |
 |---|---|---|
 | ① | R7 채도 부스트 최적값 + 투명도 조합 | B + 슬라이더 스윕 (+ 투명도 75~85%) |
 | ② | cap 배선 여부 | C에서 cap 버튼 → 밴드 보라 변화 유무 |
-| ③ | stab:fast 정지 지터 허용 여부 | stab:fast + 정면 응시 |
-| ④ | 사카드 시 눈꺼풀 마스크 위상 지연 | stab:fast + 빠른 시선 이동 — 렌즈가 눈꺼풀에 잘리는 순간 유무 |
+| ③ | ✅ **종결** — 상수 스윕 R1~R3(b299~b301)로 지터 원인 분해: 추종 노브=beta(150 합격선), 지터 주범=radius/eyelid 일괄 near-raw화. **canonical = iris 중심 1.0/150(중심만), radius/eyelid 코어 기본 유지** | bench_notes §트래킹 스윕 R1~R3 + 인사이트 |
+| ④ | ✅ **종결** — 1/150c 사카드 실측 잘림 미발생 ("잘리는 거 없이 잘 따라가"). 렌더러 contour 정렬 보류(후속 백로그) | 〃 |
 | ⑤ | D 페이드 최적 f값 | C로 링을 파랑에 넣고 → D 확인 |
 | ⑥ | 반경 보정 계수 | C에서 초록 경계가 실제 홍채 경계와 일치하는 f값 판독 |
 
 ## 3. 할 일 (판정 수집 후) + ⚠️절대 제약
 
-1. **canonical 조립안 §5 작성**: V2 골격 + scale 상한 4.0~4.2 + (①에서 유효하면) 채도 α + (⑤) 페이드 기본값 + (⑥) 반경 보정. 트래킹: stab fast 상수를 코어 기본(`iris_sdk_default_stabilizer_config`, sdk_api.cpp:766)으로 승격 + (④ 발견 시) 렌더러 contour/eyelid OneEuro(gpu_lens_renderer.h, 4.0/12~15)를 동일 상수로 정렬 (LensSim 선례).
+1. **canonical 조립안 §5 작성**: V2 골격 + scale 상한 4.0~4.2 + (①에서 유효하면) 채도 α + (⑤) 페이드 기본값 + (⑥) 반경 보정. 트래킹(✅확정): 코어 기본(`iris_sdk_default_stabilizer_config`, sdk_api.cpp:766)의 **iris 상수만 1.0/150으로 승격** (radius/eyelid 기본 유지 — 축 분리 인사이트). 렌더러 contour 정렬은 ④ 미발생으로 보류(백로그). 벤치 임시 API `createStabilizerTuned`(JNI/Java/데모 프리셋 사이클)는 정식 구현 시 정리.
 2. **Codex R2** (조립안 + visibility budget 수치 명시 — cap 실패 재발 방지 조항).
 3. **정식 구현**: 임시 슬롯(3/4/6) 원복("deprecated→ID5 fallback"), 진단 코드(C 디버그·보라) 제거, canonical은 ID5 수식 자체 수정 + 새 상수. cpp-pro 위임.
 4. W2 문서화(작업 규칙) + 분할 커밋 → develop 머지(`--no-ff`, PR 생략).
