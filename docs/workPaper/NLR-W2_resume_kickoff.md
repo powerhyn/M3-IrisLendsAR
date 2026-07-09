@@ -43,7 +43,7 @@
 
 ## 3. 할 일 (판정 수집 후) + ⚠️절대 제약
 
-1. **canonical 조립안 §5 작성**: V2 골격 + scale 상한 4.0~4.2 + (①에서 유효하면) 채도 α + (⑤) 페이드 기본값 + (⑥) 반경 보정. 트래킹(✅확정): 코어 기본(`iris_sdk_default_stabilizer_config`, sdk_api.cpp:766)의 **iris 상수만 1.0/150으로 승격** (radius/eyelid 기본 유지 — 축 분리 인사이트). 렌더러 contour 정렬은 ④ 미발생으로 보류(백로그). 벤치 임시 API `createStabilizerTuned`(JNI/Java/데모 프리셋 사이클)는 정식 구현 시 정리.
+1. **canonical 조립안 §5 작성**: V2 골격 + scale 상한 4.0~4.2 + (①에서 유효하면) 채도 α + (⑤) 페이드 기본값 + (⑥) 반경 보정. 트래킹(✅확정, Codex 교차 완료 — `NLR-W2_brainstorm/codex_tracking_review.md`): 코어 기본(`iris_sdk_default_stabilizer_config`, sdk_api.cpp:766)의 **iris 상수만 1.0/150으로 승격** (radius/eyelid 기본 유지 — 축 분리 인사이트). **승격 전 게이트 = A23 실기기 스모크 4항목**(정지 지터/사카드 추종/재검출 스파이크 스냅/마스크 클리핑 — bench_notes 백로그 P0). 렌더러 contour 정렬은 ④ 미발생으로 보류(백로그). 벤치 임시 API `createStabilizerTuned`(JNI/Java/데모 프리셋 사이클)는 정식 구현 시 정리.
 2. **Codex R2** (조립안 + visibility budget 수치 명시 — cap 실패 재발 방지 조항).
 3. **정식 구현**: 임시 슬롯(3/4/6) 원복("deprecated→ID5 fallback"), 진단 코드(C 디버그·보라) 제거, canonical은 ID5 수식 자체 수정 + 새 상수. cpp-pro 위임.
 4. W2 문서화(작업 규칙) + 분할 커밋 → develop 머지(`--no-ff`, PR 생략).
