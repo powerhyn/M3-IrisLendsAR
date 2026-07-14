@@ -347,6 +347,24 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * NLR 클리핑: 눈꺼풀 마스크 tuck 리매핑 강도 [0,1] (LensSim 이식 벤치, 0=항등).
+     */
+    fun setClipTuck(t: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setClipTuck(t)
+        }
+    }
+
+    /**
+     * NLR-W2 벤치: 틴트 고정 K(0, 기본) ↔ 구 적응 증폭(1) A/B 토글.
+     */
+    fun setAdaptK(v: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setAdaptK(v)
+        }
+    }
+
+    /**
      * NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위) — 벤치 라이브 튜닝.
      */
     fun setLensFadeStart(v: Float) {

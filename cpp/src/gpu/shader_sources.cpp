@@ -274,6 +274,10 @@ uniform float uEyelidFeather;
 uniform float uAvgIrisLum;
 // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap). OFF=1e6 센티널(비트 동일).
 uniform float uScleraTintMax;
+// NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식, 0=항등). 무분기 ALU 리매핑에 사용.
+uniform float uClipTuck;
+// NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1] (0=고정 기본). mix 무분기 순수 ALU(§8.9).
+uniform float uAdaptK;
 // NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위). 검출 반경 오차 보정용 라이브 튜닝. 창 폭은 +0.20 고정.
 uniform float uFadeStart;
 uniform float uDetH;
@@ -343,13 +347,19 @@ vec3 blendScreenLinear(vec3 base, vec3 blend, float opacity) {
 }
 
 // P6-W2 §5.1 C2: TintLinearV2 (canonical default). LTL 리네이밍 + squaring 제거.
-// uAvgIrisLum은 W1 fallback chain에서 이미 linear 공간 값으로 공급됨 (W1 §5.2.1).
-// K(=0.7) + clamp upper(7.0)는 실기기 시각 튜닝값. ColorReplaceLinear(ID=7)는 별도
-// 수식이라 K 영향 없음 — 5번 단독 강도 조정 가능.
+// NLR-W2 확정: 장면 적응 증폭(0.85/avgLum + clamp) 제거 → 고정 K=4.2 (사용자 결정 2026-07-09,
+// R5~R7 실측). uAvgIrisLum은 이 수식에서 미사용 — 측정 인프라(W1 §5.2.1, linear 공간 공급)는
+// 진단·타 수식용으로 보존. ColorReplaceLinear(ID=7)는 별도 수식이라 K 영향 없음 — 5번 단독 강도 조정 가능.
 vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
     vec3 baseL = toLinearFast(base);
     float lum = dot(baseL, LUMA_709_LENS);
-    float scale = clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0);
+    // NLR-W2 확정: 장면 적응 증폭(0.85/avgLum) 제거 → 고정 K (사용자 결정 2026-07-09).
+    // 근거: 적응이 실내에서 만드는 고증폭(K 5.5~7)이 흰자/경계 빛남의 병인 (R6 실측).
+    // K=4.2 = 빛남 임계 K≈4.4(R6b 스윕 f≈1.1) 직하 — 선명도 유지 + 빛남 제거.
+    // uAvgIrisLum 측정 인프라(W6/P7-W2)는 진단·타 수식용으로 보존 (여기서만 미사용).
+    // uAdaptK: 톤 하락(고정 K 4.2 < 실내 적응 5.5~7) 비교 검증용 라이브 토글 — 0=고정(기본), 1=구 적응식.
+    //   mix라 무분기 순수 ALU(§8.9 안전). 벤치 종료 시 토글 제거 예정.
+    float scale = mix(4.2, clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0), uAdaptK);
     float tintMul = min(lum * scale, uScleraTintMax);
     vec3 tinted = toLinearFast(blend) * tintMul;
     vec3 result = mix(baseL, tinted, opacity);
@@ -473,7 +483,8 @@ vec3 blendPivotBiDir(vec3 base, vec3 blend, float opacity) {
 vec3 blendTintLinearRadial(vec3 base, vec3 blend, float opacity, float irisDist) {
     vec3 baseL = toLinearFast(base);
     float lum = dot(baseL, LUMA_709_LENS);
-    float scale = clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0);
+    // NLR-W2 확정: V2와 동일 고정 K + 적응 비교 토글(uAdaptK)
+    float scale = mix(4.2, clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0), uAdaptK);
     float tintMul = min(lum * scale, uScleraTintMax);
     vec3 tinted = toLinearFast(blend) * tintMul;
     float fade = 1.0 - smoothstep(uFadeStart, uFadeStart + 0.20, irisDist);
@@ -653,6 +664,15 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         float bottomClip = 1.0 - smoothstep(maxY - eyelidFeather, maxY + eyelidFeather, vTexCoord.y);
         eyelidMask = topClip * bottomClip;
     }
+
+    // NLR 클리핑: tuck 리매핑 (LensSim 실기기 확정 이식 — clipping-accuracy-handoff §3).
+    // 페더 원본 m은 경계가 넓고 물렁("스티커 뜸") — 하위 tuckLo 컷 + 전이폭 축소로 타이트 클립.
+    // t=0이면 수학적 항등(기본 — 현행과 비트 동일). 순수 ALU(분기·texture 없음, §8.9 안전).
+    // ⚠️ calcContactShadow는 Y-slab 기하(minY+feather) 기반이라 tuck 미동조 — tuck 채택 시
+    //   그림자 경계 동조 필요 (LensSim §3 파생 효과 동조 교훈; contact shadow 기본 OFF라 벤치 무영향).
+    float tuckLo = 0.45 * uClipTuck;
+    float tuckHi = 1.0 - 0.15 * uClipTuck;
+    eyelidMask = clamp((eyelidMask - tuckLo) / max(tuckHi - tuckLo, 1e-4), 0.0, 1.0);
 
     float finalAlpha = lens.a * uOpacity * edgeAlpha * eyelidMask;
 

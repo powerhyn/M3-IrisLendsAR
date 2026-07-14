@@ -2242,6 +2242,30 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetScleraTintMax(
 }
 
 /**
+ * Java: native void nativeSetClipTuck(float t);
+ * NLR 클리핑: 눈꺼풀 마스크 tuck 리매핑 강도 [0,1] (LensSim 이식 벤치, 0=항등).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetClipTuck(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat t)
+{
+    iris_sdk_set_lens_clip_tuck(static_cast<float>(t));
+}
+
+/**
+ * Java: native void nativeSetAdaptK(float v);
+ * NLR-W2 벤치: 틴트 고정 K(0, 기본) ↔ 구 적응 증폭(1) A/B 토글 — 톤 비교 검증용.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetAdaptK(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat v)
+{
+    iris_sdk_set_lens_adapt_k(static_cast<float>(v));
+}
+
+/**
  * Java: native void nativeSetLensFadeStart(float v);
  * NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위, 0.5~1.4) — 검출 반경 오차 라이브 보정.
  */

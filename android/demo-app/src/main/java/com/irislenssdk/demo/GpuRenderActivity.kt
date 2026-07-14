@@ -116,6 +116,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
     private lateinit var btnW4Cap: Button        // P7-W4 §5.8: 흰자 빛남 cap sweep
+    private lateinit var btnTuck: Button         // NLR 클리핑: tuck 리매핑 sweep (LensSim 이식)
+    private lateinit var btnAdaptK: Button       // NLR-W2: 고정 K↔적응 증폭 A/B (톤 비교)
     private lateinit var btnImgMode: Button      // NLR 트래킹 A/B: MediaPipe IMAGE 모드 (내부 스무딩·ROI 우회)
     private lateinit var btnStabFast: Button     // NLR 트래킹 A/B: stabilizer near-raw 프리셋
     private lateinit var seekMaxDetail: SeekBar
@@ -238,6 +240,8 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
         btnW4Cap = findViewById(R.id.btnW4Cap)
+        btnTuck = findViewById(R.id.btnTuck)
+        btnAdaptK = findViewById(R.id.btnAdaptK)
         btnImgMode = findViewById(R.id.btnImgMode)
         btnStabFast = findViewById(R.id.btnStabFast)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
@@ -540,6 +544,22 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW4Cap.text = if (cap >= 1.0e5f) "cap:off" else String.format("cap%.2f", cap)
             Log.i(TAG, "P7-W4 sclera tint cap → ${if (cap >= 1.0e5f) "off" else "$cap"}")
         }
+        // NLR 클리핑: tuck 리매핑 sweep {off, 0.5, 0.75, 1.0(LensSim 확정)} — contour 마스크(mask:contour)에서 판정.
+        btnTuck.setOnClickListener {
+            tuckIdx = (tuckIdx + 1) % tuckSweep.size
+            val t = tuckSweep[tuckIdx]
+            cameraGLView.setClipTuck(t)
+            btnTuck.text = if (t <= 0f) "tuck:off" else String.format("tuck%.2f", t)
+            Log.i(TAG, "NLR clip tuck → ${if (t <= 0f) "off" else "$t"}")
+        }
+        // NLR-W2: 고정 K(4.2, 확정 기본) ↔ 구 적응 증폭(0.85/avgLum, 상한 7.0) A/B — 톤 하락 비교 검증.
+        btnAdaptK.setOnClickListener {
+            adaptKOn = !adaptKOn
+            cameraGLView.setAdaptK(if (adaptKOn) 1f else 0f)
+            btnAdaptK.text = if (adaptKOn) "K:adapt" else "K:fix"
+            btnAdaptK.setBackgroundColor(if (adaptKOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Log.i(TAG, "NLR tint K → ${if (adaptKOn) "ADAPT(0.85/avgLum, 구 방식)" else "FIX(4.2, 확정)"}")
+        }
         // (P8 통합) skin/radiance/slim sweep 버튼 → 뷰티 탭 슬라이더로 이전 (setupBeautyControls).
     }
 
@@ -572,6 +592,16 @@ class GpuRenderActivity : AppCompatActivity() {
     // D(V2+페이드) + cap 조합 = 후보 H 라이브 튜닝 (cap이 렌즈 내 밝은 픽셀 과증폭 상한 역할).
     private val w4CapSweep = floatArrayOf(0.95f, 1.05f, 1.15f, 1.0e6f)
     private var w4CapIdx = 3   // 시작 = OFF (코어 기본 1.275는 사실상 무효 구간이라 OFF와 동일 취급)
+
+    // NLR 클리핑: tuck 리매핑 sweep — R1 판정: 1.0(LensSim 확정)은 렌즈를 깎아먹는 케이스 有,
+    // 0.75가 정당 + 0.85 후보 (IrisLens는 해석식 마스크라 LensSim 래스터와 실효 폭이 달라
+    // 최적점이 낮게 잡히는 것으로 해석). R2 = 0.75 vs 0.85 정밀 판정.
+    // tuckLo=0.45t/tuckHi=1−0.15t: 페더 하위 컷 + 전이폭 축소 = 타이트 클립(밀착감).
+    private val tuckSweep = floatArrayOf(0f, 0.75f, 0.85f, 1.0f)
+    private var tuckIdx = 0    // 시작 = off (현행 비트 동일)
+
+    // NLR-W2: 고정 K↔적응 증폭 A/B (기본 = 고정 K, 사용자 확정 상태)
+    private var adaptKOn = false
 
     // NLR-W1 복원 갭 보수: 컨텍스트 재생성 시 native 기본값으로 리셋되는 상태들의 UI 측 진실값.
     // (기존 지역 변수라 restoreLensRenderState가 복원 불가했던 구조 결함 — 필드 승격)
@@ -738,6 +768,10 @@ class GpuRenderActivity : AppCompatActivity() {
         cameraGLView.setContactShadow(contactShadowOn)
         // P7-W4 §5.8: 흰자 빛남 cap — 현재 sweep 값 재주입
         cameraGLView.setScleraTintMax(w4CapSweep[w4CapIdx])
+        // NLR 클리핑: tuck 리매핑 — 현재 sweep 값 재주입
+        cameraGLView.setClipTuck(tuckSweep[tuckIdx])
+        // NLR-W2: K 토글 — 현재 상태 재주입
+        cameraGLView.setAdaptK(if (adaptKOn) 1f else 0f)
         // NLR-W2 R5: 흰자 페이드 시작점 — 현재 슬라이더 값 재주입
         cameraGLView.setLensFadeStart(fadeStartV)
         // 현재 선택 렌즈 텍스처 재업로드 (stale native texture는 onSurfaceCreated에서 이미 해제됨).

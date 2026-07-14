@@ -153,6 +153,10 @@ public:
     /// P7-W4 §5.8: TintLinearV2(ID=5) 유효 틴트 배율 상한 — 흰자 고휘도 픽셀 빛남 cap.
     /// clamp[1.0, 1e6]. 하한 1.0=홍채 자체 틴트(≈0.85) 불변, OFF 센티널=1e6.
     void setScleraTintMax(float v);
+    /// NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식, 0=항등).
+    void setClipTuck(float v);
+    /// NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1] (0=고정 기본).
+    void setAdaptK(float v);
     /// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝. clamp[0.5, 1.4], 창 폭 +0.20 고정.
     void setLensFadeStart(float v);
     /// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off (기본 on).
@@ -321,6 +325,8 @@ private:
         GLint uTexelSize = -1;
         GLint uGateThreshold = -1;
         GLint uScleraTintMax = -1;  // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap)
+        GLint uClipTuck = -1;       // NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식, 0=항등)
+        GLint uAdaptK = -1;         // NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1] (0=고정 기본)
         GLint uFadeStart = -1;      // NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위) 라이브 튜닝
         GLint uDetailReinject = -1;
         GLint uLowLightActive = -1;  // P7-W2 §5.4: gate 전용 저조도 래치 상태 (0..1)
@@ -467,6 +473,10 @@ private:
     // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한. 기본값 근거 = 0.85×1.5 (P7-W4 §5.8),
     // OFF 센티널 1e6.
     float sclera_tint_max_ = 1.275f;
+    // NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식). 기본 0 = 현행 동작 보존(비트 동일).
+    float clip_tuck_ = 0.0f;
+    // NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1]. 기본 0 = 고정 K(확정 상태) 유지(비트 동일).
+    float adapt_k_ = 0.0f;
     // NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위). 검출 반경 오차 보정용 라이브 튜닝, 창 폭 +0.20 고정.
     float fade_start_ = 0.95f;
     bool  detail_reinject_ = true;  // C10 on/off

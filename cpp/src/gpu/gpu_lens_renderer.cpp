@@ -517,6 +517,8 @@ void GPULensRenderer::cacheLensUniforms() {
     lens_uniforms_.uTexelSize = glGetUniformLocation(lens_program_, "uTexelSize");
     lens_uniforms_.uGateThreshold = glGetUniformLocation(lens_program_, "uGateThreshold");
     lens_uniforms_.uScleraTintMax = glGetUniformLocation(lens_program_, "uScleraTintMax");
+    lens_uniforms_.uClipTuck = glGetUniformLocation(lens_program_, "uClipTuck");
+    lens_uniforms_.uAdaptK = glGetUniformLocation(lens_program_, "uAdaptK");
     lens_uniforms_.uFadeStart = glGetUniformLocation(lens_program_, "uFadeStart");
     lens_uniforms_.uDetailReinject = glGetUniformLocation(lens_program_, "uDetailReinject");
     lens_uniforms_.uLowLightActive = glGetUniformLocation(lens_program_, "uLowLightActive");
@@ -643,6 +645,18 @@ void GPULensRenderer::setGateThreshold(float t) {
 void GPULensRenderer::setScleraTintMax(float v) {
     std::lock_guard<std::mutex> lock(mutex_);
     sclera_tint_max_ = std::clamp(v, 0.85f, 1.0e6f);
+}
+
+// NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식). 0=수학적 항등(현행 보존, 비트 동일).
+void GPULensRenderer::setClipTuck(float v) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    clip_tuck_ = std::clamp(v, 0.0f, 1.0f);
+}
+
+// NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1]. 0=고정 K(확정 상태 보존, 비트 동일).
+void GPULensRenderer::setAdaptK(float v) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    adapt_k_ = std::clamp(v, 0.0f, 1.0f);
 }
 
 // NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝 — 검출 반경 오차 보정용.
@@ -1264,6 +1278,10 @@ ErrorCode GPULensRenderer::renderToTexture(
     glUniform1f(lens_uniforms_.uAvgIrisLum, avg_luma);
     // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 업로드 (흰자 빛남 cap).
     glUniform1f(lens_uniforms_.uScleraTintMax, sclera_tint_max_);
+    // NLR 클리핑: tuck 리매핑 강도 업로드 (LensSim §3 이식) — 0=항등.
+    glUniform1f(lens_uniforms_.uClipTuck, clip_tuck_);
+    // NLR-W2 벤치: 고정 K↔적응 증폭 A/B 업로드 — 0=고정 K(확정).
+    glUniform1f(lens_uniforms_.uAdaptK, adapt_k_);
     // NLR-W2 R5: 흰자 페이드 시작점 업로드 (홍채 반경 단위) — 라이브 튜닝.
     glUniform1f(lens_uniforms_.uFadeStart, fade_start_);
 
