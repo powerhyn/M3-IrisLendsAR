@@ -826,4 +826,56 @@ void iris_sdk_set_use_measured_luma(int enabled) {
 #endif
 }
 
+// P7-W4 §5.8: TintLinearV2 흰자 빛남 cap internal C API (유효 틴트 배율 상한).
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출(gate_threshold와 동일 패턴).
+void iris_sdk_set_lens_sclera_tint_max(float cap) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setScleraTintMax(cap);
+    }
+#else
+    (void)cap;
+#endif
+}
+
+// NLR 클리핑: tuck 리매핑 강도 [0,1] internal C API (LensSim §3 이식, 0=항등).
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출(sclera_tint_max와 동일 패턴).
+void iris_sdk_set_lens_clip_tuck(float t) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setClipTuck(t);
+    }
+#else
+    (void)t;
+#endif
+}
+
+// NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1] internal C API (0=고정 기본, 1=구 적응식).
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출(clip_tuck과 동일 패턴).
+void iris_sdk_set_lens_adapt_k(float v) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setAdaptK(v);
+    }
+#else
+    (void)v;
+#endif
+}
+
+// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝 internal C API.
+// JNI 파일에서 forward declare 후 호출. 공개 sdk_api.h 미노출(sclera_tint_max와 동일 패턴).
+void iris_sdk_set_lens_fade_start(float v) {
+#ifdef IRIS_SDK_HAS_GLES
+    std::lock_guard<std::mutex> lock(g_gpu_mutex);
+    if (g_gpu_lens) {
+        g_gpu_lens->setLensFadeStart(v);
+    }
+#else
+    (void)v;
+#endif
+}
+
 } // extern "C"

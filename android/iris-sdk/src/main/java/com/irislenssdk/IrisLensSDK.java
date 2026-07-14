@@ -1015,6 +1015,44 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 토글 (벤치용 — 흰자 빛남 cap).
+     * @param cap 1.275(기본)/1.5/2.0, OFF=1e6 센티널(비트 동일 출력). C++ setter가 [1.0, 1e6] clamp.
+     */
+    public static void setScleraTintMax(float cap) {
+        if (sLibraryLoaded) {
+            nativeSetScleraTintMax(cap);
+        }
+    }
+
+    /**
+     * NLR 클리핑: 눈꺼풀 마스크 tuck 리매핑 강도 (벤치용, C++ clamp [0, 1], 0=항등).
+     * LensSim 실기기 확정값 1.0 이식 검증 — clipping-accuracy-handoff §3.
+     */
+    public static void setClipTuck(float t) {
+        if (sLibraryLoaded) {
+            nativeSetClipTuck(t);
+        }
+    }
+
+    /**
+     * NLR-W2 벤치: 틴트 고정 K(0, 기본) ↔ 구 적응 증폭(1) A/B 토글 — 톤 하락 비교 검증용.
+     */
+    public static void setAdaptK(float v) {
+        if (sLibraryLoaded) {
+            nativeSetAdaptK(v);
+        }
+    }
+
+    /**
+     * NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위, C++ clamp [0.5, 1.4]) — 벤치 라이브 튜닝.
+     */
+    public static void setLensFadeStart(float v) {
+        if (sLibraryLoaded) {
+            nativeSetLensFadeStart(v);
+        }
+    }
+
+    /**
      * P6-W6 C10: 홍채 디테일 재주입 on/off 토글 (벤치용).
      * @param enabled true=on(기본), false=off.
      */
@@ -1283,6 +1321,17 @@ public final class IrisLensSDK {
     }
 
     /**
+     * NLR 트래킹 A/B: OneEuro 상수 스윕 Stabilizer — (minCutoff, beta)를 직접 주입.
+     * near-raw(3.0/200 — LensSim 픽셀 공간 3.0/0.3 등가)에서 정지 지터 임계 탐색용 벤치 API.
+     * allAxes=false면 iris 중심에만 적용, radius/eyelid는 코어 기본(R3 축 분리).
+     * hold 등 필터 외 파라미터는 기본과 동일.
+     */
+    public static long createStabilizerTuned(int holdFrames, float minCutoff, float beta, boolean allAxes) {
+        if (!sLibraryLoaded) return 0;
+        return nativeCreateStabilizerTuned(holdFrames, minCutoff, beta, allAxes);
+    }
+
+    /**
      * 검출 결과를 스무딩합니다 (in-place).
      *
      * <p>전달된 IrisResult 객체의 값이 스무딩된 결과로 덮어씌워집니다.
@@ -1508,6 +1557,12 @@ public final class IrisLensSDK {
     private static native void nativeSetGateThreshold(float threshold);
     private static native void nativeSetDetailReinject(boolean enabled);
     private static native void nativeSetUseMeasuredLuma(boolean enabled);
+    // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap 벤치 토글
+    private static native void nativeSetScleraTintMax(float cap);
+    private static native void nativeSetClipTuck(float t);  // NLR 클리핑: tuck 리매핑 (LensSim 이식 벤치)
+    private static native void nativeSetAdaptK(float v);    // NLR-W2 벤치: 고정 K↔적응 증폭 A/B
+    // NLR-W2 R5: 흰자 페이드 시작점 벤치 토글
+    private static native void nativeSetLensFadeStart(float v);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods
@@ -1515,6 +1570,7 @@ public final class IrisLensSDK {
 
     private static native long nativeCreateStabilizer();
     private static native long nativeCreateStabilizerWithHold(int holdFrames);
+    private static native long nativeCreateStabilizerTuned(int holdFrames, float minCutoff, float beta, boolean allAxes);  // NLR 트래킹 A/B
     private static native float nativeStabilize(long handle, IrisResult result, double timestampSec);
     private static native void nativeDestroyStabilizer(long handle);
 

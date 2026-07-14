@@ -247,11 +247,17 @@
         </LinearLayout>
 
         <!-- 블링크 ramp(B5) / 저조도 gate(B9) / 디테일 재주입(C10) / 측정 luma(W7) 벤치 토글 -->
+        <!-- NLR 클리핑: tuck 버튼 추가로 행 폭이 화면을 넘어 가로 스크롤로 전환 (버튼 잘림 방지) -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:scrollbars="none">
+
         <LinearLayout
             android:id="@+id/w6BenchPanel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
             android:orientation="horizontal"
             android:padding="4dp"
             android:background="#80000000">
@@ -307,7 +313,57 @@
                 android:backgroundTint="#66555555"
                 style="@style/Widget.MaterialComponents.Button.TextButton" />
 
+            <Button
+                android:id="@+id/btnW4Cap"
+                android:layout_width="72dp"
+                android:layout_height="36dp"
+                android:text="cap:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnTuck"
+                android:layout_width="84dp"
+                android:layout_height="36dp"
+                android:text="tuck:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnAdaptK"
+                android:layout_width="72dp"
+                android:layout_height="36dp"
+                android:text="K:fix"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnImgMode"
+                android:layout_width="68dp"
+                android:layout_height="36dp"
+                android:text="img:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
         </LinearLayout>
+
+        </HorizontalScrollView>
 
         <!-- TASKS frame-sync 킬스위치 -->
         <LinearLayout
@@ -325,6 +381,19 @@
                 android:layout_height="36dp"
                 android:layout_marginStart="2dp"
                 android:text="fsync:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <Button
+                android:id="@+id/btnStabFast"
+                android:layout_width="104dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="2dp"
+                android:text="stab:norm"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:textAllCaps="false"

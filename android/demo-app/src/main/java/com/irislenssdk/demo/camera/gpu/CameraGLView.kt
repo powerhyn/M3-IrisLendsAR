@@ -338,6 +338,42 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * P7-W4 §5.8: TintLinearV2 흰자 빛남 cap 토글 (1.275/1.5/2.0/OFF=1e6).
+     */
+    fun setScleraTintMax(cap: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setScleraTintMax(cap)
+        }
+    }
+
+    /**
+     * NLR 클리핑: 눈꺼풀 마스크 tuck 리매핑 강도 [0,1] (LensSim 이식 벤치, 0=항등).
+     */
+    fun setClipTuck(t: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setClipTuck(t)
+        }
+    }
+
+    /**
+     * NLR-W2 벤치: 틴트 고정 K(0, 기본) ↔ 구 적응 증폭(1) A/B 토글.
+     */
+    fun setAdaptK(v: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setAdaptK(v)
+        }
+    }
+
+    /**
+     * NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위) — 벤치 라이브 튜닝.
+     */
+    fun setLensFadeStart(v: Float) {
+        queueEvent {
+            com.irislenssdk.IrisLensSDK.setLensFadeStart(v)
+        }
+    }
+
+    /**
      * P6-W6 C10: 홍채 디테일 재주입 on/off.
      */
     fun setDetailReinject(enabled: Boolean) {

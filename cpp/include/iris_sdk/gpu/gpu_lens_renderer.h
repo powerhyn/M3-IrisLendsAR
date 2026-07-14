@@ -150,6 +150,15 @@ public:
     void setBlinkUpMs(float ms);
     /// P6-W6 §5.7 B9: 저조도 디테일 gate 임계값(linear avg luma). 토글 0.10/0.15/0.25, 기본 0.15. clamp[0,1].
     void setGateThreshold(float t);
+    /// P7-W4 §5.8: TintLinearV2(ID=5) 유효 틴트 배율 상한 — 흰자 고휘도 픽셀 빛남 cap.
+    /// clamp[1.0, 1e6]. 하한 1.0=홍채 자체 틴트(≈0.85) 불변, OFF 센티널=1e6.
+    void setScleraTintMax(float v);
+    /// NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식, 0=항등).
+    void setClipTuck(float v);
+    /// NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1] (0=고정 기본).
+    void setAdaptK(float v);
+    /// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝. clamp[0.5, 1.4], 창 폭 +0.20 고정.
+    void setLensFadeStart(float v);
     /// P6-W6 §5.2 C10: 홍채 inner 디테일 재주입 on/off (기본 on).
     void setDetailReinject(bool enabled);
     /// P7-W2 §5.6: avg_iris_luma 실측↔fallback A/B 토글 (기본 false=fallback, 안전 롤백).
@@ -315,6 +324,10 @@ private:
         // P6-W6 §5.2/§5.7: C10 디테일 재주입 + B9 gate + C7 블링크 ramp.
         GLint uTexelSize = -1;
         GLint uGateThreshold = -1;
+        GLint uScleraTintMax = -1;  // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap)
+        GLint uClipTuck = -1;       // NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식, 0=항등)
+        GLint uAdaptK = -1;         // NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1] (0=고정 기본)
+        GLint uFadeStart = -1;      // NLR-W2 R5: 흰자 페이드 시작점 (홍채 반경 단위) 라이브 튜닝
         GLint uDetailReinject = -1;
         GLint uLowLightActive = -1;  // P7-W2 §5.4: gate 전용 저조도 래치 상태 (0..1)
         GLint uLeftRenderAlpha = -1;
@@ -457,6 +470,15 @@ private:
     // 특성상 C10 디테일을 일반 환경에서 항상 살리는 쪽 채택(도메인 판단). gate 로직은
     // 보존되어 실측 연결 시 극단 저조도(luma<0.07)만 자동 감쇄.
     float gate_threshold_ = 0.10f;  // B9 토글 후보 0.10/0.15/0.25
+    // P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한. 기본값 근거 = 0.85×1.5 (P7-W4 §5.8),
+    // OFF 센티널 1e6.
+    float sclera_tint_max_ = 1.275f;
+    // NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식). 기본 0 = 현행 동작 보존(비트 동일).
+    float clip_tuck_ = 0.0f;
+    // NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1]. 기본 0 = 고정 K(확정 상태) 유지(비트 동일).
+    float adapt_k_ = 0.0f;
+    // NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위). 검출 반경 오차 보정용 라이브 튜닝, 창 폭 +0.20 고정.
+    float fade_start_ = 0.95f;
     bool  detail_reinject_ = true;  // C10 on/off
 
     // P7-W2 §5.6: 실측 luma A/B 토글. false면 packet 실측을 무시하고 fallback 0.1225만.

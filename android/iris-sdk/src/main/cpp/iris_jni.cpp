@@ -1780,6 +1780,51 @@ Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerWithHold(
 }
 
 /**
+ * Java: native long nativeCreateStabilizerTuned(int holdFrames, float minCutoff, float beta,
+ *                                               boolean allAxes);
+ * NLR 트래킹 A/B: OneEuro 상수 스윕용 벤치 API — near-raw(3.0/200, LensSim 픽셀 공간
+ * 3.0/0.3 등가 — beta 0.3 × 분석폭 ~640px ≈ 200)에서 정지 지터 임계를 찾기 위해
+ * (minCutoff, beta)를 데모에서 주입.
+ * allAxes=false면 iris 중심에만 적용하고 radius/eyelid는 코어 기본 유지 —
+ * 사카드에서 빨라야 하는 축은 중심뿐이라, 반경 근생화가 만드는 정지 "크기 숨쉬기"
+ * 지터를 분리 검증(R3 축 분리 가설).
+ * 필터 외 파라미터(hold/hysteresis/outlier/blink)는 기본 config 그대로.
+ */
+JNIEXPORT jlong JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeCreateStabilizerTuned(
+    JNIEnv* /* env */,
+    jclass /* clazz */,
+    jint holdFrames,
+    jfloat minCutoff,
+    jfloat beta,
+    jboolean allAxes) {
+
+    IrisStabilizerConfig config;
+    iris_sdk_default_stabilizer_config(&config);
+    config.hold_frames = static_cast<int>(holdFrames);
+    config.iris_min_cutoff = static_cast<float>(minCutoff);
+    config.iris_beta = static_cast<float>(beta);
+    if (allAxes == JNI_TRUE) {
+        config.radius_min_cutoff = static_cast<float>(minCutoff);
+        config.radius_beta = static_cast<float>(beta);
+        config.eyelid_min_cutoff = static_cast<float>(minCutoff);
+        config.eyelid_beta = static_cast<float>(beta);
+    }
+
+    int64_t handle = iris_sdk_create_stabilizer(&config);
+    if (handle == 0) {
+        LOGE("Failed to create TUNED stabilizer (hold=%d %.2f/%.0f axes=%s)",
+             static_cast<int>(holdFrames), minCutoff, beta,
+             allAxes == JNI_TRUE ? "all" : "center");
+    } else {
+        LOGI("TUNED stabilizer created: handle=%lld hold=%d (%.2f/%.0f axes=%s)",
+             static_cast<long long>(handle), static_cast<int>(holdFrames),
+             minCutoff, beta, allAxes == JNI_TRUE ? "all" : "center");
+    }
+    return static_cast<jlong>(handle);
+}
+
+/**
  * @brief 검출 결과 스무딩 (Java IrisResult를 in-place로 수정)
  *
  * Java: native float nativeStabilize(long handle, IrisResult result, double timestampSec);
@@ -2182,6 +2227,54 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetGateThreshold(
     jfloat threshold)
 {
     iris_sdk_set_lens_gate_threshold(static_cast<float>(threshold));
+}
+
+/**
+ * Java: native void nativeSetScleraTintMax(float cap);
+ * P7-W4 §5.8: TintLinearV2 흰자 빛남 cap (토글 1.275/1.5/2.0/OFF=1e6).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetScleraTintMax(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat cap)
+{
+    iris_sdk_set_lens_sclera_tint_max(static_cast<float>(cap));
+}
+
+/**
+ * Java: native void nativeSetClipTuck(float t);
+ * NLR 클리핑: 눈꺼풀 마스크 tuck 리매핑 강도 [0,1] (LensSim 이식 벤치, 0=항등).
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetClipTuck(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat t)
+{
+    iris_sdk_set_lens_clip_tuck(static_cast<float>(t));
+}
+
+/**
+ * Java: native void nativeSetAdaptK(float v);
+ * NLR-W2 벤치: 틴트 고정 K(0, 기본) ↔ 구 적응 증폭(1) A/B 토글 — 톤 비교 검증용.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetAdaptK(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat v)
+{
+    iris_sdk_set_lens_adapt_k(static_cast<float>(v));
+}
+
+/**
+ * Java: native void nativeSetLensFadeStart(float v);
+ * NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위, 0.5~1.4) — 검출 반경 오차 라이브 보정.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetLensFadeStart(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jfloat v)
+{
+    iris_sdk_set_lens_fade_start(static_cast<float>(v));
 }
 
 /**

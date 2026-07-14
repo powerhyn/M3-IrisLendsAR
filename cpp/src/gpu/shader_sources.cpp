@@ -272,6 +272,14 @@ uniform float uRightEyeTop;
 uniform float uRightEyeBottom;
 uniform float uEyelidFeather;
 uniform float uAvgIrisLum;
+// P7-W4 §5.8: TintLinearV2 유효 틴트 배율 상한 (흰자 빛남 cap). OFF=1e6 센티널(비트 동일).
+uniform float uScleraTintMax;
+// NLR 클리핑: tuck 리매핑 강도 [0,1] (LensSim §3 이식, 0=항등). 무분기 ALU 리매핑에 사용.
+uniform float uClipTuck;
+// NLR-W2 벤치: 고정 K↔적응 증폭 A/B [0,1] (0=고정 기본). mix 무분기 순수 ALU(§8.9).
+uniform float uAdaptK;
+// NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위). 검출 반경 오차 보정용 라이브 튜닝. 창 폭은 +0.20 고정.
+uniform float uFadeStart;
 uniform float uDetH;
 
 uniform int uScleraProtect;
@@ -339,14 +347,21 @@ vec3 blendScreenLinear(vec3 base, vec3 blend, float opacity) {
 }
 
 // P6-W2 §5.1 C2: TintLinearV2 (canonical default). LTL 리네이밍 + squaring 제거.
-// uAvgIrisLum은 W1 fallback chain에서 이미 linear 공간 값으로 공급됨 (W1 §5.2.1).
-// K(=0.7) + clamp upper(7.0)는 실기기 시각 튜닝값. ColorReplaceLinear(ID=7)는 별도
-// 수식이라 K 영향 없음 — 5번 단독 강도 조정 가능.
+// NLR-W2 확정: 장면 적응 증폭(0.85/avgLum + clamp) 제거 → 고정 K=4.2 (사용자 결정 2026-07-09,
+// R5~R7 실측). uAvgIrisLum은 이 수식에서 미사용 — 측정 인프라(W1 §5.2.1, linear 공간 공급)는
+// 진단·타 수식용으로 보존. ColorReplaceLinear(ID=7)는 별도 수식이라 K 영향 없음 — 5번 단독 강도 조정 가능.
 vec3 blendTintLinearV2(vec3 base, vec3 blend, float opacity) {
     vec3 baseL = toLinearFast(base);
     float lum = dot(baseL, LUMA_709_LENS);
-    float scale = clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0);
-    vec3 tinted = toLinearFast(blend) * lum * scale;
+    // NLR-W2 확정: 장면 적응 증폭(0.85/avgLum) 제거 → 고정 K (사용자 결정 2026-07-09).
+    // 근거: 적응이 실내에서 만드는 고증폭(K 5.5~7)이 흰자/경계 빛남의 병인 (R6 실측).
+    // K=4.2 = 빛남 임계 K≈4.4(R6b 스윕 f≈1.1) 직하 — 선명도 유지 + 빛남 제거.
+    // uAvgIrisLum 측정 인프라(W6/P7-W2)는 진단·타 수식용으로 보존 (여기서만 미사용).
+    // uAdaptK: 톤 하락(고정 K 4.2 < 실내 적응 5.5~7) 비교 검증용 라이브 토글 — 0=고정(기본), 1=구 적응식.
+    //   mix라 무분기 순수 ALU(§8.9 안전). 벤치 종료 시 토글 제거 예정.
+    float scale = mix(4.2, clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0), uAdaptK);
+    float tintMul = min(lum * scale, uScleraTintMax);
+    vec3 tinted = toLinearFast(blend) * tintMul;
     vec3 result = mix(baseL, tinted, opacity);
     return toSRGBFast(result);
 }
@@ -359,6 +374,152 @@ vec3 blendColorReplaceLinear(vec3 base, vec3 blend, float opacity, float maxDeta
     float detail = clamp(pow(lum / max(0.01, uAvgIrisLum), 0.7), 0.75, maxDetail);
     vec3 colored = lensL * detail;
     return toSRGBFast(mix(baseL, colored, opacity));
+}
+
+// NLR-W2 R1 벤치 후보 A/B/C (임시 — 채택 시 W6에서 정식 ID 부여)
+// 후보 A: KM 반투명 코팅. 계보=Kubelka-Munk coating (Li et al. CVPR15) + white-back constraint.
+// [NLR-W2] 1차 벤치 스티커 판정 — ID 3 슬롯 회수(→후보 G), 함수 보존(삭제 금지·참조 근거 유지).
+vec3 blendKMCoating(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = clamp(toLinearFast(blend), vec3(0.0), vec3(0.98));
+
+    // Rc: 안료층 자체 반사. 0.80은 R1 bench 상수.
+    // Tc2는 base=1.0일 때 coated ~= lensL가 되도록 역산:
+    // lensL = Rc + Tc2 / (1 - Rc)  =>  Tc2 = (lensL - Rc) * (1 - Rc)
+    vec3 Rc = clamp(lensL * 0.80, vec3(0.0), vec3(0.95));
+    vec3 Tc2 = max(lensL - Rc, vec3(0.0)) * (vec3(1.0) - Rc);
+
+    vec3 denom = max(vec3(1.0) - Rc * baseL, vec3(1e-4));
+    vec3 coated = Rc + (Tc2 * baseL) / denom;
+
+    vec3 outL = mix(baseL, clamp(coated, vec3(0.0), vec3(1.0)), clamp(opacity, 0.0, 1.0));
+    return toSRGBFast(outL);
+}
+
+// NLR-W2 R1 벤치 후보 A/B/C (임시 — 채택 시 W6에서 정식 ID 부여)
+// 후보 B: Oklab 가산 mean-shift + 흰자 guard. 계보=Shiseido 계열 mean-shift recolor + 흰자 guard(min-pivot).
+// [NLR-W2] 1차 벤치 스티커 판정 — ID 4 슬롯 회수(→후보 G+흰자 페이드), 함수 보존(삭제 금지·참조 근거 유지).
+vec3 linearSrgbToOklab(vec3 c) {
+    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+
+    vec3 lms = pow(max(vec3(l, m, s), vec3(1e-6)), vec3(1.0 / 3.0));
+    return vec3(
+        0.2104542553 * lms.x + 0.7936177850 * lms.y - 0.0040720468 * lms.z,
+        1.9779984951 * lms.x - 2.4285922050 * lms.y + 0.4505937099 * lms.z,
+        0.0259040371 * lms.x + 0.7827717662 * lms.y - 0.8086757660 * lms.z
+    );
+}
+
+vec3 oklabToLinearSrgb(vec3 c) {
+    float l_ = c.x + 0.3963377774 * c.y + 0.2158037573 * c.z;
+    float m_ = c.x - 0.1055613458 * c.y - 0.0638541728 * c.z;
+    float s_ = c.x - 0.0894841775 * c.y - 1.2914855480 * c.z;
+
+    float l = l_ * l_ * l_;
+    float m = m_ * m_ * m_;
+    float s = s_ * s_ * s_;
+
+    return vec3(
+         4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    );
+}
+
+vec3 blendOklabMeanShiftGuard(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = clamp(toLinearFast(blend), vec3(0.0), vec3(1.0));
+
+    vec3 baseOk = linearSrgbToOklab(baseL);
+    vec3 lensOk = linearSrgbToOklab(lensL);
+
+    // uAvgIrisLum은 linear Rec.709 luma이므로 neutral gray의 Oklab L 근사로 변환한다.
+    float irisPivotOk = pow(clamp(uAvgIrisLum, 1e-4, 1.0), 1.0 / 3.0);
+
+    // 원식 그대로: lensOk.x + (baseOk.x - irisPivotOk)
+    // 프로젝트 적응: 흰자처럼 pivot보다 밝은 픽셀은 mean-shift 상승분을 차단한다.
+    float guardedBaseL = min(baseOk.x, irisPivotOk);
+    float targetOkL = clamp(lensOk.x + (guardedBaseL - irisPivotOk), 0.0, 1.0);
+
+    vec3 targetL = oklabToLinearSrgb(vec3(targetOkL, lensOk.yz));
+    vec3 outL = mix(baseL, clamp(targetL, vec3(0.0), vec3(1.0)), clamp(opacity, 0.0, 1.0));
+    return toSRGBFast(outL);
+}
+
+// NLR-W2 R1 벤치 후보 A/B/C (임시 — 채택 시 W6에서 정식 ID 부여)
+// 후보 C: 국소 피벗 양방향 blend. 계보=Meta 계열 2밴드(shadow multiply / highlight screen) single-tap 근사.
+// [NLR-W2] 1차 벤치 스티커 룩 판정 — ID 6 슬롯 회수(→후보 E), 함수는 보존(삭제 금지·참조 근거 유지).
+vec3 blendPivotBiDir(vec3 base, vec3 blend, float opacity) {
+    vec3 baseL = toLinearFast(base);
+    vec3 lensL = clamp(toLinearFast(blend), vec3(0.0), vec3(1.0));
+
+    float lum = dot(baseL, LUMA_709_LENS);
+    float pivot = clamp(uAvgIrisLum, 0.03, 0.80);
+
+    // Low side: 피벗보다 어두운 곳은 multiply 성분으로 가라앉힌다.
+    // lum==pivot이면 lensL, lum<pivot이면 lensL보다 어두워진다.
+    float lowRatio = clamp(lum / pivot, 0.0, 1.0);
+    vec3 multiplyHalf = mix(lensL, lensL * lowRatio, 0.50);
+
+    // High side: 밝은 곳은 screen을 허용하되 50%만 섞어 과한 흰자 부양을 막는다.
+    vec3 screened = vec3(1.0) - (vec3(1.0) - baseL) * (vec3(1.0) - lensL);
+    vec3 screenHalf = mix(lensL, screened, 0.50);
+
+    float highEdge = max(pivot + 0.08, 0.65);
+    float highW = smoothstep(pivot, highEdge, lum);
+    vec3 targetL = mix(multiplyHalf, screenHalf, highW);
+
+    vec3 outL = mix(baseL, clamp(targetL, vec3(0.0), vec3(1.0)), clamp(opacity, 0.0, 1.0));
+    return toSRGBFast(outL);
+}
+
+// NLR-W2 벤치 후보 E-v3: 수식은 현행 ID5(V2)와 완전 동일 + 흰자 겹침 띠 알파 조기 페이드.
+// v1/v2(정규화 기준 공간 보간)는 R2 실측에서 역효과 — 톤 매칭된 링이 흰 흰자 위에서 대비가 커져
+// 오히려 더 도드라짐(솔리드 회색 띠). 실물 렌즈는 외곽=최암 잉크 + 흰자 겹침부 반투명 가라앉음
+// (리서치 검증 클레임)이므로, 밝은 패턴 에셋의 흰자 겹침부는 톤 조작이 아니라 알파 컷이 정답 가설.
+// fade: 홍채 가장자리(1.0) 직전부터 1.15에서 0 — 서클렌즈 확대감은 ~15% 보존.
+vec3 blendTintLinearRadial(vec3 base, vec3 blend, float opacity, float irisDist) {
+    vec3 baseL = toLinearFast(base);
+    float lum = dot(baseL, LUMA_709_LENS);
+    // NLR-W2 확정: V2와 동일 고정 K + 적응 비교 토글(uAdaptK)
+    float scale = mix(4.2, clamp(0.85 / max(0.01, uAvgIrisLum), 0.8, 7.0), uAdaptK);
+    float tintMul = min(lum * scale, uScleraTintMax);
+    vec3 tinted = toLinearFast(blend) * tintMul;
+    float fade = 1.0 - smoothstep(uFadeStart, uFadeStart + 0.20, irisDist);
+    return toSRGBFast(mix(baseL, tinted, opacity * fade));
+}
+
+// NLR-W2 §5.8 패턴 재사용 헬퍼: uCameraTexture 국소 3x3 blur의 linear Rec.709 휘도.
+// C10 디테일 재주입 블록(applyLens 내부)의 오프셋·가중치·textureLod fetch 방식을 그대로 옮긴 것.
+// C10 값은 blend 분기 이후 + uDetailReinject 분기 안에서 계산되어 스코프/시점이 어긋나므로 재사용 불가 —
+// 후보 G에 공급하려면 blend 분기 전 uniform control flow에서 무조건 재계산해야 한다(§8.9: 분기 내 fetch 금지,
+// textureLod(uv,0.0)로 명시 LOD 지정해 derivative 불필요, mipmap 미사용 + LINEAR filter라 결과 동일).
+float cameraBlurLumLinear(vec2 uv, vec2 texel) {
+    vec2 t = texel;
+    float lC  = dot(toLinearFast(textureLod(uCameraTexture, uv, 0.0).rgb), LUMA_709_LENS);
+    float lN  = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2(0.0, -t.y), 0.0).rgb), LUMA_709_LENS);
+    float lS  = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2(0.0,  t.y), 0.0).rgb), LUMA_709_LENS);
+    float lE  = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2( t.x, 0.0), 0.0).rgb), LUMA_709_LENS);
+    float lW  = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2(-t.x, 0.0), 0.0).rgb), LUMA_709_LENS);
+    float lNE = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2( t.x, -t.y), 0.0).rgb), LUMA_709_LENS);
+    float lNW = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2(-t.x, -t.y), 0.0).rgb), LUMA_709_LENS);
+    float lSE = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2( t.x,  t.y), 0.0).rgb), LUMA_709_LENS);
+    float lSW = dot(toLinearFast(textureLod(uCameraTexture, uv + vec2(-t.x,  t.y), 0.0).rgb), LUMA_709_LENS);
+    return (lC * 2.0 + lN + lS + lE + lW + lNE + lNW + lSE + lSW) / 10.0;  // W6 §5.8 3x3 single-pass
+}
+
+// NLR-W2 벤치 후보 G: quotient 셰이딩 트랜스퍼 — 틴트 레벨은 상수, 질감은 국소 비율로만 전달.
+// detail = lum / blurLum 은 조명 레벨이 소거된 고주파 성분 (Meta 주파수 대역·Chanel 국소 통계의 정실 구현).
+// 밝기 비례 항이 없어 "밝은 부분에서 더 밝게 빛나는" 곱셈 아티팩트가 구조적으로 없음.
+// blurLum은 반드시 linear Rec.709 luma (cameraBlurLumLinear 공급 — baseL의 lum과 동일 공간).
+vec3 blendQuotientShading(vec3 base, vec3 blend, float opacity, float blurLum, float fade) {
+    vec3 baseL = toLinearFast(base);
+    float lum = dot(baseL, LUMA_709_LENS);
+    float detail = clamp(lum / max(blurLum, 0.01), 0.6, 1.6);
+    vec3 tinted = toLinearFast(blend) * 0.85 * detail;
+    return toSRGBFast(mix(baseL, tinted, opacity * fade));
 }
 
 float asymmetricEllipseMask(vec2 uv, vec2 center, vec3 radii, float rotation, float feather) {
@@ -504,6 +665,15 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         eyelidMask = topClip * bottomClip;
     }
 
+    // NLR 클리핑: tuck 리매핑 (LensSim 실기기 확정 이식 — clipping-accuracy-handoff §3).
+    // 페더 원본 m은 경계가 넓고 물렁("스티커 뜸") — 하위 tuckLo 컷 + 전이폭 축소로 타이트 클립.
+    // t=0이면 수학적 항등(기본 — 현행과 비트 동일). 순수 ALU(분기·texture 없음, §8.9 안전).
+    // ⚠️ calcContactShadow는 Y-slab 기하(minY+feather) 기반이라 tuck 미동조 — tuck 채택 시
+    //   그림자 경계 동조 필요 (LensSim §3 파생 효과 동조 교훈; contact shadow 기본 OFF라 벤치 무영향).
+    float tuckLo = 0.45 * uClipTuck;
+    float tuckHi = 1.0 - 0.15 * uClipTuck;
+    eyelidMask = clamp((eyelidMask - tuckLo) / max(tuckHi - tuckLo, 1e-4), 0.0, 1.0);
+
     float finalAlpha = lens.a * uOpacity * edgeAlpha * eyelidMask;
 
     float irisEdgeDist = dist * uLensScale;
@@ -537,12 +707,22 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
 
     float maxDetail = mix(uMaxDetail, 1.0, smoothstep(0.75, 1.0, irisEdgeDist));
 
-    // P6-W2 §5.4/§5.8/§5.9: 블렌드 분기 5종 등록 (0/1/2/5/7) + 빈 ID(3/4/6) fallback.
+    // P6-W2 §5.4/§5.8/§5.9: 블렌드 분기 상시 슬롯 (0/1/2/5/7) 무변경.
     //   - ID 0 Normal: 유지 (W5 B1 Normal vs CRL 벤치 대기)
     //   - ID 2 ScreenLinear: 선형 공간 (W2 sRGB Screen 대체)
     //   - ID 5 TintLinearV2: canonical default
     //   - ID 7 ColorReplaceLinear: W2 활성 — W5 B1 벤치 대상, 채택 확정 아님
-    //   - ID 3/4/6/기타: TintLinearV2 fallback (디버그 로그는 CPU 측에서 1회)
+    // NLR-W2 2차 벤치 임시 재배선(develop 머지 금지): deprecated ID 3/4/6을 후보 G로 재매핑.
+    //   3→blendQuotientShading(G): quotient 셰이딩 트랜스퍼(fade=1.0, G 단독).
+    //   4→blendQuotientShading(G)+흰자 조기 페이드: fade=1.0-smoothstep(0.95,1.15,irisEdgeDist).
+    //   6→blendTintLinearRadial(E-v3): 페이드 단독 대조군(유지).
+    //   1차 벤치 스티커 판정된 A(KM,blendKMCoating)/B(OkShift,blendOklabMeanShiftGuard)/
+    //   C(Pivot,blendPivotBiDir)는 슬롯만 회수, 함수는 전부 보존.
+    //   채택 시 W6에서 새 ID로 승격 예정. 그 외 미등록 ID는 여전히 TintLinearV2 fallback.
+    // NLR-W2 후보 G: 국소 블러 휘도(linear Rec.709) — §8.9 준수 위해 blend 분기 밖에서 무조건 계산.
+    //   C10(§5.8) 블록은 blend 분기 이후·uDetailReinject 분기 안이라 값 재사용 불가(스코프 불일치) →
+    //   동일 패턴 헬퍼로 재계산. blend 모드 3/4가 아니어도 항상 실행돼 fetch가 non-uniform 분기에 안 걸림.
+    float blurLumG = cameraBlurLumLinear(vTexCoord, uTexelSize);
     vec3 blended;
     if (uBlendMode == 0) {
         blended = blendNormal(camera.rgb, lens.rgb, finalAlpha);
@@ -550,8 +730,35 @@ vec4 applyLens(vec4 camera, vec2 irisCenter, float irisRadius, float aspectRatio
         blended = blendMultiply(camera.rgb, lens.rgb, finalAlpha);
     } else if (uBlendMode == 2) {
         blended = blendScreenLinear(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 3) {
+        // NLR-W2 R6: TintLinear 고정 scale — lum 곱셈(질감·녹아듦)은 유지, 장면 적응(0.85/avgLum)만 제거.
+        //   사용자 요청 정정: "블렌드는 tint-linear 유지, 주변 밝기에 따른 증폭만 끄기".
+        //   K=3.4 = 중간 조명(avgLum 0.25) 앵커. 삼각 비교: A+lum:meas(적응) / A+lum:fb(K≈6.94) / B(K=3.4).
+        //   cap(uScleraTintMax)도 적용 — 밝은 픽셀 상한을 유효 구간(0.95~1.15)에서 조합 가능.
+        // R7: K 고정 4.2 (R6b 실측 임계 4.4 직하) + 슬라이더 = 채도 부스트.
+        //   "K 상한 유지하되 더 선명하게" — 빛남은 휘도 현상이므로 휘도 보존 채도 확장은
+        //   구조적으로 빛남 재유발 없음. f0.8→1.0(원본) ~ f1.4→2.2배.
+        vec3 baseFixed = toLinearFast(camera.rgb);
+        float lumFixed = dot(baseFixed, LUMA_709_LENS);
+        float tintMulFixed = min(lumFixed * 4.2, uScleraTintMax);
+        vec3 tintedFixed = toLinearFast(lens.rgb) * tintMulFixed;
+        float satBoost = 1.0 + (uFadeStart - 0.8) * 2.0;
+        float lumTint = dot(tintedFixed, LUMA_709_LENS);
+        tintedFixed = max(vec3(lumTint) + (tintedFixed - vec3(lumTint)) * satBoost, vec3(0.0));
+        blended = toSRGBFast(mix(baseFixed, tintedFixed, finalAlpha));
+    } else if (uBlendMode == 4) {
+        // NLR-W2 R5 진단: 기하 디버그 — irisEdgeDist 밴드 시각화 (D 페이드 미체감 원인 확정용).
+        //   초록=홍채 안(<uFadeStart) / 빨강=페이드 창(uFadeStart~+0.20) / 파랑=바깥. 렌즈 존재 영역만.
+        vec3 bandColor = mix(mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), step(uFadeStart, irisEdgeDist)),
+                             vec3(0.0, 0.3, 1.0), step(uFadeStart + 0.20, irisEdgeDist));
+        // R6b cap 배선 진단: cap ≤ 1.2(신설 sweep 값)이면 밴드에 보라 섞임 — cap 버튼 눌러도
+        //   색 변화 없으면 setScleraTintMax 체인이 끊긴 것 (전 라운드 "cap 무변화" 신고 검증용).
+        bandColor.b += step(uScleraTintMax, 1.2) * 0.8;
+        blended = mix(camera.rgb, bandColor, clamp(finalAlpha * 3.0, 0.0, 0.85));
     } else if (uBlendMode == 5) {
         blended = blendTintLinearV2(camera.rgb, lens.rgb, finalAlpha);
+    } else if (uBlendMode == 6) {
+        blended = blendTintLinearRadial(camera.rgb, lens.rgb, finalAlpha, irisEdgeDist);
     } else if (uBlendMode == 7) {
         blended = blendColorReplaceLinear(camera.rgb, lens.rgb, finalAlpha, maxDetail);
     } else {

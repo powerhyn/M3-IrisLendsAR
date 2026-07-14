@@ -115,6 +115,11 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnW6Gate: Button
     private lateinit var btnW6Detail: Button
     private lateinit var btnW7Measured: Button   // P7-W2: avg_iris_luma fallback↔실측 A/B
+    private lateinit var btnW4Cap: Button        // P7-W4 §5.8: 흰자 빛남 cap sweep
+    private lateinit var btnTuck: Button         // NLR 클리핑: tuck 리매핑 sweep (LensSim 이식)
+    private lateinit var btnAdaptK: Button       // NLR-W2: 고정 K↔적응 증폭 A/B (톤 비교)
+    private lateinit var btnImgMode: Button      // NLR 트래킹 A/B: MediaPipe IMAGE 모드 (내부 스무딩·ROI 우회)
+    private lateinit var btnStabFast: Button     // NLR 트래킹 A/B: stabilizer near-raw 프리셋
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
 
@@ -234,6 +239,11 @@ class GpuRenderActivity : AppCompatActivity() {
         btnW6Gate = findViewById(R.id.btnW6Gate)
         btnW6Detail = findViewById(R.id.btnW6Detail)
         btnW7Measured = findViewById(R.id.btnW7Measured)
+        btnW4Cap = findViewById(R.id.btnW4Cap)
+        btnTuck = findViewById(R.id.btnTuck)
+        btnAdaptK = findViewById(R.id.btnAdaptK)
+        btnImgMode = findViewById(R.id.btnImgMode)
+        btnStabFast = findViewById(R.id.btnStabFast)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
 
@@ -424,22 +434,20 @@ class GpuRenderActivity : AppCompatActivity() {
         val defaultIdx = blendModeEntries.indexOfFirst { it.second == lensConfig.blendMode }
         if (defaultIdx >= 0) spinnerBlendMode.setSelection(defaultIdx)
 
-        // Sclera Protection 토글 (P4-W2-01, 기본 ON)
-        var scleraOn = true
+        // Sclera Protection 토글 (P4-W2-01, 기본 ON) — NLR-W1: 복원 가능하도록 필드 승격
         btnToggleSclera.setOnClickListener {
-            scleraOn = !scleraOn
-            cameraGLView.setScleraProtect(scleraOn)
-            btnToggleSclera.text = if (scleraOn) "Sclera: ON" else "Sclera: OFF"
-            btnToggleSclera.setBackgroundColor(if (scleraOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+            scleraProtectOn = !scleraProtectOn
+            cameraGLView.setScleraProtect(scleraProtectOn)
+            btnToggleSclera.text = if (scleraProtectOn) "Sclera: ON" else "Sclera: OFF"
+            btnToggleSclera.setBackgroundColor(if (scleraProtectOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
-        // Contact Shadow 토글 (P4-W2-01, 기본 OFF)
-        var shadowOn = false
+        // Contact Shadow 토글 (P4-W2-01, 기본 OFF) — NLR-W1: 복원 가능하도록 필드 승격
         btnToggleShadow.setOnClickListener {
-            shadowOn = !shadowOn
-            cameraGLView.setContactShadow(shadowOn)
-            btnToggleShadow.text = if (shadowOn) "Shadow: ON" else "Shadow: OFF"
-            btnToggleShadow.setBackgroundColor(if (shadowOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
+            contactShadowOn = !contactShadowOn
+            cameraGLView.setContactShadow(contactShadowOn)
+            btnToggleShadow.text = if (contactShadowOn) "Shadow: ON" else "Shadow: OFF"
+            btnToggleShadow.setBackgroundColor(if (contactShadowOn) 0x4400CC00.toInt() else 0x44FF0000.toInt())
         }
 
         // EYECLIP A-2: 눈꺼풀 마스크 모드 3-way 순환 (Y-slab → Ellipse → Contour)
@@ -460,11 +468,14 @@ class GpuRenderActivity : AppCompatActivity() {
 
 
         // 홍채 밝기 보정 슬라이더 (P4-W2-01, 0.8~1.4 / 0.1 스텝 / 기본 1.2)
+        // NLR-W2 R5: dead 슬라이더(구 setMaxDetail — 소비처 없음) → 흰자 페이드 시작점 재배선.
+        // C(기하 디버그) 켠 채 드래그하면 빨강 창이 움직임 → 빛나는 링을 덮게 맞춘 뒤 D로 결과 확인.
         seekMaxDetail.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val value = 0.8f + progress * 0.1f
-                tvMaxDetailValue.text = String.format("%.1f", value)
-                cameraGLView.setMaxDetail(value)
+                fadeStartV = value
+                tvMaxDetailValue.text = String.format("f%.1f", value)
+                cameraGLView.setLensFadeStart(value)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -503,6 +514,52 @@ class GpuRenderActivity : AppCompatActivity() {
             btnW7Measured.text = if (w7MeasuredOn) "lum:meas" else "lum:fb"
             Log.i(TAG, "P7-W2 measured luma → ${if (w7MeasuredOn) "on" else "off"}")
         }
+        // NLR 트래킹 A/B: MediaPipe RunningMode.IMAGE 토글 — 내부 스무딩·ROI 추적 우회
+        // (mediapipe-internal-smoothing-bypass 핸드오프). 전환 시 landmarker는 분석 스레드에서
+        // 자동 재생성(필터 리셋 포함) — 1~2프레임 렌즈 드롭은 정상.
+        btnImgMode.setOnClickListener {
+            imgModeOn = !imgModeOn
+            faceTracker?.setImageMode(imgModeOn)
+            btnImgMode.text = if (imgModeOn) "img:on" else "img:off"
+            btnImgMode.setBackgroundColor(if (imgModeOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Log.i(TAG, "NLR tracking mode → ${if (imgModeOn) "IMAGE(스무딩·ROI 우회)" else "VIDEO"}")
+        }
+        // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 — 분석 스레드에서 재생성 (플래그 방식).
+        // 프리셋 구성·라운드별 판정 근거는 stabPresets 선언부 주석 참조.
+        btnStabFast.setOnClickListener {
+            stabPresetIdx = (stabPresetIdx + 1) % stabPresets.size
+            stabRecreateRequested = true
+            val p = stabPresets[stabPresetIdx]
+            btnStabFast.text = "stab:${p.label}"
+            btnStabFast.setBackgroundColor(if (stabPresetIdx != 0) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Log.i(TAG, "NLR stabilizer → ${p.label}" +
+                if (stabPresetIdx == 0) " (코어 기본 4.0/15)"
+                else " (${p.minCutoff}/${p.beta} ${if (p.allAxes) "all" else "center"})")
+        }
+        // P7-W4 §5.8: TintLinearV2 흰자 빛남 cap sweep (1.275/1.5/2.0/OFF).
+        btnW4Cap.setOnClickListener {
+            w4CapIdx = (w4CapIdx + 1) % w4CapSweep.size
+            val cap = w4CapSweep[w4CapIdx]
+            cameraGLView.setScleraTintMax(cap)
+            btnW4Cap.text = if (cap >= 1.0e5f) "cap:off" else String.format("cap%.2f", cap)
+            Log.i(TAG, "P7-W4 sclera tint cap → ${if (cap >= 1.0e5f) "off" else "$cap"}")
+        }
+        // NLR 클리핑: tuck 리매핑 sweep {off, 0.5, 0.75, 1.0(LensSim 확정)} — contour 마스크(mask:contour)에서 판정.
+        btnTuck.setOnClickListener {
+            tuckIdx = (tuckIdx + 1) % tuckSweep.size
+            val t = tuckSweep[tuckIdx]
+            cameraGLView.setClipTuck(t)
+            btnTuck.text = if (t <= 0f) "tuck:off" else String.format("tuck%.2f", t)
+            Log.i(TAG, "NLR clip tuck → ${if (t <= 0f) "off" else "$t"}")
+        }
+        // NLR-W2: 고정 K(4.2, 확정 기본) ↔ 구 적응 증폭(0.85/avgLum, 상한 7.0) A/B — 톤 하락 비교 검증.
+        btnAdaptK.setOnClickListener {
+            adaptKOn = !adaptKOn
+            cameraGLView.setAdaptK(if (adaptKOn) 1f else 0f)
+            btnAdaptK.text = if (adaptKOn) "K:adapt" else "K:fix"
+            btnAdaptK.setBackgroundColor(if (adaptKOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Log.i(TAG, "NLR tint K → ${if (adaptKOn) "ADAPT(0.85/avgLum, 구 방식)" else "FIX(4.2, 확정)"}")
+        }
         // (P8 통합) skin/radiance/slim sweep 버튼 → 뷰티 탭 슬라이더로 이전 (setupBeautyControls).
     }
 
@@ -513,11 +570,13 @@ class GpuRenderActivity : AppCompatActivity() {
 
     private data class BenchCombo(val label: String, val blendMode: Int, val vetoMode: Int, val desc: String)
 
+    // NLR-W2 수식 후보 블라인드 벤치 (codex_r1.md §5): veto는 전 조합 legacy 0 고정(§5.10 변수 분리),
+    // lum:meas 고정 권장. 정답표는 여기에만 — 평가자에겐 A/B/C/D 라벨만.
     private val benchCombos = listOf(
-        BenchCombo("A", 0, 1, "Normal + color-veto(Codex)"),
-        BenchCombo("B", 0, 2, "Normal + luma-only(Gemini)"),
-        BenchCombo("C", 7, 1, "CRL + color-veto(Codex)"),
-        BenchCombo("D", 7, 2, "CRL + luma-only(Gemini)"),
+        BenchCombo("A", 5, 0, "current TintLinearV2 (control)"),
+        BenchCombo("B", 3, 0, "R7: TintLinear 고정 K=4.2 + 슬라이더=채도 부스트(1.0~2.2)"),
+        BenchCombo("C", 4, 0, "R6b: 기하 디버그 (초록<f/빨강 f~f+0.2/파랑>f+0.2, 슬라이더 연동 + cap≤1.2 보라)"),
+        BenchCombo("D", 6, 0, "E-v3: V2 수식 + 흰자 조기 페이드만"),
     )
     private var currentBenchIdx = -1
 
@@ -528,15 +587,57 @@ class GpuRenderActivity : AppCompatActivity() {
     private var w6GateIdx = 0    // 기본 0.10 (저조도 드묾 — C10 디테일 항상 ON)
     private var w6DetailOn = true
     private var w7MeasuredOn = true   // P7-W2 §5.6: 실기기 검증 후 기본 실측 ON (SDK default와 일치). 토글로 fallback 비교.
+
+    // P7-W4 §5.8 → NLR-W2 R4 재조정: 유효 구간(0.95~1.15)으로 sweep 교체. 마지막 = OFF 센티널(1e6).
+    // D(V2+페이드) + cap 조합 = 후보 H 라이브 튜닝 (cap이 렌즈 내 밝은 픽셀 과증폭 상한 역할).
+    private val w4CapSweep = floatArrayOf(0.95f, 1.05f, 1.15f, 1.0e6f)
+    private var w4CapIdx = 3   // 시작 = OFF (코어 기본 1.275는 사실상 무효 구간이라 OFF와 동일 취급)
+
+    // NLR 클리핑: tuck 리매핑 sweep — R1 판정: 1.0(LensSim 확정)은 렌즈를 깎아먹는 케이스 有,
+    // 0.75가 정당 + 0.85 후보 (IrisLens는 해석식 마스크라 LensSim 래스터와 실효 폭이 달라
+    // 최적점이 낮게 잡히는 것으로 해석). R2 = 0.75 vs 0.85 정밀 판정.
+    // tuckLo=0.45t/tuckHi=1−0.15t: 페더 하위 컷 + 전이폭 축소 = 타이트 클립(밀착감).
+    private val tuckSweep = floatArrayOf(0f, 0.75f, 0.85f, 1.0f)
+    private var tuckIdx = 0    // 시작 = off (현행 비트 동일)
+
+    // NLR-W2: 고정 K↔적응 증폭 A/B (기본 = 고정 K, 사용자 확정 상태)
+    private var adaptKOn = false
+
+    // NLR-W1 복원 갭 보수: 컨텍스트 재생성 시 native 기본값으로 리셋되는 상태들의 UI 측 진실값.
+    // (기존 지역 변수라 restoreLensRenderState가 복원 불가했던 구조 결함 — 필드 승격)
+    private var scleraProtectOn = true    // 코어 기본 ON과 일치
+    private var contactShadowOn = false   // 코어 기본 OFF와 일치
+    private var currentVetoMode = 0       // P6-W5 B8 미판정 — legacy 0 유지 (§5.10)
+    private var fadeStartV = 0.95f        // NLR-W2 R5: 흰자 페이드 시작점 (코어 기본 0.95와 일치)
+    private var imgModeOn = false         // NLR 트래킹 A/B: IMAGE 모드 (기본 VIDEO — 트래커 재생성 시 재적용)
+
+    // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 (idx 0 = 코어 기본 4.0/15).
+    // 핸들은 분석 스레드 전용이라 UI에서 직접 destroy 금지 — 재생성 요청 플래그만 세우고
+    // 분석 경로에서 처리. minCutoff/beta 의미는 버튼 리스너 주석 참조.
+    private data class StabPreset(
+        val label: String, val minCutoff: Float, val beta: Float, val allAxes: Boolean = true)
+    // R2 판정: 지연 노브=beta 확정(150 합격·100 분기점·70↓ 붕괴), 단 2/150도 정지 지터 잔존.
+    // R3 축 분리 가설: 사카드에서 빨라야 하는 축은 iris 중심뿐 — radius(크기)·eyelid까지
+    // 근생화한 게 정지 "크기 숨쉬기" 지터의 주범일 수 있음. a=세 축 전부, c=중심만.
+    private val stabPresets = listOf(
+        StabPreset("norm", 0f, 0f),                // 코어 기본 (createStabilizer 경로)
+        StabPreset("2/150a", 2.0f, 150f),          // R2 최선 그대로 — 지터 기준점
+        StabPreset("2/150c", 2.0f, 150f, false),   // 중심만 — radius/eyelid 코어 기본
+        StabPreset("1/150c", 1.0f, 150f, false),   // 중심만 + minCutoff 인하 (잔여 지터용)
+    )
+    @Volatile private var stabPresetIdx = 0
+    @Volatile private var stabRecreateRequested = false
     private var maskMode = 0      // EYECLIP A-2: 눈꺼풀 마스크 모드 0=Y-slab, 1=ellipse, 2=contour. 컨텍스트 재생성 후 restoreLensRenderState로 복원.
     // (P8 통합) p8Skin/Radiance/Slim sweep 상태 제거 — 뷰티 탭 슬라이더가 연속값을 직접 보유.
 
-    // 활성 blend ID {0,1,2,5,7}만 노출 — deprecated 3/4/6(Overlay/LumTint/SoftLight)은 셰이더가
-    // ID5로 fallback시키는 거짓 UI라 제외(shader_sources.cpp 분기 = 0/1/2/5/7만 존재).
+    // 활성 blend ID {0,1,2,5,7} + NLR-W2 벤치 임시 슬롯 {3,4,6}.
+    // ⚠️ 3/4/6은 벤치 기간 한정 재배선(KM/OkShift/Pivot — codex_r1.md §5) — develop 머지 금지,
+    //   채택 시 W6에서 정식 ID 부여 후 원래 "deprecated → ID5 fallback"으로 복원.
     // 스피너 position ≠ blend ID이므로 선택/복원은 반드시 값 기반 역조회(indexOfFirst)로.
     private val blendModeEntries = arrayOf(
         "Normal" to 0, "Multiply" to 1, "Screen Linear" to 2,
-        "Lum Tint Linear" to 5, "Color Replace" to 7
+        "Lum Tint Linear" to 5, "Color Replace" to 7,
+        "Quot†" to 3, "Quot+F†" to 4, "V2+Fade†" to 6
     )
 
     private fun applyBenchCombo(idx: Int) {
@@ -544,6 +645,7 @@ class GpuRenderActivity : AppCompatActivity() {
         lensConfig.blendMode = combo.blendMode
         cameraGLView.setLensConfig(lensConfig)
         cameraGLView.setScleraVetoMode(combo.vetoMode)
+        currentVetoMode = combo.vetoMode  // NLR-W1: 컨텍스트 재생성 복원용 진실값
         // 축소 스피너(5종)에서 position ≠ blend ID — 값 기반 역조회.
         // (구 setSelection(blendMode)은 ID7이 어댑터 범위 초과 → IndexOutOfBounds 크래시)
         val benchIdx = blendModeEntries.indexOfFirst { it.second == combo.blendMode }
@@ -657,6 +759,21 @@ class GpuRenderActivity : AppCompatActivity() {
         // EYECLIP A-2: eyelid_mask_mode_는 releaseGpuLens()로 리셋 → 복귀 시 현재 UI 상태 재적용
         //   (누락 시 백그라운드 복귀 후 Y-slab로 강등됨).
         cameraGLView.setEyelidMaskMode(maskMode)
+        // NLR-W1: 기존 미복원 갭 일괄 보수 — 아래 native 상태들도 컨텍스트 재생성 시 기본값으로
+        //   리셋되나 복원 대상에서 빠져 있었음 (벤치 중 백그라운드 복귀 시 판정 조건이 조용히 어긋남).
+        cameraGLView.setBlinkUpMs(w6BlinkUpSweep[w6BlinkIdx])
+        cameraGLView.setGateThreshold(w6GateSweep[w6GateIdx])
+        cameraGLView.setScleraVetoMode(currentVetoMode)
+        cameraGLView.setScleraProtect(scleraProtectOn)
+        cameraGLView.setContactShadow(contactShadowOn)
+        // P7-W4 §5.8: 흰자 빛남 cap — 현재 sweep 값 재주입
+        cameraGLView.setScleraTintMax(w4CapSweep[w4CapIdx])
+        // NLR 클리핑: tuck 리매핑 — 현재 sweep 값 재주입
+        cameraGLView.setClipTuck(tuckSweep[tuckIdx])
+        // NLR-W2: K 토글 — 현재 상태 재주입
+        cameraGLView.setAdaptK(if (adaptKOn) 1f else 0f)
+        // NLR-W2 R5: 흰자 페이드 시작점 — 현재 슬라이더 값 재주입
+        cameraGLView.setLensFadeStart(fadeStartV)
         // 현재 선택 렌즈 텍스처 재업로드 (stale native texture는 onSurfaceCreated에서 이미 해제됨).
         if (::lensManager.isInitialized) {
             lensManager.currentLens?.let { lens ->
@@ -974,6 +1091,7 @@ class GpuRenderActivity : AppCompatActivity() {
             onError = { msg -> Log.w(TAG, "③-3 FaceTracker: $msg") },
         )
         tracker.onRawResult = ::onTasksRawResult
+        tracker.setImageMode(imgModeOn) // 트래커 재생성 시 현재 A/B 상태 재적용
         faceTracker = tracker
         return tracker
     }
@@ -1038,9 +1156,22 @@ class GpuRenderActivity : AppCompatActivity() {
 
         // Temporal Stabilizer 적용 (검출 실패 포함 — hold/fade-out 동작 필요, LEGACY 동일)
         // TASKS 전용 핸들 — 같은 코어 stabilize, LEGACY 핸들 수명 불간섭 (§5-5)
+        // NLR A/B: 프리셋 전환 요청 시 분석 스레드(여기)에서 재생성 — 핸들 스레드 안전.
+        if (stabRecreateRequested) {
+            if (tasksStabilizerHandle != 0L) {
+                IrisLensSDK.destroyStabilizer(tasksStabilizerHandle)
+                tasksStabilizerHandle = 0L
+            }
+            stabRecreateRequested = false
+        }
         if (tasksStabilizerHandle == 0L) {
             // hold 연장본으로 생성 — 눈 일부 감김 시 얼굴 dropout 동안 렌즈 유지(stabilizerHoldFrames 주석 참조).
-            tasksStabilizerHandle = IrisLensSDK.createStabilizer(stabilizerHoldFrames)
+            val preset = stabPresets[stabPresetIdx]
+            tasksStabilizerHandle = if (stabPresetIdx != 0) {
+                IrisLensSDK.createStabilizerTuned(stabilizerHoldFrames, preset.minCutoff, preset.beta, preset.allAxes)
+            } else {
+                IrisLensSDK.createStabilizer(stabilizerHoldFrames)
+            }
         }
         if (tasksStabilizerHandle != 0L) {
             val timestampSec = System.nanoTime() / 1_000_000_000.0
