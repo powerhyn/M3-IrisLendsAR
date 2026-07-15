@@ -76,7 +76,8 @@ typedef struct BeautyFilterConfigV2 {
     float slimFace;
     /** @brief 눈 확대 (0.0~1.0, 기본값 0.0) */
     float enlargeEyes;
-    /** @brief 턱 축소 (0.0~1.0, 기본값 0.0) */
+    /** @brief 내부 축소 (0.0~1.0, 기본값 0.0): 콧볼·입꼬리·볼을 얼굴 세로축 방향으로
+     *         좁혀 face-small 느낌. (구 "턱 축소"에서 P8-W4B로 의미 재정의) */
     float thinChin;
 
     //===== 처리 옵션 =====

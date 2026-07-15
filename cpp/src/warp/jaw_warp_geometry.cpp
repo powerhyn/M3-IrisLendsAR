@@ -1,8 +1,10 @@
 /**
  * @file jaw_warp_geometry.cpp
- * @brief 턱 V라인 슬림 워프 CPU 제어점/파라미터 산출 구현 (P8-W4-A)
+ * @brief V라인 + 내부 축소 워프 CPU 제어점/파라미터 산출 구현 (P8-W4 / P8-W4B)
  *
- * 핸드오프 §1/§3/§4를 전부 픽셀 공간으로 이식. 값 변경 없음(LensSim S23+ 검증본).
+ * jaw 그룹(7점/측) + upper 그룹(1점/측)은 LensSim S23+ 검증본 값 무변경.
+ * P8-W4B 확장: interior 그룹(4점/측)을 interior_strength로 조건부 패킹 → face-small lite.
+ * 전부 픽셀 공간. interior_strength=0 이면 jaw 경로는 기존과 수치 동일(회귀 불변).
  * 출처: docs/lenssim-handoff/jaw-vline-warp-handoff-from-lenssimulator.md.
  */
 
@@ -63,11 +65,12 @@ inline void disableWarp(JawWarpParams& out) {
 bool computeJawWarp(const IrisLandmark* face_mesh,
                     int image_width,
                     int image_height,
-                    float strength,
+                    float jaw_strength,
+                    float interior_strength,
                     JawWarpParams& out) {
-    // strength≤0 또는 null/퇴화 차원 → 비활성.
-    if (face_mesh == nullptr || strength <= 0.0f ||
-        image_width <= 0 || image_height <= 0) {
+    // 두 strength 모두 ≤0 또는 null/퇴화 차원 → 비활성(기존 strength≤0 동작 보존).
+    if (face_mesh == nullptr || image_width <= 0 || image_height <= 0 ||
+        (jaw_strength <= 0.0f && interior_strength <= 0.0f)) {
         disableWarp(out);
         return false;
     }
@@ -90,54 +93,79 @@ bool computeJawWarp(const IrisLandmark* face_mesh,
     }
 
     const Vec2 axisHat = Vec2{axis.x / axis_len_px, axis.y / axis_len_px};
-    const float max_disp_px = face_width_px * kMaxDispRatio * strength;
 
-    // --- 제어점 14개: 좌 7 + 우 7 (배열 슬롯 0~6=좌, 7~13=우) ---
-    float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
-    for (int side = 0; side < 2; ++side) {
-        const int* indices = (side == 0) ? kLeftSideControl : kRightSideControl;
-        for (int i = 0; i < kSideControlPoints; ++i) {
-            const int slot = side * kSideControlPoints + i;
-            const Vec2 c = toPixel(face_mesh[indices[i]], image_width, image_height);
+    // 그룹 하나(좌 per_side + 우 per_side)를 슬롯 n부터 연속 패킹하고 n을 전진시킨다.
+    // perp-inward 수식은 모든 그룹 공통 — max_disp/taper만 그룹별로 다르다.
+    int n = 0;
+    auto packGroup = [&](const int* idxL, const int* idxR, const float* taper,
+                         int per_side, float max_disp) {
+        for (int side = 0; side < 2; ++side) {
+            const int* indices = (side == 0) ? idxL : idxR;
+            for (int i = 0; i < per_side; ++i) {
+                const Vec2 c = toPixel(face_mesh[indices[i]], image_width, image_height);
 
-            // 세로축에 수직인 성분: perp = v − (v·axisHat)·axisHat.
-            const Vec2 v = Vec2{c.x - axisOrigin.x, c.y - axisOrigin.y};
-            const float along = dot(v, axisHat);
-            const Vec2 perp = Vec2{v.x - along * axisHat.x, v.y - along * axisHat.y};
-            const float perp_len = length(perp);
+                // 세로축에 수직인 성분: perp = v − (v·axisHat)·axisHat.
+                const Vec2 v = Vec2{c.x - axisOrigin.x, c.y - axisOrigin.y};
+                const float along = dot(v, axisHat);
+                const Vec2 perp = Vec2{v.x - along * axisHat.x, v.y - along * axisHat.y};
+                const float perp_len = length(perp);
 
-            Vec2 disp = Vec2{0.0f, 0.0f};
-            if (perp_len >= 1e-6f) {
-                // inward = −normalize(perp) (안쪽 = 세로축 방향).
-                const float scale = -(max_disp_px * kTaper[i]) / perp_len;
-                disp = Vec2{perp.x * scale, perp.y * scale};
-            }
+                Vec2 disp = Vec2{0.0f, 0.0f};
+                if (perp_len >= 1e-6f) {
+                    // inward = −normalize(perp) (안쪽 = 세로축 방향).
+                    const float scale = -(max_disp * taper[i]) / perp_len;
+                    disp = Vec2{perp.x * scale, perp.y * scale};
+                }
 
-            out.cx[slot] = c.x;
-            out.cy[slot] = c.y;
-            out.dx[slot] = disp.x;
-            out.dy[slot] = disp.y;
-
-            if (slot == 0) {
-                min_x = max_x = c.x;
-                min_y = max_y = c.y;
-            } else {
-                if (c.x < min_x) min_x = c.x;
-                if (c.x > max_x) max_x = c.x;
-                if (c.y < min_y) min_y = c.y;
-                if (c.y > max_y) max_y = c.y;
+                out.cx[n] = c.x;
+                out.cy[n] = c.y;
+                out.dx[n] = disp.x;
+                out.dy[n] = disp.y;
+                ++n;
             }
         }
+    };
+
+    // 조건부 패킹: jaw + upper (jaw_strength) → interior (interior_strength).
+    // jaw 그룹은 항상 슬롯 0..13(좌 0..6, 우 7..13)에 먼저 놓여 좌우 대칭 검증을 보존한다.
+    if (jaw_strength > 0.0f) {
+        const float max_disp_jaw = face_width_px * kMaxDispRatio * jaw_strength;
+        packGroup(kLeftSideControl, kRightSideControl, kTaper,
+                  kSideControlPoints, max_disp_jaw);   // 슬롯 0..13
+        packGroup(kLeftUpperControl, kRightUpperControl, kUpperTaper,
+                  kUpperPerSide, max_disp_jaw);        // 슬롯 14..15
+    }
+    if (interior_strength > 0.0f) {
+        const float max_disp_interior = face_width_px * kMaxDispRatio * interior_strength;
+        packGroup(kLeftInteriorControl, kRightInteriorControl, kInteriorTaper,
+                  kInteriorPerSide, max_disp_interior);  // 슬롯 16..23 (jaw 생략 시 0..7)
     }
 
-    // --- σ + 바운딩박스(±3σ 마진) ---
+    // 미사용 슬롯 정리(잔여값 노출 회피 — 셰이더/evaluate는 count까지만 읽음).
+    for (int i = n; i < JawWarpParams::kMaxControlPoints; ++i) {
+        out.cx[i] = 0.0f;
+        out.cy[i] = 0.0f;
+        out.dx[i] = 0.0f;
+        out.dy[i] = 0.0f;
+    }
+
+    // --- σ + 바운딩박스(±3σ 마진, 패킹된 점만으로 산출) ---
+    float min_x = out.cx[0], max_x = out.cx[0];
+    float min_y = out.cy[0], max_y = out.cy[0];
+    for (int i = 1; i < n; ++i) {
+        if (out.cx[i] < min_x) min_x = out.cx[i];
+        if (out.cx[i] > max_x) max_x = out.cx[i];
+        if (out.cy[i] < min_y) min_y = out.cy[i];
+        if (out.cy[i] > max_y) max_y = out.cy[i];
+    }
+
     out.sigma_px = face_width_px * kSigmaRatio;
     const float margin = kBoundsSigmaMargin * out.sigma_px;
     out.bounds_min_x = min_x - margin;
     out.bounds_min_y = min_y - margin;
     out.bounds_max_x = max_x + margin;
     out.bounds_max_y = max_y + margin;
-    out.count = kControlPointCount;
+    out.count = n;
 
     return true;
 }

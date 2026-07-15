@@ -183,9 +183,10 @@ void main() {
 )glsl";
 
 //=============================================================================
-// P8-W4: 턱 V라인 워프 (fragment-direct 비정규 RBF 인버스 워프)
+// P8-W4 / P8-W4B: V라인 + 내부 축소 워프 (fragment-direct 비정규 RBF 인버스 워프)
 // 출처: docs/lenssim-handoff/jaw-vline-warp-handoff-from-lenssimulator.md §4 (LensSim S23+ 검증).
-// 풀스크린 패스. 제어점 14개(cx,cy,dx,dy 픽셀)를 uniform으로 받아 출력 픽셀 p의 소스를
+// 풀스크린 패스. 제어점 최대 24개(cx,cy,dx,dy 픽셀 — jaw 14 + upper 2 + interior 8, 조건부
+//   패킹이라 8/16/24)를 uniform으로 받아 출력 픽셀 p의 소스를
 //   src(p) = p − Σᵢ dᵢ·exp(−|p−cᵢ|²/2σ²)  (인버스 워프)
 // 로 구해 입력 텍스처를 리샘플한다. bbox+3σ 밖이면 루프 생략(early-out), sigma=0이면 패스스루.
 // 좌표계: vTexCoord/uViewportPx 는 렌더 텍스처(미러·Y-flip 적용) 공간 — 제어점도 CPU에서
@@ -196,8 +197,8 @@ const char* WARP_FRAGMENT = R"glsl(
 precision highp float;
 
 uniform sampler2D uTexture;   // 입력 (skin/brightness 거친 프레임)
-uniform vec4 uWarp[14];       // [cx, cy, dx, dy] — 렌더 텍스처 픽셀 공간
-uniform int uWarpCount;       // 활성 제어점 수 (보통 14)
+uniform vec4 uWarp[24];       // [cx, cy, dx, dy] — 렌더 텍스처 픽셀 공간 (kMaxControlPoints=24)
+uniform int uWarpCount;       // 활성 제어점 수 (조건부 패킹: 8/16/24)
 uniform float uWarpSigma;     // 가우시안 σ (px). 0이면 워프 off(패스스루)
 uniform vec4 uWarpBounds;     // [minX, minY, maxX, maxY] (제어점 bbox + 3σ), px
 uniform vec2 uViewportPx;     // 뷰포트 px

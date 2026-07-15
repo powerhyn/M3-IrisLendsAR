@@ -202,8 +202,8 @@ public:
      * @param output_texture 출력 텍스처 ID
      * @param width 텍스처 너비
      * @param height 텍스처 높이
-     * @param slim_face 갸름한 얼굴 강도 (0.0~1.0)
-     * @param thin_chin 턱 축소 강도 (0.0~1.0)
+     * @param slim_face 갸름한 얼굴(V라인) 강도 (0.0~1.0)
+     * @param thin_chin 내부 축소 강도 (0.0~1.0): 콧볼·입꼬리·볼을 세로축 방향으로 좁힘
      * @param enlarge_eyes 눈 확대 강도 (0.0~1.0)
      * @param detection 얼굴 검출 결과 (랜드마크 필요)
      * @return 에러 코드
@@ -446,7 +446,7 @@ private:
     /// P8-W4: 턱 V라인 워프 셰이더 uniform location 캐시
     struct WarpUniforms {
         GLint uTexture = -1;
-        GLint uWarp = -1;        // vec4[14] 배열 — glUniform4fv(uWarp, count, ...)
+        GLint uWarp = -1;        // vec4[24] 배열 — glUniform4fv(uWarp, count, ...)
         GLint uWarpCount = -1;
         GLint uWarpSigma = -1;
         GLint uWarpBounds = -1;
