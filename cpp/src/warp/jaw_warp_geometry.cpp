@@ -67,7 +67,8 @@ bool computeJawWarp(const IrisLandmark* face_mesh,
                     int image_height,
                     float jaw_strength,
                     float interior_strength,
-                    JawWarpParams& out) {
+                    JawWarpParams& out,
+                    int interior_taper_preset) {
     // 두 strength 모두 ≤0 또는 null/퇴화 차원 → 비활성(기존 strength≤0 동작 보존).
     if (face_mesh == nullptr || image_width <= 0 || image_height <= 0 ||
         (jaw_strength <= 0.0f && interior_strength <= 0.0f)) {
@@ -136,8 +137,15 @@ bool computeJawWarp(const IrisLandmark* face_mesh,
                   kUpperPerSide, max_disp_jaw);        // 슬롯 14..15
     }
     if (interior_strength > 0.0f) {
+        // 벤치 임시(P8-W4B): interior taper 프리셋 행 선택. 범위 밖 인덱스는 프리셋 0으로
+        // 폴백해 기존 동작(비트 동일)으로 안전 수렴한다. jaw/upper 그룹과 무관.
+        const int taper_preset =
+            (interior_taper_preset >= 0 && interior_taper_preset < kInteriorTaperPresetCount)
+                ? interior_taper_preset
+                : 0;
         const float max_disp_interior = face_width_px * kMaxDispRatio * interior_strength;
-        packGroup(kLeftInteriorControl, kRightInteriorControl, kInteriorTaper,
+        packGroup(kLeftInteriorControl, kRightInteriorControl,
+                  kInteriorTaperPresets[taper_preset],
                   kInteriorPerSide, max_disp_interior);  // 슬롯 16..23 (jaw 생략 시 0..7)
     }
 

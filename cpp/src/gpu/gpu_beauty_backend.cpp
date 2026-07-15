@@ -7,6 +7,7 @@
 #include "iris_sdk/gpu/render_context.h"
 #include "iris_sdk/gpu/skin_mask_geometry.h"
 #include "iris_sdk/beauty_roi_manager.h"
+#include "iris_sdk/internal/bench_toggles.h"  // P8-W4B: iris_sdk_get_interior_taper_preset (매 프레임 read)
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -1414,8 +1415,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         // computeJawWarp는 원본(비미러) face_mesh를 받아 이미지 픽셀 공간 제어점을 낸다.
         // detection->face_mesh 는 iris_sdk::IrisLandmark[478] — computeJawWarp 인자 타입과
         // 동일하므로 캐스팅 불필요(prepareSkinFans 와 동일하게 직접 접근).
+        // P8-W4B 벤치: 내부 taper 프리셋을 sdk 레벨 atomic 에서 매 프레임 read(무락).
+        // 범위 밖 인덱스는 computeJawWarp 내부에서 프리셋 0으로 폴백한다.
         if (iris_sdk::jaw_warp::computeJawWarp(detection->face_mesh, width, height,
-                                               jawStrength, interiorStrength, wp)
+                                               jawStrength, interiorStrength, wp,
+                                               iris_sdk_get_interior_taper_preset())
             && wp.sigma_px > 0.0f && wp.count > 0) {
             // 🔴 좌표 정합: 이미지 공간 → 렌더 텍스처 공간(미러·Y-flip). prepareSkinFans 동형.
             iris_sdk::jaw_warp::JawWarpParams wp_render =

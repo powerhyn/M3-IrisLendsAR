@@ -13,6 +13,9 @@
  *   8. ConditionalPackingCount       — jaw만=16, interior만=8, 둘 다=24, 둘 다 0=false
  *   9. InteriorDirectionInward       — interior 그룹 변위도 세로축 안쪽을 향함
  *  10. FullStrengthGate              — jaw+interior 풀강도 실 fixture: 홍채<5%, 눈꼬리<12%
+ *  11. Preset0MatchesDefault        — [P8-W4B] preset 0 == preset 미지정(비트 동일)
+ *  12. OutOfRangePresetClampsToZero — [P8-W4B] preset −1·99 → 프리셋 0 폴백
+ *  13. AllPresetsFullStrengthGate   — [P8-W4B] 전 프리셋 × 풀강도 게이트 + 실측 보고
  *
  * 합성 타원 얼굴(실랜드마크 불필요): 필요한 인덱스만 정규화 타원 위에 배치한다.
  *   - 세로축: 이마(10) 상단 ↔ 턱끝(152) 하단 (수직 대칭축).
@@ -35,6 +38,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace {
@@ -51,6 +55,8 @@ using iris_sdk::jaw_warp::kUpperPerSide;
 using iris_sdk::jaw_warp::kInteriorPerSide;
 using iris_sdk::jaw_warp::kLeftInteriorControl;
 using iris_sdk::jaw_warp::kRightInteriorControl;
+using iris_sdk::jaw_warp::kInteriorTaperPresetCount;
+using iris_sdk::jaw_warp::kInteriorTaperPresets;
 using iris_sdk::jaw_warp::kLandmarkForehead;
 using iris_sdk::jaw_warp::kLandmarkChin;
 using iris_sdk::jaw_warp::kLandmarkCheekLeft;
@@ -460,6 +466,95 @@ TEST(JawWarpGeometry, FullStrengthGate) {
         EXPECT_LT(evalAt(idx), maxDisp * 0.12f)
             << "eye corner " << idx << " displacement exceeds 12% at full strength";
     }
+}
+
+// ⑪ [P8-W4B] 프리셋 0 == preset 미지정(기본) → count/sigma/bounds/cx/cy/dx/dy 전부 비트 동일.
+//    (interior_taper_preset 추가가 기존 동작을 바꾸지 않음을 보장.)
+TEST(JawWarpGeometry, Preset0MatchesDefault) {
+    auto mesh = makeRealFace();
+    JawWarpParams def{}, p0{};
+    // 기본(preset 인자 생략) — 둘 다 패킹되도록 jaw+interior 풀강도.
+    ASSERT_TRUE(computeJawWarp(mesh.data(), kRealFrameW, kRealFrameH, 1.0f, 1.0f, def));
+    // 명시 preset 0.
+    ASSERT_TRUE(computeJawWarp(mesh.data(), kRealFrameW, kRealFrameH, 1.0f, 1.0f, p0, 0));
+
+    EXPECT_EQ(def.count, p0.count);
+    EXPECT_FLOAT_EQ(def.sigma_px, p0.sigma_px);
+    EXPECT_FLOAT_EQ(def.bounds_min_x, p0.bounds_min_x);
+    EXPECT_FLOAT_EQ(def.bounds_min_y, p0.bounds_min_y);
+    EXPECT_FLOAT_EQ(def.bounds_max_x, p0.bounds_max_x);
+    EXPECT_FLOAT_EQ(def.bounds_max_y, p0.bounds_max_y);
+    for (int i = 0; i < def.count; ++i) {
+        EXPECT_FLOAT_EQ(def.cx[i], p0.cx[i]) << "cx mismatch at " << i;
+        EXPECT_FLOAT_EQ(def.cy[i], p0.cy[i]) << "cy mismatch at " << i;
+        EXPECT_FLOAT_EQ(def.dx[i], p0.dx[i]) << "dx mismatch at " << i;
+        EXPECT_FLOAT_EQ(def.dy[i], p0.dy[i]) << "dy mismatch at " << i;
+    }
+}
+
+// ⑫ [P8-W4B] 범위 밖 프리셋 인덱스(-1, 99)는 프리셋 0으로 폴백(결과 비트 동일).
+TEST(JawWarpGeometry, OutOfRangePresetClampsToZero) {
+    auto mesh = makeRealFace();
+    JawWarpParams p0{}, pNeg{}, pBig{};
+    ASSERT_TRUE(computeJawWarp(mesh.data(), kRealFrameW, kRealFrameH, 1.0f, 1.0f, p0, 0));
+    ASSERT_TRUE(computeJawWarp(mesh.data(), kRealFrameW, kRealFrameH, 1.0f, 1.0f, pNeg, -1));
+    ASSERT_TRUE(computeJawWarp(mesh.data(), kRealFrameW, kRealFrameH, 1.0f, 1.0f, pBig, 99));
+
+    ASSERT_EQ(p0.count, pNeg.count);
+    ASSERT_EQ(p0.count, pBig.count);
+    for (int i = 0; i < p0.count; ++i) {
+        EXPECT_FLOAT_EQ(p0.dx[i], pNeg.dx[i]) << "preset -1 diverged at " << i;
+        EXPECT_FLOAT_EQ(p0.dy[i], pNeg.dy[i]) << "preset -1 diverged at " << i;
+        EXPECT_FLOAT_EQ(p0.dx[i], pBig.dx[i]) << "preset 99 diverged at " << i;
+        EXPECT_FLOAT_EQ(p0.dy[i], pBig.dy[i]) << "preset 99 diverged at " << i;
+    }
+}
+
+// ⑬ [P8-W4B] 전 프리셋 × 풀강도 게이트 루프(실 fixture): 각 프리셋에서
+//    홍채중심(468/473) < 5%(하드), 눈꼬리(33/263) < 12%(완화). 실측 비율은 stdout 로 보고.
+//    denom(maxDisp)=jaw taper 1.0 점 변위 → jaw 무변경이라 프리셋 간 동일. numerator 만 프리셋별 변동.
+TEST(JawWarpGeometry, AllPresetsFullStrengthGate) {
+    auto mesh = makeRealFace();
+
+    std::printf("\n[P8-W4B interior-taper preset gate — real fixture %dx%d, jaw=1.0 interior=1.0]\n",
+                kRealFrameW, kRealFrameH);
+    std::printf("  preset | iris468 | iris473 |  eye33  |  eye263 | (gate: iris<5%%, eye<12%%)\n");
+
+    for (int preset = 0; preset < kInteriorTaperPresetCount; ++preset) {
+        JawWarpParams p{};
+        ASSERT_TRUE(computeJawWarp(mesh.data(), kRealFrameW, kRealFrameH, 1.0f, 1.0f, p, preset));
+        ASSERT_EQ(kControlPointCount, p.count) << "preset " << preset << " count";
+
+        float maxDisp = 0.0f;
+        for (int i = 0; i < p.count; ++i) {
+            const float m = std::sqrt(p.dx[i] * p.dx[i] + p.dy[i] * p.dy[i]);
+            if (m > maxDisp) maxDisp = m;
+        }
+        ASSERT_GT(maxDisp, 0.0f);
+
+        auto ratioAt = [&](int idx) {
+            const float ex = mesh[idx].x * kRealFrameW;
+            const float ey = mesh[idx].y * kRealFrameH;
+            float odx = 0.0f, ody = 0.0f;
+            evaluateWarpDisplacement(p, ex, ey, odx, ody);
+            return std::sqrt(odx * odx + ody * ody) / maxDisp;
+        };
+
+        const float r468 = ratioAt(468);
+        const float r473 = ratioAt(473);
+        const float r33 = ratioAt(33);
+        const float r263 = ratioAt(263);
+        std::printf("     %d  |  %5.2f%% |  %5.2f%% |  %5.2f%% |  %5.2f%%\n",
+                    preset, r468 * 100.0f, r473 * 100.0f, r33 * 100.0f, r263 * 100.0f);
+
+        // 홍채중심 < 5% (하드 게이트 — 렌즈 정합). 볼 중앙 taper 0.08 전 프리셋 고정으로 지킴.
+        EXPECT_LT(r468, 0.05f) << "preset " << preset << " iris 468 exceeds 5%";
+        EXPECT_LT(r473, 0.05f) << "preset " << preset << " iris 473 exceeds 5%";
+        // 눈꼬리 < 12% (완화 게이트).
+        EXPECT_LT(r33, 0.12f) << "preset " << preset << " eye corner 33 exceeds 12%";
+        EXPECT_LT(r263, 0.12f) << "preset " << preset << " eye corner 263 exceeds 12%";
+    }
+    std::fflush(stdout);
 }
 
 }  // namespace

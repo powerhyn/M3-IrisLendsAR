@@ -2302,6 +2302,19 @@ Java_com_irislenssdk_IrisLensSDK_nativeSetUseMeasuredLuma(
     iris_sdk_set_use_measured_luma(enabled ? 1 : 0);
 }
 
+/**
+ * Java: native void nativeSetInteriorTaperPreset(int preset);
+ * P8-W4B 벤치: 얼굴 내부 축소(thinChin) taper 비율 프리셋 (0=기본,1=볼강조,2=입코강조,3=약하게).
+ *   상태는 코어 sdk 레벨 atomic 저장(GL 컨텍스트 재생성 무관). 범위 밖은 코어에서 프리셋 0 폴백.
+ */
+JNIEXPORT void JNICALL
+Java_com_irislenssdk_IrisLensSDK_nativeSetInteriorTaperPreset(
+    JNIEnv* /* env */, jclass /* clazz */,
+    jint preset)
+{
+    iris_sdk_set_interior_taper_preset(static_cast<int>(preset));
+}
+
 // ============================================================================
 // 랜드마크 주입 경계 JNI (③-3 §3-2 — ADR-0001 §6 첫 외부 소비자)
 // ============================================================================
