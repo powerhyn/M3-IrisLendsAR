@@ -94,6 +94,19 @@ D 슬롯(ID6) 교체. 곱셈 골격 유지 + 정규화 기준을 공간 연속 �
 - **img(IMAGE 모드) on/off: 차이 미미** → FaceTracker `numFaces=2` 내부 스무딩 우회가 실제로 작동 중이라는 **실증** (핸드오프 §4-2 체크 해소). img 토글은 진단용 보존, 기본 VIDEO 유지(ROI 추적 이점).
 - **stab:fast(코어 필터 3.0/200) 효과 큼 — "눈을 잘 따라다님"** → LensSim 대비 잔여 지연의 주범 = 코어 stabilizer 보수 튜닝(4.0/15, 정규화 공간) 확정. 등가 환산 근거: LensSim 픽셀 공간 beta 0.3 × 분석폭 ~640px ≈ 200.
 - 남은 판정: ① 정지 지터(near-raw 대가) 허용 여부 ② 사카드 시 눈꺼풀 마스크 위상 지연(contour 필터는 아직 구 상수 — 렌더러 fitEyeEllipse/contour OneEuro 4.0/12~15) → 필요 시 LensSim처럼 동일 상수 정렬.
+
+### MP 스무딩 A/B 인프라 v2 (2026-07-15, 벤치 임시 — 판정 후 제거)
+
+"자체 필터 없이 MP 내부 스무딩만 쓰면 더 빠르고 자연스러운가?"(사용자 질문)를 직접 판정하기 위한 `trk:` 순환 버튼. v1의 raw/MP+필터 팔은 사용자 결정으로 제거, **기본 vs MP-only × 실행모드 3종**으로 재편. MP팔은 전부 numFaces=1 + 자체 stabilizer 바이패스(hold/hysteresis/blink-hold 동반 OFF):
+
+| 팔 | RunningMode | MP 내부 스무딩 | 의미 |
+|----|-------------|---------------|------|
+| 기본 | VIDEO (img 버튼 따름) | OFF (numFaces=2 우회) + 자체 필터 | 정식 경로 |
+| MP-vid | VIDEO | **ON** (0.05/80) | 질문의 본팔 — 스무딩+ROI 추적 |
+| MP-img | IMAGE | 없음 (모드 특성) | 풀 검출·무필터 — 모드 차이 비교용 |
+| MP-strm | LIVE_STREAM | **ON** + 비동기 큐잉 | LensSim 실측 1~2프레임 지연 재현 |
+
+구현: FaceTracker `setTrackingRunningMode`(3모드 통합, LIVE_STREAM은 detectAsync+리스너+프레임 복사풀 4매+tsMs 대기열 매칭 신규 배선) + `setSingleFaceMode`. 판정 기준: ① saccade 렌즈 밀착 ② 깜빡임 중 렌즈 거동 ③ 손 가림→복귀 ④ 정지 지터. **판정 결과 기록 대기.**
 - 승격 예정: 판정 통과 시 fast 상수를 코어 기본(`iris_sdk_default_stabilizer_config`)으로 (실기기 튜닝 canonical 관례).
 
 ## 트래킹 스윕 R1~R3 (2026-07-09, b299~b301) — OneEuro 상수 수렴

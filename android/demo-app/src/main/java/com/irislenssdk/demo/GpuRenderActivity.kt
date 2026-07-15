@@ -119,6 +119,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnTuck: Button         // NLR 클리핑: tuck 리매핑 sweep (LensSim 이식)
     private lateinit var btnAdaptK: Button       // NLR-W2: 고정 K↔적응 증폭 A/B (톤 비교)
     private lateinit var btnImgMode: Button      // NLR 트래킹 A/B: MediaPipe IMAGE 모드 (내부 스무딩·ROI 우회)
+    private lateinit var btnTrkArm: Button       // MP 스무딩 A/B: 필터 배치 4팔 순환 (벤치 임시)
     private lateinit var btnStabFast: Button     // NLR 트래킹 A/B: stabilizer near-raw 프리셋
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
@@ -250,6 +251,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnTuck = findViewById(R.id.btnTuck)
         btnAdaptK = findViewById(R.id.btnAdaptK)
         btnImgMode = findViewById(R.id.btnImgMode)
+        btnTrkArm = findViewById(R.id.btnTrkArm)
         btnStabFast = findViewById(R.id.btnStabFast)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
@@ -529,10 +531,18 @@ class GpuRenderActivity : AppCompatActivity() {
         // 자동 재생성(필터 리셋 포함) — 1~2프레임 렌즈 드롭은 정상.
         btnImgMode.setOnClickListener {
             imgModeOn = !imgModeOn
-            faceTracker?.setImageMode(imgModeOn)
+            // MP팔(trk != 기본) 활성 중엔 팔이 모드를 소유 — 기본 팔일 때만 즉시 반영
+            if (trkArmIdx == 0) faceTracker?.setImageMode(imgModeOn)
             btnImgMode.text = if (imgModeOn) "img:on" else "img:off"
             btnImgMode.setBackgroundColor(if (imgModeOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
             Log.i(TAG, "NLR tracking mode → ${if (imgModeOn) "IMAGE(스무딩·ROI 우회)" else "VIDEO"}")
+        }
+
+        // MP 스무딩 A/B 4팔 순환 — 판정 기준: ①saccade 렌즈 밀착 ②깜빡임 거동 ③가림 복귀
+        btnTrkArm.setOnClickListener {
+            trkArmIdx = (trkArmIdx + 1) % trkArms.size
+            applyTrkArm()
+            Toast.makeText(this, "트래킹 팔: ${trkArms[trkArmIdx].label}", Toast.LENGTH_SHORT).show()
         }
         // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 — 분석 스레드에서 재생성 (플래그 방식).
         // 프리셋 구성·라운드별 판정 근거는 stabPresets 선언부 주석 참조.
@@ -620,6 +630,41 @@ class GpuRenderActivity : AppCompatActivity() {
     private var currentVetoMode = 0       // P6-W5 B8 미판정 — legacy 0 유지 (§5.10)
     private var fadeStartV = 0.95f        // NLR-W2 R5: 흰자 페이드 시작점 (코어 기본 0.95와 일치)
     private var imgModeOn = false         // NLR 트래킹 A/B: IMAGE 모드 (기본 VIDEO — 트래커 재생성 시 재적용)
+
+    // MP 스무딩 A/B (벤치 임시): 기본 vs MP-only × 실행모드 3종.
+    // MP팔은 전부 numFaces=1 + 자체 stabilizer 바이패스(hold/hysteresis/blink-hold 동반 꺼짐):
+    //   vid  = VIDEO      — 내부 스무딩 ON + ROI 추적 (질문의 본팔)
+    //   img  = IMAGE      — 스무딩 없음·프레임당 풀 검출 (모드 차이 비교용 — 사실상 무필터)
+    //   strm = LIVE_STREAM — 스무딩 ON + 비동기 내부 큐잉 (LensSim 실측 1~2프레임 지연 재현)
+    // mode < 0 = 기본 팔: img 버튼(imgModeOn) 상태를 따름
+    private data class TrkArm(val label: String, val singleFace: Boolean, val bypassStab: Boolean, val mode: Int)
+    private val trkArms = listOf(
+        TrkArm("기본", false, false, -1),
+        TrkArm("MP-vid", true, true, FaceTracker.MODE_VIDEO),
+        TrkArm("MP-img", true, true, FaceTracker.MODE_IMAGE),
+        TrkArm("MP-strm", true, true, FaceTracker.MODE_STREAM),
+    )
+    @Volatile private var trkArmIdx = 0
+    @Volatile private var stabBypassOn = false   // 분석 스레드에서 stabilize 호출 스킵
+
+    /** 현재 트래킹 팔의 실행 모드 산출 — 기본 팔(mode<0)은 img 버튼 상태를 따른다. */
+    private fun trkArmMode(arm: TrkArm): Int =
+        if (arm.mode < 0) (if (imgModeOn) FaceTracker.MODE_IMAGE else FaceTracker.MODE_VIDEO)
+        else arm.mode
+
+    /** 현재 트래킹 팔 적용 — 트래커 재생성 예약 + 바이패스 플래그 + 필터 상태 리셋. */
+    private fun applyTrkArm() {
+        val arm = trkArms[trkArmIdx]
+        faceTracker?.setSingleFaceMode(arm.singleFace)
+        faceTracker?.setTrackingRunningMode(trkArmMode(arm))
+        stabBypassOn = arm.bypassStab
+        // 팔 전환 시 stabilizer 재생성 — 바이패스 중 고여 있던 필터 상태의 복귀 글라이드 방지
+        stabRecreateRequested = true
+        btnTrkArm.text = "trk:${arm.label}"
+        btnTrkArm.setBackgroundColor(if (trkArmIdx != 0) 0xCC2196F3.toInt() else 0x66555555.toInt())
+        Log.i(TAG, "MP smoothing A/B → ${arm.label} (numFaces=${if (arm.singleFace) 1 else 2}, " +
+            "mode=${trkArmMode(arm)}, bypassStab=${arm.bypassStab})")
+    }
 
     // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 (idx 0 = 코어 기본 4.0/15).
     // 핸들은 분석 스레드 전용이라 UI에서 직접 destroy 금지 — 재생성 요청 플래그만 세우고
@@ -1133,7 +1178,10 @@ class GpuRenderActivity : AppCompatActivity() {
             onError = { msg -> Log.w(TAG, "③-3 FaceTracker: $msg") },
         )
         tracker.onRawResult = ::onTasksRawResult
-        tracker.setImageMode(imgModeOn) // 트래커 재생성 시 현재 A/B 상태 재적용
+        // 트래커 재생성 시 현재 A/B 상태 재적용 (기본 팔이면 img 버튼 상태 따름)
+        val arm = trkArms[trkArmIdx]
+        tracker.setSingleFaceMode(arm.singleFace)
+        tracker.setTrackingRunningMode(trkArmMode(arm))
         faceTracker = tracker
         return tracker
     }
@@ -1215,7 +1263,9 @@ class GpuRenderActivity : AppCompatActivity() {
                 IrisLensSDK.createStabilizer(stabilizerHoldFrames)
             }
         }
-        if (tasksStabilizerHandle != 0L) {
+        // MP 스무딩 A/B: 바이패스 팔이면 stabilize 스킵 — raw(또는 MP 스무딩만 걸린) 결과가
+        // 그대로 GL로 간다 (hold/hysteresis/blink-hold도 함께 꺼짐 — 팔의 정직한 거동).
+        if (tasksStabilizerHandle != 0L && !stabBypassOn) {
             val timestampSec = System.nanoTime() / 1_000_000_000.0
             IrisLensSDK.stabilize(tasksStabilizerHandle, tasksIrisResult, timestampSec)
         }
