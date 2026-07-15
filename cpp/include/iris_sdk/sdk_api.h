@@ -596,7 +596,8 @@ typedef struct IrisBeautyConfigV2 {
     /* 얼굴 형태 보정 */
     float slim_face;        /**< 얼굴 슬림화 (0.0~1.0) */
     float enlarge_eyes;     /**< 눈 확대 (0.0~1.0) */
-    float thin_chin;        /**< 턱 축소 (0.0~1.0) */
+    float thin_chin;        /**< 내부 축소 (0.0~1.0): 콧볼·입꼬리·볼을 얼굴 세로축
+                                 방향으로 좁혀 face-small 느낌 (구 "턱 축소" 의미 재정의) */
 
     /* 처리 옵션 */
     int use_gpu;            /**< GPU 가속 사용 (0=CPU, 1=GPU) */
@@ -723,14 +724,14 @@ IRIS_SDK_EXPORT void iris_sdk_set_skin_radiance(float strength);
  * @brief Face Warp 적용 (GPU)
  *
  * GPU에서 얼굴 형태 보정(Face Warp)을 적용합니다.
- * 슬림 페이스, 눈 확대, 턱 축소 등의 효과를 렌더링합니다.
+ * 슬림 페이스(V라인), 눈 확대, 내부 축소(face-small) 등의 효과를 렌더링합니다.
  *
  * @param input_texture 입력 OpenGL ES 텍스처 ID
  * @param output_texture 출력 텍스처 ID 포인터
  * @param width 텍스처 너비
  * @param height 텍스처 높이
- * @param slim_face 얼굴 슬림화 강도 (0.0~1.0)
- * @param thin_chin 턱 축소 강도 (0.0~1.0)
+ * @param slim_face 얼굴 슬림화(V라인) 강도 (0.0~1.0)
+ * @param thin_chin 내부 축소 강도 (0.0~1.0): 콧볼·입꼬리·볼을 세로축 방향으로 좁힘
  * @param enlarge_eyes 눈 확대 강도 (0.0~1.0)
  * @param detection 얼굴 검출 결과 (필수, NULL이면 pass-through)
  * @return IRIS_SDK_OK 성공

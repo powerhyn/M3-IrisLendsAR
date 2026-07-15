@@ -1087,7 +1087,7 @@ void GPUBeautyBackend::executeWarpPass(
     glViewport(0, 0, width, height);
     glUseProgram(warp_program_);
 
-    // 셰이더 §4: uWarp[14] = [cx, cy, dx, dy] (렌더 텍스처 픽셀 공간 — 호출부가 이미 정렬).
+    // 셰이더 §4: uWarp[24] = [cx, cy, dx, dy] (렌더 텍스처 픽셀 공간 — 호출부가 이미 정렬).
     // params는 cx/cy/dx/dy를 SoA로 보관하므로 vec4 AoS 배열로 패킹한 뒤 한 번에 업로드.
     const int count = (params.count < iris_sdk::jaw_warp::JawWarpParams::kMaxControlPoints)
                           ? params.count
@@ -1228,16 +1228,19 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // (P8-W2) skin mask가 OFF면 스무딩 없음 = 의도된 종착(레거시 FreqSep/Bilateral 폴백 제거).
     const bool use_skin_mask = config.enabled && skinMaskSmoothingActive(detection);
 
-    // P8-W4: 턱 V라인 워프 게이트. slim_face>0 또는 thin_chin>0 + face_mesh 유효 +
-    //   warp 셰이더 생성 성공일 때만 활성. computeJawWarp가 추가로 strength≤0/퇴화를 거른다.
+    // P8-W4 / P8-W4B: V라인 + 내부 축소 워프 게이트. slim_face>0 또는 thin_chin>0 +
+    //   face_mesh 유효 + warp 셰이더 생성 성공일 때만 활성.
+    //   computeJawWarp가 추가로 두 strength≤0/퇴화를 거른다.
     const bool needs_warp = config.enabled
         && (effective_config.slimFace > 0.0f || effective_config.thinChin > 0.0f)
         && detection && detection->detected && detection->face_mesh_valid
         && warp_program_ != 0;
-    // slim/chin 합성(단순): 둘 중 큰 값이 메인 강도 (브레인스토밍 §5-3).
+    // 2노브 독립 스케일: max() 합성 폐기. jaw = slimFace(V라인), interior = thinChin.
+    // thinChin은 더 이상 "턱끝 축소"가 아니라 "얼굴 내부 축소(콧볼·입꼬리·볼 동반)".
     const float jawStrength = needs_warp
-        ? std::clamp(std::max(effective_config.slimFace, effective_config.thinChin), 0.0f, 1.0f)
-        : 0.0f;
+        ? std::clamp(effective_config.slimFace, 0.0f, 1.0f) : 0.0f;
+    const float interiorStrength = needs_warp
+        ? std::clamp(effective_config.thinChin, 0.0f, 1.0f) : 0.0f;
 
     // 활성 필터 수에 따라 동적으로 텍스처 할당
     // (P8-W2) 잔존 패스: ① skin mask smoothing + ② brightness(통합 Color). + (P8-W4) ③ warp.
@@ -1402,9 +1405,9 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
 
     // (P8-W2 제거) 소프트 포커스 / Vivid 포스트프로세싱 곁가지 제거.
 
-    // 3. P8-W4: 턱 V라인 워프 (skin/brightness 이후 마지막 패스).
+    // 3. P8-W4 / P8-W4B: V라인 + 내부 축소 워프 (skin/brightness 이후 마지막 패스).
     //    워프장은 턱(프레임 가장자리)까지 닿으므로 ROI scissor를 끄고 전체 프레임에서 동작
-    //    (skin mask 1345 패턴과 동일). computeJawWarp가 strength≤0/퇴화면 false → 패스 생략.
+    //    (skin mask 1345 패턴과 동일). computeJawWarp가 두 strength≤0/퇴화면 false → 패스 생략.
     if (needs_warp) {
         if (profiling) profiler_->begin("JawWarp");
         iris_sdk::jaw_warp::JawWarpParams wp{};
@@ -1412,7 +1415,7 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
         // detection->face_mesh 는 iris_sdk::IrisLandmark[478] — computeJawWarp 인자 타입과
         // 동일하므로 캐스팅 불필요(prepareSkinFans 와 동일하게 직접 접근).
         if (iris_sdk::jaw_warp::computeJawWarp(detection->face_mesh, width, height,
-                                               jawStrength, wp)
+                                               jawStrength, interiorStrength, wp)
             && wp.sigma_px > 0.0f && wp.count > 0) {
             // 🔴 좌표 정합: 이미지 공간 → 렌더 텍스처 공간(미러·Y-flip). prepareSkinFans 동형.
             iris_sdk::jaw_warp::JawWarpParams wp_render =

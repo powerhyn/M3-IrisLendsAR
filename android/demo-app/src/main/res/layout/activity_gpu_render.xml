@@ -734,6 +734,42 @@
 
                 </LinearLayout>
 
+                <!-- 얼굴축소(interior shrink, thinChin 재정의) 슬라이더 (0~0.50) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="8dp">
+
+                    <TextView
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:text="얼굴축소"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekShrink"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginHorizontal="6dp"
+                        android:max="50"
+                        android:progress="0" />
+
+                    <TextView
+                        android:id="@+id/tvShrinkValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="off"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:minWidth="36dp"
+                        android:gravity="end" />
+
+                </LinearLayout>
+
                 <!-- 피부(skin) 슬라이더 (0~1.0) -->
                 <LinearLayout
                     android:layout_width="match_parent"
