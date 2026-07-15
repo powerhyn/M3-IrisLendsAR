@@ -80,16 +80,21 @@ class FaceTracker(
 
     @Volatile private var usingGpu = false
 
-    // NLR-트래킹 A/B: RunningMode.IMAGE 토글 (mediapipe-internal-smoothing-bypass 핸드오프).
-    // VIDEO 경로는 numFaces=2 트릭으로 내부 스무딩을 이미 우회했다고 가정하나(아래 주석),
-    // 그 가정의 실증 + ROI 추적 유무 지연 차이를 실기기 A/B로 확인한다.
+    // 트래킹 A/B(벤치 임시): 실행 모드 3종 — MODE_VIDEO(동기+ROI 추적, numFaces=1이면 내부
+    // 스무딩 활성) / MODE_IMAGE(동기, 스무딩·추적 없음) / MODE_STREAM(LIVE_STREAM 비동기 —
+    // 내부 큐잉, LensSim 실측 1~2프레임 지연의 재현 팔).
     // 요청은 아무 스레드나, 실제 재생성은 분석 스레드(ensureLandmarker)에서만.
-    @Volatile private var imageModeRequested = false
-    private var imageModeActive = false
+    @Volatile private var runningModeRequested = MODE_VIDEO
+    private var runningModeActive = MODE_VIDEO
 
-    /** IMAGE 모드 A/B 토글 — 어느 스레드에서나 안전. 다음 analyze에서 landmarker 재생성. */
+    /** IMAGE 모드 A/B 토글 (레거시 표면 — img 버튼) — 어느 스레드에서나 안전. */
     fun setImageMode(enabled: Boolean) {
-        imageModeRequested = enabled
+        runningModeRequested = if (enabled) MODE_IMAGE else MODE_VIDEO
+    }
+
+    /** 실행 모드 직접 지정 (벤치 임시) — MODE_VIDEO/IMAGE/STREAM. 다음 analyze에서 재생성. */
+    fun setTrackingRunningMode(mode: Int) {
+        runningModeRequested = mode.coerceIn(MODE_VIDEO, MODE_STREAM)
     }
 
     // P8 트래킹 A/B(벤치 임시): numFaces=1 토글 — VIDEO+numFaces=1 조합에서만 활성화되는
@@ -185,6 +190,20 @@ class FaceTracker(
         // 현재 버퍼에서 홍채 평균 휘도를 측정한다.
         sampleIrisLuma(src, width, height, plane.rowStride)
 
+        // LIVE_STREAM(벤치 임시): 비동기 제출 — detectAsync 반환 즉시 imageProxy가 닫히므로
+        // 원본 버퍼를 풀 버퍼로 복사해 결과 콜백까지 수명을 보장한다.
+        if (runningModeActive == MODE_STREAM) {
+            try {
+                submitStreamFrame(lm, rotation, frameTimestampNs, width, height,
+                    plane.rowStride, src, rowBytes)
+            } catch (e: RuntimeException) {
+                handleDetectError(e)
+            } finally {
+                imageProxy.close()
+            }
+            return
+        }
+
         val mpImage: MPImage = if (plane.rowStride == rowBytes) {
             // 패딩 없음 — 제로카피 경로. detectForVideo가 동기라 호출이 반환될 때까지
             // 버퍼가 유효하며, ImageProxy는 finally에서 닫는다.
@@ -215,7 +234,7 @@ class FaceTracker(
             // 추론 동안 이 스레드가 점유되어 CameraX가 자동으로 최신 프레임만 남긴다.
             // IMAGE 모드: result.timestampMs()가 무의미(핸드오프 §3-3) — 아래 onResult가
             // 제출 시각 ts를 별도 운반하므로 두 모드 모두 시간 계약이 동일하게 유지된다.
-            val result = if (imageModeActive) {
+            val result = if (runningModeActive == MODE_IMAGE) {
                 lm.detect(mpImage, processingOptions(rotation))
             } else {
                 lm.detectForVideo(mpImage, processingOptions(rotation), ts)
@@ -233,6 +252,106 @@ class FaceTracker(
             handleDetectError(e)
         } finally {
             imageProxy.close()
+        }
+    }
+
+    // ── LIVE_STREAM 벤치 경로 (임시 — 판정 후 제거) ──────────────────────
+    // detectAsync는 결과가 MediaPipe 콜백 스레드로 늦게 도착하므로, 제출 시점 메타
+    // (센서 ns·회전·크기)와 복사 버퍼를 tsMs 키로 대기열에 보관했다가 결과와 매칭한다.
+    // 버퍼는 소형 풀(최대 4) 재사용 — 풀 고갈 시 프레임 드롭(백프레셔).
+
+    private class PendingStreamFrame(
+        val tsMs: Long, val frameNs: Long, val rotation: Int,
+        val width: Int, val height: Int, val buffer: ByteBuffer,
+    )
+
+    private val pendingStreamFrames = ArrayDeque<PendingStreamFrame>()
+    private val streamBufferPool = ArrayDeque<ByteBuffer>()
+    private var streamBuffersAllocated = 0
+
+    private fun submitStreamFrame(
+        lm: FaceLandmarker, rotation: Int, frameTimestampNs: Long,
+        width: Int, height: Int, rowStride: Int, src: ByteBuffer, rowBytes: Int,
+    ) {
+        val buf = obtainStreamBuffer(rowBytes * height) ?: return // 인플라이트 초과 — 드롭
+        buf.clear()
+        val capacity = src.capacity()
+        for (row in 0 until height) {
+            val pos = row * rowStride
+            src.limit(minOf(capacity, pos + rowBytes))
+            src.position(pos)
+            buf.put(src)
+        }
+        src.limit(capacity)
+        buf.rewind()
+        val mpImage = ByteBufferImageBuilder(buf, width, height, MPImage.IMAGE_FORMAT_RGBA).build()
+        val ts = maxOf(SystemClock.uptimeMillis(), lastTimestampMs + 1)
+        lastTimestampMs = ts
+        synchronized(pendingStreamFrames) {
+            pendingStreamFrames.addLast(
+                PendingStreamFrame(ts, frameTimestampNs, rotation, width, height, buf))
+        }
+        try {
+            lm.detectAsync(mpImage, processingOptions(rotation), ts)
+        } catch (e: RuntimeException) {
+            synchronized(pendingStreamFrames) {
+                pendingStreamFrames.removeLastOrNull()?.let { recycleStreamBuffer(it.buffer) }
+            }
+            throw e
+        }
+    }
+
+    /** MediaPipe 콜백 스레드에서 호출 — 대기열에서 tsMs 매칭 후 동기 경로와 동일 처리. */
+    private fun handleStreamResult(result: FaceLandmarkerResult, input: MPImage) {
+        if (closed) return
+        var matched: PendingStreamFrame? = null
+        synchronized(pendingStreamFrames) {
+            while (pendingStreamFrames.isNotEmpty()) {
+                val p = pendingStreamFrames.removeFirst()
+                if (p.tsMs == result.timestampMs()) {
+                    matched = p
+                    break
+                }
+                recycleStreamBuffer(p.buffer) // MediaPipe flow limiter가 흘려보낸 프레임
+            }
+        }
+        val p = matched ?: return
+        try {
+            onResult(result, input, p.frameNs, p.tsMs)
+            try {
+                onRawResult?.invoke(result, p.rotation, p.width, p.height, p.buffer,
+                    p.width * 4, p.frameNs)
+            } catch (e: RuntimeException) {
+                onError("onRawResult 소비자 오류: ${e.message}")
+            }
+        } finally {
+            recycleStreamBuffer(p.buffer)
+        }
+    }
+
+    private fun obtainStreamBuffer(size: Int): ByteBuffer? {
+        synchronized(pendingStreamFrames) {
+            while (streamBufferPool.isNotEmpty()) {
+                val b = streamBufferPool.removeFirst()
+                if (b.capacity() >= size) return b
+                streamBuffersAllocated-- // 해상도 변경 등 크기 불일치 — 폐기
+            }
+            if (streamBuffersAllocated >= MAX_STREAM_BUFFERS) return null
+            streamBuffersAllocated++
+        }
+        return ByteBuffer.allocateDirect(size)
+    }
+
+    private fun recycleStreamBuffer(b: ByteBuffer) {
+        synchronized(pendingStreamFrames) { streamBufferPool.addLast(b) }
+    }
+
+    /** 모드 전환/종료 시 스트림 상태 초기화 — 인플라이트 결과는 closed/재생성으로 무시된다. */
+    private fun resetStreamState() {
+        synchronized(pendingStreamFrames) {
+            pendingStreamFrames.clear()
+            streamBufferPool.clear()
+            streamBuffersAllocated = 0
         }
     }
 
@@ -257,6 +376,7 @@ class FaceTracker(
             // 종료 경로 — 무시
         }
         landmarker = null
+        resetStreamState()
     }
 
     // ───────────────────────── 내부 ─────────────────────────
@@ -273,9 +393,9 @@ class FaceTracker(
             cpuFallbackRequested = false
             resetFilters()
         }
-        // IMAGE↔VIDEO 모드/numFaces 전환 — 옵션은 생성 시점 고정이라 재생성 필수 (핸드오프 §3-4).
+        // 실행 모드/numFaces 전환 — 옵션은 생성 시점 고정이라 재생성 필수 (핸드오프 §3-4).
         // 필터 리셋 동반 (모드 간 시간 특성이 달라 오래된 필터 상태가 글라이드 유발).
-        if (landmarker != null && (imageModeRequested != imageModeActive ||
+        if (landmarker != null && (runningModeRequested != runningModeActive ||
                 singleFaceRequested != singleFaceActive)) {
             try {
                 landmarker?.close()
@@ -284,12 +404,13 @@ class FaceTracker(
             landmarker = null
             creationFailed = false
             resetFilters()
+            resetStreamState()
             hadFace = false
         }
         if (landmarker != null || creationFailed) return
 
         val wantGpu = preferGpu && !cpuForced && !EmulatorDetector.isEmulator
-        imageModeActive = imageModeRequested
+        runningModeActive = runningModeRequested
         singleFaceActive = singleFaceRequested
         landmarker = try {
             createLandmarker(wantGpu).also { usingGpu = wantGpu }
@@ -321,10 +442,15 @@ class FaceTracker(
             .setModelAssetPath(MODEL_ASSET_PATH)
             .setDelegate(if (useGpu) Delegate.GPU else Delegate.CPU)
             .build()
-        val options = FaceLandmarker.FaceLandmarkerOptions.builder()
+        val builder = FaceLandmarker.FaceLandmarkerOptions.builder()
             .setBaseOptions(baseOptions)
-            // IMAGE = 내부 스무딩·ROI 추적 없는 동기 모드 (A/B 토글 — setImageMode)
-            .setRunningMode(if (imageModeActive) RunningMode.IMAGE else RunningMode.VIDEO)
+            // 실행 모드 3종 (벤치 토글 — setImageMode / setTrackingRunningMode):
+            // IMAGE = 내부 스무딩·ROI 추적 없는 동기, LIVE_STREAM = 비동기(내부 큐잉)
+            .setRunningMode(when (runningModeActive) {
+                MODE_IMAGE -> RunningMode.IMAGE
+                MODE_STREAM -> RunningMode.LIVE_STREAM
+                else -> RunningMode.VIDEO
+            })
             // ③-3: numFaces=2로 MediaPipe face_landmarker 그래프의 내부
             // LandmarksSmoothingCalculator(One-Euro 0.05/80) 노드를 우회한다 —
             // 이 노드는 num_faces==1 + 스트림 모드(VIDEO)에서만 활성화되며
@@ -339,8 +465,12 @@ class FaceTracker(
             // 렌즈 시착에 불필요 — 지연시간 절약
             .setOutputFaceBlendshapes(false)
             .setOutputFacialTransformationMatrixes(false)
-            .build()
-        return FaceLandmarker.createFromOptions(context, options)
+        if (runningModeActive == MODE_STREAM) {
+            // LIVE_STREAM은 결과/오류 리스너 필수 — 결과는 MediaPipe 콜백 스레드로 도착
+            builder.setResultListener { result, input -> handleStreamResult(result, input) }
+            builder.setErrorListener { e -> onError("LIVE_STREAM 추론 오류: ${e.message}") }
+        }
+        return FaceLandmarker.createFromOptions(context, builder.build())
     }
 
     private fun processingOptions(rotation: Int): ImageProcessingOptions {
@@ -628,6 +758,14 @@ class FaceTracker(
          * [이식 적응] 원본(LensSimulator)은 "lenssdk/face_landmarker.task" — 경로만 demo assets에 맞춤.
          */
         private const val MODEL_ASSET_PATH = "models/face_landmarker.task"
+
+        // 실행 모드 (벤치 토글 — setTrackingRunningMode)
+        const val MODE_VIDEO = 0
+        const val MODE_IMAGE = 1
+        const val MODE_STREAM = 2
+
+        /** LIVE_STREAM 인플라이트 복사 버퍼 상한 — 초과 제출은 드롭(백프레셔) */
+        private const val MAX_STREAM_BUFFERS = 4
 
         // One-Euro 시작값 (ADR-0002). beta는 픽셀 공간 운동 지연 재튜닝 값 —
         // 0.007은 빠른 머리 움직임에도 컷오프가 ~2Hz에 머물러 렌즈가 3~4프레임 끌림

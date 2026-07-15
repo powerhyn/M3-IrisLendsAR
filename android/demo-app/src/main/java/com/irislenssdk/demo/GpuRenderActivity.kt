@@ -531,7 +531,8 @@ class GpuRenderActivity : AppCompatActivity() {
         // 자동 재생성(필터 리셋 포함) — 1~2프레임 렌즈 드롭은 정상.
         btnImgMode.setOnClickListener {
             imgModeOn = !imgModeOn
-            faceTracker?.setImageMode(imgModeOn)
+            // MP팔(trk != 기본) 활성 중엔 팔이 모드를 소유 — 기본 팔일 때만 즉시 반영
+            if (trkArmIdx == 0) faceTracker?.setImageMode(imgModeOn)
             btnImgMode.text = if (imgModeOn) "img:on" else "img:off"
             btnImgMode.setBackgroundColor(if (imgModeOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
             Log.i(TAG, "NLR tracking mode → ${if (imgModeOn) "IMAGE(스무딩·ROI 우회)" else "VIDEO"}")
@@ -630,31 +631,39 @@ class GpuRenderActivity : AppCompatActivity() {
     private var fadeStartV = 0.95f        // NLR-W2 R5: 흰자 페이드 시작점 (코어 기본 0.95와 일치)
     private var imgModeOn = false         // NLR 트래킹 A/B: IMAGE 모드 (기본 VIDEO — 트래커 재생성 시 재적용)
 
-    // MP 스무딩 A/B 4팔 (벤치 임시): (numFaces=1 여부, 자체 stabilizer 바이패스 여부)
-    // 0 기본     = 우회(numFaces=2) + 자체 필터  ← 정식 경로
-    // 1 MP+필터  = MP 스무딩 ON + 자체 필터 (이중 필터 체감)
-    // 2 MP-only  = MP 스무딩 ON + 필터 바이패스 (사용자 질문의 팔)
-    // 3 raw      = 우회 + 필터 바이패스 (무필터 기준점 — 지터 원판)
-    private data class TrkArm(val label: String, val singleFace: Boolean, val bypassStab: Boolean)
+    // MP 스무딩 A/B (벤치 임시): 기본 vs MP-only × 실행모드 3종.
+    // MP팔은 전부 numFaces=1 + 자체 stabilizer 바이패스(hold/hysteresis/blink-hold 동반 꺼짐):
+    //   vid  = VIDEO      — 내부 스무딩 ON + ROI 추적 (질문의 본팔)
+    //   img  = IMAGE      — 스무딩 없음·프레임당 풀 검출 (모드 차이 비교용 — 사실상 무필터)
+    //   strm = LIVE_STREAM — 스무딩 ON + 비동기 내부 큐잉 (LensSim 실측 1~2프레임 지연 재현)
+    // mode < 0 = 기본 팔: img 버튼(imgModeOn) 상태를 따름
+    private data class TrkArm(val label: String, val singleFace: Boolean, val bypassStab: Boolean, val mode: Int)
     private val trkArms = listOf(
-        TrkArm("기본", false, false),
-        TrkArm("MP+필터", true, false),
-        TrkArm("MP-only", true, true),
-        TrkArm("raw", false, true),
+        TrkArm("기본", false, false, -1),
+        TrkArm("MP-vid", true, true, FaceTracker.MODE_VIDEO),
+        TrkArm("MP-img", true, true, FaceTracker.MODE_IMAGE),
+        TrkArm("MP-strm", true, true, FaceTracker.MODE_STREAM),
     )
     @Volatile private var trkArmIdx = 0
     @Volatile private var stabBypassOn = false   // 분석 스레드에서 stabilize 호출 스킵
 
-    /** 현재 트래킹 팔 적용 — 트래커 numFaces 재생성 예약 + 바이패스 플래그 + 필터 상태 리셋. */
+    /** 현재 트래킹 팔의 실행 모드 산출 — 기본 팔(mode<0)은 img 버튼 상태를 따른다. */
+    private fun trkArmMode(arm: TrkArm): Int =
+        if (arm.mode < 0) (if (imgModeOn) FaceTracker.MODE_IMAGE else FaceTracker.MODE_VIDEO)
+        else arm.mode
+
+    /** 현재 트래킹 팔 적용 — 트래커 재생성 예약 + 바이패스 플래그 + 필터 상태 리셋. */
     private fun applyTrkArm() {
         val arm = trkArms[trkArmIdx]
         faceTracker?.setSingleFaceMode(arm.singleFace)
+        faceTracker?.setTrackingRunningMode(trkArmMode(arm))
         stabBypassOn = arm.bypassStab
         // 팔 전환 시 stabilizer 재생성 — 바이패스 중 고여 있던 필터 상태의 복귀 글라이드 방지
         stabRecreateRequested = true
         btnTrkArm.text = "trk:${arm.label}"
         btnTrkArm.setBackgroundColor(if (trkArmIdx != 0) 0xCC2196F3.toInt() else 0x66555555.toInt())
-        Log.i(TAG, "MP smoothing A/B → ${arm.label} (numFaces=${if (arm.singleFace) 1 else 2}, bypassStab=${arm.bypassStab})")
+        Log.i(TAG, "MP smoothing A/B → ${arm.label} (numFaces=${if (arm.singleFace) 1 else 2}, " +
+            "mode=${trkArmMode(arm)}, bypassStab=${arm.bypassStab})")
     }
 
     // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 (idx 0 = 코어 기본 4.0/15).
@@ -1169,8 +1178,10 @@ class GpuRenderActivity : AppCompatActivity() {
             onError = { msg -> Log.w(TAG, "③-3 FaceTracker: $msg") },
         )
         tracker.onRawResult = ::onTasksRawResult
-        tracker.setImageMode(imgModeOn) // 트래커 재생성 시 현재 A/B 상태 재적용
-        tracker.setSingleFaceMode(trkArms[trkArmIdx].singleFace) // MP 스무딩 팔 재적용
+        // 트래커 재생성 시 현재 A/B 상태 재적용 (기본 팔이면 img 버튼 상태 따름)
+        val arm = trkArms[trkArmIdx]
+        tracker.setSingleFaceMode(arm.singleFace)
+        tracker.setTrackingRunningMode(trkArmMode(arm))
         faceTracker = tracker
         return tracker
     }
