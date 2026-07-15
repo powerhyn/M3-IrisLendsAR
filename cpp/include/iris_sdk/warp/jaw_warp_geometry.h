@@ -85,10 +85,32 @@ constexpr int kInteriorPerSide = 4;
 constexpr int kLeftInteriorControl[kInteriorPerSide] = {280, 425, 291, 358};
 /// 피험자 우측 내부 4점 (좌측 대칭, 동일 순서).
 constexpr int kRightInteriorControl[kInteriorPerSide] = {50, 205, 61, 129};
-/// 내부 테이퍼 (볼 중앙, 볼 하부, 입꼬리, 콧볼) — 볼 중앙은 눈(홍채)에 가까워 최소.
+/// 내부 테이퍼 확정값(볼 중앙, 볼 하부, 입꼬리, 콧볼) = **프리셋 0(단일 진실)**.
 /// [0]=0.08: 초기값 0.12는 풀강도에서 홍채 중심(468) 변위 5.02%로 5% 게이트 초과 →
 /// 0.08로 낮춰 4.73%(margin 0.27%p) 통과. 나머지 3개는 눈에서 충분히 멀어 미조정.
+/// 아래 kInteriorTaperPresets[0] 이 이 배열을 그대로 참조한다(중복 리터럴 없음).
 constexpr float kInteriorTaper[kInteriorPerSide] = {0.08f, 0.35f, 0.30f, 0.20f};
+
+/// 내부 테이퍼 프리셋 개수 (P8-W4B 벤치 임시).
+constexpr int kInteriorTaperPresetCount = 4;
+
+/// 내부 테이퍼 프리셋 테이블 (각 행 = 볼 중앙, 볼 하부, 입꼬리, 콧볼) — **벤치 임시**.
+///
+/// 목적: 여러 평가자가 실기기에서 내부 4점 비율 조합을 런타임 토글로 A/B 비교하기 위한
+/// 임시 테이블. 다수 의견 수집 후 승자 행을 kInteriorTaper 로 고정하고 이 테이블·프리셋
+/// API(iris_sdk_set_interior_taper_preset)는 제거한다. 프리셋 선택 상태는 backend 멤버가
+/// 아니라 sdk 레벨 std::atomic<int>(sdk_api_v2.cpp)로 보관 → GL 컨텍스트 재생성에도 유지되며,
+/// gpu_beauty_backend 가 매 프레임 읽어 computeJawWarp(..., interior_taper_preset)로 전달한다.
+///
+/// 행 순서: 0=기본(kInteriorTaper 참조 — 단일 진실), 1=볼 강조, 2=입·코 강조, 3=약하게.
+/// ⚠️ 각 행 [0]=볼 중앙은 눈(홍채)에 가장 가까워 **전 프리셋 0.08 고정**한다(홍채 <5% 하드
+///    게이트가 볼 중앙만 제약). 프리셋 간 가변은 나머지 3점(볼 하부·입꼬리·콧볼)에 한정한다.
+constexpr float kInteriorTaperPresets[kInteriorTaperPresetCount][kInteriorPerSide] = {
+    {kInteriorTaper[0], kInteriorTaper[1], kInteriorTaper[2], kInteriorTaper[3]},  // 0=기본(단일 진실)
+    {0.08f, 0.45f, 0.25f, 0.15f},  // 1=볼 강조   (볼 하부 ↑, 입꼬리·콧볼 ↓)
+    {0.08f, 0.28f, 0.38f, 0.28f},  // 2=입·코 강조 (입꼬리·콧볼 ↑, 볼 하부 ↓)
+    {0.08f, 0.25f, 0.25f, 0.18f},  // 3=약하게    (볼 중앙 제외 전반 하향)
+};
 
 /// 전체 제어점 수 = (jaw 7 + upper 1 + interior 4) × 2 = 24 (조건부 패킹 시 상한).
 constexpr int kControlPointCount = (kSideControlPoints + kUpperPerSide + kInteriorPerSide) * 2;
@@ -165,6 +187,10 @@ struct JawWarpParams {
  * @param jaw_strength     V라인 강도 0~1 (= slimFace). jaw + upper 그룹 스케일.
  * @param interior_strength 내부 축소 강도 0~1 (= thinChin). interior 그룹 스케일.
  * @param out              [출력] 워프 파라미터. 비활성 시 count=0, sigma_px=0
+ * @param interior_taper_preset [벤치 임시] interior 그룹 taper 프리셋 행 인덱스
+ *        (kInteriorTaperPresets, 0=기본). **기본 0 = 기존 동작 비트 동일**. 범위
+ *        밖([0,kInteriorTaperPresetCount) 밖: 예 −1·99)은 프리셋 0으로 폴백한다.
+ *        jaw/upper 그룹과는 무관(jaw 경로 수치 불변).
  * @return true=워프 활성, false=비활성(두 strength ≤ 0 또는 퇴화 입력 또는 null)
  *
  * @note out은 false 반환 시에도 count=0/sigma_px=0으로 안전하게 채워진다.
@@ -175,7 +201,8 @@ bool computeJawWarp(const IrisLandmark* face_mesh,
                     int image_height,
                     float jaw_strength,
                     float interior_strength,
-                    JawWarpParams& out);
+                    JawWarpParams& out,
+                    int interior_taper_preset = 0);
 
 /**
  * @brief 출력 픽셀 (px,py)에서의 워프 변위 합 (CPU RBF 평가 — 테스트/검증용)

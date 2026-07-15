@@ -1075,6 +1075,19 @@ public final class IrisLensSDK {
     }
 
     /**
+     * P8-W4B 벤치 임시: 얼굴 내부 축소(thinChin) taper 비율 프리셋 선택.
+     * 여러 평가자가 실기기에서 내부 4점(볼 중앙·볼 하부·입꼬리·콧볼) 비율 조합을 토글 A/B
+     * 비교하기 위한 임시 API — 다수 의견 수집 후 승자 고정 시 제거 예정. 프리셋 상태는 코어
+     * sdk 레벨 atomic 에 저장돼 GL 컨텍스트 재생성에도 유지되며, UI 스레드에서 호출해도 안전하다.
+     * @param preset 0=기본, 1=볼 강조, 2=입·코 강조, 3=약하게. 범위 밖 값은 코어에서 프리셋 0으로 폴백.
+     */
+    public static void setInteriorTaperPreset(int preset) {
+        if (sLibraryLoaded) {
+            nativeSetInteriorTaperPreset(preset);
+        }
+    }
+
+    /**
      * GPU 렌즈 타원 마스크 설정.
      * GL 스레드에서 호출.
      * @param enabled true=on, false=off
@@ -1563,6 +1576,8 @@ public final class IrisLensSDK {
     private static native void nativeSetAdaptK(float v);    // NLR-W2 벤치: 고정 K↔적응 증폭 A/B
     // NLR-W2 R5: 흰자 페이드 시작점 벤치 토글
     private static native void nativeSetLensFadeStart(float v);
+    // P8-W4B 벤치: 내부 축소(thinChin) taper 비율 프리셋 토글
+    private static native void nativeSetInteriorTaperPreset(int preset);
 
     // ========================================================================
     // Temporal Stabilizer Native Methods

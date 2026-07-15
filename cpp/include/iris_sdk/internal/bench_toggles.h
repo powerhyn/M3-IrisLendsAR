@@ -61,6 +61,17 @@ void iris_sdk_set_lens_adapt_k(float v);
 // NLR-W2 R5: 흰자 페이드 시작점(홍채 반경 단위) 라이브 튜닝 토글 — 검출 반경 오차 보정용. 창 폭 +0.20 고정.
 void iris_sdk_set_lens_fade_start(float v);
 
+// ----------------------------------------------------------------------------
+// [interior-taper] P8-W4B 벤치: 얼굴 내부 축소(thinChin) taper 비율 프리셋 선택 토글.
+// preset 0=기본, 1=볼강조, 2=입코강조, 3=약하게 (jaw_warp_geometry.h kInteriorTaperPresets).
+// 범위 밖 인덱스는 소비 시점(computeJawWarp)에서 프리셋 0으로 폴백.
+// 상태는 backend 멤버가 아니라 sdk 레벨 std::atomic<int>(sdk_api_v2.cpp)에 보관 →
+// GL 컨텍스트 재생성에도 유지. gpu_beauty_backend 가 매 프레임 getter 로 읽어 전달.
+// UI 스레드 store ↔ GL 스레드 load 무락 교환(atomic). 다수 의견 수집 후 승자 고정·제거 예정.
+// ----------------------------------------------------------------------------
+void iris_sdk_set_interior_taper_preset(int preset);
+int  iris_sdk_get_interior_taper_preset(void);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

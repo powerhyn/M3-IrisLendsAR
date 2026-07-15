@@ -22,6 +22,7 @@
 #include "iris_sdk/gpu/texture_handle.h"
 #endif
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -36,6 +37,13 @@ namespace {
 // ============================================================================
 
 std::mutex g_gpu_mutex;
+
+// P8-W4B 벤치: 내부 축소(interior) taper 프리셋 인덱스. GL 컨텍스트 재생성에도 살아남도록
+// GPUBeautyBackend 멤버가 아니라 sdk 레벨 static 으로 보관한다(백엔드는 컨텍스트마다 재생성).
+// UI 스레드(JNI setter) store ↔ GL 스레드(gpu_beauty_backend load) 무락 교환 — 독립 스칼라라
+// relaxed 로 충분(의존 데이터 없음, torn read 없음). 범위 클램프는 소비측(computeJawWarp)에서.
+// GLES 가드 밖 — non-GLES 빌드에서도 JNI setter/getter 심볼이 존재해야 링크가 성립.
+std::atomic<int> g_interior_taper_preset{0};
 
 // ③-2 B3 (감사 finding): sizeof 단일 가드는 '동일 크기를 유지하는 필드 순서 교환·타입
 // 치환'을 잡지 못한다 — 필드별 offset 일치를 컴파일 타임에 강제한다. 한쪽 정의에만
@@ -876,6 +884,19 @@ void iris_sdk_set_lens_fade_start(float v) {
 #else
     (void)v;
 #endif
+}
+
+// P8-W4B 벤치: 내부 축소 taper 프리셋 선택/조회 internal C API (다수 의견 수집용).
+// 다른 벤치 토글과 달리 g_gpu_lens 멤버가 아니라 sdk 레벨 std::atomic 로 보관한다 —
+// GL 컨텍스트 재생성으로 백엔드가 재생성돼도 선택이 유지돼야 하기 때문. 원값을 그대로
+// 저장하고 범위 클램프(→프리셋 0)는 소비측 computeJawWarp 에 단일화한다.
+// UI 스레드에서 store 돼도 안전(atomic, relaxed). 공개 sdk_api.h 미노출.
+void iris_sdk_set_interior_taper_preset(int preset) {
+    g_interior_taper_preset.store(preset, std::memory_order_relaxed);
+}
+
+int iris_sdk_get_interior_taper_preset(void) {
+    return g_interior_taper_preset.load(std::memory_order_relaxed);
 }
 
 } // extern "C"
