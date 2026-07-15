@@ -698,6 +698,15 @@
                     android:text="Beauty: ON"
                     android:textAllCaps="false" />
 
+                <!-- P8-W4B 벤치: 내부 taper 프리셋 순환 (다수 의견 수집용) -->
+                <Button
+                    android:id="@+id/btnTaperPreset"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Taper: 기본"
+                    android:textAllCaps="false" />
+
                 <!-- 턱슬림(slim) 슬라이더 (0~0.50) -->
                 <LinearLayout
                     android:layout_width="match_parent"

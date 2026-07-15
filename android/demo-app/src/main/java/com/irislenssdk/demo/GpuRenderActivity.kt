@@ -133,6 +133,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var tvSlimValue: TextView
     private lateinit var seekShrink: SeekBar        // P8-W4B: 얼굴 내부 축소 (thinChin 재정의)
     private lateinit var tvShrinkValue: TextView
+    private lateinit var btnTaperPreset: Button     // P8-W4B 벤치: 내부 taper 프리셋 순환
     private lateinit var seekSkin: SeekBar          // P8-W1: 피부 스무딩
     private lateinit var tvSkinValue: TextView
     private lateinit var seekRadiance: SeekBar      // P8-W3: 화사함 radiance
@@ -142,6 +143,9 @@ class GpuRenderActivity : AppCompatActivity() {
     // progress = 단계 인덱스. 기존 sweep 값을 모두 포함하고 그 사이를 보간했다.
     private val slimSteps = floatArrayOf(0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f)   // 0.1 간격, 기본 0.2(idx 2)
     private val shrinkSteps = floatArrayOf(0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f) // P8-W4B: 얼굴축소(thinChin), 기본 0(off)
+    // P8-W4B 벤치: 내부 taper 프리셋 (kInteriorTaperPresets와 인덱스 동기 — 볼중앙 0.08 전 프리셋 고정)
+    private val taperPresetLabels = arrayOf("기본", "볼강조", "입코강조", "약하게")
+    @Volatile private var taperPresetIdx = 0
     private val skinSteps = floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1.0f)       // 기존 [0, 0.5, 1.0]
     private val radianceSteps = floatArrayOf(0f, 0.2f, 0.4f, 0.5f, 0.6f)     // 기존 [0, 0.40, 0.60]
 
@@ -264,6 +268,7 @@ class GpuRenderActivity : AppCompatActivity() {
         tvSlimValue = findViewById(R.id.tvSlimValue)
         seekShrink = findViewById(R.id.seekShrink)
         tvShrinkValue = findViewById(R.id.tvShrinkValue)
+        btnTaperPreset = findViewById(R.id.btnTaperPreset)
         seekSkin = findViewById(R.id.seekSkin)
         tvSkinValue = findViewById(R.id.tvSkinValue)
         seekRadiance = findViewById(R.id.seekRadiance)
@@ -702,6 +707,17 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // P8-W4B 벤치: 내부 taper 프리셋 순환 — 다수 의견 수집용. sdk 레벨 atomic이라
+        // GL 컨텍스트 재생성에도 유지(복원 불필요). 얼굴축소 슬라이더 > 0일 때만 체감됨.
+        btnTaperPreset.setOnClickListener {
+            taperPresetIdx = (taperPresetIdx + 1) % taperPresetLabels.size
+            IrisLensSDK.setInteriorTaperPreset(taperPresetIdx)
+            btnTaperPreset.text = "Taper: ${taperPresetLabels[taperPresetIdx]}"
+            btnTaperPreset.setBackgroundColor(if (taperPresetIdx != 0) 0xCC2196F3.toInt() else 0x66555555.toInt())
+            Toast.makeText(this, "내부 taper: ${taperPresetLabels[taperPresetIdx]}", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "P8-W4B taper preset → $taperPresetIdx (${taperPresetLabels[taperPresetIdx]})")
+        }
+
         // 얼굴 내부 축소 (shrinkSteps, config 경로 = thin_chin 재정의 → 콧볼·입꼬리·볼 워프). 기본 0(off).
         // P8-W4B: 턱슬림(slimFace)과 독립 노브 — 태블릿 조합 A/B용.
         seekShrink.max = shrinkSteps.lastIndex
@@ -822,6 +838,7 @@ class GpuRenderActivity : AppCompatActivity() {
         seekShrink.isEnabled = enabled
         seekSkin.isEnabled = enabled
         seekRadiance.isEnabled = enabled
+        btnTaperPreset.isEnabled = enabled
     }
 
     private fun setupDebugControls() {
