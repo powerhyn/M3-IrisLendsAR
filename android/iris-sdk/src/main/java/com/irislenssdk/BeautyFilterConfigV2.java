@@ -75,7 +75,7 @@ public class BeautyFilterConfigV2 {
 
     /**
      * 얼굴 슬림화 (0.0 ~ 1.0).
-     * V-라인 효과를 적용합니다.
+     * 턱 라인 V-라인 효과를 적용합니다 (턱선 + 광대 아래 실루엣).
      */
     public float slimFace;
 
@@ -86,8 +86,10 @@ public class BeautyFilterConfigV2 {
     public float enlargeEyes;
 
     /**
-     * 턱 축소 (0.0 ~ 1.0).
-     * 턱 영역을 슬림하게 만듭니다.
+     * 얼굴 내부 축소 (0.0 ~ 1.0). — P8-W4B에서 의미 재정의 (구: 턱 축소)
+     * 콧볼·입꼬리·볼을 얼굴 세로축 방향으로 좁혀 얼굴이 전체적으로
+     * 작아진 느낌을 만듭니다. {@link #slimFace}(턱 라인)와 독립으로 동작하며,
+     * 눈 영역은 렌즈 정합을 위해 움직이지 않습니다.
      */
     public float thinChin;
 

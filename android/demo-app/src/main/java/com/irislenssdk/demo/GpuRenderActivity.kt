@@ -131,6 +131,8 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnToggleBeauty: Button
     private lateinit var seekSlim: SeekBar          // P8-W4: 턱 V라인 슬림
     private lateinit var tvSlimValue: TextView
+    private lateinit var seekShrink: SeekBar        // P8-W4B: 얼굴 내부 축소 (thinChin 재정의)
+    private lateinit var tvShrinkValue: TextView
     private lateinit var seekSkin: SeekBar          // P8-W1: 피부 스무딩
     private lateinit var tvSkinValue: TextView
     private lateinit var seekRadiance: SeekBar      // P8-W3: 화사함 radiance
@@ -139,6 +141,7 @@ class GpuRenderActivity : AppCompatActivity() {
     // 뷰티 슬라이더 단계값 (기존 sweep 사전지정값 기반 + 가짓수 2배 디테일화).
     // progress = 단계 인덱스. 기존 sweep 값을 모두 포함하고 그 사이를 보간했다.
     private val slimSteps = floatArrayOf(0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f)   // 0.1 간격, 기본 0.2(idx 2)
+    private val shrinkSteps = floatArrayOf(0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f) // P8-W4B: 얼굴축소(thinChin), 기본 0(off)
     private val skinSteps = floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1.0f)       // 기존 [0, 0.5, 1.0]
     private val radianceSteps = floatArrayOf(0f, 0.2f, 0.4f, 0.5f, 0.6f)     // 기존 [0, 0.40, 0.60]
 
@@ -259,6 +262,8 @@ class GpuRenderActivity : AppCompatActivity() {
         btnToggleBeauty = findViewById(R.id.btnToggleBeauty)
         seekSlim = findViewById(R.id.seekSlim)
         tvSlimValue = findViewById(R.id.tvSlimValue)
+        seekShrink = findViewById(R.id.seekShrink)
+        tvShrinkValue = findViewById(R.id.tvShrinkValue)
         seekSkin = findViewById(R.id.seekSkin)
         tvSkinValue = findViewById(R.id.tvSkinValue)
         seekRadiance = findViewById(R.id.seekRadiance)
@@ -697,6 +702,24 @@ class GpuRenderActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // 얼굴 내부 축소 (shrinkSteps, config 경로 = thin_chin 재정의 → 콧볼·입꼬리·볼 워프). 기본 0(off).
+        // P8-W4B: 턱슬림(slimFace)과 독립 노브 — 태블릿 조합 A/B용.
+        seekShrink.max = shrinkSteps.lastIndex
+        seekShrink.progress = 0
+        beautyConfig.thinChin = shrinkSteps[0]
+        tvShrinkValue.text = stepLabel(shrinkSteps[0], "%.2f")
+        seekShrink.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val s = shrinkSteps[progress]
+                beautyConfig.thinChin = s
+                tvShrinkValue.text = stepLabel(s, "%.2f")
+                cameraGLView.setBeautyConfig(beautyConfig)
+                Log.i(TAG, "P8-W4B interior shrink → $s")
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         // 피부 스무딩 (skinSteps, 직접 메서드 경로). 기본 최대(1.0).
         seekSkin.max = skinSteps.lastIndex
         seekSkin.progress = skinSteps.lastIndex
@@ -739,6 +762,7 @@ class GpuRenderActivity : AppCompatActivity() {
         cameraGLView.setSkinMaskSmoothing(skin > 0f, skin)
         cameraGLView.setSkinRadiance(radianceSteps[seekRadiance.progress])
         beautyConfig.slimFace = slimSteps[seekSlim.progress]
+        beautyConfig.thinChin = shrinkSteps[seekShrink.progress]
         cameraGLView.setBeautyConfig(beautyConfig)
     }
 
@@ -795,6 +819,7 @@ class GpuRenderActivity : AppCompatActivity() {
     /** 뷰티 슬라이더 일괄 활성/비활성 (Beauty OFF면 조작해도 효과 없어 오인 방지). */
     private fun setBeautySlidersEnabled(enabled: Boolean) {
         seekSlim.isEnabled = enabled
+        seekShrink.isEnabled = enabled
         seekSkin.isEnabled = enabled
         seekRadiance.isEnabled = enabled
     }
