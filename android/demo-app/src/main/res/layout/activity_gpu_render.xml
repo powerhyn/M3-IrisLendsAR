@@ -361,6 +361,19 @@
                 android:backgroundTint="#66555555"
                 style="@style/Widget.MaterialComponents.Button.TextButton" />
 
+            <!-- MP 스무딩 A/B: 필터 배치 4팔 순환 (벤치 임시) -->
+            <Button
+                android:id="@+id/btnTrkArm"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="trk:기본"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
         </LinearLayout>
 
         </HorizontalScrollView>

@@ -119,6 +119,7 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnTuck: Button         // NLR 클리핑: tuck 리매핑 sweep (LensSim 이식)
     private lateinit var btnAdaptK: Button       // NLR-W2: 고정 K↔적응 증폭 A/B (톤 비교)
     private lateinit var btnImgMode: Button      // NLR 트래킹 A/B: MediaPipe IMAGE 모드 (내부 스무딩·ROI 우회)
+    private lateinit var btnTrkArm: Button       // MP 스무딩 A/B: 필터 배치 4팔 순환 (벤치 임시)
     private lateinit var btnStabFast: Button     // NLR 트래킹 A/B: stabilizer near-raw 프리셋
     private lateinit var seekMaxDetail: SeekBar
     private lateinit var tvMaxDetailValue: TextView
@@ -250,6 +251,7 @@ class GpuRenderActivity : AppCompatActivity() {
         btnTuck = findViewById(R.id.btnTuck)
         btnAdaptK = findViewById(R.id.btnAdaptK)
         btnImgMode = findViewById(R.id.btnImgMode)
+        btnTrkArm = findViewById(R.id.btnTrkArm)
         btnStabFast = findViewById(R.id.btnStabFast)
         seekMaxDetail = findViewById(R.id.seekMaxDetail)
         tvMaxDetailValue = findViewById(R.id.tvMaxDetailValue)
@@ -534,6 +536,13 @@ class GpuRenderActivity : AppCompatActivity() {
             btnImgMode.setBackgroundColor(if (imgModeOn) 0xCC2196F3.toInt() else 0x66555555.toInt())
             Log.i(TAG, "NLR tracking mode → ${if (imgModeOn) "IMAGE(스무딩·ROI 우회)" else "VIDEO"}")
         }
+
+        // MP 스무딩 A/B 4팔 순환 — 판정 기준: ①saccade 렌즈 밀착 ②깜빡임 거동 ③가림 복귀
+        btnTrkArm.setOnClickListener {
+            trkArmIdx = (trkArmIdx + 1) % trkArms.size
+            applyTrkArm()
+            Toast.makeText(this, "트래킹 팔: ${trkArms[trkArmIdx].label}", Toast.LENGTH_SHORT).show()
+        }
         // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 — 분석 스레드에서 재생성 (플래그 방식).
         // 프리셋 구성·라운드별 판정 근거는 stabPresets 선언부 주석 참조.
         btnStabFast.setOnClickListener {
@@ -620,6 +629,33 @@ class GpuRenderActivity : AppCompatActivity() {
     private var currentVetoMode = 0       // P6-W5 B8 미판정 — legacy 0 유지 (§5.10)
     private var fadeStartV = 0.95f        // NLR-W2 R5: 흰자 페이드 시작점 (코어 기본 0.95와 일치)
     private var imgModeOn = false         // NLR 트래킹 A/B: IMAGE 모드 (기본 VIDEO — 트래커 재생성 시 재적용)
+
+    // MP 스무딩 A/B 4팔 (벤치 임시): (numFaces=1 여부, 자체 stabilizer 바이패스 여부)
+    // 0 기본     = 우회(numFaces=2) + 자체 필터  ← 정식 경로
+    // 1 MP+필터  = MP 스무딩 ON + 자체 필터 (이중 필터 체감)
+    // 2 MP-only  = MP 스무딩 ON + 필터 바이패스 (사용자 질문의 팔)
+    // 3 raw      = 우회 + 필터 바이패스 (무필터 기준점 — 지터 원판)
+    private data class TrkArm(val label: String, val singleFace: Boolean, val bypassStab: Boolean)
+    private val trkArms = listOf(
+        TrkArm("기본", false, false),
+        TrkArm("MP+필터", true, false),
+        TrkArm("MP-only", true, true),
+        TrkArm("raw", false, true),
+    )
+    @Volatile private var trkArmIdx = 0
+    @Volatile private var stabBypassOn = false   // 분석 스레드에서 stabilize 호출 스킵
+
+    /** 현재 트래킹 팔 적용 — 트래커 numFaces 재생성 예약 + 바이패스 플래그 + 필터 상태 리셋. */
+    private fun applyTrkArm() {
+        val arm = trkArms[trkArmIdx]
+        faceTracker?.setSingleFaceMode(arm.singleFace)
+        stabBypassOn = arm.bypassStab
+        // 팔 전환 시 stabilizer 재생성 — 바이패스 중 고여 있던 필터 상태의 복귀 글라이드 방지
+        stabRecreateRequested = true
+        btnTrkArm.text = "trk:${arm.label}"
+        btnTrkArm.setBackgroundColor(if (trkArmIdx != 0) 0xCC2196F3.toInt() else 0x66555555.toInt())
+        Log.i(TAG, "MP smoothing A/B → ${arm.label} (numFaces=${if (arm.singleFace) 1 else 2}, bypassStab=${arm.bypassStab})")
+    }
 
     // NLR 트래킹 A/B: stabilizer OneEuro 프리셋 사이클 (idx 0 = 코어 기본 4.0/15).
     // 핸들은 분석 스레드 전용이라 UI에서 직접 destroy 금지 — 재생성 요청 플래그만 세우고
@@ -1134,6 +1170,7 @@ class GpuRenderActivity : AppCompatActivity() {
         )
         tracker.onRawResult = ::onTasksRawResult
         tracker.setImageMode(imgModeOn) // 트래커 재생성 시 현재 A/B 상태 재적용
+        tracker.setSingleFaceMode(trkArms[trkArmIdx].singleFace) // MP 스무딩 팔 재적용
         faceTracker = tracker
         return tracker
     }
@@ -1215,7 +1252,9 @@ class GpuRenderActivity : AppCompatActivity() {
                 IrisLensSDK.createStabilizer(stabilizerHoldFrames)
             }
         }
-        if (tasksStabilizerHandle != 0L) {
+        // MP 스무딩 A/B: 바이패스 팔이면 stabilize 스킵 — raw(또는 MP 스무딩만 걸린) 결과가
+        // 그대로 GL로 간다 (hold/hysteresis/blink-hold도 함께 꺼짐 — 팔의 정직한 거동).
+        if (tasksStabilizerHandle != 0L && !stabBypassOn) {
             val timestampSec = System.nanoTime() / 1_000_000_000.0
             IrisLensSDK.stabilize(tasksStabilizerHandle, tasksIrisResult, timestampSec)
         }

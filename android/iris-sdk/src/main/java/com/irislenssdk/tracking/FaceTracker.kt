@@ -92,6 +92,17 @@ class FaceTracker(
         imageModeRequested = enabled
     }
 
+    // P8 트래킹 A/B(벤치 임시): numFaces=1 토글 — VIDEO+numFaces=1 조합에서만 활성화되는
+    // MediaPipe 내부 LandmarksSmoothingCalculator(One-Euro 0.05/80)를 "켠" 팔을 실기기로
+    // 체감하기 위한 토글. 기본 false(=numFaces=2, 스무딩 우회)가 정식 경로.
+    @Volatile private var singleFaceRequested = false
+    private var singleFaceActive = false
+
+    /** numFaces=1(MP 내부 스무딩 ON) A/B 토글 — 어느 스레드에서나 안전. 다음 analyze에서 재생성. */
+    fun setSingleFaceMode(enabled: Boolean) {
+        singleFaceRequested = enabled
+    }
+
     /** GPU 추론 중 런타임 오류 발생 시 분석 스레드에서 CPU로 재생성하기 위한 플래그 */
     @Volatile private var cpuFallbackRequested = false
     private var cpuForced = false
@@ -262,9 +273,10 @@ class FaceTracker(
             cpuFallbackRequested = false
             resetFilters()
         }
-        // IMAGE↔VIDEO 모드 전환 — running mode는 생성 시점 고정이라 재생성 필수 (핸드오프 §3-4).
+        // IMAGE↔VIDEO 모드/numFaces 전환 — 옵션은 생성 시점 고정이라 재생성 필수 (핸드오프 §3-4).
         // 필터 리셋 동반 (모드 간 시간 특성이 달라 오래된 필터 상태가 글라이드 유발).
-        if (landmarker != null && imageModeRequested != imageModeActive) {
+        if (landmarker != null && (imageModeRequested != imageModeActive ||
+                singleFaceRequested != singleFaceActive)) {
             try {
                 landmarker?.close()
             } catch (_: RuntimeException) {
@@ -278,6 +290,7 @@ class FaceTracker(
 
         val wantGpu = preferGpu && !cpuForced && !EmulatorDetector.isEmulator
         imageModeActive = imageModeRequested
+        singleFaceActive = singleFaceRequested
         landmarker = try {
             createLandmarker(wantGpu).also { usingGpu = wantGpu }
         } catch (e: RuntimeException) {
@@ -318,7 +331,8 @@ class FaceTracker(
             // (face_landmarker_graph.cc), 활성 시 코어 stabilize와 직렬 이중 필터가
             // 되어 추적 위상 지연이 누적된다(§5 주의 3 '이중 필터 금지' 위반).
             // 소비자는 전경(최대) 얼굴 1개만 사용하므로 2번째 슬롯은 미사용.
-            .setNumFaces(2)
+            // singleFaceActive(벤치 임시)면 1로 — 내부 스무딩 ON 팔 체감용 (setSingleFaceMode).
+            .setNumFaces(if (singleFaceActive) 1 else 2)
             .setMinFaceDetectionConfidence(0.5f)
             .setMinTrackingConfidence(0.5f)
             .setMinFacePresenceConfidence(0.5f)
