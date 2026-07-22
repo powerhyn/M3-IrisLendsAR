@@ -1055,11 +1055,15 @@ class GpuRenderActivity : AppCompatActivity() {
     }
 
     /**
-     * 디바이스 성능에 따라 최적 카메라 해상도를 결정합니다.
+     * 디바이스 성능에 따라 **프리뷰(렌더 소스)** 해상도를 결정합니다.
      *
-     * - 저사양 (RAM <= 3GB): 480x640
-     * - 중간 사양 (RAM <= 6GB): 720x1280
-     * - 고사양 (RAM > 6GB): 1080x1920
+     * ⚠️ Size는 **센서 좌표(가로 기준) 4:3**으로 준다 — AspectRatioStrategy가 4:3을 강제하므로
+     * 세로 9:16 값(구 1080x1920)을 주면 조건이 상충해 CameraX가 "가장 가까운 낮은 4:3"인
+     * 960x720으로 폴백한다(2026-07-22 S10 Ultra 실측: 태블릿 대화면에서 육안 흐림).
+     *
+     * - 저사양 (RAM <= 3GB): 640x480
+     * - 중간 사양 (RAM <= 6GB): 1280x960
+     * - 고사양 (RAM > 6GB): 1440x1080
      */
     private fun selectOptimalResolution(): Size {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -1068,14 +1072,24 @@ class GpuRenderActivity : AppCompatActivity() {
         val totalRamMb = memInfo.totalMem / (1024 * 1024)
 
         val resolution = when {
-            totalRamMb <= 3072 -> Size(480, 640)
-            totalRamMb <= 6144 -> Size(720, 1280)
-            else -> Size(1080, 1920)
+            totalRamMb <= 3072 -> Size(640, 480)
+            totalRamMb <= 6144 -> Size(1280, 960)
+            else -> Size(1440, 1080)
         }
 
-        Log.d(TAG, "Device RAM: ${totalRamMb}MB -> resolution: ${resolution.width}x${resolution.height}")
+        Log.d(TAG, "Device RAM: ${totalRamMb}MB -> preview resolution: ${resolution.width}x${resolution.height}")
         return resolution
     }
+
+    /**
+     * 추론(ImageAnalysis) 해상도 — 프리뷰와 **동일 4:3**, 더 낮게 고정.
+     *
+     * FaceLandmarker는 내부에서 자체 입력 크기로 리사이즈하므로 고해상 프레임은 이득이 없고
+     * RGBA 복사·대역폭 비용만 늘어난다. 프리뷰와 종횡비를 맞춰야 랜드마크(정규화 좌표)가
+     * 렌더 텍스처에 그대로 대응된다.
+     */
+    private fun selectAnalysisResolution(totalRamMb: Long): Size =
+        if (totalRamMb <= 3072) Size(640, 480) else Size(960, 720)
 
     private fun bindCameraUseCases() {
         val cameraProvider = cameraProvider ?: return
@@ -1087,15 +1101,22 @@ class GpuRenderActivity : AppCompatActivity() {
 
         // 디바이스 성능 기반 해상도 선택
         val targetResolution = selectOptimalResolution()
-        val resolutionSelector = ResolutionSelector.Builder()
+        // 프리뷰(렌더 소스)와 추론 해상도를 분리한다 — 공유 시 추론 비용 때문에 프리뷰까지
+        // 낮게 묶여 대화면에서 흐려진다. 둘 다 4:3이라 랜드마크 정규화 좌표는 그대로 호환.
+        val totalRamMb = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager)
+            .let { am -> ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) } }
+            .totalMem / (1024 * 1024)
+        val analysisResolution = selectAnalysisResolution(totalRamMb)
+        Log.d(TAG, "Analysis resolution: ${analysisResolution.width}x${analysisResolution.height}")
+
+        fun selectorFor(size: Size) = ResolutionSelector.Builder()
             .setResolutionStrategy(
-                ResolutionStrategy(
-                    targetResolution,
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
-                )
+                ResolutionStrategy(size, ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)
             )
             .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
             .build()
+
+        val resolutionSelector = selectorFor(targetResolution)
 
         // Preview → GLSurfaceView
         val preview = Preview.Builder()
@@ -1108,7 +1129,7 @@ class GpuRenderActivity : AppCompatActivity() {
         // ImageAnalysis (MediaPipe Tasks 추론용)
         // W4-D: TASKS 단일 경로. Tasks는 YUV 직접 입력 불가(함정 #2) → RGBA_8888 직접 스트림.
         val imageAnalysis = ImageAnalysis.Builder()
-            .setResolutionSelector(resolutionSelector)
+            .setResolutionSelector(selectorFor(analysisResolution))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()
