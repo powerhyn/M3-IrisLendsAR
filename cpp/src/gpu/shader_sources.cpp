@@ -14,8 +14,7 @@ namespace shaders {
 //=============================================================================
 // 풀스크린 쿼드 버텍스 셰이더
 //=============================================================================
-const char* FULLSCREEN_QUAD_VERTEX = R"glsl(
-#version 310 es
+const char* FULLSCREEN_QUAD_VERTEX = R"glsl(#version 310 es
 
 layout(location = 0) in vec2 aPosition;
 layout(location = 1) in vec2 aTexCoord;
@@ -31,8 +30,7 @@ void main() {
 //=============================================================================
 // 패스스루 프래그먼트 셰이더 (텍스처 그대로 출력)
 //=============================================================================
-const char* PASSTHROUGH_FRAGMENT = R"glsl(
-#version 310 es
+const char* PASSTHROUGH_FRAGMENT = R"glsl(#version 310 es
 precision highp float;
 
 uniform sampler2D uTexture;
@@ -55,8 +53,7 @@ void main() {
 // 통합 Color Adjustment 프래그먼트 셰이더 (Brightness 잔존)
 // (P8-W2) ColorBalance/Whitening/LUT 발췌 제거 — brightness GLSL만 유지.
 //=============================================================================
-const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT = R"glsl(
-#version 310 es
+const char* COMBINED_COLOR_ADJUSTMENT_FRAGMENT = R"glsl(#version 310 es
 precision highp float;
 
 uniform sampler2D uTexture;
@@ -91,8 +88,7 @@ void main() {
 //=============================================================================
 
 // 피부 마스크 단색 채움 — UV 불필요, NDC position만 (원본 MASK_VS)
-const char* SKIN_MASK_FILL_VERTEX = R"glsl(
-#version 310 es
+const char* SKIN_MASK_FILL_VERTEX = R"glsl(#version 310 es
 layout(location = 0) in vec2 aPosition;
 void main() {
     gl_Position = vec4(aPosition, 0.0, 1.0);
@@ -100,8 +96,7 @@ void main() {
 )glsl";
 
 // 마스크 값을 R 채널에 기록 (외곽=1.0, 제외 폴리곤=0.0 덮어쓰기). 원본 MASK_FS.
-const char* SKIN_MASK_FILL_FRAGMENT = R"glsl(
-#version 310 es
+const char* SKIN_MASK_FILL_FRAGMENT = R"glsl(#version 310 es
 precision mediump float;
 uniform float uValue;
 out vec4 fragColor;
@@ -112,8 +107,7 @@ void main() {
 
 // 분리형 가우시안 5-fetch (linear sampling 트릭). 원본 BLUR_FS 원문 그대로.
 // uDirection = 텍셀 단위 방향 (1/w,0) 또는 (0,1/h); uOffsetScale 컬러 1.6 / 마스크 1.0.
-const char* SKIN_SEPARABLE_BLUR_FRAGMENT = R"glsl(
-#version 310 es
+const char* SKIN_SEPARABLE_BLUR_FRAGMENT = R"glsl(#version 310 es
 precision highp float;
 uniform sampler2D uTexture;
 uniform vec2 uDirection;
@@ -131,8 +125,7 @@ void main() {
 
 // 에지 가드 컴포지트 — base/blur/mask 동일 UV (P8-W1 §1.4: OES/ST/크롭/미러/워프 체인 제거).
 // 피부 스무딩 코어는 원본 COMPOSITE_FS(1159-1163) 수치 그대로.
-const char* SKIN_SMOOTH_COMPOSITE_FRAGMENT = R"glsl(
-#version 310 es
+const char* SKIN_SMOOTH_COMPOSITE_FRAGMENT = R"glsl(#version 310 es
 precision highp float;
 uniform sampler2D uTexture;     // 원본 (풀해상도, base)
 uniform sampler2D uBlurTex;     // 컬러 블러 결과 (1/4)
@@ -192,8 +185,7 @@ void main() {
 // 좌표계: vTexCoord/uViewportPx 는 렌더 텍스처(미러·Y-flip 적용) 공간 — 제어점도 CPU에서
 //   prepareSkinFans 와 동형으로 같은 공간에 정렬해 넘긴다(gpu_beauty_backend.cpp executeWarpPass).
 //=============================================================================
-const char* WARP_FRAGMENT = R"glsl(
-#version 310 es
+const char* WARP_FRAGMENT = R"glsl(#version 310 es
 precision highp float;
 
 uniform sampler2D uTexture;   // 입력 (skin/brightness 거친 프레임)
@@ -228,8 +220,7 @@ void main() {
 //=============================================================================
 // 렌즈 오버레이 버텍스 셰이더 (풀스크린 쿼드, 텍스처 좌표 패스스루)
 //=============================================================================
-const char* LENS_OVERLAY_VERTEX = R"glsl(
-#version 310 es
+const char* LENS_OVERLAY_VERTEX = R"glsl(#version 310 es
 
 layout(location = 0) in vec2 aPosition;
 layout(location = 1) in vec2 aTexCoord;
@@ -247,8 +238,7 @@ void main() {
 // Kotlin 참조 구현(CameraGLRenderer.kt LENS_OVERLAY_FRAGMENT_SHADER)을
 // 1:1로 포팅. 함수/식/uniform 시그니처가 모두 동일해야 시각적 결과가 일치한다.
 //=============================================================================
-const char* LENS_OVERLAY_FRAGMENT = R"glsl(
-#version 310 es
+const char* LENS_OVERLAY_FRAGMENT = R"glsl(#version 310 es
 precision highp float;
 
 uniform sampler2D uCameraTexture;

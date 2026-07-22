@@ -245,6 +245,19 @@ target_link_libraries(test_gpu_beauty_backend PRIVATE
 gtest_discover_tests(test_gpu_beauty_backend DISCOVERY_TIMEOUT 60)
 
 # ============================================================
+# 셰이더 소스 문자열 가드 (Mali #version 첫 줄 요구 — 2026-07-22 S10 Ultra 회귀)
+# ============================================================
+add_executable(test_shader_sources test_shader_sources.cpp)
+target_include_directories(test_shader_sources PRIVATE ${TEST_COMMON_INCLUDES})
+target_link_libraries(test_shader_sources PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    iris_sdk
+)
+
+gtest_discover_tests(test_shader_sources DISCOVERY_TIMEOUT 60)
+
+# ============================================================
 # P2-W2-02: FastGuidedFilter 테스트
 # ============================================================
 add_executable(test_fast_guided_filter test_fast_guided_filter.cpp)

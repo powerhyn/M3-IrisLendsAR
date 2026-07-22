@@ -76,8 +76,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         )
 
         // OES 텍스처 → 2D 텍스처 변환 버텍스 셰이더
-        private const val VERTEX_SHADER = """
-            #version 310 es
+        private const val VERTEX_SHADER = """#version 310 es
             layout(location = 0) in vec2 aPosition;
             layout(location = 1) in vec2 aTexCoord;
 
@@ -111,8 +110,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         """
 
         // OES 텍스처 샘플링 프래그먼트 셰이더
-        private const val OES_TO_2D_FRAGMENT_SHADER = """
-            #version 310 es
+        private const val OES_TO_2D_FRAGMENT_SHADER = """#version 310 es
             #extension GL_OES_EGL_image_external_essl3 : require
             precision highp float;
 
@@ -127,8 +125,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         """
 
         // 패스스루 프래그먼트 셰이더 (2D 텍스처)
-        private const val PASSTHROUGH_FRAGMENT_SHADER = """
-            #version 310 es
+        private const val PASSTHROUGH_FRAGMENT_SHADER = """#version 310 es
             precision highp float;
 
             uniform sampler2D uTexture;
