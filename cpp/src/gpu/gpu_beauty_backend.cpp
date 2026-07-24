@@ -1291,7 +1291,11 @@ IrisSdkError GPUBeautyBackend::applyTextureId(
     // ROI passthrough: scissor 활성화 전에 출력 FBO를 원본으로 채움
     // → scissor 외부 픽셀이 stale 데이터가 되는 것을 방지
     // (P8-W2) brightness=1.0 중립값으로 원본 그대로 채운다(balance/whitening/LUT 인자 제거).
-    if (roi_ptr && roi_ptr->valid) {
+    // (FMLENS 감사) scissor 를 실제로 쓰는 패스는 brightness(:1397) 하나뿐이다 — skin(:1378)/
+    //   warp(:1427) 은 scissor 를 끄고 전체 프레임에 그린다. 따라서 brightness OFF 이면
+    //   prefill 로 보존할 scissor 외부 영역 자체가 없다. 'skin+warp, brightness OFF' 흔한
+    //   조합에서 풀해상 왕복 2패스를 통째로 스킵한다(프레임 예산 절감, 출력 동일).
+    if (roi_ptr && roi_ptr->valid && needsBrightness) {
         executeCombinedColorPass(input_tex_id, ping->fbo_id, width, height, 1.0f);
         if (pong) {
             executeCombinedColorPass(input_tex_id, pong->fbo_id, width, height, 1.0f);

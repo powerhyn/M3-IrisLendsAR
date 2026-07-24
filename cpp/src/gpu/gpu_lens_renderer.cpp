@@ -274,6 +274,12 @@ bool GPULensRenderer::loadLensTexture(const uint8_t* data, int width, int height
 
     while (glGetError() != GL_NO_ERROR) {} // 이전 누적 에러 클리어
 
+    // 🔴 알파 규약(계약): data 는 **premultiplied-alpha** RGBA8 이어야 한다.
+    //   합성 셰이더가 샘플 직후 rgb/=a 로 unpremultiply 한 뒤(shader_sources.cpp:642)
+    //   finalAlpha(=lens.a·opacity·edge·eyelid, :678)로 다시 알파 합성한다. premult 는
+    //   GL_LINEAR/mipmap 이 투명 경계에서 색을 올바르게 보간하게 해 헤일로를 막는다.
+    //   straight-alpha 를 넘기면 :642 가 반투명 픽셀의 색을 과증폭한다.
+    //   (FMLENS 감사 — 에셋 저작 파이프라인은 이 계약과 반드시 일치시킬 것.)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, data);
 
