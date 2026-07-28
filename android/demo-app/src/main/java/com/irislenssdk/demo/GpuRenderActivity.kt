@@ -100,6 +100,16 @@ class GpuRenderActivity : AppCompatActivity() {
          */
         private const val USE_16_9_CAPTURE = true
 
+        /**
+         * 임시 실험 플래그 — Preview 단독 바인딩(ImageAnalysis 미사용).
+         * 스트림 1개화 재설계의 전제("추론 스트림을 빼면 고해상도가 열리는가")를 실측하기 위한 것.
+         * true 면 추론이 없어 랜드마크·렌즈가 동작하지 않는다. 검증 후 반드시 false 로 되돌린다.
+         */
+        private const val EXPERIMENT_PREVIEW_ONLY = false
+
+        /** 실험 시 요청할 프리뷰 해상도 (전면 카메라 지원: 4000x3000 / 3840x2160 / …). */
+        private val EXPERIMENT_PREVIEW_SIZE = Size(3840, 2160)
+
         private const val LEFT_PANEL_DP = 300    // activity_gpu_render.xml landLeftPanel과 일치
         private const val RIGHT_PANEL_DP = 180   // activity_gpu_render.xml landRightPanel과 일치
     }
@@ -1223,8 +1233,9 @@ class GpuRenderActivity : AppCompatActivity() {
             .requireLensFacing(lensFacing)
             .build()
 
-        // 디바이스 성능 기반 해상도 선택
-        val targetResolution = selectOptimalResolution()
+        // 디바이스 성능 기반 해상도 선택 (실험 경로는 고해상 강제)
+        val targetResolution =
+            if (EXPERIMENT_PREVIEW_ONLY) EXPERIMENT_PREVIEW_SIZE else selectOptimalResolution()
         // 프리뷰(렌더 소스)와 추론 해상도를 분리한다 — 공유 시 추론 비용 때문에 프리뷰까지
         // 낮게 묶여 대화면에서 흐려진다. 둘 다 4:3이라 랜드마크 정규화 좌표는 그대로 호환.
         val totalRamMb = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager)
@@ -1291,12 +1302,14 @@ class GpuRenderActivity : AppCompatActivity() {
 
         try {
             cameraProvider.unbindAll()
-            val camera = cameraProvider.bindToLifecycle(
-                this,
-                cameraSelector,
-                preview,
-                imageAnalysis
-            )
+            // ⚠️ EXPERIMENT_PREVIEW_ONLY: 스트림 1개화 재설계의 **전제 검증용** 임시 경로.
+            //   Preview 단독이면 4K 가 실제로 열리는지(=조합 제약이 ImageAnalysis 때문인지)를
+            //   확인한다. 이 경로에서는 추론 입력이 없어 랜드마크/렌즈가 동작하지 않는다.
+            val camera = if (EXPERIMENT_PREVIEW_ONLY) {
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview)
+            } else {
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis)
+            }
 
             // 미러링 설정 (전면 카메라)
             cameraGLView.setMirror(lensFacing == CameraSelector.LENS_FACING_FRONT)

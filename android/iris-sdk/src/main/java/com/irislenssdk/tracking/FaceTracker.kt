@@ -159,6 +159,74 @@ class FaceTracker(
     /** 샘플 오프셋 재사용 버퍼 (프레임당 힙 할당 0) */
     private val lumaSampleOffsets = IntArray(IrisLumaSampler.MAX_SAMPLES)
 
+    /**
+     * ImageProxy 없는 RGBA_8888 진입점 — **단일 스트림(GL readback) 경로 전용**.
+     *
+     * CameraX ImageAnalysis 대신 GL 다운샘플 FBO를 glReadPixels 로 읽어 넘길 때 쓴다.
+     * [analyze] 와 동일한 추론·결과 경로를 타므로 좌표 계약도 동일하다(비미러 센서 공간).
+     *
+     * @param rgba **direct** ByteBuffer, capacity 가 정확히 width*4*height 여야 한다(패딩 불가).
+     *             이 함수가 반환할 때까지 호출자가 내용 유효성을 보장한다(반환 후 재사용 가능).
+     * @param rotationDegrees ImageAnalysis 의 imageInfo.rotationDegrees 와 같은 의미.
+     *             버퍼가 이미 upright 면 0. (본 기기 실측: SurfaceTexture 변환행렬이 항등이라
+     *             GL 버퍼는 센서 방향 그대로 → 카메라가 주던 값을 그대로 넘겨야 한다.)
+     * @param frameTimestampNs 센서 타임스탬프(ns) — frame-sync 매칭 키.
+     *
+     * 백프레셔는 호출자 책임이다(ImageProxy 경로의 KEEP_ONLY_LATEST 가 없다).
+     * 스레드 규약은 [analyze] 와 동일 — 반드시 같은 분석 executor 스레드에서 호출한다.
+     */
+    fun analyzeRgba(
+        rgba: ByteBuffer,
+        width: Int,
+        height: Int,
+        rotationDegrees: Int,
+        frameTimestampNs: Long
+    ) {
+        if (closed) return
+        if (!rgba.isDirect) {
+            onError("analyzeRgba: direct ByteBuffer 필요")
+            return
+        }
+        val rowBytes = width * 4
+        if (rgba.capacity() != rowBytes * height) {
+            onError("analyzeRgba: capacity ${rgba.capacity()} != ${rowBytes * height} (${width}x$height)")
+            return
+        }
+        ensureLandmarker()
+        val lm = landmarker ?: return
+
+        lastRotationDegrees = rotationDegrees
+
+        // 홍채 평균 휘도 — ImageProxy 경로와 동일하게 detect 전 동기 샘플.
+        sampleIrisLuma(rgba, width, height, rowBytes)
+
+        rgba.rewind()
+        val mpImage: MPImage =
+            ByteBufferImageBuilder(rgba, width, height, MPImage.IMAGE_FORMAT_RGBA).build()
+
+        // 타임스탬프 단조 증가 보장 (VIDEO 모드 필수 조건)
+        val ts = maxOf(SystemClock.uptimeMillis(), lastTimestampMs + 1)
+        lastTimestampMs = ts
+
+        try {
+            val result = if (runningModeActive == MODE_IMAGE) {
+                lm.detect(mpImage, processingOptions(rotationDegrees))
+            } else {
+                lm.detectForVideo(mpImage, processingOptions(rotationDegrees), ts)
+            }
+            onResult(result, mpImage, frameTimestampNs, ts)
+            try {
+                onRawResult?.invoke(
+                    result, rotationDegrees, width, height, rgba, rowBytes, frameTimestampNs
+                )
+            } catch (e: RuntimeException) {
+                onError("onRawResult 소비자 오류: ${e.message}")
+            }
+        } catch (e: RuntimeException) {
+            handleDetectError(e)
+        }
+    }
+
     /** 분석 executor 스레드 전용. */
     fun analyze(imageProxy: ImageProxy) {
         if (closed) {

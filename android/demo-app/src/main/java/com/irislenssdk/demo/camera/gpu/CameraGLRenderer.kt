@@ -83,6 +83,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform mat4 uSTMatrix;  // SurfaceTexture 변환 행렬
             uniform int uMirror;     // 미러링 (전면 카메라)
             uniform int uFlipY;      // Y축 뒤집기
+            uniform int uFlipPosX;   // 목적지 X 반전 — 분석(readback) 패스 전용, 링/화면은 0
             uniform vec2 uScale;     // Aspect ratio 보정 스케일
             uniform int uRotate;     // 화면 회전 90도 배수 (0..3) — 최종 blit 전용, FBO 패스는 항상 0
 
@@ -93,6 +94,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 // Y축 뒤집기 (상하 반전)
                 if (uFlipY == 1) {
                     pos.y = -pos.y;
+                }
+                // 목적지 X 반전 — 분석(readback) 패스 전용.
+                // 링 패스는 uMirror 로 '텍스처 좌표'를 뒤집어 미러 영상을 만들지만, 추론 입력은
+                // 비미러 공간이어야 한다(FaceTracker mirror=false 계약). 소스(uMirror/ST)를 건드리지
+                // 않고 **목적지 x** 를 뒤집으면, native 렌즈 렌더러가 랜드마크에 적용하는 x←1-x 의
+                // 역이 되어 회전 성분이 있어도 정합이 유지된다. 링 패스는 항상 0.
+                if (uFlipPosX == 1) {
+                    pos.x = -pos.x;
                 }
                 // Aspect ratio 보정 스케일 적용
                 pos *= uScale;
@@ -218,6 +227,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uSTMatrixLocation: Int = -1
     private var uMirrorLocation: Int = -1
     private var uFlipYLocation: Int = -1
+    private var uFlipPosXLocation: Int = -1
     private var uScaleLocation: Int = -1
     private var uRotateLocation: Int = -1
     private var uOESTextureLocation: Int = -1
@@ -295,6 +305,54 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     // 1.54배 확대 구간에서 bilinear이 디테일을 뭉개는 것을 보정한다. 실기기 육안 확정 후 고정 예정.
     private var upscaleMode: Int = 1
     private var sharpenAmount: Float = 0.35f
+
+    /** Step 0 진단: stMatrix 1회 로깅 플래그(회전 성분 유무 확인). */
+    private var stMatrixLogged = false
+
+    //=========================================================================
+    // 단일 스트림 분석 경로 (ImageAnalysis 대체)
+    //
+    // CameraX 는 Preview + ImageAnalysis 두 스트림을 동시에 열면 조합 제약으로 프리뷰가
+    // 1920x1080 에 묶인다(실측). 추론 입력을 **GL 에서 직접 만들면** 스트림이 1개가 되어
+    // 4K 까지 열린다 → 화면(2960) 대비 축소가 되어 선명도·에일리어싱이 근본 개선된다.
+    //
+    // 좌표계: OES 를 소스로, 링 패스와 같은 uSTMatrix/uMirror 를 쓰되 목적지 X 를 반전하고
+    // (uFlipPosX=isMirror) Y 는 뒤집지 않는다(uFlipY=0). 이 조합이 native 렌즈 렌더러가
+    // 랜드마크에 적용하는 (x←1-x if mirror, y←1-y) 의 역이라, glReadPixels 가 bottom-up 으로
+    // 읽는 것까지 상쇄되어 FaceTracker 의 비미러 계약과 정합한다.
+    //=========================================================================
+
+    /** 분석 FBO 긴 변 상한 — 기존 ImageAnalysis 960x540 과 픽셀 수를 맞춘다. */
+    private val analysisMaxLongSide = 960
+
+    private var analysisTex = 0
+    private var analysisFbo = 0
+    private var analysisW = 0
+    private var analysisH = 0
+    /** readPixels 대상 (direct, width*4*height 정확히) */
+    private var analysisBuf: java.nio.ByteBuffer? = null
+
+    /** GL 스레드 → 분석 스레드 핸드오프 콜백. (buffer, w, h, rotationDeg, frameTsNs) */
+    @Volatile private var onAnalysisFrame: ((java.nio.ByteBuffer, Int, Int, Int, Long) -> Unit)? = null
+
+    /** 인플라이트 1개 제한(latest-wins) — 분석이 밀리면 프레임을 버린다. */
+    private val analysisInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    @Volatile private var analysisEnabled = false
+
+    fun setAnalysisFrameCallback(cb: ((java.nio.ByteBuffer, Int, Int, Int, Long) -> Unit)?) {
+        onAnalysisFrame = cb
+    }
+
+    fun setAnalysisEnabled(enabled: Boolean) {
+        analysisEnabled = enabled
+        Log.i(TAG, "단일 스트림 분석 경로 → $enabled")
+    }
+
+    /** 분석이 프레임 소비를 마쳤음을 알린다(다음 프레임 허용). */
+    fun notifyAnalysisConsumed() {
+        analysisInFlight.set(false)
+    }
 
     /** 최종 blit에 적용할 90도 배수 회전량 (0..3). */
     private fun screenRotationQuadrant(): Int {
@@ -443,6 +501,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uSTMatrixLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uSTMatrix")
         uMirrorLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uMirror")
         uFlipYLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uFlipY")
+        uFlipPosXLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uFlipPosX")
         uScaleLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uScale")
         uRotateLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uRotate")
         uOESTextureLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uOESTexture")
@@ -510,6 +569,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         surfaceTexture?.updateTexImage()
         surfaceTexture?.getTransformMatrix(stMatrix)
 
+        // Step 0(단일 스트림 설계): stMatrix 에 회전 성분이 있는지 1회 실측한다.
+        // 분석 패스의 좌우/상하 부호는 ST 의 회전 성분 유무에 따라 달라지므로, 이 값이
+        // 좌표계 확정의 근거가 된다. column-major [1]/[4] 교차항이 0이 아니면 회전 존재.
+        if (!stMatrixLogged) {
+            stMatrixLogged = true
+            Log.i(TAG, "stMatrix=" + stMatrix.joinToString { "%.3f".format(it) })
+        }
+
         // frame-sync: 이 프레임의 센서 타임스탬프(ns) — 링 슬롯 태그 + 랜드마크 매칭 키.
         // 분석측 imageInfo.timestamp와 동일 클럭(클럭 게이트 실기기 검증 완료, 06-15).
         val frameTsNs = surfaceTexture?.timestamp ?: 0L
@@ -519,6 +586,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // 화면 클리어
         GLES31.glClear(GLES31.GL_COLOR_BUFFER_BIT)
+
+        // 0단계(단일 스트림): 추론 입력용 저해상도 프레임을 GL에서 직접 만들어 넘긴다.
+        //   ImageAnalysis 스트림을 대체하므로 카메라 스트림이 1개가 되어 고해상 프리뷰가 열린다.
+        if (analysisEnabled) {
+            renderAndReadAnalysis(frameTsNs)
+        }
 
         // 1단계: OES → RGBA 변환을 이번 프레임의 링 슬롯에 렌더하고 센서 ts로 태그.
         val writtenIdx = ringWrite
@@ -611,6 +684,107 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     /**
      * OES 텍스처를 RGBA 2D 텍스처로 변환
      */
+    /**
+     * 분석용 저해상도 FBO 확보 — 프레임 종횡비를 유지한 채 긴 변을 [analysisMaxLongSide] 이하로.
+     * 종횡비를 어기면 MediaPipe 가 찌그러진 얼굴을 보고 렌즈가 타원이 된다.
+     */
+    private fun ensureAnalysisTarget(): Boolean {
+        val srcW = frameWidth
+        val srcH = frameHeight
+        if (srcW <= 0 || srcH <= 0) return false
+
+        var k = 1
+        while (maxOf(srcW, srcH) / k > analysisMaxLongSide) k++
+        val w = (srcW / k).coerceAtLeast(16)
+        val h = (srcH / k).coerceAtLeast(16)
+
+        if (analysisFbo != 0 && analysisW == w && analysisH == h) return true
+
+        releaseAnalysisTarget()
+
+        val tex = IntArray(1)
+        val fbo = IntArray(1)
+        GLES31.glGenTextures(1, tex, 0)
+        GLES31.glGenFramebuffers(1, fbo, 0)
+        GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, tex[0])
+        GLES31.glTexImage2D(
+            GLES31.GL_TEXTURE_2D, 0, GLES31.GL_RGBA, w, h, 0,
+            GLES31.GL_RGBA, GLES31.GL_UNSIGNED_BYTE, null
+        )
+        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MIN_FILTER, GLES31.GL_LINEAR)
+        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_MAG_FILTER, GLES31.GL_LINEAR)
+        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_S, GLES31.GL_CLAMP_TO_EDGE)
+        GLES31.glTexParameteri(GLES31.GL_TEXTURE_2D, GLES31.GL_TEXTURE_WRAP_T, GLES31.GL_CLAMP_TO_EDGE)
+        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, fbo[0])
+        GLES31.glFramebufferTexture2D(
+            GLES31.GL_FRAMEBUFFER, GLES31.GL_COLOR_ATTACHMENT0, GLES31.GL_TEXTURE_2D, tex[0], 0
+        )
+        val ok = GLES31.glCheckFramebufferStatus(GLES31.GL_FRAMEBUFFER) == GLES31.GL_FRAMEBUFFER_COMPLETE
+        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+        if (!ok) {
+            Log.e(TAG, "분석 FBO 생성 실패 ${w}x$h")
+            GLES31.glDeleteTextures(1, tex, 0)
+            GLES31.glDeleteFramebuffers(1, fbo, 0)
+            return false
+        }
+
+        analysisTex = tex[0]
+        analysisFbo = fbo[0]
+        analysisW = w
+        analysisH = h
+        analysisBuf = java.nio.ByteBuffer.allocateDirect(w * 4 * h).order(java.nio.ByteOrder.nativeOrder())
+        Log.i(TAG, "분석 타깃 생성: ${w}x$h (소스 ${srcW}x$srcH, k=$k)")
+        return true
+    }
+
+    private fun releaseAnalysisTarget() {
+        if (analysisTex != 0) {
+            GLES31.glDeleteTextures(1, intArrayOf(analysisTex), 0); analysisTex = 0
+        }
+        if (analysisFbo != 0) {
+            GLES31.glDeleteFramebuffers(1, intArrayOf(analysisFbo), 0); analysisFbo = 0
+        }
+        analysisW = 0; analysisH = 0; analysisBuf = null
+    }
+
+    /**
+     * OES → 분석 FBO 렌더 후 glReadPixels 로 RGBA 를 읽어 콜백에 넘긴다.
+     * 인플라이트 1개(latest-wins)로 제한해 분석이 밀리면 프레임을 버린다.
+     */
+    private fun renderAndReadAnalysis(frameTsNs: Long) {
+        val cb = onAnalysisFrame ?: return
+        if (!analysisInFlight.compareAndSet(false, true)) return  // 이전 프레임 처리 중 → 스킵
+        if (!ensureAnalysisTarget()) { analysisInFlight.set(false); return }
+        val buf = analysisBuf ?: run { analysisInFlight.set(false); return }
+
+        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, analysisFbo)
+        GLES31.glViewport(0, 0, analysisW, analysisH)
+        GLES31.glUseProgram(oesToRgbProgram)
+        GLES31.glUniformMatrix4fv(uSTMatrixLocation, 1, false, stMatrix, 0)
+        // 좌표계 계약(설계서 §1): 링과 같은 ST·미러를 쓰되 목적지 X 반전, Y 는 뒤집지 않는다.
+        GLES31.glUniform1i(uMirrorLocation, if (isMirror) 1 else 0)
+        GLES31.glUniform1i(uFlipPosXLocation, if (isMirror) 1 else 0)
+        GLES31.glUniform1i(uFlipYLocation, 0)
+        GLES31.glUniform1i(uRotateLocation, 0)
+        GLES31.glUniform2f(uScaleLocation, 1.0f, 1.0f)
+        GLES31.glActiveTexture(GLES31.GL_TEXTURE0)
+        GLES31.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId)
+        GLES31.glUniform1i(uOESTextureLocation, 0)
+        renderFullscreenQuad()
+
+        buf.rewind()
+        GLES31.glPixelStorei(GLES31.GL_PACK_ALIGNMENT, 4)
+        GLES31.glReadPixels(
+            0, 0, analysisW, analysisH, GLES31.GL_RGBA, GLES31.GL_UNSIGNED_BYTE, buf
+        )
+        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+
+        buf.rewind()
+        // rotationDegrees: 이 기기 stMatrix 가 항등이라 GL 버퍼는 센서 방향 그대로다.
+        // 따라서 카메라가 주던 회전값(frameRotation)을 그대로 넘겨야 MediaPipe 가 바로 세운다.
+        cb(buf, analysisW, analysisH, frameRotation, frameTsNs)
+    }
+
     private fun renderOESToRgba(targetFbo: Int) {
         // FBO 바인딩 (frame-sync: 이번 프레임의 링 슬롯 FBO)
         GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, targetFbo)
@@ -626,6 +800,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniformMatrix4fv(uSTMatrixLocation, 1, false, stMatrix, 0)
         GLES31.glUniform1i(uMirrorLocation, if (isMirror) 1 else 0)
         GLES31.glUniform1i(uFlipYLocation, 1)  // Y축 뒤집기 활성화
+        GLES31.glUniform1i(uFlipPosXLocation, 0)  // 링 패스는 목적지 X 반전 없음(분석 패스 전용)
         GLES31.glUniform2f(uScaleLocation, 1.0f, 1.0f)  // FBO에는 전체 프레임 캡처
         // 화면 회전은 최종 blit 전용 — 링 FBO(렌즈/뷰티 합성 좌표계)는 항상 회전 0을 유지해야
         // 랜드마크 upright 공간과의 계약이 깨지지 않는다. (VERTEX_SHADER 소스 공유 → 명시 필수)
@@ -885,6 +1060,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniformMatrix4fv(stLocation, 1, false, identityMatrix, 0)
         GLES31.glUniform1i(mirrorLocation, 0)  // 이미 미러링 적용됨
         GLES31.glUniform1i(flipYLocation, 0)   // 이미 Y축 뒤집기 적용됨
+        GLES31.glUniform1i(
+            GLES31.glGetUniformLocation(passthroughProgram, "uFlipPosX"), 0
+        )  // 화면 blit은 목적지 X 반전 없음(분석 패스 전용)
 
         // Aspect ratio 보정 스케일 계산 (Cover 모드 - 화면 꽉 채우기, 넘치는 부분 crop)
         // 회전 고려: 90도 또는 270도 회전 시 width/height 교환
