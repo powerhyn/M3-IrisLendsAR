@@ -285,6 +285,20 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
+    /** 선명도 진단(SHARP §6-2) — 다음 프레임의 링 FBO 원본을 PNG로 덤프한다. */
+    fun requestRingDump(dir: java.io.File) {
+        queueEvent {
+            glRenderer.requestRingDump(dir)
+        }
+    }
+
+    /** 선명도 진단(SHARP §6-3) — 링/렌즈 FBO 전치 보정 A/B 토글. */
+    fun setRingSwapDiag(on: Boolean) {
+        queueEvent {
+            glRenderer.setRingSwapDiag(on)
+        }
+    }
+
     /**
      * 렌즈 설정
      */

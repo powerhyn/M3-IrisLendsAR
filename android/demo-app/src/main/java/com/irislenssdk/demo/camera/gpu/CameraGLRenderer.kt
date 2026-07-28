@@ -310,6 +310,41 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var stMatrixLogged = false
 
     //=========================================================================
+    // 선명도 실측 진단 — 링 FBO 원본 덤프 (SHARP §6-2)
+    //
+    // "회전 270에서 링 FBO 진입 시점 콘텐츠 방향이 무엇인가"를 추론이 아니라 1회 덤프로 확정한다.
+    // 동시에 "소스가 이미 흐린가(카메라 HAL) vs 최종 blit에서 잃는가"를 가른다 —
+    // 링 FBO는 최종 blit 이전(업스케일 전) 원본 텍셀이므로, 여기서 라플라시안 분산을 재면
+    // 화면 캡처와 달리 업스케일·크롭이 섞이지 않은 소스 해상력이 나온다.
+    //
+    // 트리거: adb shell am broadcast -a com.irislenssdk.demo.DUMP_RING
+    // 산출: getExternalFilesDir/sharpdump/ring_<W>x<H>_rot<frameRotation>_<ts>.png
+    // 진단 전용 — 요청이 없으면 onDrawFrame 비용은 volatile 읽기 1회다.
+    //=========================================================================
+    @Volatile private var dumpRingDir: java.io.File? = null
+
+    //=========================================================================
+    // 선명도 실측 진단 — 링 FBO '전치(transpose)' A/B (SHARP §6-3 검증)
+    //
+    // 실측(2026-07-28): stMatrix 는 항등인데 링 FBO 내용은 FMLens 화면 기준 3.03배 비등방이고,
+    // 최종 blit 이 그 역(2.85/0.90=3.17배)을 걸어 화면에서만 상쇄된다. 즉 카메라가 주는 버퍼는
+    // 세로형(1080x1920)인데 링 FBO 를 request.resolution(1920x1080) 그대로 잡아 **전치 상태로
+    // 리샘플**하고 있다 — 장면의 가로축 표본이 1920→1080 으로 소거된 뒤 화면에서 2.85배로 다시
+    // 늘어난다. 이 왕복이 가로 고주파를 잃는 실제 원인이다(가로 2차차분 0.86 vs FMLens 2.16).
+    //
+    // ON 이면 링/렌즈 FBO 를 실제 콘텐츠 치수로 잡고 blit 도 등방(×1.584)으로 맞춰 A/B 한다.
+    //   adb shell am broadcast -a com.irislenssdk.demo.SET_RING_SWAP --ez on true
+    // ⚠️ 진단 전용 기본 OFF — 랜드마크/렌즈 좌표 계약(resolveCoordinateSpace)은 아직 미조정이라
+    //    렌즈를 켜면 정합이 어긋난다. 배경 선명도 A/B 용도로만 쓴다.
+    //=========================================================================
+    @Volatile private var ringSwapDiag = false
+    @Volatile private var ringSwapPending = false
+
+    /** 실제로 할당된 링/렌즈 FBO 치수. 전치 진단에서 frameWidth/Height 와 갈릴 수 있다. */
+    private var ringW: Int = 0
+    private var ringH: Int = 0
+
+    //=========================================================================
     // 단일 스트림 분석 경로 (ImageAnalysis 대체)
     //
     // CameraX 는 Preview + ImageAnalysis 두 스트림을 동시에 열면 조합 제약으로 프리뷰가
@@ -581,6 +616,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 분석측 imageInfo.timestamp와 동일 클럭(클럭 게이트 실기기 검증 완료, 06-15).
         val frameTsNs = surfaceTexture?.timestamp ?: 0L
 
+        // 선명도 진단(SHARP §6-3): 전치 토글이 바뀌었으면 중간 버퍼를 재생성한다.
+        if (ringSwapPending) {
+            ringSwapPending = false
+            if (frameWidth > 0 && frameHeight > 0) {
+                recreateIntermediateBuffers(frameWidth, frameHeight)
+            }
+        }
+
         // 펜딩 렌즈 텍스처 업로드
         uploadPendingLensTexture()
 
@@ -597,6 +640,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val writtenIdx = ringWrite
         renderOESToRgba(ringFbo[writtenIdx])
         ringTsNs[writtenIdx] = frameTsNs
+
+        // 선명도 진단(SHARP §6-2): 요청이 있으면 방금 쓴 링 슬롯을 원본 그대로 덤프한다.
+        dumpRingDir?.let { dir ->
+            dumpRingDir = null
+            dumpRingSlot(dir, ringFbo[writtenIdx])
+        }
         if (ringCount < ringSize) ringCount++
         ringWrite = (ringWrite + 1) % ringSize
 
@@ -788,9 +837,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private fun renderOESToRgba(targetFbo: Int) {
         // FBO 바인딩 (frame-sync: 이번 프레임의 링 슬롯 FBO)
         GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, targetFbo)
-        // 프레임 크기 사용 (FBO 텍스처 크기와 일치)
-        val fboWidth = if (frameWidth > 0) frameWidth else viewWidth
-        val fboHeight = if (frameHeight > 0) frameHeight else viewHeight
+        // FBO 텍스처 실제 크기 사용 (전치 진단에서 frameWidth/Height 와 갈릴 수 있다)
+        val fboWidth = if (ringW > 0) ringW else viewWidth
+        val fboHeight = if (ringH > 0) ringH else viewHeight
         GLES31.glViewport(0, 0, fboWidth, fboHeight)
 
         // OES → RGBA 셰이더 사용
@@ -897,8 +946,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 렌즈 FBO 생성
      */
     private fun createLensFbo() {
-        val width = if (frameWidth > 0) frameWidth else viewWidth
-        val height = if (frameHeight > 0) frameHeight else viewHeight
+        // 링과 같은 공간에서 합성해야 하므로 링 FBO 실치수를 따른다(전치 진단 포함).
+        val width = if (ringW > 0) ringW else viewWidth
+        val height = if (ringH > 0) ringH else viewHeight
 
         // 기존 버퍼 삭제
         if (lensOutputTextureId != 0) {
@@ -1066,13 +1116,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // Aspect ratio 보정 스케일 계산 (Cover 모드 - 화면 꽉 채우기, 넘치는 부분 crop)
         // 회전 고려: 90도 또는 270도 회전 시 width/height 교환
-        val isRotated = (frameRotation == 90 || frameRotation == 270)
-        val texWidth = if (frameWidth > 0) {
-            if (isRotated) frameHeight else frameWidth
-        } else viewWidth
-        val texHeight = if (frameHeight > 0) {
-            if (isRotated) frameWidth else frameHeight
-        } else viewHeight
+        // 전치 진단 ON 이면 링 FBO 가 이미 콘텐츠 실치수라 여기서 다시 교환하면 안 된다
+        // (교환은 '링이 전치되어 있다'를 보정하던 것이므로 이중 적용이 된다).
+        val isRotated = (frameRotation == 90 || frameRotation == 270) && !ringSwapDiag
+        val srcTexW = if (ringW > 0) ringW else viewWidth
+        val srcTexH = if (ringH > 0) ringH else viewHeight
+        val texWidth = if (isRotated) srcTexH else srcTexW
+        val texHeight = if (isRotated) srcTexW else srcTexH
 
         // 링 FBO 내용은 '기기 natural orientation 기준 upright'다(stMatrix + targetRotation=ROTATION_0 핀).
         // 화면이 회전해 있으면 그만큼 최종 blit에서 되돌려야 사용자 눈에 정립으로 보인다.
@@ -1100,9 +1150,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform2f(scaleLocation, scaleX * displayZoom, scaleY * displayZoom)
 
         // 업스케일 품질: 소스 텍셀 크기 + 모드/샤프닝 강도 주입.
-        // texWidth/texHeight는 회전 보정 전(소스 텍스처 실제 픽셀)이어야 bicubic 좌표가 맞는다.
-        val srcW = if (frameWidth > 0) frameWidth else viewWidth
-        val srcH = if (frameHeight > 0) frameHeight else viewHeight
+        // 회전 보정 전 '소스 텍스처 실제 픽셀'이어야 bicubic 좌표가 맞는다 → 링 FBO 실치수.
+        val srcW = srcTexW
+        val srcH = srcTexH
         GLES31.glUniform2f(
             GLES31.glGetUniformLocation(passthroughProgram, "uTexSize"),
             srcW.toFloat(), srcH.toFloat()
@@ -1334,6 +1384,72 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     }
 
     /**
+     * 선명도 진단(SHARP §6-2) — 다음 프레임의 링 FBO를 PNG로 덤프하도록 예약한다.
+     * GL 스레드가 아닌 곳에서 호출해도 안전하다(다음 onDrawFrame에서 소비).
+     */
+    fun requestRingDump(dir: java.io.File) {
+        dumpRingDir = dir
+        Log.i(TAG, "링 FBO 덤프 예약 → ${dir.absolutePath}")
+    }
+
+    /**
+     * 선명도 진단(SHARP §6-3) — 링/렌즈 FBO 전치 보정 A/B 토글.
+     * 다음 프레임에서 중간 버퍼를 재생성한다. 기본 OFF(현행과 픽셀 동일).
+     */
+    fun setRingSwapDiag(on: Boolean) {
+        if (ringSwapDiag == on) return
+        ringSwapDiag = on
+        ringSwapPending = true
+        Log.i(TAG, "SHARP 전치 진단 → $on (다음 프레임에 링 재생성)")
+    }
+
+    /**
+     * 링 FBO를 glReadPixels로 읽어 PNG로 저장한다. GL 스레드에서만 호출된다.
+     *
+     * glReadPixels는 y=0이 하단이므로 PNG 행 순서를 뒤집어 저장한다 — 그래야 파일을 열었을 때
+     * 화면에 보이는 방향과 같아, "가로형인가 세로형인가"를 눈으로 바로 판정할 수 있다.
+     */
+    private fun dumpRingSlot(dir: java.io.File, fbo: Int) {
+        val w = if (ringW > 0) ringW else viewWidth
+        val h = if (ringH > 0) ringH else viewHeight
+        if (w <= 0 || h <= 0) { Log.e(TAG, "링 덤프 실패: 프레임 크기 미확정 ${w}x$h"); return }
+
+        val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
+        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, fbo)
+        GLES31.glPixelStorei(GLES31.GL_PACK_ALIGNMENT, 4)
+        GLES31.glReadPixels(0, 0, w, h, GLES31.GL_RGBA, GLES31.GL_UNSIGNED_BYTE, buf)
+        GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+        checkGlError("dumpRingSlot")
+
+        // RGBA 바이트 → ARGB int, 행 뒤집기 동시 수행
+        buf.rewind()
+        val px = IntArray(w * h)
+        val row = ByteArray(w * 4)
+        for (y in 0 until h) {
+            buf.get(row)
+            val dst = (h - 1 - y) * w      // GL 하단 행 → PNG 마지막 행
+            for (x in 0 until w) {
+                val i = x * 4
+                val r = row[i].toInt() and 0xFF
+                val g = row[i + 1].toInt() and 0xFF
+                val b = row[i + 2].toInt() and 0xFF
+                px[dst + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+
+        runCatching {
+            dir.mkdirs()
+            val name = "ring_${w}x${h}_rot${frameRotation}_scr${screenRotation}q${screenRotationQuadrant()}_" +
+                "${android.os.SystemClock.elapsedRealtime()}.png"
+            val file = java.io.File(dir, name)
+            val bmp = android.graphics.Bitmap.createBitmap(px, w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            java.io.FileOutputStream(file).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            bmp.recycle()
+            Log.i(TAG, "링 FBO 덤프 완료: ${file.absolutePath} (${w}x$h, frameRot=$frameRotation)")
+        }.onFailure { Log.e(TAG, "링 FBO 덤프 저장 실패: ${it.message}") }
+    }
+
+    /**
      * SurfaceTexture 반환 (카메라 연결용)
      */
     fun getSurfaceTexture(): SurfaceTexture? = surfaceTexture
@@ -1362,7 +1478,14 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     /**
      * 중간 버퍼 (RGBA 텍스처 + FBO) 생성
      */
-    private fun recreateIntermediateBuffers(width: Int, height: Int) {
+    private fun recreateIntermediateBuffers(requestedW: Int, requestedH: Int) {
+        // 전치 진단(ON): 카메라 버퍼가 세로형이므로 회전 시 치수를 바꿔 잡아 리샘플을 없앤다.
+        val rotated = (frameRotation == 90 || frameRotation == 270)
+        val width = if (ringSwapDiag && rotated) requestedH else requestedW
+        val height = if (ringSwapDiag && rotated) requestedW else requestedH
+        ringW = width
+        ringH = height
+
         // 기존 링버퍼 삭제
         deleteRingBuffers()
 

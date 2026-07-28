@@ -110,6 +110,11 @@ class GpuRenderActivity : AppCompatActivity() {
         /** 실험 시 요청할 프리뷰 해상도 (전면 카메라 지원: 4000x3000 / 3840x2160 / …). */
         private val EXPERIMENT_PREVIEW_SIZE = Size(3840, 2160)
 
+        /** 선명도 실측 진단 브로드캐스트 (디버그 빌드 전용 — registerSharpnessDiagReceiver 참조). */
+        private const val ACTION_DUMP_RING = "com.irislenssdk.demo.DUMP_RING"
+        private const val ACTION_SET_UPSCALE = "com.irislenssdk.demo.SET_UPSCALE"
+        private const val ACTION_SET_RING_SWAP = "com.irislenssdk.demo.SET_RING_SWAP"
+
         private const val LEFT_PANEL_DP = 300    // activity_gpu_render.xml landLeftPanel과 일치
         private const val RIGHT_PANEL_DP = 180   // activity_gpu_render.xml landRightPanel과 일치
     }
@@ -1866,7 +1871,67 @@ class GpuRenderActivity : AppCompatActivity() {
         (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
             .registerDisplayListener(displayListener, null)
         pushScreenRotation()
+        registerSharpnessDiagReceiver()
         // P6-W4 env_map 로드는 onGpuInitialized 콜백에서 처리 (GPU lens init 완료 보장).
+    }
+
+    //=========================================================================
+    // 선명도 실측 진단 리시버 (SHARP §6-2 / §6-5) — 디버그 빌드 전용
+    //
+    // 실측은 "같은 장면을 두 앱이 번갈아 본다"가 전제라, 측정 중 화면을 만지면 태블릿이
+    // 흔들려 장면이 바뀐다. 버튼 대신 adb 브로드캐스트로 상태를 바꿔 손을 대지 않고 A/B 한다.
+    //
+    //   링 FBO 원본 덤프:  adb shell am broadcast -a com.irislenssdk.demo.DUMP_RING
+    //   업스케일 모드 전환: adb shell am broadcast -a com.irislenssdk.demo.SET_UPSCALE --ei mode 2
+    //                      (0=bilinear, 1=bicubic, 2=bicubic+언샤프, --ef sharpen 로 강도 지정)
+    //
+    // ⚠️ 진단 전용. BuildConfig.DEBUG 게이트로 릴리스에는 등록되지 않으며,
+    //    선명도 트랙 종결 시 이 블록과 CameraGLRenderer.dumpRingSlot 을 함께 제거한다.
+    //=========================================================================
+    private var sharpnessDiagReceiver: android.content.BroadcastReceiver? = null
+
+    private fun registerSharpnessDiagReceiver() {
+        if (!BuildConfig.DEBUG || sharpnessDiagReceiver != null) return
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: android.content.Intent?) {
+                when (intent?.action) {
+                    ACTION_DUMP_RING -> {
+                        val dir = java.io.File(getExternalFilesDir(null), "sharpdump")
+                        cameraGLView.requestRingDump(dir)
+                    }
+                    ACTION_SET_RING_SWAP -> {
+                        val on = intent.getBooleanExtra("on", false)
+                        cameraGLView.setRingSwapDiag(on)
+                        Log.i(TAG, "SHARP 진단: 링 전치 보정 → $on")
+                    }
+                    ACTION_SET_UPSCALE -> {
+                        val mode = intent.getIntExtra("mode", 1).coerceIn(0, 2)
+                        val sharpen = intent.getFloatExtra("sharpen", 0.35f)
+                        upscaleModeIdx = mode
+                        cameraGLView.setUpscaleMode(mode, sharpen)
+                        Log.i(TAG, "SHARP 진단: 업스케일 모드 → $mode (sharpen=$sharpen)")
+                    }
+                }
+            }
+        }
+        val filter = android.content.IntentFilter().apply {
+            addAction(ACTION_DUMP_RING)
+            addAction(ACTION_SET_UPSCALE)
+            addAction(ACTION_SET_RING_SWAP)
+        }
+        // adb shell(다른 UID)에서 보내야 하므로 EXPORTED. 디버그 빌드에서만 등록된다.
+        ContextCompat.registerReceiver(
+            this, receiver, filter, ContextCompat.RECEIVER_EXPORTED
+        )
+        sharpnessDiagReceiver = receiver
+        Log.i(TAG, "SHARP 진단 리시버 등록됨 ($ACTION_DUMP_RING / $ACTION_SET_UPSCALE)")
+    }
+
+    private fun unregisterSharpnessDiagReceiver() {
+        sharpnessDiagReceiver?.let {
+            runCatching { unregisterReceiver(it) }
+            sharpnessDiagReceiver = null
+        }
     }
 
     //=========================================================================
@@ -1949,6 +2014,7 @@ class GpuRenderActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         cameraGLView.onPause()
+        unregisterSharpnessDiagReceiver()
         runCatching {
             (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
                 .unregisterDisplayListener(displayListener)
