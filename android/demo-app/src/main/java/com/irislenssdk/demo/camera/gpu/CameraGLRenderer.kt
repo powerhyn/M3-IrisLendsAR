@@ -84,6 +84,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             uniform int uMirror;     // 미러링 (전면 카메라)
             uniform int uFlipY;      // Y축 뒤집기
             uniform vec2 uScale;     // Aspect ratio 보정 스케일
+            uniform int uRotate;     // 화면 회전 90도 배수 (0..3) — 최종 blit 전용, FBO 패스는 항상 0
 
             out vec2 vTexCoord;
 
@@ -95,6 +96,16 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
                 }
                 // Aspect ratio 보정 스케일 적용
                 pos *= uScale;
+                // 화면 회전 (정점만 회전 — texCoord/미러 경로는 불변).
+                // 90도 배수는 축 교환이라 uScale을 회전 후 기준으로 미리 교환해 두면
+                // 별도 종횡비 보정 없이 정확히 맞는다 (renderToScreen 참조).
+                if (uRotate == 1) {
+                    pos = vec2(-pos.y, pos.x);
+                } else if (uRotate == 2) {
+                    pos = vec2(-pos.x, -pos.y);
+                } else if (uRotate == 3) {
+                    pos = vec2(pos.y, -pos.x);
+                }
                 gl_Position = vec4(pos, 0.0, 1.0);
 
                 // SurfaceTexture 변환 적용
@@ -125,16 +136,70 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         """
 
         // 패스스루 프래그먼트 셰이더 (2D 텍스처)
+        // 최종 blit — 업스케일 품질 담당.
+        //
+        // 소스(1920x1080)를 태블릿 창(2960x1848)에 그리면 1.54배 확대가 되는데, 기본 GL_LINEAR
+        // (bilinear)는 이 배율에서 디테일을 뭉갠다(기본 카메라 앱·참조앱 대비 흐림의 직접 원인).
+        //   uUpscaleMode 0 = bilinear (종전과 동일)
+        //   uUpscaleMode 1 = Catmull-Rom bicubic — 하드웨어 bilinear 4탭 조합으로 16탭 bicubic을
+        //       근사(Sigg&Hadwiger). 엣지를 살려 확대해 선명도가 오른다.
+        //   uUpscaleMode 2 = bicubic + 언샤프 마스크 — 확대로 잃은 고주파를 되살린다(과하면 링잉).
         private const val PASSTHROUGH_FRAGMENT_SHADER = """#version 310 es
             precision highp float;
 
             uniform sampler2D uTexture;
+            uniform vec2 uTexSize;       // 소스 텍스처 픽셀 크기 (bicubic 좌표 계산용)
+            uniform int uUpscaleMode;    // 0=bilinear, 1=bicubic, 2=bicubic+sharpen
+            uniform float uSharpen;      // 언샤프 강도 (mode 2에서만)
 
             in vec2 vTexCoord;
             out vec4 fragColor;
 
+            // Catmull-Rom bicubic: 4번의 하드웨어 bilinear fetch로 16탭 bicubic과 동등한 결과.
+            vec4 textureBicubic(vec2 uv) {
+                vec2 texelSize = 1.0 / uTexSize;
+                vec2 coord = uv * uTexSize - 0.5;
+                vec2 f = fract(coord);
+                coord = floor(coord);
+
+                vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+                vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+                vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+                vec2 w3 = f * f * (-0.5 + 0.5 * f);
+
+                vec2 s0 = w0 + w1;
+                vec2 s1 = w2 + w3;
+                vec2 f0 = w1 / s0;
+                vec2 f1 = w3 / s1;
+
+                vec2 t0 = (coord - 1.0 + f0) * texelSize;
+                vec2 t1 = (coord + 1.0 + f1) * texelSize;
+
+                return texture(uTexture, vec2(t0.x, t0.y)) * s0.x * s0.y
+                     + texture(uTexture, vec2(t1.x, t0.y)) * s1.x * s0.y
+                     + texture(uTexture, vec2(t0.x, t1.y)) * s0.x * s1.y
+                     + texture(uTexture, vec2(t1.x, t1.y)) * s1.x * s1.y;
+            }
+
             void main() {
-                fragColor = texture(uTexture, vTexCoord);
+                if (uUpscaleMode == 0) {
+                    fragColor = texture(uTexture, vTexCoord);
+                    return;
+                }
+
+                vec4 c = textureBicubic(vTexCoord);
+
+                if (uUpscaleMode == 2 && uSharpen > 0.0) {
+                    // 언샤프 마스크: 소스 텍셀 기준 4-이웃 평균을 저주파로 보고 차분을 되돌린다.
+                    vec2 t = 1.0 / uTexSize;
+                    vec3 lo = (texture(uTexture, vTexCoord + vec2( t.x, 0.0)).rgb
+                             + texture(uTexture, vTexCoord + vec2(-t.x, 0.0)).rgb
+                             + texture(uTexture, vTexCoord + vec2(0.0,  t.y)).rgb
+                             + texture(uTexture, vTexCoord + vec2(0.0, -t.y)).rgb) * 0.25;
+                    c.rgb = clamp(c.rgb + (c.rgb - lo) * uSharpen, 0.0, 1.0);
+                }
+
+                fragColor = c;
             }
         """
 
@@ -154,6 +219,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var uMirrorLocation: Int = -1
     private var uFlipYLocation: Int = -1
     private var uScaleLocation: Int = -1
+    private var uRotateLocation: Int = -1
     private var uOESTextureLocation: Int = -1
     private var uTextureLocation: Int = -1
 
@@ -207,6 +273,34 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     private var frameWidth: Int = 0
     private var frameHeight: Int = 0
     private var frameRotation: Int = 0  // 카메라 회전 각도 (0, 90, 180, 270)
+
+    // 화면(디스플레이) 회전 각도 (0, 90, 180, 270). natural orientation 기준.
+    // 세로 고정 폰에서는 항상 0이라 회전 경로 전체가 항등(=수정 전과 픽셀 동일)이다.
+    private var screenRotation: Int = 0
+    // 회전 부호 A/B (실기기 육안 확정용). true면 보정 방향을 반대로 적용한다.
+    private var screenRotationInverted: Boolean = false
+
+    // FOV 확대(displayZoom): 최종 blit에만 곱하는 등방 배율.
+    //
+    // 문제: 카메라는 4:3(=센서 최대 화각)인데 태블릿 가로 창은 약 16:10이라, Cover 계산이 항상
+    //   width-bound(else 분기)로 떨어져 배율이 S = viewWidth/texWidth 최소값에 고정된다.
+    //   → 얼굴 위 천장이 넓게 잡히고 피사체가 작아 보인다(참조앱 FMLens 대비 약 -10%).
+    // 처방: 캡처·랜드마크·렌즈 좌표계는 그대로 두고 **최종 blit 정점 스케일에만** 등방 배율을 곱해
+    //   화면 표시만 확대한다. 링 FBO는 1:1(uScale=1,1)이고 렌즈/뷰티 합성도 그 공간에서 끝나므로
+    //   배경·렌즈·뷰티가 같은 변환 하나를 함께 타 정합이 자동 보존된다(캡처 FOV 유지 → 추적도 무영향).
+    // 등방이라 rotSwap 축 교환과 무관하다. 기본 1.0f = 현행과 비트 동일(폰 세로 무회귀).
+    private var displayZoom: Float = 1.0f
+
+    // 업스케일 품질 (최종 blit). 0=bilinear(종전) / 1=bicubic / 2=bicubic+언샤프.
+    // 1.54배 확대 구간에서 bilinear이 디테일을 뭉개는 것을 보정한다. 실기기 육안 확정 후 고정 예정.
+    private var upscaleMode: Int = 1
+    private var sharpenAmount: Float = 0.35f
+
+    /** 최종 blit에 적용할 90도 배수 회전량 (0..3). */
+    private fun screenRotationQuadrant(): Int {
+        val k = ((screenRotation / 90) % 4 + 4) % 4
+        return if (screenRotationInverted) (4 - k) % 4 else k
+    }
 
     // 상태
     private var isInitialized: Boolean = false
@@ -350,6 +444,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         uMirrorLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uMirror")
         uFlipYLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uFlipY")
         uScaleLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uScale")
+        uRotateLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uRotate")
         uOESTextureLocation = GLES31.glGetUniformLocation(oesToRgbProgram, "uOESTexture")
         uTextureLocation = GLES31.glGetUniformLocation(passthroughProgram, "uTexture")
 
@@ -532,6 +627,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         GLES31.glUniform1i(uMirrorLocation, if (isMirror) 1 else 0)
         GLES31.glUniform1i(uFlipYLocation, 1)  // Y축 뒤집기 활성화
         GLES31.glUniform2f(uScaleLocation, 1.0f, 1.0f)  // FBO에는 전체 프레임 캡처
+        // 화면 회전은 최종 blit 전용 — 링 FBO(렌즈/뷰티 합성 좌표계)는 항상 회전 0을 유지해야
+        // 랜드마크 upright 공간과의 계약이 깨지지 않는다. (VERTEX_SHADER 소스 공유 → 명시 필수)
+        GLES31.glUniform1i(uRotateLocation, 0)
 
         // OES 텍스처 바인딩
         GLES31.glActiveTexture(GLES31.GL_TEXTURE0)
@@ -783,6 +881,7 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         val mirrorLocation = GLES31.glGetUniformLocation(passthroughProgram, "uMirror")
         val flipYLocation = GLES31.glGetUniformLocation(passthroughProgram, "uFlipY")
         val scaleLocation = GLES31.glGetUniformLocation(passthroughProgram, "uScale")
+        val rotateLocation = GLES31.glGetUniformLocation(passthroughProgram, "uRotate")
         GLES31.glUniformMatrix4fv(stLocation, 1, false, identityMatrix, 0)
         GLES31.glUniform1i(mirrorLocation, 0)  // 이미 미러링 적용됨
         GLES31.glUniform1i(flipYLocation, 0)   // 이미 Y축 뒤집기 적용됨
@@ -797,18 +896,46 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             if (isRotated) frameWidth else frameHeight
         } else viewHeight
 
-        val texAspect = texWidth.toFloat() / texHeight.toFloat()
+        // 링 FBO 내용은 '기기 natural orientation 기준 upright'다(stMatrix + targetRotation=ROTATION_0 핀).
+        // 화면이 회전해 있으면 그만큼 최종 blit에서 되돌려야 사용자 눈에 정립으로 보인다.
+        val rotK = screenRotationQuadrant()
+        val rotSwap = (rotK == 1 || rotK == 3)
+
+        val texAspectUpright = texWidth.toFloat() / texHeight.toFloat()
+        // 회전 후 화면에서 콘텐츠가 실제로 갖는 종횡비
+        val texAspect = if (rotSwap) 1.0f / texAspectUpright else texAspectUpright
         val viewAspect = viewWidth.toFloat() / viewHeight.toFloat()
 
         // Cover 모드: 화면을 꽉 채우고 넘치는 부분은 GL viewport에 의해 자동 crop
-        val (scaleX, scaleY) = if (texAspect > viewAspect) {
+        val (screenScaleX, screenScaleY) = if (texAspect > viewAspect) {
             // 텍스처가 더 넓음 → 높이 채우고 좌우 넘침 (crop)
             (texAspect / viewAspect) to 1.0f
         } else {
             // 텍스처가 더 좁음 → 너비 채우고 상하 넘침 (crop)
             1.0f to (viewAspect / texAspect)
         }
-        GLES31.glUniform2f(scaleLocation, scaleX, scaleY)
+        // 셰이더는 [scale → rotate] 순서다. 90도 회전은 축 교환이므로 화면 기준 배율을
+        // 축만 바꿔 넘기면 회전 후 정확히 (screenScaleX, screenScaleY)가 된다.
+        val (scaleX, scaleY) =
+            if (rotSwap) screenScaleY to screenScaleX else screenScaleX to screenScaleY
+        // displayZoom: 등방이라 축 교환(rotSwap)과 무관하게 양축에 동일 배율.
+        GLES31.glUniform2f(scaleLocation, scaleX * displayZoom, scaleY * displayZoom)
+
+        // 업스케일 품질: 소스 텍셀 크기 + 모드/샤프닝 강도 주입.
+        // texWidth/texHeight는 회전 보정 전(소스 텍스처 실제 픽셀)이어야 bicubic 좌표가 맞는다.
+        val srcW = if (frameWidth > 0) frameWidth else viewWidth
+        val srcH = if (frameHeight > 0) frameHeight else viewHeight
+        GLES31.glUniform2f(
+            GLES31.glGetUniformLocation(passthroughProgram, "uTexSize"),
+            srcW.toFloat(), srcH.toFloat()
+        )
+        GLES31.glUniform1i(
+            GLES31.glGetUniformLocation(passthroughProgram, "uUpscaleMode"), upscaleMode
+        )
+        GLES31.glUniform1f(
+            GLES31.glGetUniformLocation(passthroughProgram, "uSharpen"), sharpenAmount
+        )
+        GLES31.glUniform1i(rotateLocation, rotK)
 
         // 텍스처 바인딩
         GLES31.glActiveTexture(GLES31.GL_TEXTURE0)
@@ -988,6 +1115,44 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     fun setFrameRotation(rotation: Int) {
         this.frameRotation = rotation
         Log.d(TAG, "Frame rotation set: $rotation")
+    }
+
+    /**
+     * 화면(디스플레이) 회전 설정 (0, 90, 180, 270).
+     *
+     * 최종 blit에만 반영되며 링 FBO·랜드마크 좌표계는 건드리지 않는다
+     * (렌즈/뷰티 합성은 회전 영향 0). 세로 고정에서는 항상 0.
+     */
+    fun setScreenRotation(rotation: Int) {
+        if (this.screenRotation != rotation) {
+            this.screenRotation = rotation
+            Log.d(TAG, "Screen rotation set: $rotation (quadrant=${screenRotationQuadrant()})")
+        }
+    }
+
+    /** 회전 부호 A/B 토글 (실기기 육안 확정용). */
+    fun setScreenRotationInverted(inverted: Boolean) {
+        this.screenRotationInverted = inverted
+        Log.i(TAG, "Screen rotation sign inverted → $inverted (quadrant=${screenRotationQuadrant()})")
+    }
+
+    /**
+     * 최종 blit 등방 확대 배율 설정 (FOV 확대). 1.0 = 무확대(현행 동일).
+     * 캡처·랜드마크·렌즈 좌표계는 불변이라 렌즈 정합·추적에 영향 없다.
+     */
+    fun setDisplayZoom(zoom: Float) {
+        val z = zoom.coerceIn(1.0f, 1.5f)
+        if (this.displayZoom != z) {
+            this.displayZoom = z
+            Log.i(TAG, "Display zoom set: $z")
+        }
+    }
+
+    /** 업스케일 품질 모드 (0=bilinear, 1=bicubic, 2=bicubic+언샤프). */
+    fun setUpscaleMode(mode: Int, sharpen: Float = 0.35f) {
+        upscaleMode = mode.coerceIn(0, 2)
+        sharpenAmount = sharpen.coerceIn(0.0f, 1.5f)
+        Log.i(TAG, "Upscale mode → $upscaleMode (sharpen=$sharpenAmount)")
     }
 
     /**

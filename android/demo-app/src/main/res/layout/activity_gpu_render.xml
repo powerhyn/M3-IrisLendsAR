@@ -83,6 +83,65 @@
 
     </LinearLayout>
 
+    <!-- ===================================================================
+         가로(태블릿) 전용 좌/우 패널 — 세로에서는 전부 GONE이라 영향 없음.
+
+         회전 시 액티비티가 재생성되지 않으므로(configChanges) 대체 레이아웃 리소스는
+         적용되지 않는다. 대신 GpuRenderActivity.applyOrientationLayout()이 기존 뷰
+         인스턴스를 이 컨테이너로 옮겨 담는다(재부모화) — 뷰가 그대로라 슬라이더 값·
+         렌즈 선택·GL 상태가 회전을 넘어 유지된다.
+         =================================================================== -->
+
+    <!-- 좌: 기능 설정 (렌즈 세부 + 뷰티 탭) -->
+    <LinearLayout
+        android:id="@+id/landLeftPanel"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:orientation="vertical"
+        android:background="#A6000000"
+        android:visibility="gone" />
+
+    <!-- 우: 렌즈 선택 (세로 리스트) -->
+    <FrameLayout
+        android:id="@+id/landRightPanel"
+        android:layout_width="180dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="#A6000000"
+        android:visibility="gone" />
+
+    <!-- 패널 접기/펼치기 핸들 (가로에서만 보임) -->
+    <Button
+        android:id="@+id/btnLandLeftHandle"
+        android:layout_width="28dp"
+        android:layout_height="72dp"
+        android:layout_gravity="start|center_vertical"
+        android:text="▶"
+        android:textSize="12sp"
+        android:textColor="#FFFFFFFF"
+        android:minWidth="0dp"
+        android:paddingStart="0dp"
+        android:paddingEnd="0dp"
+        android:background="#99000000"
+        android:contentDescription="기능 설정 패널 열기/닫기"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btnLandRightHandle"
+        android:layout_width="28dp"
+        android:layout_height="72dp"
+        android:layout_gravity="end|center_vertical"
+        android:text="◀"
+        android:textSize="12sp"
+        android:textColor="#FFFFFFFF"
+        android:minWidth="0dp"
+        android:paddingStart="0dp"
+        android:paddingEnd="0dp"
+        android:background="#99000000"
+        android:contentDescription="렌즈 선택 패널 열기/닫기"
+        android:visibility="gone" />
+
     <!-- 기어(⚙) 토글 버튼 (우상단, 항상 보임) — 개발/벤치 패널 표시/숨김 -->
     <ImageButton
         android:id="@+id/btnGearToggle"
@@ -354,6 +413,36 @@
                 android:layout_width="68dp"
                 android:layout_height="36dp"
                 android:text="img:off"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <!-- 가로 회전 부호 A/B — 태블릿 가로에서 영상 회전 방향이 반대면 이걸로 뒤집는다.
+                 확정되면 CameraGLRenderer의 기본값을 상수화하고 이 버튼은 제거. -->
+            <Button
+                android:id="@+id/btnRotSign"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginStart="2dp"
+                android:text="rot:+"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="false"
+                android:minWidth="0dp"
+                android:backgroundTint="#66555555"
+                style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            <!-- 가로 FOV 확대 스윕 — 참조앱과 같은 자리에서 육안 비교해 배율 확정.
+                 ⚠️ rot 부호를 먼저 고정한 뒤 판단할 것. 확정되면 landDisplayZoom 상수화하고 이 버튼 제거. -->
+            <Button
+                android:id="@+id/btnZoom"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginStart="2dp"
+                android:text="up:bicub"
                 android:textSize="12sp"
                 android:textStyle="bold"
                 android:textAllCaps="false"

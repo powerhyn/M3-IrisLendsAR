@@ -138,6 +138,50 @@ class OverlayView @JvmOverloads constructor(
     // 미러링 (전면 카메라)
     private var isMirror: Boolean = true
 
+    //=========================================================================
+    // 화면 회전 보정 (가로 모드)
+    //
+    // 랜드마크는 '기기 natural orientation 기준 upright' 공간이라(GL 링 FBO와 동일 계약)
+    // 화면이 회전해 있으면 그만큼 캔버스를 돌려야 GL 출력 위에 정확히 겹친다.
+    // 회전량 0(세로 고정)이면 아래 경로는 전부 항등 — 기존 동작과 픽셀 동일.
+    //=========================================================================
+
+    private var screenRotation: Int = 0
+    private var screenRotationInverted: Boolean = false
+
+    /** 캔버스에 적용할 90도 배수 회전량 (0..3). */
+    private fun rotQuadrant(): Int {
+        val k = ((screenRotation / 90) % 4 + 4) % 4
+        return if (screenRotationInverted) (4 - k) % 4 else k
+    }
+
+    private val rotSwap: Boolean get() = rotQuadrant().let { it == 1 || it == 3 }
+
+    /** 논리 캔버스 폭 — 회전 적용 후 좌표계 기준(90/270이면 뷰 높이). */
+    private val vw: Int get() = if (rotSwap) height else width
+
+    /** 논리 캔버스 높이 — 회전 적용 후 좌표계 기준(90/270이면 뷰 폭). */
+    private val vh: Int get() = if (rotSwap) width else height
+
+    /**
+     * 화면(디스플레이) 회전 설정 (0, 90, 180, 270).
+     * [CameraGLView.setScreenRotation]과 같은 값을 넣어야 GL 출력과 오버레이가 정합한다.
+     */
+    fun setScreenRotation(rotation: Int) {
+        if (screenRotation != rotation) {
+            screenRotation = rotation
+            invalidate()
+        }
+    }
+
+    /** 회전 부호 A/B 토글 — GL 쪽과 반드시 같은 값을 유지해야 한다. */
+    fun setScreenRotationInverted(inverted: Boolean) {
+        if (screenRotationInverted != inverted) {
+            screenRotationInverted = inverted
+            invalidate()
+        }
+    }
+
     // 디버그 모드
     var debugMode: Boolean = false
 
@@ -210,6 +254,17 @@ class OverlayView @JvmOverloads constructor(
 
     // 렌즈 표시 여부
     var showLens: Boolean = true
+
+    // GL 최종 blit의 등방 확대 배율과 맞추는 값 (CameraGLRenderer.setDisplayZoom 동기화용).
+    // 1.0 = 무확대(현행 동일). GPU 데모는 showLens=false라 실제 영향 대상은 디버그 마커다.
+    var displayZoom: Float = 1.0f
+        set(value) {
+            val z = value.coerceIn(1.0f, 1.5f)
+            if (field != z) {
+                field = z
+                invalidate()
+            }
+        }
 
     // === 필터된 프레임 렌더링 ===
     // 뷰티 필터가 적용된 프레임을 배경으로 표시
@@ -529,6 +584,23 @@ class OverlayView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
+        val k = rotQuadrant()
+        if (k == 0) {
+            drawContent(canvas)
+            return
+        }
+        // 논리 캔버스(정립 좌표계) → 실제 뷰 좌표 매핑. GL 최종 blit의 정점 회전과 같은 방향.
+        val saved = canvas.save()
+        when (k) {
+            1 -> { canvas.translate(0f, height.toFloat()); canvas.rotate(-90f) }
+            2 -> { canvas.translate(width.toFloat(), height.toFloat()); canvas.rotate(180f) }
+            else -> { canvas.translate(width.toFloat(), 0f); canvas.rotate(90f) }
+        }
+        drawContent(canvas)
+        canvas.restoreToCount(saved)
+    }
+
+    private fun drawContent(canvas: Canvas) {
         // 필터된 프레임 배경 렌더링 (뷰티 필터 활성화 시)
         if (showFilteredFrame) {
             filteredFrame?.let { frame ->
@@ -576,17 +648,20 @@ class OverlayView @JvmOverloads constructor(
         // FIT: min() — 이미지가 뷰 안에 맞춤 (레터박스)
         // COVER: max() — 이미지가 뷰를 완전히 채움 (넘치는 부분 crop, GL Cover 출력과 동일)
         val useFitMode = screenMappingMode == ScreenMappingMode.FIT
+        // displayZoom: GL 최종 blit의 등방 확대(CameraGLRenderer.setDisplayZoom)와 동일 배율을
+        // 곱해 디버그 마커(메시·홍채)가 확대된 영상 위에 계속 정합하게 한다.
+        // offsetX/offsetY는 아래에서 이 값으로부터 파생되므로 자동 동기화된다.
         val scaleFactor = computeScreenTransform(
-            imageWidth, imageHeight, width, height, useFitMode
-        )
+            imageWidth, imageHeight, vw, vh, useFitMode
+        ) * displayZoom
 
         // 스케일된 이미지 크기
         val scaledImageWidth = imageWidth * scaleFactor
         val scaledImageHeight = imageHeight * scaleFactor
 
         // 이미지를 뷰 중앙에 배치하기 위한 오프셋
-        val offsetX = (width - scaledImageWidth) / 2f
-        val offsetY = (height - scaledImageHeight) / 2f
+        val offsetX = (vw - scaledImageWidth) / 2f
+        val offsetY = (vh - scaledImageHeight) / 2f
 
         // 렌즈 텍스처 렌더링 (별도의 긴 타임아웃 적용)
         // 깜빡임 방지: 검출 실패해도 3초간 마지막 위치에 렌즈 유지
@@ -722,17 +797,17 @@ class OverlayView @JvmOverloads constructor(
      */
     private fun drawFilteredFrame(canvas: Canvas, frame: Bitmap) {
         // fillCenter 스케일링 계산 (PreviewView와 동일)
-        val scaleFactor = max(width.toFloat() / frame.width, height.toFloat() / frame.height)
+        val scaleFactor = max(vw.toFloat() / frame.width, vh.toFloat() / frame.height)
         val scaledWidth = frame.width * scaleFactor
         val scaledHeight = frame.height * scaleFactor
-        val offsetX = (width - scaledWidth) / 2f
-        val offsetY = (height - scaledHeight) / 2f
+        val offsetX = (vw - scaledWidth) / 2f
+        val offsetY = (vh - scaledHeight) / 2f
 
         canvas.save()
 
         // 미러링 적용 (전면 카메라)
         if (isMirror) {
-            canvas.scale(-1f, 1f, width / 2f, height / 2f)
+            canvas.scale(-1f, 1f, vw / 2f, vh / 2f)
         }
 
         // 프레임 그리기
@@ -817,7 +892,7 @@ class OverlayView @JvmOverloads constructor(
 
         // 미러링 (전면 카메라)
         if (isMirror) {
-            cx = width - cx
+            cx = vw - cx
         }
 
         // 캐시된 스케일 비트맵 가져오기 (없거나 크기 변경 시 새로 생성)
@@ -875,7 +950,7 @@ class OverlayView @JvmOverloads constructor(
 
             // 미러링 (전면 카메라)
             if (isMirror) {
-                screenX = width - screenX
+                screenX = vw - screenX
             }
 
             if (i == 0) {
@@ -920,7 +995,7 @@ class OverlayView @JvmOverloads constructor(
         // 정규화 랜드마크 → 화면좌표 (buildEyePath와 동일: coerce + scale + isMirror X-flip)
         fun screenX(idx: Int): Float {
             var s = mesh[idx * 3].coerceIn(0f, 1f) * imageWidth * scaleFactor + offsetX
-            if (isMirror) s = width - s
+            if (isMirror) s = vw - s
             return s
         }
         fun screenY(idx: Int): Float =
@@ -1013,7 +1088,7 @@ class OverlayView @JvmOverloads constructor(
 
         // 미러링 (전면 카메라)
         if (isMirror) {
-            cx = width - cx
+            cx = vw - cx
         }
 
         // 1) Raw 홍채 반경 원 (파란색 점선 - 실제 홍채 경계)
@@ -1043,7 +1118,7 @@ class OverlayView @JvmOverloads constructor(
     ) {
         var cx = normalizedX * imageWidth * scaleFactor + offsetX
         val cy = normalizedY * imageHeight * scaleFactor + offsetY
-        if (isMirror) cx = width - cx
+        if (isMirror) cx = vw - cx
         canvas.drawCircle(cx, cy, radius * scaleFactor, rawDiagRingPaint)
         canvas.drawCircle(cx, cy, 9f, rawDiagDotPaint)
     }
@@ -1059,7 +1134,7 @@ class OverlayView @JvmOverloads constructor(
     ) {
         var cx = normalizedX * imageWidth * scaleFactor + offsetX
         val cy = normalizedY * imageHeight * scaleFactor + offsetY
-        if (isMirror) cx = width - cx
+        if (isMirror) cx = vw - cx
         canvas.drawCircle(cx, cy, 7f, filteredDiagDotPaint)
     }
 
@@ -1083,8 +1158,8 @@ class OverlayView @JvmOverloads constructor(
 
             // 미러링 (전면 카메라)
             if (isMirror) {
-                val tempLeft = width - right
-                right = width - left
+                val tempLeft = vw - right
+                right = vw - left
                 left = tempLeft
             }
 
@@ -1130,8 +1205,8 @@ class OverlayView @JvmOverloads constructor(
             val bottom = (result.faceRectY + result.faceRectHeight) * imageHeight * scaleFactor + offsetY
 
             if (isMirror) {
-                val tempLeft = width - right
-                right = width - left
+                val tempLeft = vw - right
+                right = vw - left
                 left = tempLeft
             }
 
@@ -1169,11 +1244,11 @@ class OverlayView @JvmOverloads constructor(
         val lineHeight = debugTextPaint.fontSpacing
         val bgHeight = lineHeight * textLines.size + 20
 
-        tempRect.set(10f, height - bgHeight - 10, 450f, height - 10f)
+        tempRect.set(10f, vh - bgHeight - 10, 450f, vh - 10f)
         canvas.drawRect(tempRect, debugBgPaint)
 
         // 텍스트
-        var y = height - bgHeight + lineHeight
+        var y = vh - bgHeight + lineHeight
         for (line in textLines) {
             canvas.drawText(line, 20f, y, debugTextPaint)
             y += lineHeight
@@ -1201,7 +1276,7 @@ class OverlayView @JvmOverloads constructor(
             val screenY = y * imageHeight * scaleFactor + offsetY
 
             if (isMirror) {
-                screenX = width - screenX
+                screenX = vw - screenX
             }
 
             canvas.drawCircle(screenX, screenY, MESH_POINT_RADIUS, meshPointPaint)
@@ -1239,7 +1314,7 @@ class OverlayView @JvmOverloads constructor(
 
             // 미러링 (전면 카메라)
             if (isMirror) {
-                screenX = width - screenX
+                screenX = vw - screenX
             }
 
             canvas.drawCircle(screenX, screenY, MESH_POINT_RADIUS, meshPointPaint)
@@ -1381,7 +1456,7 @@ class OverlayView @JvmOverloads constructor(
         val screenY = rawY * imageHeight * scaleFactor + offsetY
 
         if (isMirror) {
-            screenX = width - screenX
+            screenX = vw - screenX
         }
 
         // 중심은 더 크게, 경계는 작게
@@ -1419,8 +1494,8 @@ class OverlayView @JvmOverloads constructor(
             val screenY2 = y2 * imageHeight * scaleFactor + offsetY
 
             if (isMirror) {
-                screenX1 = width - screenX1
-                screenX2 = width - screenX2
+                screenX1 = vw - screenX1
+                screenX2 = vw - screenX2
             }
 
             canvas.drawLine(screenX1, screenY1, screenX2, screenY2, meshLinePaint)

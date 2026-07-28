@@ -42,11 +42,10 @@ cmake -DBUILD_TESTS=ON ..
 make
 ```
 
-### Android/iOS 빌드
+### Android 빌드
 ```bash
-./scripts/build_android.sh
-./scripts/build_ios.sh
-./scripts/build_all.sh
+./scripts/build_android.sh      # 코어 .so
+./scripts/build_android_aar.sh  # AAR 패키징
 ```
 
 ### 테스트 실행
@@ -72,34 +71,7 @@ C++ Core Engine (핵심 로직)
 Third Party (MediaPipe, OpenCV, TFLite)
 ```
 
-### 핵심 컴포넌트
-
-| 컴포넌트 | 역할 | 파일 |
-|----------|------|------|
-| `IrisDetector` | 홍채 검출 추상 인터페이스 | `core/include/iris_detector.h` |
-| `MediaPipeDetector` | MediaPipe 기반 구현체 | `core/include/mediapipe_detector.h` |
-| `LensRenderer` | 가상 렌즈 렌더링 | `core/include/lens_renderer.h` |
-| `SDKManager` | 싱글톤 관리자 | `core/include/sdk_manager.h` |
-| `sdk_api.h` | C API 래퍼 (바인딩용) | `core/include/sdk_api.h` |
-
-### 검출기 인터페이스 패턴
-
-모델 교체를 위해 Strategy 패턴 사용:
-```
-IrisDetector (인터페이스)
-├── MediaPipeDetector (Phase 1)
-├── EyeOnlyDetector (Phase 2)
-└── HybridDetector (Phase 2 - MediaPipe 실패시 EyeOnly 폴백)
-```
-
-## 플랫폼별 바인딩
-
-| 플랫폼 | 바인딩 | 결과물 | 위치 |
-|--------|--------|--------|------|
-| Android | JNI | libiris_sdk.so → AAR | `bindings/android/` |
-| iOS | Objective-C++ | IrisSDK.xcframework | `bindings/ios/` |
-| Flutter | dart:ffi | Plugin | `bindings/flutter/` |
-| Web | Emscripten | WASM + JS | `bindings/web/` |
+코어 헤더는 `cpp/include/iris_sdk/`, 플랫폼 바인딩은 최상위 `android/` `ios/` `flutter/` `web/`에 있습니다.
 
 ## C API 사용 규칙
 
@@ -123,21 +95,6 @@ IrisDetector (인터페이스)
 - 얼굴 전체 인식 필수 (눈만 클로즈업시 실패)
 - 극단적 각도(45°+)에서 불안정
 - Phase 2에서 Eye-Only 커스텀 모델로 보완 예정
-
-## 개발 순서
-
-1. **core/** - C++ 코어 엔진 먼저 구현
-2. **bindings/android/** - JNI 바인딩 (테스트 용이)
-3. **bindings/ios/** - iOS Framework
-4. **bindings/flutter/** - Flutter Plugin
-5. **bindings/web/** - WASM (선택적)
-
-## 의존성
-
-- MediaPipe: Apache 2.0 (Face Mesh + Iris Tracking)
-- OpenCV 4.x: Apache 2.0 (이미지 처리)
-- TensorFlow Lite 2.x: Apache 2.0 (커스텀 모델용)
-- CMake 3.18+, C++17
 
 ## 주의사항
 
@@ -183,7 +140,3 @@ cpp/
 - 의사결정 사항 및 이유
 - 이슈 및 해결 방안
 - 다음 단계
-
-**현재 작업 문서**:
-- `000_implementation_plan.md` - 전체 구현 계획서 (승인됨)
-- `001_project_setup.md` - 프로젝트 초기 구조 설정

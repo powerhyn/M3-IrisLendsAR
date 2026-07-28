@@ -252,6 +252,40 @@ class CameraGLView @JvmOverloads constructor(
     }
 
     /**
+     * 화면(디스플레이) 회전 설정 (0, 90, 180, 270).
+     * 최종 blit 전용 — 링 FBO/랜드마크 좌표계는 불변.
+     */
+    fun setScreenRotation(rotation: Int) {
+        queueEvent {
+            glRenderer.setScreenRotation(rotation)
+        }
+    }
+
+    /** 회전 부호 A/B 토글 (실기기 육안 확정용). */
+    fun setScreenRotationInverted(inverted: Boolean) {
+        queueEvent {
+            glRenderer.setScreenRotationInverted(inverted)
+        }
+    }
+
+    /**
+     * 최종 blit 등방 확대 배율 (FOV 확대). 1.0 = 무확대.
+     * 4:3 캡처를 가로 창에 Cover로 깔면 배율이 최소치에 고정되는 문제 보정용.
+     */
+    fun setDisplayZoom(zoom: Float) {
+        queueEvent {
+            glRenderer.setDisplayZoom(zoom)
+        }
+    }
+
+    /** 업스케일 품질 모드 (0=bilinear, 1=bicubic, 2=bicubic+언샤프). */
+    fun setUpscaleMode(mode: Int, sharpen: Float = 0.35f) {
+        queueEvent {
+            glRenderer.setUpscaleMode(mode, sharpen)
+        }
+    }
+
+    /**
      * 렌즈 설정
      */
     fun setLensConfig(config: LensConfig) {

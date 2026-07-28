@@ -29,6 +29,25 @@ class LensAdapter(
     // 현재 선택된 렌즈 ID
     private var selectedLensId: String = NoLens.ID
 
+    // 아이템 레이아웃 — 세로(가로 스크롤 레일)는 item_lens, 가로 모드 우측 세로 리스트는 item_lens_land.
+    // viewType으로 그대로 사용하므로 전환 시 기존 ViewHolder가 재사용되지 않고 새로 inflate된다
+    // (RecycledViewPool을 수동으로 비울 필요 없음).
+    private var itemLayoutRes: Int = R.layout.item_lens
+
+    /**
+     * 아이템 레이아웃 전환 (세로 ↔ 가로).
+     *
+     * @param layoutRes [R.layout.item_lens] 또는 [R.layout.item_lens_land].
+     *                  두 레이아웃은 lensContainer/lensImage/lensName id를 공유해야 한다.
+     */
+    fun setItemLayout(layoutRes: Int) {
+        if (itemLayoutRes == layoutRes) return
+        itemLayoutRes = layoutRes
+        notifyDataSetChanged()
+    }
+
+    override fun getItemViewType(position: Int): Int = itemLayoutRes
+
     /**
      * 뷰홀더
      */
@@ -40,7 +59,7 @@ class LensAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): LensViewHolder {
         val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_lens, parent, false)
+            .inflate(viewType, parent, false)
         return LensViewHolder(view)
     }
 
