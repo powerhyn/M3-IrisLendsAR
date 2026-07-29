@@ -1321,6 +1321,16 @@ class GpuRenderActivity : AppCompatActivity() {
 
             Log.d(TAG, "Camera bound successfully")
 
+            // SHARP 진단: 회전 생산자 후보 비교.
+            // 현재 frameRotation의 유일한 생산자는 ImageAnalysis의 imageInfo.rotationDegrees라
+            // (a) 프리뷰 surface보다 늦게 오고 (b) ImageAnalysis 미바인딩 경로에선 아예 안 온다.
+            // sensorRotationDegrees가 같은 값이면 bind 시점 선주입으로 둘 다 해소된다.
+            Log.d(
+                TAG,
+                "SHARP 회전 생산자: sensorRotationDegrees=" +
+                    "${camera.cameraInfo.sensorRotationDegrees}, screenRot=${currentScreenRotationDeg()}"
+            )
+
             // 진단: 이 카메라가 SurfaceTexture 로 실제 내보낼 수 있는 크기 목록.
             // CameraX Preview 는 관례상 ≤1080p 로 잘라 주므로, 여기 더 큰 값이 있으면
             // "하드웨어 한계"가 아니라 "CameraX 정책"이라는 뜻이다(= Camera2 직행 시 이득 있음).
@@ -1358,7 +1368,14 @@ class GpuRenderActivity : AppCompatActivity() {
         if (rotation != lastRotation) {
             lastRotation = rotation
             cameraGLView.setFrameRotation(rotation)
-            Log.d(TAG, "Camera rotation (TASKS): $rotation")
+            // SHARP 진단: 분석 버퍼 실치수를 함께 남긴다. 링 전치 정본화의 전제인
+            // "IrisResult.frameWidth/Height(upright) 종횡비 == 링 콘텐츠 종횡비"가
+            // 성립하는지 판정하려면 요청값(960x540)이 아니라 실제로 온 치수가 필요하다.
+            Log.d(
+                TAG,
+                "Camera rotation (TASKS): $rotation, analysis buffer=" +
+                    "${imageProxy.width}x${imageProxy.height}, screenRot=${currentScreenRotationDeg()}"
+            )
         }
         ensureFaceTracker().analyze(imageProxy)
     }
@@ -1900,9 +1917,9 @@ class GpuRenderActivity : AppCompatActivity() {
                         cameraGLView.requestRingDump(dir)
                     }
                     ACTION_SET_RING_SWAP -> {
-                        val on = intent.getBooleanExtra("on", false)
-                        cameraGLView.setRingSwapDiag(on)
-                        Log.i(TAG, "SHARP 진단: 링 전치 보정 → $on")
+                        val legacy = intent.getBooleanExtra("legacy", false)
+                        cameraGLView.setRingLegacyTranspose(legacy)
+                        Log.i(TAG, "SHARP 게이트: 구 전치 동작 복원 → $legacy")
                     }
                     ACTION_SET_UPSCALE -> {
                         val mode = intent.getIntExtra("mode", 1).coerceIn(0, 2)

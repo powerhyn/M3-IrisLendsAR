@@ -324,23 +324,37 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     @Volatile private var dumpRingDir: java.io.File? = null
 
     //=========================================================================
-    // 선명도 실측 진단 — 링 FBO '전치(transpose)' A/B (SHARP §6-3 검증)
+    // 링 FBO 치수 계약 (SHARP — 전치 리샘플 수정)
     //
-    // 실측(2026-07-28): stMatrix 는 항등인데 링 FBO 내용은 FMLens 화면 기준 3.03배 비등방이고,
-    // 최종 blit 이 그 역(2.85/0.90=3.17배)을 걸어 화면에서만 상쇄된다. 즉 카메라가 주는 버퍼는
-    // 세로형(1080x1920)인데 링 FBO 를 request.resolution(1920x1080) 그대로 잡아 **전치 상태로
-    // 리샘플**하고 있다 — 장면의 가로축 표본이 1920→1080 으로 소거된 뒤 화면에서 2.85배로 다시
-    // 늘어난다. 이 왕복이 가로 고주파를 잃는 실제 원인이다(가로 2차차분 0.86 vs FMLens 2.16).
+    // 카메라가 채우는 OES 버퍼는 회전이 **이미 반영된** 상태다(실측: TransformationInfo
+    // hasCameraTransform=true, rotationDegrees=270, stMatrix=정확한 항등행렬). 즉 1920x1080 을
+    // 요청해도 실제 버퍼는 1080x1920 세로형이다. 그런데 링 FBO 를 request.resolution 그대로
+    // 1920x1080 으로 잡으면 stMatrix 가 항등이라 OES [0,1]^2 → 링 [0,1]^2 매핑이 그대로
+    // **전치 리샘플**이 된다: 장면 가로축 표본이 1920→1080 으로 소거되고(되돌릴 수 없음)
+    // 세로축은 1080→1920 으로 무의미하게 증폭된다. 최종 blit 의 Cover 계산이 치수를 되교환해
+    // 종횡비만 복원하므로 화면에서는 왜곡이 아니라 '가로 뭉개짐'으로만 드러났다.
     //
-    // ON 이면 링/렌즈 FBO 를 실제 콘텐츠 치수로 잡고 blit 도 등방(×1.584)으로 맞춰 A/B 한다.
-    //   adb shell am broadcast -a com.irislenssdk.demo.SET_RING_SWAP --ez on true
-    // ⚠️ 진단 전용 기본 OFF — 랜드마크/렌즈 좌표 계약(resolveCoordinateSpace)은 아직 미조정이라
-    //    렌즈를 켜면 정합이 어긋난다. 배경 선명도 A/B 용도로만 쓴다.
+    // 실측 근거(2026-07-28, SM-X920): 링덤프↔화면 정합 NCC 0.9948 → 배율 x2.850 / y0.900,
+    // 링덤프↔FMLens(기하 기준) 비등방 3.034, 전치 보정 시 가로 2차차분 1.227→3.346(2.73배 복구),
+    // 가로/세로 비 0.221→0.612 로 FMLens(0.634)와 일치. 상세: docs/workPaper/SHARP_ring_fbo_transpose.md
+    //
+    // 계약: **ringW/ringH 가 링 공간의 단일 진리원**이며 항상 '카메라 upright 콘텐츠 실치수'다.
+    // 회전이 90/270 이면 요청 치수를 교환해 잡는다. 이 규칙은 회전이 버퍼에 구워져 있든
+    // stMatrix 에 실려 있든 동일하게 옳다 — 어느 쪽이든 FBO 가 받는 콘텐츠는 upright 이므로
+    // upright 종횡비로 잡아야 1:1 무손실이 된다.
     //=========================================================================
-    @Volatile private var ringSwapDiag = false
-    @Volatile private var ringSwapPending = false
 
-    /** 실제로 할당된 링/렌즈 FBO 치수. 전치 진단에서 frameWidth/Height 와 갈릴 수 있다. */
+    /**
+     * 구(舊) 전치 동작 복원 킬스위치 — 게이트 검증용 A/B. 기본 false(=수정 적용).
+     *
+     * true 면 수정 전과 픽셀 동일하게 동작한다. 렌즈 ON 상태 선명도 게이트에서
+     * "수정이 실제로 살아 있는가"를 같은 빌드로 대조하는 유일한 수단이라 남겨 둔다.
+     *   adb shell am broadcast -a com.irislenssdk.demo.SET_RING_SWAP --ez legacy true
+     */
+    @Volatile private var ringLegacyTranspose = false
+    @Volatile private var ringRecreatePending = false
+
+    /** 링/렌즈 FBO 실치수 — 링 공간의 단일 진리원 (위 계약 참조). */
     private var ringW: Int = 0
     private var ringH: Int = 0
 
@@ -508,6 +522,10 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         }
         ringWrite = 0
         ringCount = 0
+        // 링 치수도 무효화한다 — 링 자원이 없는데 ringW/ringH가 남아 있으면
+        // 렌즈/뷰티가 존재하지 않는 텍스처의 치수를 native에 넘긴다.
+        ringW = 0
+        ringH = 0
         // 구 SurfaceTexture는 파괴된 컨텍스트의 OES에 묶였던 stale — release 후 새로 만든다.
         surfaceTexture?.let { runCatching { it.release() } }
         surfaceTexture = null
@@ -616,9 +634,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
         // 분석측 imageInfo.timestamp와 동일 클럭(클럭 게이트 실기기 검증 완료, 06-15).
         val frameTsNs = surfaceTexture?.timestamp ?: 0L
 
-        // 선명도 진단(SHARP §6-3): 전치 토글이 바뀌었으면 중간 버퍼를 재생성한다.
-        if (ringSwapPending) {
-            ringSwapPending = false
+        // 킬스위치(구 전치 동작 복원)가 토글됐으면 중간 버퍼를 재생성한다 — 게이트 A/B 전용.
+        if (ringRecreatePending) {
+            ringRecreatePending = false
             if (frameWidth > 0 && frameHeight > 0) {
                 recreateIntermediateBuffers(frameWidth, frameHeight)
             }
@@ -738,6 +756,13 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 종횡비를 어기면 MediaPipe 가 찌그러진 얼굴을 보고 렌즈가 타원이 된다.
      */
     private fun ensureAnalysisTarget(): Boolean {
+        // ⚠️ 링과 **같은 전치 리샘플 버그가 여기에도 잠복**해 있다(현재 setAnalysisEnabled 호출자 0
+        //    = 미배선이라 실동작 영향 없음). 배선 시 반드시 함께 재판정할 것:
+        //    치수를 링처럼 콘텐츠 실치수로 바꾸면 아래 renderAndReadAnalysis 콜백의
+        //    rotationDegrees(현재 frameRotation)도 0으로 바뀌어야 한다. 둘 중 하나만 바꾸면
+        //    TasksToIrisResult의 upright 스왑 결과가 링 종횡비와 어긋나 렌즈가 타원이 된다.
+        //    (현행 조합 512x288 + rot270 → upright 288x512 = 0.5625 = 링 종횡비. 우연히 정합.)
+        //    지금은 의도적으로 손대지 않는다 — 반쪽 변경이 가장 위험하다.
         val srcW = frameWidth
         val srcH = frameHeight
         if (srcW <= 0 || srcH <= 0) return false
@@ -945,8 +970,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     /**
      * 렌즈 FBO 생성
      */
+    // ⚠️ 도달 불가(dead) — lensFboId는 이 함수 안에서만 non-zero가 되는데, 유일한 호출처가
+    //    recreateIntermediateBuffers의 `if (lensFboId != 0)` 가드다. 실제 렌즈 출력은 native
+    //    TexturePool이 담당한다(gpu_lens_renderer.cpp acquireRenderTarget). 삭제는 별도 정리에서.
     private fun createLensFbo() {
-        // 링과 같은 공간에서 합성해야 하므로 링 FBO 실치수를 따른다(전치 진단 포함).
+        // 링과 같은 공간에서 합성해야 하므로 링 FBO 실치수를 따른다.
         val width = if (ringW > 0) ringW else viewWidth
         val height = if (ringH > 0) ringH else viewHeight
 
@@ -1008,8 +1036,15 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             return inputTexture
         }
 
-        val texWidth = if (frameWidth > 0) frameWidth else viewWidth
-        val texHeight = if (frameHeight > 0) frameHeight else viewHeight
+        // ⚠️ 이것은 '검출 프레임 치수'가 아니라 **입력 텍스처(링 FBO)의 실제 픽셀 치수**다.
+        // native GPULensRenderer는 이 값으로 출력 렌더타깃을 잡고 glViewport를 건다
+        // (gpu_lens_renderer.cpp: acquireRenderTarget(width,height) + glViewport(0,0,width,height)).
+        // 링 실치수(1080x1920)와 어긋난 값(1920x1080)을 주면 렌즈 패스가 **재전치 리샘플**을
+        // 수행해 이번 수정으로 복구한 가로 표본을 그대로 다시 소거한다.
+        // 렌즈 원 자체는 uFrameAspect + 정규화 UV로 정의되므로 화면 정합은 이 값과 무관하다 —
+        // 즉 여기가 틀려도 '타원'으로는 안 보이고 **선명도로만** 드러난다(게이트 주의).
+        val texWidth = if (ringW > 0) ringW else if (frameWidth > 0) frameWidth else viewWidth
+        val texHeight = if (ringH > 0) ringH else if (frameHeight > 0) frameHeight else viewHeight
 
         // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3)
 
@@ -1055,9 +1090,10 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * @return 출력 텍스처 ID
      */
     private fun applyGpuBeautyFilter(inputTexture: Int, detectionHandle: Long): Int {
-        // 프레임 크기 사용
-        val texWidth = if (frameWidth > 0) frameWidth else viewWidth
-        val texHeight = if (frameHeight > 0) frameHeight else viewHeight
+        // 입력 텍스처(링/렌즈 출력)의 실제 픽셀 치수. 렌즈와 동일한 이유로 ringW/ringH를 쓴다 —
+        // 어긋나면 뷰티 패스가 재전치 리샘플을 수행해 선명도 복구를 무효화한다.
+        val texWidth = if (ringW > 0) ringW else if (frameWidth > 0) frameWidth else viewWidth
+        val texHeight = if (ringH > 0) ringH else if (frameHeight > 0) frameHeight else viewHeight
 
         // detectionHandle은 onDrawFrame의 단일 슬롯 스냅샷(getActiveDetectionSlot)에서 전달됨 (W4-B3, lock-free)
 
@@ -1116,9 +1152,11 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
 
         // Aspect ratio 보정 스케일 계산 (Cover 모드 - 화면 꽉 채우기, 넘치는 부분 crop)
         // 회전 고려: 90도 또는 270도 회전 시 width/height 교환
-        // 전치 진단 ON 이면 링 FBO 가 이미 콘텐츠 실치수라 여기서 다시 교환하면 안 된다
-        // (교환은 '링이 전치되어 있다'를 보정하던 것이므로 이중 적용이 된다).
-        val isRotated = (frameRotation == 90 || frameRotation == 270) && !ringSwapDiag
+        // 링 FBO 는 이제 콘텐츠 실치수(upright)라 여기서 다시 교환하지 않는다.
+        // 종전에는 링이 전치돼 있어 여기서 되교환해 종횡비만 복원했고, 그 되교환이 화면에서
+        // 비등방(x2.85/y0.90)을 만들어 가로 뭉개짐의 마지막 절반을 담당했다.
+        // 킬스위치가 켜진 경우에만 그 구 동작을 재현한다.
+        val isRotated = ringLegacyTranspose && (frameRotation == 90 || frameRotation == 270)
         val srcTexW = if (ringW > 0) ringW else viewWidth
         val srcTexH = if (ringH > 0) ringH else viewHeight
         val texWidth = if (isRotated) srcTexH else srcTexW
@@ -1211,6 +1249,9 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      *
      * @return (detW, detH) 렌즈 계산에 사용할 좌표 기준 크기
      */
+    @Suppress("unused")  // ⚠️ 호출자 0 — dead code. 렌즈 좌표는 native가 IrisResult의
+    // frame_width/height로 직접 계산하므로(uFrameAspect) 이 함수는 링 치수와 무관하다.
+    // SHARP 전치 수정에서 '동반 조정 필수'로 지목됐던 곳이지만 실제로는 조정 대상이 아니다.
     private fun resolveCoordinateSpace(result: IrisResult): Pair<Int, Int> {
         // 1순위: 검출 결과의 프레임 크기 (이미 회전 적용됨)
         if (result.frameWidth > 0 && result.frameHeight > 0) {
@@ -1338,11 +1379,42 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     }
 
     /**
-     * 카메라 회전 설정 (0, 90, 180, 270)
+     * 카메라 회전 설정 (0, 90, 180, 270) — 버퍼를 시계방향으로 이만큼 돌리면 upright가 된다.
+     *
+     * 이 값은 링 FBO 치수를 결정하므로(전치 수정) 늦게 도착하면 링을 다시 잡아야 한다.
+     * 실측(SM-X920): 프리뷰 surface 충족은 12:58:11.088인데 ImageAnalysis 경로의 회전은
+     * 11.436에 온다(348ms 늦음). 순서를 '보장'하는 대신 **멱등 재생성**으로 자가 치유한다 —
+     * 치수와 회전 중 무엇이 먼저 오든 나중 것이 재생성을 한 번 더 유발하면 종단 상태가 같다.
+     * (CameraGLView가 Preview 자신의 TransformationInfo로도 이 값을 넣어 주므로 보통은
+     *  setFrameSize와 거의 동시에 확정되고, ImageAnalysis 호출은 변경 가드에 걸려 no-op이 된다.)
      */
     fun setFrameRotation(rotation: Int) {
+        // 로그는 가드 **앞**에 둔다 — rotation==0이면 필드 초기값과 같아 가드에 걸리는데,
+        // 그때도 '값이 도달했다'는 사실은 관측 가능해야 폰(세로) 게이트를 판정할 수 있다.
+        Log.d(TAG, "Frame rotation set: $rotation (prev=$frameRotation)")
+        if (this.frameRotation == rotation) return
         this.frameRotation = rotation
-        Log.d(TAG, "Frame rotation set: $rotation")
+
+        // 링을 이미 만든 적이 있고(=EGL 자원 유효) 계산된 치수가 실제로 달라질 때만 재생성한다.
+        // ringTex[0]==0 이면 컨텍스트 손실/초기화 전이라 건드리지 않는다 —
+        // 뒤따르는 onSurfaceChanged가 자가 치유하므로 멱등성은 유지된다.
+        // 치수 비교로 억제하지 않으면 전/후면 전환(270↔90)처럼 치수가 같은 경우에도
+        // frame-sync 링 워밍업과 클럭 도메인 검증이 매번 처음부터 다시 돈다.
+        if (ringTex[0] != 0 && frameWidth > 0 && frameHeight > 0) {
+            val (w, h) = ringDimsFor(frameWidth, frameHeight)
+            if (w != ringW || h != ringH) {
+                recreateIntermediateBuffers(frameWidth, frameHeight)
+            }
+        }
+    }
+
+    /**
+     * 요청 치수(센서 좌표) → 링 FBO 실치수. 회전 90/270이면 교환한다.
+     * 킬스위치가 켜져 있으면 구 동작(교환 없음 = 전치 리샘플)을 그대로 재현한다.
+     */
+    private fun ringDimsFor(requestedW: Int, requestedH: Int): Pair<Int, Int> {
+        val rotated = !ringLegacyTranspose && (frameRotation == 90 || frameRotation == 270)
+        return if (rotated) Pair(requestedH, requestedW) else Pair(requestedW, requestedH)
     }
 
     /**
@@ -1393,14 +1465,17 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
     }
 
     /**
-     * 선명도 진단(SHARP §6-3) — 링/렌즈 FBO 전치 보정 A/B 토글.
-     * 다음 프레임에서 중간 버퍼를 재생성한다. 기본 OFF(현행과 픽셀 동일).
+     * 구 전치 동작 복원 킬스위치 (SHARP 게이트 A/B 전용). 기본 false = 수정 적용.
+     *
+     * 게이트가 실패했을 때 '이번 수정 탓인지'를 같은 빌드에서 가르는 유일한 수단이다.
+     * 특히 렌즈 ON 선명도 게이트는 이 토글로만 검출력을 증명할 수 있다 —
+     * 렌즈 기하는 UV 불변이라 치수 인자가 틀려도 '타원'으로는 드러나지 않기 때문이다.
      */
-    fun setRingSwapDiag(on: Boolean) {
-        if (ringSwapDiag == on) return
-        ringSwapDiag = on
-        ringSwapPending = true
-        Log.i(TAG, "SHARP 전치 진단 → $on (다음 프레임에 링 재생성)")
+    fun setRingLegacyTranspose(legacy: Boolean) {
+        if (ringLegacyTranspose == legacy) return
+        ringLegacyTranspose = legacy
+        ringRecreatePending = true
+        Log.i(TAG, "SHARP 구 전치 동작 복원 → $legacy (다음 프레임에 링 재생성)")
     }
 
     /**
@@ -1479,10 +1554,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
      * 중간 버퍼 (RGBA 텍스처 + FBO) 생성
      */
     private fun recreateIntermediateBuffers(requestedW: Int, requestedH: Int) {
-        // 전치 진단(ON): 카메라 버퍼가 세로형이므로 회전 시 치수를 바꿔 잡아 리샘플을 없앤다.
-        val rotated = (frameRotation == 90 || frameRotation == 270)
-        val width = if (ringSwapDiag && rotated) requestedH else requestedW
-        val height = if (ringSwapDiag && rotated) requestedW else requestedH
+        // 링 치수 = 카메라 upright 콘텐츠 실치수 (필드 선언부의 계약 참조).
+        // 요청 치수(request.resolution)는 센서 좌표라 회전 90/270 이면 교환해야 실제 버퍼와 맞는다.
+        // ⚠️ '치수 동일이면 조기 return' 같은 멱등 가드를 여기 넣지 말 것 —
+        //    markGlHandlesStale 이 ringTex/ringFbo 를 0 으로 만든 뒤 같은 치수로 재진입하므로
+        //    조기 return 하면 링이 영영 안 만들어져 블랙스크린이 된다. 중복 억제는 호출부 책임.
+        val (width, height) = ringDimsFor(requestedW, requestedH)
         ringW = width
         ringH = height
 
@@ -1530,7 +1607,12 @@ class CameraGLRenderer : GLSurfaceView.Renderer {
             createLensFbo()
         }
 
-        Log.d(TAG, "Intermediate ring buffers created: ${width}x${height} x$ringSize")
+        // 판정 근거를 한 줄에 실어 둔다 — 게이트에서 '마지막 created 줄'만 보면 되게.
+        Log.d(
+            TAG,
+            "Intermediate ring buffers created: ${width}x${height} x$ringSize " +
+                "(req=${requestedW}x$requestedH rot=$frameRotation swapped=${width != requestedW})"
+        )
     }
 
     /** frame-sync 링버퍼(텍스처 + FBO) 일괄 해제. */

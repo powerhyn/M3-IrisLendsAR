@@ -1,7 +1,8 @@
 # SHARP — 선명도 격차 원인 확정: 링 FBO 전치(transpose) 리샘플
 
-> 상태: **✅ 원인 확정 · 처방 실측 검증 완료 / ⏳ 본수정(좌표 계약 반영) 미착수**
-> 브랜치: `feature/sharpness-measure` (기저 `feature/single-stream-camera` @ 1579bc7)
+> 상태: **✅ 원인 확정 · ✅ 본수정 구현 + 게이트 7/11 통과 / ⏳ 얼굴 필요 게이트 3건 + 폰 1건 미판정**
+> 브랜치: 실측 `feature/sharpness-measure`(098e0f7) → 본수정 `fix/ring-fbo-transpose`
+> 기저: `feature/single-stream-camera` @ 1579bc7
 > 선행 문서: `docs/ar-report/FMLENS_vs_IRISLENS_선명도_실측.md` (§6 절차를 이 문서가 실행)
 > 실측 일시: 2026-07-28 21:13 ~ 22:15 / 기기 Samsung SM-X920 (Galaxy Tab S10 Ultra), Android 16
 
@@ -181,19 +182,74 @@ ROI `x 1450–1950, y 1150–1500` (더 평탄한 타일면):
 
 ---
 
-## 7. 남은 일 (본수정)
+## 7. 본수정 (브랜치 `fix/ring-fbo-transpose`)
 
-이번 작업의 토글은 **진단 전용 기본 OFF**다. 배경 선명도 A/B만 검증했고, 좌표 계약은 손대지 않았다.
+### 7-1. 무엇을 고쳤나
 
-1. **`setFrameSize` 진입 치수 정본화** — 회전(90/270) 시 실제 버퍼 치수를 쓰도록. `Frame rotation set`이 `Providing surface`보다 **늦게** 도착하므로(실측 21:22:18.322 → .661) 두 값이 모두 확정된 뒤 재생성하는 순서 보장이 필요하다.
-2. **`resolveCoordinateSpace` / 랜드마크·렌즈 좌표 매핑** — 링 공간 치수가 바뀌므로 동반 조정 필수. **미검증.**
-3. **`ensureAnalysisTarget`** — `frameWidth/Height` 기반이라 같이 재검토 (현재 GL 분석 경로는 미배선이라 즉시 영향 없음).
-4. **렌즈 켠 상태 회귀** — 선행 문서 §6-3 경고대로 렌즈가 타원으로 찌그러지거나 좌우 반전·오프셋이 생길 수 있다. **렌즈를 실제로 선택하고** 확인할 것 (이번 측정은 렌즈 미선택 상태).
-5. **OverlayView 마커 정합** — GL과 같은 회전 부호를 쓰므로 함께 확인.
-6. **폰(세로 고정) 무회귀 확인** — 세로 고정 기기에서는 `frameRotation`이 0이라 경로가 항등이어야 한다.
-7. 진단 코드 제거 — `SET_RING_SWAP` / `DUMP_RING` / `SET_UPSCALE` 리시버와 `dumpRingSlot`은 트랙 종결 시 함께 제거.
+**`ringW`/`ringH`를 링 공간의 단일 진리원으로 승격**하고, 회전 90/270이면 요청 치수를 교환해 링/렌즈 FBO를 **항상 콘텐츠 실치수**로 잡는다. 링이 upright 실치수가 되므로 `renderToScreen`의 되교환(`isRotated`)을 제거하고, native 렌즈/뷰티에 넘기던 텍스처 치수를 `frameWidth/frameHeight`(센서 좌표) → `ringW/ringH`(실제 FBO)로 바꿨다.
 
----
+**회전 정본 생산자를 바꿨다.** 종전에는 `frameRotation`을 ImageAnalysis의 `imageInfo.rotationDegrees`에서만 얻었는데, 그 값이 링 치수를 결정하게 되면서 두 결함이 생긴다: (a) 프리뷰 surface보다 **348ms 늦게** 도착하고 (b) `EXPERIMENT_PREVIEW_ONLY`처럼 ImageAnalysis를 안 묶는 경로에선 **아예 오지 않아** 링이 전치 상태로 고착된다. `SurfaceRequest.setTransformationInfoListener`로 **프리뷰 자신의 회전**을 받아 둘 다 해소했다. 순서는 '보장'하지 않고 `setFrameRotation`의 **멱등 재생성**(계산 치수가 실제로 바뀔 때만)으로 자가 치유한다.
+
+실측 확정값 (SM-X920, 2026-07-29):
+
+| 값 | 실측 | 비고 |
+|---|---|---|
+| `TransformationInfo.rotationDegrees` | **270**, `hasCameraTransform=true` | surface 콜백과 **같은 ms**에 도착 |
+| `cameraInfo.sensorRotationDegrees` | **270** | bind 시점에 이미 확정, 위와 동일 |
+| `imageInfo.rotationDegrees` | 270 | 321ms 늦게 도착 → 이제 변경 가드에 걸려 no-op |
+| 분석 버퍼 실치수 | **512×288** (요청 960×540에서 폴백) | rot270 스왑 → upright 288×512 = 0.5625 = 링 종횡비와 일치 ✓ |
+| `frameRotation` (화면을 세로로 돌린 뒤) | **270 불변** | 화면 방향과 무관 — `targetRotation` 핀의 결과 |
+
+### 7-2. 검토에서 뒤집힌 것 (재조사 금지)
+
+멀티에이전트 매핑(5영역 108건) + 적대 검증 3관점 결과 중 **직접 확인해 사실로 확정**한 것:
+
+| 이전 계획/문서의 서술 | 판정 | 근거 |
+|---|---|---|
+| "`resolveCoordinateSpace` 동반 조정 필수" | **해당 없음** | 호출자 0건. 렌즈 좌표는 native가 `IrisResult.frame_width/height`로 직접 계산(`uFrameAspect`) |
+| "`createLensFbo`가 렌즈 출력을 담당" | **도달 불가(dead)** | `lensFboId`는 그 함수 안에서만 non-zero인데 유일 호출처가 `if (lensFboId != 0)` 가드. 실제 출력은 native `TexturePool` |
+| "치수 인자가 틀리면 렌즈가 타원이 된다" | **거짓** | 렌즈 기하는 전부 UV 공간이라 픽셀 치수와 독립. 틀리면 **타원이 아니라 선명도로만** 드러난다 — 게이트 설계의 함정 |
+| "`OverlayView`는 `displayZoom`을 모른다" | **거짓** | `OverlayView.kt:656`이 곱한다. Activity가 GL과 Overlay 양쪽에 동일 주입 |
+| "폰 세로 고정이면 `frameRotation=0`이라 무회귀" | **성립 불가 가능성 높음** | `targetRotation=ROTATION_0` 핀이라 화면 방향과 무관. 태블릿에서 화면을 세로로 돌려도 270 불변. 폰도 270이면 **무회귀가 아니라 동일 개선**이다 — 폰 실측 전까지 '무회귀'라고 쓰지 말 것 |
+
+### 7-3. 게이트 결과
+
+| 게이트 | 결과 |
+|---|---|
+| **G1 치수 정본화** | ✅ 콜드스타트 최종 `Intermediate ring buffers created: 1080x1920 (req=1920x1080 rot=270 swapped=true)`. 회전이 surface와 **같은 ms**에 도착해 재생성 1회로 수렴 |
+| **G2 버퍼 실증** | ✅ 덤프 파일명 `ring_1080x1920_rot270_scr90q1_*.png` |
+| **G3 배경 기하 (렌즈 OFF)** | ✅ 왜곡·블랙바·과크롭 없음. Render 61fps / Detect 31fps 유지 |
+| **G3b 뷰티 패스 ON 선명도** | ✅ 아래 표. **킬스위치 A/B로 게이트 검출력까지 증명** |
+| **G7-1 홈→복귀** | ✅ 링 1080×1920 유지(뷰 종횡비로 덮이지 않음). 전환 중 `onSurfaceChanged: 1848x2823` 과도기에도 불변 |
+| **G7-2 화면 회전** | ✅ `Screen rotation set: 0 (quadrant=0)`에서도 링 1080×1920 불변, 세로 기하 정상(등방 ×1.711) |
+| **G9 native 풀** | ✅ `TexturePool full` / `exceeds max` / `SDK lens render FAILED` 로그 없음 |
+| **G4 렌즈 정합** | ⏳ **미판정 — 얼굴 필요** |
+| **G5 뷰티 (턱 워프·스킨 마스크)** | ⏳ **미판정 — 얼굴 필요** |
+| **G6 OverlayView 마커** | ⏳ **미판정 — 얼굴 필요** |
+| **G8 폰** | ⏳ **미판정 — 폰 실기기 필요** |
+
+**G3b 정량 (뷰티 패스 활성, 동일 벽면 ROI x1950–2550 y300–1400):**
+
+| | 라플라시안 | 가로 2차 | 세로 2차 | 가로/세로 | 평균밝기 |
+|---|---|---|---|---|---|
+| 수정 | 7.944 | **2.349** | 3.648 | **0.644** | 161.0 |
+| 구동작(킬스위치 ON) | 6.058 | **1.000** | 3.627 | **0.276** | 160.7 |
+| 수정(재확인) | 7.993 | 2.372 | 3.663 | 0.648 | 160.8 |
+| FMLens 참고 | — | — | — | 0.634 | — |
+
+가로만 **2.35배** 개선, 세로 불변, 비가 FMLens와 일치. 재확인값이 첫 측정과 일치하고 평균밝기도 동일(161.0/160.7/160.8)해 장면 드리프트가 아님이 확인된다.
+
+> ⚠️ **이 게이트가 왜 필요한가**: 렌즈/뷰티에 넘기는 텍스처 치수가 틀리면 native 패스가 링을 **재전치 리샘플**해 이번 수정을 통째로 무효화한다(`gpu_lens_renderer.cpp`: `acquireRenderTarget(w,h)` + `glViewport(0,0,w,h)`). 그런데 렌즈 기하는 UV 불변이라 **육안으로는 멀쩡하고**, 링 덤프는 렌즈 패스 **이전**에 찍히므로 G2도 통과한다. 즉 렌즈/뷰티를 켠 상태의 선명도 측정만이 유일한 검출기다.
+
+### 7-4. 남은 일
+
+1. **G4 / G5 / G6** — 얼굴이 프레임에 있는 상태로 판정. 특히 G4는 '수정으로 깨졌는가'가 아니라 **'처음으로 맞는가'** 를 보는 게이트일 수 있다(태블릿 가로 렌즈 정합은 원래 미검증). 실패 시 원인 분리를 위해 킬스위치(`SET_RING_SWAP --ez legacy true`)로 구동작과 대조할 것.
+   - ⚠️ G4 전에 `rot:±` 부호를 먼저 확정할 것 — 부호가 틀린 상태로는 '전치 수정이 틀렸다'와 '회전 부호가 틀렸다'를 구분할 수 없다.
+2. **G8 폰** — `Frame rotation set: N (prev=…)` 1줄로 판정. 270이면 무회귀가 아니라 **동일 개선**이므로 G1~G6을 폰에서 그대로 재수행한다.
+3. **뷰티 튜닝 상수 재판정** — `jaw_warp_geometry.h`의 `kSigmaRatio 0.13` / `kMaxDispRatio 0.032`는 태블릿에서 3.16:1 비등방 공간에 튜닝돼 있었다. 등방이 되면서 워프 거동이 바뀐다(수치 회귀가 아니라 정상화). S23+ 세로에서 검증된 값이라면 오히려 같은 조건으로 되돌아가는 것이지만 육안 재확인 필요.
+4. **분석 경로(`ensureAnalysisTarget`)** — 같은 전치 버그가 잠복해 있다(현재 미배선). 배선 시 **치수와 회전을 반드시 함께** 바꿀 것. 반쪽만 바꾸면 `TasksToIrisResult` upright 스왑 결과가 링 종횡비와 어긋나 렌즈가 3.16:1 타원이 된다. 코드에 경고 주석 삽입 완료.
+5. **기기 일반성** — '회전 90/270 ⇒ 링 치수 스왑' 규칙은 SM-X920 1대 실측에서 역산했다. 다만 회전이 버퍼에 구워져 있든 `stMatrix`에 실려 있든 FBO가 받는 콘텐츠는 upright이므로 규칙은 양쪽에서 동일하게 옳다. 반증 기기가 나오면 `hasCameraTransform` / stMatrix 교차항으로 분기하는 가드를 검토.
+6. **진단 코드 제거** — `SET_RING_SWAP`(킬스위치) / `DUMP_RING` / `SET_UPSCALE` 리시버와 `dumpRingSlot`, `resolveCoordinateSpace`·`createLensFbo` dead 정리는 트랙 종결 시.
 
 ## 8. 실측 재현 방법
 
@@ -227,3 +283,4 @@ $ADB pull /sdcard/Android/data/com.irislenssdk.demo/files/sharpdump/
 | 일시 | 내용 |
 |---|---|
 | 2026-07-28 | 선행 문서 §6 절차 실행 — 빌드 정합성 해소, stMatrix 항등 확정, 링 FBO 전치 원인 확정, 처방 A/B 검증. 본수정은 미착수 |
+| 2026-07-29 | 본수정 구현(`fix/ring-fbo-transpose`) — 링 치수 정본화 + TransformationInfo 회전 생산자 + 렌즈/뷰티 치수 전파. 게이트 G1·G2·G3·G3b·G7·G9 통과, G4/G5/G6(얼굴 필요)·G8(폰) 미판정 |

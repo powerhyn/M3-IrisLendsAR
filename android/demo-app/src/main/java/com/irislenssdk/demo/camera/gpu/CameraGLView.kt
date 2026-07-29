@@ -182,6 +182,29 @@ class CameraGLView @JvmOverloads constructor(
         }
 
         val resolution = request.resolution
+
+        // 프리뷰 스트림 **자신의** 회전을 회전 정본 생산자로 쓴다 (SHARP 전치 수정).
+        //
+        // 종전에는 frameRotation을 ImageAnalysis의 imageInfo.rotationDegrees에서만 얻었는데,
+        // 그 값이 링 FBO 치수를 결정하게 되면서 두 가지가 문제가 된다:
+        //   (a) 늦게 도착한다 — 실측 SM-X920: surface 충족 12:58:11.088 vs 회전 11.436 (348ms)
+        //   (b) Preview 단독 바인딩(EXPERIMENT_PREVIEW_ONLY)에선 **아예 오지 않는다**
+        //       → 링이 전치 상태로 고착돼 수정이 조용히 무효화된다
+        // TransformationInfo는 같은 SurfaceRequest 경로로 오므로 둘 다 해소된다.
+        // 실측 확인: rotationDegrees=270, hasCameraTransform=true — ImageAnalysis 값과 동일하고
+        // sensorRotationDegrees(270)와도 일치한다. ImageAnalysis 쪽 호출은 변경 가드에 걸려 no-op.
+        runCatching {
+            request.setTransformationInfoListener(surfaceExecutor) { info ->
+                Log.d(
+                    TAG,
+                    "TransformationInfo: rotationDegrees=${info.rotationDegrees}" +
+                        ", hasCameraTransform=${info.hasCameraTransform()}" +
+                        ", cropRect=${info.cropRect}, resolution=${resolution.width}x${resolution.height}"
+                )
+                queueEvent { glRenderer.setFrameRotation(info.rotationDegrees) }
+            }
+        }.onFailure { Log.w(TAG, "TransformationInfo 등록 실패: ${it.message}") }
+
         cameraSurfaceTexture?.setDefaultBufferSize(resolution.width, resolution.height)
         // GL 스레드에서 프레임 크기 설정 (FBO 재생성 포함)
         queueEvent {
@@ -292,10 +315,10 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
-    /** 선명도 진단(SHARP §6-3) — 링/렌즈 FBO 전치 보정 A/B 토글. */
-    fun setRingSwapDiag(on: Boolean) {
+    /** SHARP 게이트 A/B — 구 전치 동작 복원 킬스위치. 기본 false(=수정 적용). */
+    fun setRingLegacyTranspose(legacy: Boolean) {
         queueEvent {
-            glRenderer.setRingSwapDiag(on)
+            glRenderer.setRingLegacyTranspose(legacy)
         }
     }
 
