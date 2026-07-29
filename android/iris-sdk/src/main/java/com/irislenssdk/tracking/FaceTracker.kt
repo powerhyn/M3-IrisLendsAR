@@ -541,12 +541,41 @@ class FaceTracker(
         return FaceLandmarker.createFromOptions(context, builder.build())
     }
 
+    /**
+     * 검출 힌트 회전 오프셋 (SHARP-ROT).
+     *
+     * `imageInfo.rotationDegrees`는 `targetRotation=ROTATION_0` 핀 때문에 **기기를 물리적으로
+     * 어떻게 들든 상수**다(실측 SM-X920: 가로·세로 모두 270). 그래서 이 값을 그대로 MediaPipe
+     * 힌트로 쓰면 '기기 natural orientation 기준 정립'까지만 맞고, 기기를 90° 돌려 든 상태에서는
+     * **MediaPipe가 옆으로 누운 얼굴을 본다**. 검출 단계(BlazeFace)는 정립 얼굴 위주로 학습돼
+     * 있어 랜드마크가 불안정해진다(실측: 태블릿 가로에서 고개를 조금만 돌려도 메시가 일그러짐,
+     * 같은 기기 세로에서는 안정).
+     *
+     * 이 오프셋은 **힌트에만** 더해진다. 출력 랜드마크는 힌트와 무관하게 원본(미회전) 센서
+     * 정규화 공간으로 반환되므로([onRawResult] 계약) 좌표 변환 경로는 건드리지 않는다.
+     * 호출자가 화면 회전을 넣어 주면 '세상 기준 정립'이 된다.
+     */
+    @Volatile private var detectionRotationOffset = 0
+
+    /** 검출 힌트 오프셋 설정 (도, 90 단위). 어느 스레드에서나 안전 — 다음 detect부터 반영. */
+    fun setDetectionRotationOffset(deg: Int) {
+        val norm = ((deg % 360) + 360) % 360
+        if (detectionRotationOffset != norm) {
+            detectionRotationOffset = norm
+        }
+    }
+
     private fun processingOptions(rotation: Int): ImageProcessingOptions {
-        if (rotation != cachedRotation || cachedProcessingOptions == null) {
-            cachedRotation = rotation
+        val hint = ((rotation + detectionRotationOffset) % 360 + 360) % 360
+        if (hint != cachedRotation || cachedProcessingOptions == null) {
+            cachedRotation = hint
             cachedProcessingOptions = ImageProcessingOptions.builder()
-                .setRotationDegrees(rotation)
+                .setRotationDegrees(hint)
                 .build()
+            android.util.Log.i(
+                "FaceTracker",
+                "검출 힌트 회전 → $hint (버퍼 $rotation + 오프셋 $detectionRotationOffset)"
+            )
         }
         return cachedProcessingOptions!!
     }
