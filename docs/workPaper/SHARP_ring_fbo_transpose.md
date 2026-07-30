@@ -304,7 +304,7 @@ RMS·평균밝기가 사실상 동일 → 같은 장면·같은 노출의 통제
 ADB=~/Library/Android/sdk/platform-tools/adb
 $ADB shell am broadcast -a com.irislenssdk.demo.DUMP_RING          # 링 FBO 원본 PNG 덤프
 $ADB shell am broadcast -a com.irislenssdk.demo.SET_UPSCALE --ei mode 2
-$ADB shell am broadcast -a com.irislenssdk.demo.SET_RING_SWAP --ez on true
+$ADB shell am broadcast -a com.irislenssdk.demo.SET_RING_SWAP --ez legacy true   # 구 전치 동작 복원(A/B)
 $ADB pull /sdcard/Android/data/com.irislenssdk.demo/files/sharpdump/
 ```
 
@@ -331,3 +331,4 @@ $ADB pull /sdcard/Android/data/com.irislenssdk.demo/files/sharpdump/
 | 2026-07-29 | 본수정 구현(`fix/ring-fbo-transpose`) — 링 치수 정본화 + TransformationInfo 회전 생산자 + 렌즈/뷰티 치수 전파. 게이트 G1·G2·G3·G3b·G7·G9 통과, G4/G5/G6(얼굴 필요)·G8(폰) 미판정 |
 | 2026-07-29 | 얼굴 게이트 완료 — G4 렌즈 정합 / G5 뷰티 / G6 마커 통과. 태블릿 게이트 10/10. 남은 것은 G8(폰)뿐 |
 | 2026-07-29 | G8 폰(S23+) 완료 — 폰도 frameRotation=270, 동일 전치 버그. 링 공간 1.92배·화면 2.09배 개선. **게이트 전부 통과** |
+| 2026-07-30 | 적대 검토 반영(7896095) + 커밋 누락 리소스 3종(9b0b44d). 킬스위치 extra 이름 `on`→`legacy` 정정 — 종전 문서 명령은 조용히 no-op 이었다 |
