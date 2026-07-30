@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IrisLensSDK Android - 화면 크기별 동작 플래그
+
+    android:screenOrientation은 리소스 한정자로 분기할 수 없으므로
+    (매니페스트 속성은 한정자를 타지 않음) bool 리소스 + 런타임
+    requestedOrientation 설정으로 "폰 세로 고정 / 태블릿 가로 허용"을 구현한다.
+
+    기본값(폰) = 가로 금지 → 기존 세로 전용 동작과 완전히 동일.
+-->
+<resources>
+    <!-- 가로 전환 허용 여부. 폰(sw < 600dp)은 세로 고정 유지. -->
+    <bool name="allow_landscape">false</bool>
+</resources>
