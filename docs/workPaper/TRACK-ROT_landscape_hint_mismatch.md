@@ -1,9 +1,9 @@
 # TRACK-ROT — 가로 화면 얼굴 추적 불안정: MediaPipe 회전 힌트 불일치
 
-> 상태: **✅ 원인 확정 · ✅ 수정 완료(블라인드 A/B 판정) / ⏳ screenRotation 180·270 육안 미검증**
-> 브랜치: `fix/ring-fbo-transpose` (커밋 `3bcc2a8`) — **미머지·미푸시**
+> 상태: **✅ 원인 확정 · ✅ 수정 완료 · ✅ 판별 실험으로 공식 확정(screenRot 90·270 두 지점 블라인드) · ✅ 적대 검토 반영** / ⏳ screenRot 180만 외삽
+> 브랜치: `fix/ring-fbo-transpose` (커밋 `3bcc2a8` → 검토 반영 `7896095`, 리소스 `9b0b44d`) — **미머지·미푸시**
 > ⚠️ 이 브랜치에는 선명도 트랙(SHARP, 4커밋)이 함께 들어 있다. 성격이 다르므로 분리 여부 미결.
-> 실측: 2026-07-29 / SM-X920 (Tab S10 Ultra), 대조 SM-S916N (Galaxy S23+)
+> 실측: 2026-07-29~30 / SM-X920 (Tab S10 Ultra), 대조 SM-S916N (Galaxy S23+)
 > 관련: `SHARP_ring_fbo_transpose.md` (별개 트랙 — 링 FBO 치수 문제. 서로 독립)
 
 ---
@@ -73,6 +73,36 @@ FaceLandmarker의 검출 단계(BlazeFace)는 정립 얼굴 위주로 학습돼 
 
 D = 오프셋 90 = `screenRotation`(90)과 일치. 사전 예측 및 물리 모델과 부합한다 — 이 태블릿은 전면 카메라가 **긴 변**에 있어, 가로로 들면 센서 원본 래스터가 이미 세상 기준 정립이다. 그래서 회전이 필요 없는 것(힌트 0)이 정답이다.
 
+### 3-2b. 판별 실험 — 가설 A vs B (적대 검토가 지적한 설계 결함 해소)
+
+**지적**: 3-2의 승리 팔 D는 오프셋 90 = **힌트 0**, 즉 '회전을 아예 안 줌'이다. `screenRot=90`에서는
+두 가설의 예측이 **완전히 같다**:
+
+| | 가설 A (`offset = screenRotation`) | 가설 B ("힌트 0이 늘 최선") |
+|---|---|---|
+| screenRot 90 | 오프셋 90 | 오프셋 90 | ← 3-2가 잰 지점. **구분 불가** |
+| screenRot 270 | 오프셋 **270** | 오프셋 **90** | ← 갈림 |
+
+가설 B가 실재할 이유도 있었다 — 태블릿 분석 버퍼가 512×288로 작아 MediaPipe 회전 전처리의
+리샘플이 품질을 깎는 경로일 수 있다. B가 참이면 이 수정은 180/270에서 **오히려 나쁘게** 만든다.
+
+**판별 실험** (2026-07-30, SM-X920 **역가로**, `Screen rotation set: 270`, 매핑 재셔플):
+
+| 팔 | 오프셋 | 힌트 | 판정 |
+|---|---|---|---|
+| **D** | **270** | **180** | ✅ **제일 안정** |
+| A | 180 | 90 | 2위 |
+| B | **90** | **0** | ❌ 완전히 망가짐 |
+| C | 0 | 270 | ❌ 완전히 망가짐 |
+
+→ **가설 A 확정, 가설 B 기각.** B가 참이었다면 B팔(힌트 0)이 이겼어야 하는데 최악군이었다.
+3-2보다 대비가 훨씬 크다("확실히 안정적" → "둘은 완전히 망가짐") — 회전 힌트가 추적 품질을
+지배한다는 것이 확증된다. 셔플도 3-2와 달랐다(A=270/B=0/C=180/D=90 → A=180/B=90/C=0/D=270)
+— D 연속 승리는 우연이고 블라인드 절차 자체도 유효했다.
+
+**공식 확정 근거 지점**: screenRot 90(3-2) + 270(여기) 두 곳 블라인드 A/B, screenRot 0은
+현상유지 관찰(원래 안정). 회전은 군(group)이라 가법성으로 180이 따라온다.
+
 ### 3-3. ⚠️ 폐기된 정량 지표 (재시도 금지)
 
 정지 상태에서 마커 무리의 프레임 간 흔들림을 재는 지표를 만들었으나 **판별력이 없었다.**
@@ -93,15 +123,22 @@ D = 오프셋 90 = `screenRotation`(90)과 일치. 사전 예측 및 물리 모�
 ## 4. 수정 내용
 
 ```kotlin
-// GpuRenderActivity.pushScreenRotation()
-if (detRotAuto && detRotOffset != deg) {
-    detRotOffset = deg
-    faceTracker?.setDetectionRotationOffset(deg)
-}
+// GpuRenderActivity.pushScreenRotation() — 값만 갱신(자동 유도)
+if (detRotAuto && detRotOffset != deg) { detRotOffset = deg }
 
-// FaceTracker.processingOptions()
-val hint = ((rotation + detectionRotationOffset) % 360 + 360) % 360
+// GpuRenderActivity.processFrameTasks() — 분석 스레드가 매 프레임 pull (멱등)
+ensureFaceTracker().also { it.setDetectionRotationOffset(detRotOffset) }.analyze(imageProxy)
+
+// FaceTracker.processingOptions() — 값 생성 후 (값, 키) 순으로 커밋
+val offset = detectionRotationOffset          // volatile 1회 읽기
+val hint = ((rotation + offset) % 360 + 360) % 360
+val opts = ImageProcessingOptions.builder().setRotationDegrees(hint).build()
+cachedProcessingOptions = opts; cachedRotation = hint
 ```
+
+> push 가 아니라 **pull** 인 이유: `faceTracker` 는 non-volatile 이고 '분석 스레드 전용' 규약이라
+> 메인 스레드에서 밀어 넣으면 트래커 생성과 인터리브될 때 유실될 수 있고, 갱신이 1회성이라
+> 재시도 경로가 없었다(적대 검토 지적). pull 은 volatile int 비교뿐이라 비용이 사실상 0이다.
 
 배선 확인 (SM-X920, `user_rotation` 스윕):
 
@@ -116,11 +153,18 @@ val hint = ((rotation + detectionRotationOffset) % 360 + 360) % 360
 
 ## 5. 미검증 / 남은 일
 
-1. **screenRotation 180·270 육안 판정** — 배선만 확인했고 정답 여부는 **외삽**이다. 특히 270(반대 방향 가로)은 부호가 뒤집힐 여지가 있다.
+1. **~~screenRotation 270~~ 완료** (§3-2b). 남은 것은 **180(거꾸로 세로)뿐**이며 실사용 빈도가 낮고, 90·270 두 지점이 확정돼 가법성으로 따라오므로 위험이 낮다.
+1-b. **자동회전 잠금 시 미동작** — `currentScreenRotationDeg()`는 기기 물리 자세가 아니라 **윈도우 회전**을 읽는다. 사용자가 자동회전을 잠그면 기기를 눕혀도 `display.rotation`이 0에 머물러 이 수정이 engage 하지 않는다(폰은 `allow_landscape=false`라 항상 이 상태). 근본 해결은 `OrientationEventListener` 기반 기기 자세지만 이번 범위 밖이다.
 2. **`rotSignInverted` 커플링** — GL blit에는 적용되는데 이 힌트에는 미적용이다. 현재 정방향 확정이라 무영향이나, 부호가 뒤집히는 기기가 나오면 두 경로가 갈린다.
 3. **태블릿 분석 스트림 512×288** — 폰은 640×360(둘 다 960×540 요청, 태블릿이 더 낮게 폴백). 면적 1.56배 차이로 랜드마크 정밀도에 직접 불리하다. 회전과 무관한 **별개 요인**이며 회전 건이 해결된 지금 다음 후보다.
-4. **진단 표면 제거** (머지 전 필수) — `SET_DET_ROT` / `DET_BLIND_START` / `DET_BLIND_NEXT` / `DET_BLIND_REVEAL` 브로드캐스트, HUD `det:` 표시, `detRotAuto` 플래그.
-5. **브랜치 분리 여부** — 이 커밋이 SHARP(선명도) 트랙과 한 브랜치에 섞여 있다. 미결.
+4. **적대 검토(2026-07-30, 4관점 17에이전트) 반영 완료** — 커밋 `7896095`:
+   - `detRotAuto` 래치(진단 1회 사용 시 자동 유도 영구 사망, REVEAL도 복구 안 함 → **남은 검증을 오염시킬 뻔함**)
+   - `setDetectionRotationOffset` 90배수 미검증 → MediaPipe 예외가 추론 오류로 오진되어 GPU→CPU 폴백 유발
+   - `processingOptions` 캐시 키를 값 생성 전 커밋 → `build()` 실패 시 조용히 이전 힌트로 계속 검출
+   - `faceTracker` non-volatile 경합 → push를 pull로 전환(매 프레임 멱등)
+   - 커밋 누락 리소스 3종(`bools.xml` 등) 추가 — 커밋 `9b0b44d`, **깨끗한 체크아웃이 빌드 안 되던 blocker**
+5. **진단 표면 제거** (머지 전 필수) — `SET_DET_ROT` / `DET_BLIND_START` / `DET_BLIND_NEXT` / `DET_BLIND_REVEAL` 브로드캐스트, HUD `det:` 표시, `detRotAuto` 플래그.
+6. **브랜치 분리 여부** — 이 커밋이 SHARP(선명도) 트랙과 한 브랜치에 섞여 있다. 미결.
 
 ---
 
@@ -146,3 +190,4 @@ adb shell am broadcast -a com.irislenssdk.demo.DET_BLIND_REVEAL
 | 일시 | 내용 |
 |---|---|
 | 2026-07-29 | 원인 확정(회전 힌트 불일치) + 블라인드 A/B로 오프셋=screenRotation 판정 + 자동 유도 반영(3bcc2a8). 정량 지표는 판별력 없음으로 폐기 |
+| 2026-07-30 | 판별 실험(역가로 screenRot=270 블라인드)으로 **가설 A 확정·B 기각** → 공식 `offset=screenRotation` 확정. 적대 검토 4관점 반영(7896095) + 커밋 누락 리소스(9b0b44d) |
