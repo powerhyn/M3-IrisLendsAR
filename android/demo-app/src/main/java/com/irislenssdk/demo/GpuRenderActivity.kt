@@ -1412,7 +1412,12 @@ class GpuRenderActivity : AppCompatActivity() {
                     "${imageProxy.width}x${imageProxy.height}, screenRot=${currentScreenRotationDeg()}"
             )
         }
-        ensureFaceTracker().analyze(imageProxy)
+        // SHARP-ROT: 검출 힌트 오프셋을 **매 프레임 pull** 한다.
+        // push(메인 스레드 → faceTracker) 방식은 faceTracker 가 non-volatile 인데다
+        // 갱신이 1회성이라, 트래커 생성과 인터리브되면 푸시가 유실되고 재시도 경로가 없었다.
+        // 여기서는 분석 스레드가 volatile int 를 읽어 setter 에 넘길 뿐이라 비용이 사실상 0이고
+        // 멱등하다(값이 같으면 setter 내부에서 그대로 대입).
+        ensureFaceTracker().also { it.setDetectionRotationOffset(detRotOffset) }.analyze(imageProxy)
     }
 
     /** 분석 스레드 전용 — FaceTracker는 생성 스레드에서만 detect/close (스레드 친화성). */
@@ -1566,7 +1571,7 @@ class GpuRenderActivity : AppCompatActivity() {
                 java.util.Locale.US, "TRK:TASKS(%s) infer≈%.0fms  %s",
                 if (tasksUsingGpu) "gpu" else "cpu", lastTasksInferMs,
                 if (blindOn) "◀ 팔 $blindLabel ▶"
-                else "det:$detRotOffset(힌트${((lastRotation.coerceAtLeast(0) + detRotOffset) % 360 + 360) % 360})"
+                else "det:$detRotOffset${if (detRotAuto) "(auto)" else "(수동)"}"
             )
             runOnUiThread { tvAbHud.text = hud }
         }
@@ -1744,9 +1749,9 @@ class GpuRenderActivity : AppCompatActivity() {
         //
         // 근거: 태블릿 가로(screenRot=90)에서 오프셋 0/90/180/270 블라인드 A/B(매핑 무작위,
         // 4팔 순환 후 재확인) 결과 오프셋 90(=힌트 0)이 확실히 안정적으로 판정됨 (2026-07-29).
+        // 값만 갱신한다 — 분석 스레드가 매 프레임 pull 해 간다(processFrameTasks 참조).
         if (detRotAuto && detRotOffset != deg) {
             detRotOffset = deg
-            faceTracker?.setDetectionRotationOffset(deg)
             Log.i(TAG, "검출 힌트 오프셋(자동) → $deg")
         }
         Log.d(TAG, "Screen rotation → $deg")
@@ -1997,14 +2002,27 @@ class GpuRenderActivity : AppCompatActivity() {
                     ACTION_DET_BLIND_REVEAL -> {
                         val map = blindArms.mapIndexed { i, v -> "${('A' + i)}=$v" }.joinToString(" / ")
                         blindOn = false
+                        // 실험 종료 = 자동 유도 복구. 이게 없으면 마지막으로 걸려 있던 무작위 팔의
+                        // 오프셋이 그대로 고정된 채 남아, 뒤이은 육안 판정이 조용히 오염된다.
+                        detRotAuto = true
+                        pushScreenRotation()
                         Log.i(TAG, "SHARP-ROT 블라인드 공개: $map (현재 팔 $blindLabel)")
                         Toast.makeText(this@GpuRenderActivity, "공개: $map", Toast.LENGTH_LONG).show()
                     }
                     ACTION_SET_DET_ROT -> {
-                        val off = intent.getIntExtra("offset", 0)
                         blindOn = false
-                        detRotAuto = false
-                        applyDetRot(off, null)
+                        if (intent.getBooleanExtra("auto", false)) {
+                            // 자동 유도 복귀 — `--ez auto true`
+                            detRotAuto = true
+                            pushScreenRotation()
+                            Toast.makeText(
+                                this@GpuRenderActivity,
+                                "검출 힌트 자동 유도 복귀 (오프셋 $detRotOffset)", Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            detRotAuto = false
+                            applyDetRot(intent.getIntExtra("offset", 0), null)
+                        }
                     }
                     ACTION_SET_RING_SWAP -> {
                         val legacy = intent.getBooleanExtra("legacy", false)
@@ -2048,7 +2066,6 @@ class GpuRenderActivity : AppCompatActivity() {
      */
     private fun applyDetRot(off: Int, blindMsg: String?) {
         detRotOffset = off
-        faceTracker?.setDetectionRotationOffset(off)
         val hintNow = ((lastRotation.coerceAtLeast(0) + off) % 360 + 360) % 360
         Log.i(TAG, "SHARP-ROT: 오프셋 → $off (힌트 $hintNow, screenRot=${currentScreenRotationDeg()}, blind=$blindOn)")
         val msg = blindMsg ?: "검출 힌트 오프셋 $off (힌트 $hintNow)"

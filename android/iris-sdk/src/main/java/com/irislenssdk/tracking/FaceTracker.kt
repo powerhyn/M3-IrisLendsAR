@@ -553,31 +553,45 @@ class FaceTracker(
      *
      * 이 오프셋은 **힌트에만** 더해진다. 출력 랜드마크는 힌트와 무관하게 원본(미회전) 센서
      * 정규화 공간으로 반환되므로([onRawResult] 계약) 좌표 변환 경로는 건드리지 않는다.
-     * 호출자가 화면 회전을 넣어 주면 '세상 기준 정립'이 된다.
+     *
+     * ⚠️ 호출자가 넣을 값의 부호는 **카메라 방향에 따라 다르다**. CameraX 의
+     * getRelativeImageRotation 은 same-facing(전면+디스플레이)에서 `sensor + destDegrees`,
+     * opposite-facing(후면)에서 `sensor - destDegrees` 로 계산한다. 따라서
+     *   전면: +screenRotation / 후면: -screenRotation
+     * 이다. 이 SDK 의 현재 소비자는 전면 카메라만 쓴다.
      */
     @Volatile private var detectionRotationOffset = 0
 
-    /** 검출 힌트 오프셋 설정 (도, 90 단위). 어느 스레드에서나 안전 — 다음 detect부터 반영. */
+    /**
+     * 검출 힌트 오프셋 설정 (도, **90의 배수만**). 어느 스레드에서나 안전 — 다음 detect부터 반영.
+     *
+     * 90 배수가 아니면 거부한다. MediaPipe `ImageProcessingOptions.build()` 가
+     * "Expected rotation to be a multiple of 90°" 로 IllegalArgumentException 을 던지는데,
+     * 그 예외는 detect 를 감싼 `catch (e: RuntimeException)` 에 잡혀 **추론 오류로 오진**되어
+     * GPU→CPU 폴백과 랜드마커 재생성을 유발한다. 회전 설정 실수가 추론 경로 장애로 위장된다.
+     */
     fun setDetectionRotationOffset(deg: Int) {
-        val norm = ((deg % 360) + 360) % 360
-        if (detectionRotationOffset != norm) {
-            detectionRotationOffset = norm
+        if (deg % 90 != 0) {
+            onError("검출 힌트 오프셋은 90의 배수여야 합니다 (받은 값: $deg) — 무시함")
+            return
         }
+        detectionRotationOffset = ((deg % 360) + 360) % 360
     }
 
     private fun processingOptions(rotation: Int): ImageProcessingOptions {
-        val hint = ((rotation + detectionRotationOffset) % 360 + 360) % 360
-        if (hint != cachedRotation || cachedProcessingOptions == null) {
-            cachedRotation = hint
-            cachedProcessingOptions = ImageProcessingOptions.builder()
-                .setRotationDegrees(hint)
-                .build()
-            android.util.Log.i(
-                "FaceTracker",
-                "검출 힌트 회전 → $hint (버퍼 $rotation + 오프셋 $detectionRotationOffset)"
-            )
-        }
-        return cachedProcessingOptions!!
+        val offset = detectionRotationOffset          // volatile 1회 읽기 — 로그와 힌트가 갈리지 않게
+        val hint = ((rotation + offset) % 360 + 360) % 360
+        val cached = cachedProcessingOptions
+        if (hint == cachedRotation && cached != null) return cached
+
+        // ⚠️ 캐시 키를 값보다 **먼저** 커밋하면 안 된다. build() 가 던졌을 때 키만 새 값으로
+        //    오염되고 값은 낡은 객체가 남아, 다음 프레임부터 캐시 히트가 되어 조용히 이전
+        //    힌트로 계속 검출한다(로그도 안 찍혀 상태가 거짓말을 한다).
+        val opts = ImageProcessingOptions.builder().setRotationDegrees(hint).build()
+        cachedProcessingOptions = opts
+        cachedRotation = hint
+        android.util.Log.i(TAG, "검출 힌트 회전 → $hint (버퍼 $rotation + 오프셋 $offset)")
+        return opts
     }
 
     private fun obtainCompactBuffer(size: Int): ByteBuffer {
@@ -854,6 +868,8 @@ class FaceTracker(
          * demo-app 내장 모델 — assets/models/ (REFACTOR-3-3 plan §2 대상 경로).
          * [이식 적응] 원본(LensSimulator)은 "lenssdk/face_landmarker.task" — 경로만 demo assets에 맞춤.
          */
+        private const val TAG = "FaceTracker"
+
         private const val MODEL_ASSET_PATH = "models/face_landmarker.task"
 
         // 실행 모드 (벤치 토글 — setTrackingRunningMode)
