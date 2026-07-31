@@ -308,20 +308,6 @@ class CameraGLView @JvmOverloads constructor(
         }
     }
 
-    /** 선명도 진단(SHARP §6-2) — 다음 프레임의 링 FBO 원본을 PNG로 덤프한다. */
-    fun requestRingDump(dir: java.io.File) {
-        queueEvent {
-            glRenderer.requestRingDump(dir)
-        }
-    }
-
-    /** SHARP 게이트 A/B — 구 전치 동작 복원 킬스위치. 기본 false(=수정 적용). */
-    fun setRingLegacyTranspose(legacy: Boolean) {
-        queueEvent {
-            glRenderer.setRingLegacyTranspose(legacy)
-        }
-    }
-
     /**
      * 렌즈 설정
      */

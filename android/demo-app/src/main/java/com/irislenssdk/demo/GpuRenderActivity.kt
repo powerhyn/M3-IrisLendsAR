@@ -110,15 +110,6 @@ class GpuRenderActivity : AppCompatActivity() {
         /** 실험 시 요청할 프리뷰 해상도 (전면 카메라 지원: 4000x3000 / 3840x2160 / …). */
         private val EXPERIMENT_PREVIEW_SIZE = Size(3840, 2160)
 
-        /** 선명도 실측 진단 브로드캐스트 (디버그 빌드 전용 — registerSharpnessDiagReceiver 참조). */
-        private const val ACTION_DUMP_RING = "com.irislenssdk.demo.DUMP_RING"
-        private const val ACTION_SET_UPSCALE = "com.irislenssdk.demo.SET_UPSCALE"
-        private const val ACTION_SET_RING_SWAP = "com.irislenssdk.demo.SET_RING_SWAP"
-        private const val ACTION_SET_DET_ROT = "com.irislenssdk.demo.SET_DET_ROT"
-        private const val ACTION_DET_BLIND_START = "com.irislenssdk.demo.DET_BLIND_START"
-        private const val ACTION_DET_BLIND_NEXT = "com.irislenssdk.demo.DET_BLIND_NEXT"
-        private const val ACTION_DET_BLIND_REVEAL = "com.irislenssdk.demo.DET_BLIND_REVEAL"
-
         private const val LEFT_PANEL_DP = 300    // activity_gpu_render.xml landLeftPanel과 일치
         private const val RIGHT_PANEL_DP = 180   // activity_gpu_render.xml landRightPanel과 일치
     }
@@ -259,27 +250,6 @@ class GpuRenderActivity : AppCompatActivity() {
      *   adb shell am broadcast -a com.irislenssdk.demo.SET_DET_ROT --ei offset 90
      */
     @Volatile private var detRotOffset: Int = 0
-
-    /**
-     * 검출 힌트 오프셋을 화면 회전에서 자동 유도할지. 진단 브로드캐스트가 오면 false 로 내려
-     * 수동 값이 pushScreenRotation 에 덮이지 않게 한다(트랙 종결 시 진단과 함께 제거).
-     */
-    private var detRotAuto = true
-
-    //=========================================================================
-    // 블라인드 A/B (SHARP-ROT 판정용)
-    //
-    // 문제: 후보 오프셋 간 차이가 미세한데다, 어느 값이 '예상 정답'인지 알고 보면
-    //   기대 효과가 판정을 오염시킨다. 앞선 정량 지표(마커 흔들림)는 같은 오프셋 내
-    //   편차가 오프셋 간 차이보다 커서 판별력이 없었다.
-    // 설계: 매핑(A/B/C/D ↔ 오프셋)은 세션마다 무작위로 섞어 **가리고**, 전환 자체는
-    //   토스트 + HUD 라벨로 **확실히 인지**시킨다. 바뀌는 순간의 체감이 가장 크다는
-    //   실사용자 관찰을 반영한 것 — 블라인드로 만들되 전환을 숨기지는 않는다.
-    //=========================================================================
-    private var blindOn = false
-    private var blindArms: List<Int> = listOf(0, 90, 180, 270)
-    private var blindIdx = 0
-    private val blindLabel: String get() = ('A' + blindIdx).toString()
 
     // StabilityLogger (P4-W1-02)
     private var stabilityLogger: StabilityLogger? = null
@@ -1570,8 +1540,7 @@ class GpuRenderActivity : AppCompatActivity() {
             val hud = String.format(
                 java.util.Locale.US, "TRK:TASKS(%s) infer≈%.0fms  %s",
                 if (tasksUsingGpu) "gpu" else "cpu", lastTasksInferMs,
-                if (blindOn) "◀ 팔 $blindLabel ▶"
-                else "det:$detRotOffset${if (detRotAuto) "(auto)" else "(수동)"}"
+                "det:$detRotOffset"
             )
             runOnUiThread { tvAbHud.text = hud }
         }
@@ -1750,7 +1719,7 @@ class GpuRenderActivity : AppCompatActivity() {
         // 근거: 태블릿 가로(screenRot=90)에서 오프셋 0/90/180/270 블라인드 A/B(매핑 무작위,
         // 4팔 순환 후 재확인) 결과 오프셋 90(=힌트 0)이 확실히 안정적으로 판정됨 (2026-07-29).
         // 값만 갱신한다 — 분석 스레드가 매 프레임 pull 해 간다(processFrameTasks 참조).
-        if (detRotAuto && detRotOffset != deg) {
+        if (detRotOffset != deg) {
             detRotOffset = deg
             Log.i(TAG, "검출 힌트 오프셋(자동) → $deg")
         }
@@ -1948,135 +1917,7 @@ class GpuRenderActivity : AppCompatActivity() {
         (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
             .registerDisplayListener(displayListener, null)
         pushScreenRotation()
-        registerSharpnessDiagReceiver()
         // P6-W4 env_map 로드는 onGpuInitialized 콜백에서 처리 (GPU lens init 완료 보장).
-    }
-
-    //=========================================================================
-    // 선명도 실측 진단 리시버 (SHARP §6-2 / §6-5) — 디버그 빌드 전용
-    //
-    // 실측은 "같은 장면을 두 앱이 번갈아 본다"가 전제라, 측정 중 화면을 만지면 태블릿이
-    // 흔들려 장면이 바뀐다. 버튼 대신 adb 브로드캐스트로 상태를 바꿔 손을 대지 않고 A/B 한다.
-    //
-    //   링 FBO 원본 덤프:  adb shell am broadcast -a com.irislenssdk.demo.DUMP_RING
-    //   업스케일 모드 전환: adb shell am broadcast -a com.irislenssdk.demo.SET_UPSCALE --ei mode 2
-    //                      (0=bilinear, 1=bicubic, 2=bicubic+언샤프, --ef sharpen 로 강도 지정)
-    //
-    // ⚠️ 진단 전용. BuildConfig.DEBUG 게이트로 릴리스에는 등록되지 않으며,
-    //    선명도 트랙 종결 시 이 블록과 CameraGLRenderer.dumpRingSlot 을 함께 제거한다.
-    //=========================================================================
-    private var sharpnessDiagReceiver: android.content.BroadcastReceiver? = null
-
-    private fun registerSharpnessDiagReceiver() {
-        if (!BuildConfig.DEBUG || sharpnessDiagReceiver != null) return
-        val receiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: android.content.Intent?) {
-                when (intent?.action) {
-                    ACTION_DUMP_RING -> {
-                        val dir = java.io.File(getExternalFilesDir(null), "sharpdump")
-                        cameraGLView.requestRingDump(dir)
-                    }
-                    ACTION_DET_BLIND_START -> {
-                        blindArms = listOf(0, 90, 180, 270).shuffled()
-                        blindIdx = 0
-                        blindOn = true
-                        detRotAuto = false
-                        applyDetRot(blindArms[blindIdx], "블라인드 시작 — 팔 $blindLabel")
-                    }
-                    ACTION_DET_BLIND_NEXT -> {
-                        if (!blindOn) {
-                            blindArms = listOf(0, 90, 180, 270).shuffled()
-                            blindIdx = 0
-                            blindOn = true
-                            detRotAuto = false
-                        } else {
-                            val want = intent.getStringExtra("arm")?.trim()?.uppercase()
-                            blindIdx = if (want != null && want.length == 1 && want[0] in 'A'..'D') {
-                                want[0] - 'A'
-                            } else {
-                                (blindIdx + 1) % blindArms.size
-                            }
-                        }
-                        applyDetRot(blindArms[blindIdx], "팔 $blindLabel")
-                    }
-                    ACTION_DET_BLIND_REVEAL -> {
-                        val map = blindArms.mapIndexed { i, v -> "${('A' + i)}=$v" }.joinToString(" / ")
-                        blindOn = false
-                        // 실험 종료 = 자동 유도 복구. 이게 없으면 마지막으로 걸려 있던 무작위 팔의
-                        // 오프셋이 그대로 고정된 채 남아, 뒤이은 육안 판정이 조용히 오염된다.
-                        detRotAuto = true
-                        pushScreenRotation()
-                        Log.i(TAG, "SHARP-ROT 블라인드 공개: $map (현재 팔 $blindLabel)")
-                        Toast.makeText(this@GpuRenderActivity, "공개: $map", Toast.LENGTH_LONG).show()
-                    }
-                    ACTION_SET_DET_ROT -> {
-                        blindOn = false
-                        if (intent.getBooleanExtra("auto", false)) {
-                            // 자동 유도 복귀 — `--ez auto true`
-                            detRotAuto = true
-                            pushScreenRotation()
-                            Toast.makeText(
-                                this@GpuRenderActivity,
-                                "검출 힌트 자동 유도 복귀 (오프셋 $detRotOffset)", Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            detRotAuto = false
-                            applyDetRot(intent.getIntExtra("offset", 0), null)
-                        }
-                    }
-                    ACTION_SET_RING_SWAP -> {
-                        val legacy = intent.getBooleanExtra("legacy", false)
-                        cameraGLView.setRingLegacyTranspose(legacy)
-                        Log.i(TAG, "SHARP 게이트: 구 전치 동작 복원 → $legacy")
-                    }
-                    ACTION_SET_UPSCALE -> {
-                        val mode = intent.getIntExtra("mode", 1).coerceIn(0, 2)
-                        val sharpen = intent.getFloatExtra("sharpen", 0.35f)
-                        upscaleModeIdx = mode
-                        cameraGLView.setUpscaleMode(mode, sharpen)
-                        Log.i(TAG, "SHARP 진단: 업스케일 모드 → $mode (sharpen=$sharpen)")
-                    }
-                }
-            }
-        }
-        val filter = android.content.IntentFilter().apply {
-            addAction(ACTION_DUMP_RING)
-            addAction(ACTION_SET_UPSCALE)
-            addAction(ACTION_SET_RING_SWAP)
-            addAction(ACTION_SET_DET_ROT)
-            addAction(ACTION_DET_BLIND_START)
-            addAction(ACTION_DET_BLIND_NEXT)
-            addAction(ACTION_DET_BLIND_REVEAL)
-        }
-        // adb shell(다른 UID)에서 보내야 하므로 EXPORTED. 디버그 빌드에서만 등록된다.
-        ContextCompat.registerReceiver(
-            this, receiver, filter, ContextCompat.RECEIVER_EXPORTED
-        )
-        sharpnessDiagReceiver = receiver
-        Log.i(TAG, "SHARP 진단 리시버 등록됨 ($ACTION_DUMP_RING / $ACTION_SET_UPSCALE)")
-    }
-
-    /**
-     * 검출 힌트 오프셋 적용 + 전환 인지 신호.
-     *
-     * 브로드캐스트는 다음 분석 프레임(~33ms)에 반영되지만 랜드마크는 코어 stabilize를
-     * 타서 몇 프레임에 걸쳐 수렴한다. 그래서 '바뀌는 순간'을 눈으로 알려 줘야
-     * 사용자가 정상 상태끼리 비교할 시작점을 잡을 수 있다.
-     * blindMsg 가 있으면 그것만 띄운다(오프셋 값 노출 금지 — 블라인드 유지).
-     */
-    private fun applyDetRot(off: Int, blindMsg: String?) {
-        detRotOffset = off
-        val hintNow = ((lastRotation.coerceAtLeast(0) + off) % 360 + 360) % 360
-        Log.i(TAG, "SHARP-ROT: 오프셋 → $off (힌트 $hintNow, screenRot=${currentScreenRotationDeg()}, blind=$blindOn)")
-        val msg = blindMsg ?: "검출 힌트 오프셋 $off (힌트 $hintNow)"
-        Toast.makeText(this@GpuRenderActivity, msg, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun unregisterSharpnessDiagReceiver() {
-        sharpnessDiagReceiver?.let {
-            runCatching { unregisterReceiver(it) }
-            sharpnessDiagReceiver = null
-        }
     }
 
     //=========================================================================
@@ -2159,7 +2000,6 @@ class GpuRenderActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         cameraGLView.onPause()
-        unregisterSharpnessDiagReceiver()
         runCatching {
             (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
                 .unregisterDisplayListener(displayListener)

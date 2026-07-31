@@ -163,7 +163,8 @@ cachedProcessingOptions = opts; cachedRotation = hint
    - `processingOptions` 캐시 키를 값 생성 전 커밋 → `build()` 실패 시 조용히 이전 힌트로 계속 검출
    - `faceTracker` non-volatile 경합 → push를 pull로 전환(매 프레임 멱등)
    - 커밋 누락 리소스 3종(`bools.xml` 등) 추가 — 커밋 `9b0b44d`, **깨끗한 체크아웃이 빌드 안 되던 blocker**
-5. **진단 표면 제거** (머지 전 필수) — `SET_DET_ROT` / `DET_BLIND_START` / `DET_BLIND_NEXT` / `DET_BLIND_REVEAL` 브로드캐스트, HUD `det:` 표시, `detRotAuto` 플래그.
+5. **~~진단 표면 제거~~ 완료** (2026-07-31) — `SET_DET_ROT` / `DET_BLIND_*` 브로드캐스트, 블라인드 상태(`blindOn`/`blindArms`/`blindIdx`/`blindLabel`), `applyDetRot`, `detRotAuto` 래치 제거. HUD 는 `det:$detRotOffset` 로 단순화(팔 라벨·`(auto)` 접미사 삭제). `pushScreenRotation` 조건은 `if (detRotOffset != deg)` 로 — **자동 유도가 이제 무조건 동작**한다(래치 제거의 의도된 결과).
+   - 실기기 재확인: 태블릿 가로 `검출 힌트 회전 → 0 (버퍼 270 + 오프셋 90)`, 폰 세로 `→ 270 (버퍼 270 + 오프셋 0)` — 제거 전과 동일. 폰의 오프셋 0 은 §4 무회귀 불변식(`screenRotation==0` ⇒ 종전과 동일)이 지켜짐을 뜻한다.
 6. **브랜치 분리 여부** — 이 커밋이 SHARP(선명도) 트랙과 한 브랜치에 섞여 있다. 미결.
 
 ---
@@ -191,3 +192,4 @@ adb shell am broadcast -a com.irislenssdk.demo.DET_BLIND_REVEAL
 |---|---|
 | 2026-07-29 | 원인 확정(회전 힌트 불일치) + 블라인드 A/B로 오프셋=screenRotation 판정 + 자동 유도 반영(3bcc2a8). 정량 지표는 판별력 없음으로 폐기 |
 | 2026-07-30 | 판별 실험(역가로 screenRot=270 블라인드)으로 **가설 A 확정·B 기각** → 공식 `offset=screenRotation` 확정. 적대 검토 4관점 반영(7896095) + 커밋 누락 리소스(9b0b44d) |
+| 2026-07-31 | 진단 표면 제거(§5-5) + 실기기 재확인(태블릿 가로·폰 세로 모두 제거 전과 동일). SHARP 트랙과 함께 develop 머지 |

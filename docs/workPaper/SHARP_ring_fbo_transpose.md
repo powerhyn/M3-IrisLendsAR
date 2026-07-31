@@ -291,10 +291,11 @@ RMS·평균밝기가 사실상 동일 → 같은 장면·같은 노출의 통제
 
 1. **~~G4 / G5 / G6~~ 완료** (2026-07-29). 셋 다 통과했고 `rot:±` 부호도 정방향(`rotSignInverted=false`)에서 마커·렌즈가 모두 붙으므로 **demo-land 트랙의 부호 미결도 함께 해소**된다.
 2. **~~G8 폰~~ 완료** (2026-07-29) — §7-3b 참조. 폰도 270이라 동일 개선이었다.
-3. **뷰티 튜닝 상수 재판정** — `jaw_warp_geometry.h`의 `kSigmaRatio 0.13` / `kMaxDispRatio 0.032`는 태블릿에서 3.16:1 비등방 공간에 튜닝돼 있었다. 등방이 되면서 워프 거동이 바뀐다(수치 회귀가 아니라 정상화). S23+ 세로에서 검증된 값이라면 오히려 같은 조건으로 되돌아가는 것이지만 육안 재확인 필요.
+3. **~~뷰티 튜닝 상수 재판정~~ 완료** (2026-07-31) — `kSigmaRatio 0.13` / `kMaxDispRatio 0.032` **재튜닝 불필요 판정**. 태블릿 가로에서 뷰티 ON·턱 V라인 슬림 `0` ↔ `0.2`(기본) 육안 대조 결과 **턱 워프 자연스러움**. 등방화가 회귀가 아니라 정상화였음이 확인됐다. 킬스위치 A/B는 불필요해 미사용. 상수 무변경.
 4. **분석 경로(`ensureAnalysisTarget`)** — 같은 전치 버그가 잠복해 있다(현재 미배선). 배선 시 **치수와 회전을 반드시 함께** 바꿀 것. 반쪽만 바꾸면 `TasksToIrisResult` upright 스왑 결과가 링 종횡비와 어긋나 렌즈가 3.16:1 타원이 된다. 코드에 경고 주석 삽입 완료.
 5. **기기 일반성** — '회전 90/270 ⇒ 링 치수 스왑' 규칙은 SM-X920 1대 실측에서 역산했다. 다만 회전이 버퍼에 구워져 있든 `stMatrix`에 실려 있든 FBO가 받는 콘텐츠는 upright이므로 규칙은 양쪽에서 동일하게 옳다. 반증 기기가 나오면 `hasCameraTransform` / stMatrix 교차항으로 분기하는 가드를 검토.
-6. **진단 코드 제거** — `SET_RING_SWAP`(킬스위치) / `DUMP_RING` / `SET_UPSCALE` 리시버와 `dumpRingSlot`, `resolveCoordinateSpace`·`createLensFbo` dead 정리는 트랙 종결 시.
+6. **~~진단 코드 제거~~ 완료** (2026-07-31) — `SET_RING_SWAP`(킬스위치) / `DUMP_RING` / `SET_UPSCALE` / `SET_DET_ROT` / `DET_BLIND_*` 리시버 전체, `dumpRingSlot`·`requestRingDump`·`setRingLegacyTranspose`·`ringRecreatePending`·`detRotAuto`·블라인드 상태 제거. 3파일 289줄 삭제. 조건식 2곳(`renderToScreen` `isRotated` / `ringDimsFor` `!ringLegacyTranspose`)은 반전 주의해 수동 정리. `setUpscaleMode`는 UI 버튼 호출처가 따로 있어 존치.
+   - **미정리(머지 무관, 선택)**: `resolveCoordinateSpace`(호출자 0) / `createLensFbo`+`lensFboId`(도달 불가) dead. 경고 주석 있음.
 
 ## 8. 실측 재현 방법
 
@@ -332,3 +333,4 @@ $ADB pull /sdcard/Android/data/com.irislenssdk.demo/files/sharpdump/
 | 2026-07-29 | 얼굴 게이트 완료 — G4 렌즈 정합 / G5 뷰티 / G6 마커 통과. 태블릿 게이트 10/10. 남은 것은 G8(폰)뿐 |
 | 2026-07-29 | G8 폰(S23+) 완료 — 폰도 frameRotation=270, 동일 전치 버그. 링 공간 1.92배·화면 2.09배 개선. **게이트 전부 통과** |
 | 2026-07-30 | 적대 검토 반영(7896095) + 커밋 누락 리소스 3종(9b0b44d). 킬스위치 extra 이름 `on`→`legacy` 정정 — 종전 문서 명령은 조용히 no-op 이었다 |
+| 2026-07-31 | **뷰티 재판정 완료(재튜닝 불필요)** + 진단 표면 제거(3파일 289줄) + 제거 후 게이트 통과. TRACK-ROT 트랙과 함께 develop 머지 |
