@@ -14,18 +14,26 @@ package com.irislenssdk.demo
 import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.BitmapFactory
+import android.hardware.display.DisplayManager
 import android.opengl.GLES31
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
 import android.view.KeyEvent
+import android.view.Surface
 import android.view.View
+import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Spinner
@@ -75,6 +83,35 @@ class GpuRenderActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "GpuRenderActivity"
         private const val REQUEST_CAMERA_PERMISSION = 1001
+
+        // 가로(태블릿) 좌/우 패널
+        private const val PANEL_ANIM_MS = 180L
+        /**
+         * 카메라 캡처를 16:9로 잡을지 여부 (태블릿 대화면 선명도·확대 실험 플래그).
+         *
+         * 4:3(1440x1080)은 전면 카메라 프리뷰 상한이라 더 못 올린다(1920x1440 요청 → 1440x1080 폴백 실측).
+         * 같은 1080 높이에서 16:9(1920x1080)를 잡으면 가로 텍셀이 33% 많아, 가로 창 Cover 합성에서
+         *   · 텍셀당 화면픽셀 2.06 → 1.71 (선명도 17% 개선)
+         *   · 화면 배율 +10.9% (수평 화각 동일 가정 — 참조앱 FMLens 실측 격차 +10.8%와 일치)
+         * 를 **동시에** 얻는다. displayZoom 확대와 달리 픽셀을 늘리지 않아 흐려지지 않는다.
+         * 대가: 세로 화각이 4:3의 75%로 좁아져 근접 시 이마/턱이 더 빨리 잘린다.
+         * 분석 스트림도 같은 종횡비로 함께 바꿔야 랜드마크 정합이 유지된다(selectAnalysisResolution).
+         * false 로 되돌리면 종전(4:3) 동작과 완전히 동일하다.
+         */
+        private const val USE_16_9_CAPTURE = true
+
+        /**
+         * 임시 실험 플래그 — Preview 단독 바인딩(ImageAnalysis 미사용).
+         * 스트림 1개화 재설계의 전제("추론 스트림을 빼면 고해상도가 열리는가")를 실측하기 위한 것.
+         * true 면 추론이 없어 랜드마크·렌즈가 동작하지 않는다. 검증 후 반드시 false 로 되돌린다.
+         */
+        private const val EXPERIMENT_PREVIEW_ONLY = false
+
+        /** 실험 시 요청할 프리뷰 해상도 (전면 카메라 지원: 4000x3000 / 3840x2160 / …). */
+        private val EXPERIMENT_PREVIEW_SIZE = Size(3840, 2160)
+
+        private const val LEFT_PANEL_DP = 300    // activity_gpu_render.xml landLeftPanel과 일치
+        private const val RIGHT_PANEL_DP = 180   // activity_gpu_render.xml landRightPanel과 일치
     }
 
     // UI
@@ -128,6 +165,17 @@ class GpuRenderActivity : AppCompatActivity() {
     private lateinit var btnGearToggle: ImageButton
     private lateinit var devPanelContainer: View
 
+    // 가로(태블릿) 레이아웃 — 좌: 기능 설정 / 우: 렌즈 선택
+    private lateinit var statusOverlay: View
+    private lateinit var bottomSheet: LinearLayout
+    private lateinit var tabContentContainer: FrameLayout
+    private lateinit var landLeftPanel: LinearLayout
+    private lateinit var landRightPanel: FrameLayout
+    private lateinit var btnLandLeftHandle: Button
+    private lateinit var btnLandRightHandle: Button
+    private lateinit var btnRotSign: Button   // 회전 부호 A/B (실기기 육안 확정용)
+    private lateinit var btnZoom: Button      // 가로 FOV 확대 스윕 (실기기 육안 확정용)
+
     // 뷰티 탭 UI — 토글 + 단계형 슬라이더 (P8 흩어진 sweep 버튼 통합)
     private lateinit var btnToggleBeauty: Button
     private lateinit var seekSlim: SeekBar          // P8-W4: 턱 V라인 슬림
@@ -161,8 +209,11 @@ class GpuRenderActivity : AppCompatActivity() {
     private var lensConfig = LensConfig()
 
     // 뷰티 설정
-    private var beautyConfig = com.irislenssdk.BeautyFilterConfigV2.Builder().enabled(true).intensity(1.0f).build()
-    private var beautyEnabled = true
+    // 기본 OFF: 피부 스무딩은 얼굴 ROI에 가우시안 블러를 걸어 **선명도를 떨어뜨린다**.
+    //   기본 ON + intensity 1.0 이던 탓에 카메라 앱/참조앱 대비 얼굴만 흐리게 보였다(실기기 확인).
+    //   렌즈 피팅 자체에는 뷰티가 필수가 아니므로 기본은 원본 화질을 보여주고, 필요할 때 토글한다.
+    private var beautyConfig = com.irislenssdk.BeautyFilterConfigV2.Builder().enabled(false).intensity(1.0f).build()
+    private var beautyEnabled = false
 
     //=========================================================================
     // 추적: MediaPipe Tasks 단일 경로 (W4-D — LEGACY 자체 검출 경로 제거)
@@ -190,6 +241,16 @@ class GpuRenderActivity : AppCompatActivity() {
     // 카메라 회전 (한 번만 설정)
     private var lastRotation: Int = -1
 
+    /**
+     * SHARP-ROT: MediaPipe 검출 힌트 회전 오프셋 (도).
+     *
+     * targetRotation 핀 때문에 imageInfo.rotationDegrees 가 기기 자세와 무관하게 상수라,
+     * 기기를 90° 돌려 들면 MediaPipe 가 누운 얼굴을 본다. 화면 회전을 힌트에만 더해
+     * '세상 기준 정립'을 만든다. 부호는 실기기 스윕으로 확정한다(0/90/180/270).
+     *   adb shell am broadcast -a com.irislenssdk.demo.SET_DET_ROT --ei offset 90
+     */
+    @Volatile private var detRotOffset: Int = 0
+
     // StabilityLogger (P4-W1-02)
     private var stabilityLogger: StabilityLogger? = null
     @Volatile private var gpuTier: String = "UNKNOWN"
@@ -201,11 +262,24 @@ class GpuRenderActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 폰은 세로 고정(기존 동작 유지), sw600dp 태블릿만 가로 허용.
+        // setContentView 전에 정해야 초기 1프레임이 잘못된 방향으로 뜨지 않는다.
+        requestedOrientation = if (resources.getBoolean(R.bool.allow_landscape)) {
+            ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+
         setContentView(R.layout.activity_gpu_render)
 
         initViews()
         initLensManager()
         initSDK()
+
+        // 레이아웃 배치 + 화면 회전 주입 (세로면 둘 다 항등)
+        applyOrientationLayout(isLandscapeLayoutWanted(resources.configuration))
+        pushScreenRotation()
 
         if (hasCameraPermission()) {
             startCamera()
@@ -259,6 +333,17 @@ class GpuRenderActivity : AppCompatActivity() {
         // 개발자 패널 토글 (기어)
         btnGearToggle = findViewById(R.id.btnGearToggle)
         devPanelContainer = findViewById(R.id.devPanelContainer)
+
+        // 가로(태블릿) 좌/우 패널
+        statusOverlay = findViewById(R.id.statusOverlay)
+        bottomSheet = findViewById(R.id.bottomSheet)
+        tabContentContainer = findViewById(R.id.tabContentContainer)
+        landLeftPanel = findViewById(R.id.landLeftPanel)
+        landRightPanel = findViewById(R.id.landRightPanel)
+        btnLandLeftHandle = findViewById(R.id.btnLandLeftHandle)
+        btnLandRightHandle = findViewById(R.id.btnLandRightHandle)
+        btnRotSign = findViewById(R.id.btnRotSign)
+        btnZoom = findViewById(R.id.btnZoom)
 
         // W4-D: frame-sync 킬스위치 + TASKS HUD (추적 공급자 토글/듀얼 A/B 측정 제거)
         btnFrameSync = findViewById(R.id.btnFrameSync)
@@ -959,6 +1044,42 @@ class GpuRenderActivity : AppCompatActivity() {
             devPanelContainer.visibility =
                 if (devPanelContainer.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
+
+        // 가로(태블릿) 좌/우 패널 접기 핸들
+        btnLandLeftHandle.setOnClickListener { setLeftPanelOpen(!leftPanelOpen) }
+        btnLandRightHandle.setOnClickListener { setRightPanelOpen(!rightPanelOpen) }
+
+        // 가로 회전 부호 A/B — 태블릿 가로에서 영상이 반대로 돌면 이걸로 뒤집는다.
+        // GL(최종 blit)과 OverlayView(캔버스)는 반드시 같은 부호를 써야 마커가 영상에 붙는다.
+        btnRotSign.setOnClickListener {
+            rotSignInverted = !rotSignInverted
+            cameraGLView.setScreenRotationInverted(rotSignInverted)
+            overlayView.setScreenRotationInverted(rotSignInverted)
+            btnRotSign.text = if (rotSignInverted) "rot:-" else "rot:+"
+            btnRotSign.setBackgroundColor(
+                if (rotSignInverted) 0xCC2196F3.toInt() else 0x66555555.toInt()
+            )
+            Log.i(TAG, "화면 회전 부호 → ${if (rotSignInverted) "반전" else "정방향"}")
+        }
+
+        // 가로 FOV 확대 스윕 — 참조앱과 같은 자리에서 육안 비교해 배율을 확정한다.
+        // ⚠️ rot 부호를 먼저 고정한 뒤 판단할 것(회전이 어긋나면 절대 배율이 달라져 판단이 오염된다).
+        // 확정 후 landDisplayZoom을 그 값으로 고정하고 이 버튼은 제거한다(btnRotSign과 동일 수명).
+        // 업스케일 품질 토글 — 1920x1080 소스를 2960 창에 1.54배 확대할 때의 리샘플링 방식.
+        // bilinear(종전)은 디테일을 뭉갠다. 육안 확정 후 최적 모드로 고정하고 버튼 제거.
+        btnZoom.setOnClickListener {
+            upscaleModeIdx = (upscaleModeIdx + 1) % 3
+            cameraGLView.setUpscaleMode(upscaleModeIdx, 0.35f)
+            btnZoom.text = when (upscaleModeIdx) {
+                0 -> "up:bilin"
+                1 -> "up:bicub"
+                else -> "up:bicub+S"
+            }
+            btnZoom.setBackgroundColor(
+                if (upscaleModeIdx > 0) 0xCC2196F3.toInt() else 0x66555555.toInt()
+            )
+            Log.i(TAG, "업스케일 모드 → $upscaleModeIdx")
+        }
     }
 
     // === StabilityLogger (P4-W1-02) ===
@@ -1063,7 +1184,14 @@ class GpuRenderActivity : AppCompatActivity() {
      *
      * - 저사양 (RAM <= 3GB): 640x480
      * - 중간 사양 (RAM <= 6GB): 1280x960
-     * - 고사양 (RAM > 6GB): 1440x1080
+     * - 고사양 (RAM > 6GB): 1920x1440
+     *
+     * 고사양이 1440x1080 → 1920x1440 인 이유(태블릿 대화면 선명도):
+     *   Cover 합성은 4:3 소스를 가로 창 폭에 맞추므로 텍셀당 화면픽셀 = viewWidth/texWidth 다.
+     *   2960px 창에서 1440 소스는 텍셀당 2.06px까지 늘어나 육안으로 흐리다(참조앱 FMLens 대비 열세).
+     *   1920 소스면 1.54px로 25% 조밀해지고, FOV 확대(displayZoom)를 얹어도 종전보다 선명하다.
+     *   기기 센서는 4000x3000이라 1920x1440은 네이티브 지원 범위이며 4:3이라 분석 스트림과
+     *   종횡비도 그대로 호환된다(랜드마크 정규화 좌표 무영향).
      */
     private fun selectOptimalResolution(): Size {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -1074,7 +1202,14 @@ class GpuRenderActivity : AppCompatActivity() {
         val resolution = when {
             totalRamMb <= 3072 -> Size(640, 480)
             totalRamMb <= 6144 -> Size(1280, 960)
-            else -> Size(1440, 1080)
+            // ⚠️ 1920x1080 이 CameraX 경로의 실질 상한이다(실측).
+            //   하드웨어는 SurfaceTexture 로 4000x3000·3840x2160 까지 낼 수 있지만, 우리는
+            //   렌더용 Preview + 추론용 ImageAnalysis **두 스트림**을 동시에 열기 때문에
+            //   그 조합이 카메라 지원 범위를 벗어나 바인딩이 실패한다("No supported surface
+            //   combination", 분석을 640x360 으로 낮춰도 동일). 참조앱 FMLens 는 SurfaceTexture
+            //   한 개로 렌더·추론을 모두 처리해 더 큰 소스를 쓴다 — 이 구조 차이가 남은 선명도
+            //   격차의 근본이며, 해소하려면 추론을 프리뷰 텍스처에서 GPU로 직접 돌려야 한다.
+            else -> if (USE_16_9_CAPTURE) Size(1920, 1080) else Size(1920, 1440)
         }
 
         Log.d(TAG, "Device RAM: ${totalRamMb}MB -> preview resolution: ${resolution.width}x${resolution.height}")
@@ -1089,7 +1224,16 @@ class GpuRenderActivity : AppCompatActivity() {
      * 렌더 텍스처에 그대로 대응된다.
      */
     private fun selectAnalysisResolution(totalRamMb: Long): Size =
-        if (totalRamMb <= 3072) Size(640, 480) else Size(960, 720)
+        if (USE_16_9_CAPTURE) {
+            // 프리뷰와 **같은 종횡비**여야 랜드마크 정규화 좌표가 렌더 텍스처에 그대로 대응한다.
+            // 640x360 로 낮춘 이유: 프리뷰를 고해상(4K급)으로 올리면 (프리뷰+분석) 동시 스트림
+            //   조합이 하드웨어 지원 범위를 벗어나 바인딩이 실패한다(실측: No supported surface
+            //   combination). 분석 스트림을 PREVIEW 등급 아래로 낮추면 조합이 통과한다.
+            //   FaceLandmarker 는 내부에서 자체 입력 크기로 리사이즈하므로 추론 정확도 손실은 작다.
+            if (totalRamMb <= 3072) Size(640, 360) else Size(960, 540)
+        } else {
+            if (totalRamMb <= 3072) Size(640, 480) else Size(960, 720)
+        }
 
     private fun bindCameraUseCases() {
         val cameraProvider = cameraProvider ?: return
@@ -1099,8 +1243,9 @@ class GpuRenderActivity : AppCompatActivity() {
             .requireLensFacing(lensFacing)
             .build()
 
-        // 디바이스 성능 기반 해상도 선택
-        val targetResolution = selectOptimalResolution()
+        // 디바이스 성능 기반 해상도 선택 (실험 경로는 고해상 강제)
+        val targetResolution =
+            if (EXPERIMENT_PREVIEW_ONLY) EXPERIMENT_PREVIEW_SIZE else selectOptimalResolution()
         // 프리뷰(렌더 소스)와 추론 해상도를 분리한다 — 공유 시 추론 비용 때문에 프리뷰까지
         // 낮게 묶여 대화면에서 흐려진다. 둘 다 4:3이라 랜드마크 정규화 좌표는 그대로 호환.
         val totalRamMb = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager)
@@ -1109,18 +1254,43 @@ class GpuRenderActivity : AppCompatActivity() {
         val analysisResolution = selectAnalysisResolution(totalRamMb)
         Log.d(TAG, "Analysis resolution: ${analysisResolution.width}x${analysisResolution.height}")
 
-        fun selectorFor(size: Size) = ResolutionSelector.Builder()
+        // highRes=true: CameraX Preview 의 기본 상한(≈1080p, PREVIEW 크기 규칙)을 풀어 그 위 해상도를
+        //   받는다. 이 상한 때문에 1920x1440 을 요청해도 1440x1080 으로 조용히 폴백해(실측 확인)
+        //   대화면에서 텍셀당 2.06px까지 늘어나 흐려졌다. 프리뷰(렌더 소스)에만 적용하고 분석은
+        //   추론 비용 때문에 기본 규칙을 유지한다. 캡처 레이트가 희생될 수 있어 fps 실측이 필요하다.
+        fun selectorFor(size: Size, highRes: Boolean = false) = ResolutionSelector.Builder()
             .setResolutionStrategy(
                 ResolutionStrategy(size, ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)
             )
-            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+            .setAspectRatioStrategy(
+                if (USE_16_9_CAPTURE) AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY
+                else AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
+            )
+            .apply {
+                if (highRes) {
+                    setAllowedResolutionMode(
+                        ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
+                    )
+                }
+            }
             .build()
 
-        val resolutionSelector = selectorFor(targetResolution)
+        // feaa44b: 프리뷰(렌더 소스)는 고해상(targetResolution) selector 사용 + PREVIEW 상한 해제.
+        val resolutionSelector = selectorFor(targetResolution, highRes = true)
+
+        // ⚠️ targetRotation을 ROTATION_0으로 고정(핀)한다. (demo-land 회전 파이프라인)
+        //
+        // 기본값은 use case 생성 시점의 display rotation이라, 세로 고정이 풀리면 회전할 때마다
+        // imageInfo.rotationDegrees와 IrisResult.frameWidth/Height가 480×640↔640×480으로 뒤집힌다.
+        // 반면 링 FBO는 센서 치수 그대로라 랜드마크 upright 공간과의 계약이 깨져 렌즈가 어긋난다.
+        // ROTATION_0에 핀하면 추적·합성 좌표계가 회전과 무관하게 불변이고, 화면 방향 보정은
+        // 최종 blit(CameraGLRenderer.setScreenRotation) 한 곳만 담당한다.
+        val targetRotation = Surface.ROTATION_0
 
         // Preview → GLSurfaceView
         val preview = Preview.Builder()
             .setResolutionSelector(resolutionSelector)
+            .setTargetRotation(targetRotation)
             .build()
             .apply {
                 setSurfaceProvider(cameraGLView.getSurfaceProvider())
@@ -1130,6 +1300,7 @@ class GpuRenderActivity : AppCompatActivity() {
         // W4-D: TASKS 단일 경로. Tasks는 YUV 직접 입력 불가(함정 #2) → RGBA_8888 직접 스트림.
         val imageAnalysis = ImageAnalysis.Builder()
             .setResolutionSelector(selectorFor(analysisResolution))
+            .setTargetRotation(targetRotation)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()
@@ -1141,17 +1312,45 @@ class GpuRenderActivity : AppCompatActivity() {
 
         try {
             cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                this,
-                cameraSelector,
-                preview,
-                imageAnalysis
-            )
+            // ⚠️ EXPERIMENT_PREVIEW_ONLY: 스트림 1개화 재설계의 **전제 검증용** 임시 경로.
+            //   Preview 단독이면 4K 가 실제로 열리는지(=조합 제약이 ImageAnalysis 때문인지)를
+            //   확인한다. 이 경로에서는 추론 입력이 없어 랜드마크/렌즈가 동작하지 않는다.
+            val camera = if (EXPERIMENT_PREVIEW_ONLY) {
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview)
+            } else {
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis)
+            }
 
             // 미러링 설정 (전면 카메라)
             cameraGLView.setMirror(lensFacing == CameraSelector.LENS_FACING_FRONT)
 
             Log.d(TAG, "Camera bound successfully")
+
+            // SHARP 진단: 회전 생산자 후보 비교.
+            // 현재 frameRotation의 유일한 생산자는 ImageAnalysis의 imageInfo.rotationDegrees라
+            // (a) 프리뷰 surface보다 늦게 오고 (b) ImageAnalysis 미바인딩 경로에선 아예 안 온다.
+            // sensorRotationDegrees가 같은 값이면 bind 시점 선주입으로 둘 다 해소된다.
+            Log.d(
+                TAG,
+                "SHARP 회전 생산자: sensorRotationDegrees=" +
+                    "${camera.cameraInfo.sensorRotationDegrees}, screenRot=${currentScreenRotationDeg()}"
+            )
+
+            // 진단: 이 카메라가 SurfaceTexture 로 실제 내보낼 수 있는 크기 목록.
+            // CameraX Preview 는 관례상 ≤1080p 로 잘라 주므로, 여기 더 큰 값이 있으면
+            // "하드웨어 한계"가 아니라 "CameraX 정책"이라는 뜻이다(= Camera2 직행 시 이득 있음).
+            try {
+                val c2 = androidx.camera.camera2.interop.Camera2CameraInfo.from(camera.cameraInfo)
+                val map = c2.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+                )
+                val sizes = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
+                    ?.sortedByDescending { it.width.toLong() * it.height }
+                Log.i(TAG, "SurfaceTexture 지원 크기 상위: " +
+                    (sizes?.take(12)?.joinToString { "${it.width}x${it.height}" } ?: "조회 실패"))
+            } catch (e: Exception) {
+                Log.w(TAG, "지원 해상도 조회 실패", e)
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "Camera binding failed", e)
@@ -1174,9 +1373,21 @@ class GpuRenderActivity : AppCompatActivity() {
         if (rotation != lastRotation) {
             lastRotation = rotation
             cameraGLView.setFrameRotation(rotation)
-            Log.d(TAG, "Camera rotation (TASKS): $rotation")
+            // SHARP 진단: 분석 버퍼 실치수를 함께 남긴다. 링 전치 정본화의 전제인
+            // "IrisResult.frameWidth/Height(upright) 종횡비 == 링 콘텐츠 종횡비"가
+            // 성립하는지 판정하려면 요청값(960x540)이 아니라 실제로 온 치수가 필요하다.
+            Log.d(
+                TAG,
+                "Camera rotation (TASKS): $rotation, analysis buffer=" +
+                    "${imageProxy.width}x${imageProxy.height}, screenRot=${currentScreenRotationDeg()}"
+            )
         }
-        ensureFaceTracker().analyze(imageProxy)
+        // SHARP-ROT: 검출 힌트 오프셋을 **매 프레임 pull** 한다.
+        // push(메인 스레드 → faceTracker) 방식은 faceTracker 가 non-volatile 인데다
+        // 갱신이 1회성이라, 트래커 생성과 인터리브되면 푸시가 유실되고 재시도 경로가 없었다.
+        // 여기서는 분석 스레드가 volatile int 를 읽어 setter 에 넘길 뿐이라 비용이 사실상 0이고
+        // 멱등하다(값이 같으면 setter 내부에서 그대로 대입).
+        ensureFaceTracker().also { it.setDetectionRotationOffset(detRotOffset) }.analyze(imageProxy)
     }
 
     /** 분석 스레드 전용 — FaceTracker는 생성 스레드에서만 detect/close (스레드 친화성). */
@@ -1201,6 +1412,7 @@ class GpuRenderActivity : AppCompatActivity() {
         tracker.onRawResult = ::onTasksRawResult
         // 트래커 재생성 시 현재 A/B 상태 재적용 (기본 팔이면 img 버튼 상태 따름)
         val arm = trkArms[trkArmIdx]
+        tracker.setDetectionRotationOffset(detRotOffset)
         tracker.setSingleFaceMode(arm.singleFace)
         tracker.setTrackingRunningMode(trkArmMode(arm))
         faceTracker = tracker
@@ -1326,8 +1538,9 @@ class GpuRenderActivity : AppCompatActivity() {
         if (++tasksHudCounter >= 30) {
             tasksHudCounter = 0
             val hud = String.format(
-                java.util.Locale.US, "TRK:TASKS(%s) infer≈%.0fms",
-                if (tasksUsingGpu) "gpu" else "cpu", lastTasksInferMs
+                java.util.Locale.US, "TRK:TASKS(%s) infer≈%.0fms  %s",
+                if (tasksUsingGpu) "gpu" else "cpu", lastTasksInferMs,
+                "det:$detRotOffset"
             )
             runOnUiThread { tvAbHud.text = hud }
         }
@@ -1421,12 +1634,289 @@ class GpuRenderActivity : AppCompatActivity() {
     }
 
     //=========================================================================
+    // 가로(태블릿) 레이아웃 — 좌: 기능 설정 / 우: 렌즈 선택
+    //
+    // configChanges로 회전을 직접 처리하므로 액티비티가 재생성되지 않는다(= EGL/CameraX/
+    // 렌즈 썸네일 유지). 대체 레이아웃 리소스는 이 조건에서 재인플레이트되지 않으므로,
+    // 기존 뷰 인스턴스를 좌/우 패널로 옮겨 담는 재부모화로 배치를 바꾼다.
+    // 뷰가 그대로라 슬라이더 값·리스너·선택 상태가 회전을 넘어 살아남는다.
+    //=========================================================================
+
+    private var landscapeLayoutApplied = false
+    // 좌 패널(기능설정)은 **기본 닫힘** — 카메라 표시 영역을 최대한 넓게 확보한다(사용자 요청).
+    // 핸들(btnLandLeftHandle)로 필요할 때만 연다. 우 패널(렌즈 선택)은 상시 노출이 자연스러워 열림 유지.
+    private var leftPanelOpen = false
+    private var rightPanelOpen = true
+
+    // 가로 FOV 확대 배율 (btnZoom 스윕으로 실기기 육안 확정 중 — 확정 후 상수화하고 버튼 제거).
+    // 참조앱 FMLens 대비 실측 격차가 지표별로 +6.6%~+10.8%로 갈려 목표를 하나로 못 박지 않았다.
+    private var landDisplayZoom = 1.0f
+    // 업스케일 품질 토글 인덱스 (0=bilinear, 1=bicubic, 2=bicubic+언샤프). 렌더러 기본값과 맞춘다.
+    private var upscaleModeIdx = 1
+    private var portraitParamsSaved = false
+    private var rvLensesPortraitParams: ViewGroup.LayoutParams? = null
+    private var tabLayoutPortraitParams: ViewGroup.LayoutParams? = null
+    private var tabContentPortraitParams: ViewGroup.LayoutParams? = null
+
+    /** 화면 회전 보정 부호 A/B (GL·오버레이 공통) — 실기기 육안 확정 후 상수화 예정. */
+    private var rotSignInverted = false
+
+    /** 180도 회전은 orientation/screenSize가 안 바뀌어 onConfigurationChanged가 오지 않는다. */
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) { pushScreenRotation() }
+    }
+
+    private fun dp(v: Int): Float = v * resources.displayMetrics.density
+
+    private fun isLandscapeLayoutWanted(config: Configuration): Boolean =
+        resources.getBoolean(R.bool.allow_landscape) &&
+            config.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        pushScreenRotation()
+        applyOrientationLayout(isLandscapeLayoutWanted(newConfig))
+    }
+
+    /** 현재 디스플레이 회전각 (0/90/180/270, natural orientation 기준). */
+    private fun currentScreenRotationDeg(): Int {
+        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display?.rotation ?: Surface.ROTATION_0
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.rotation
+        }
+        return when (rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+    }
+
+    /**
+     * 화면 회전을 렌더러·오버레이에 주입.
+     *
+     * GL은 최종 blit에만 반영하고 링 FBO/랜드마크 좌표계는 건드리지 않는다
+     * (렌즈·뷰티 합성은 회전 영향 0). 세로 고정 기기에서는 항상 0이라 항등.
+     */
+    private fun pushScreenRotation() {
+        val deg = currentScreenRotationDeg()
+        cameraGLView.setScreenRotation(deg)
+        overlayView.setScreenRotation(deg)
+
+        // SHARP-ROT: MediaPipe 검출 힌트를 화면 회전에서 유도한다.
+        //
+        // imageInfo.rotationDegrees 는 targetRotation=ROTATION_0 핀 때문에 기기 자세와
+        // 무관한 상수다(실측 SM-X920/SM-S916N 모두 270). 그 값만으로는 '기기 natural
+        // orientation 기준 정립'까지만 맞아서, 기기를 90° 돌려 들면 MediaPipe 가 옆으로
+        // 누운 얼굴을 본다 → 검출 단계(BlazeFace)가 흔들려 랜드마크가 일그러진다.
+        //   hint = (bufferRotation + screenRotation) % 360
+        // screenRotation==0 이면 현행과 완전히 동일하므로 폰·태블릿 세로는 무회귀다.
+        //
+        // 근거: 태블릿 가로(screenRot=90)에서 오프셋 0/90/180/270 블라인드 A/B(매핑 무작위,
+        // 4팔 순환 후 재확인) 결과 오프셋 90(=힌트 0)이 확실히 안정적으로 판정됨 (2026-07-29).
+        // 값만 갱신한다 — 분석 스레드가 매 프레임 pull 해 간다(processFrameTasks 참조).
+        if (detRotOffset != deg) {
+            detRotOffset = deg
+            Log.i(TAG, "검출 힌트 오프셋(자동) → $deg")
+        }
+        Log.d(TAG, "Screen rotation → $deg")
+    }
+
+    /**
+     * FOV 확대 배율 주입 — 가로에서만 적용하고 세로는 1.0(현행 동일)으로 되돌린다.
+     *
+     * 4:3 캡처를 가로 창(≈16:10)에 Cover로 깔면 계산이 항상 width-bound로 떨어져 배율이
+     * 최소치에 고정된다(얼굴 위 천장이 넓게 잡히고 피사체가 작아 보임). 최종 blit에만
+     * 등방 배율을 곱해 표시를 확대한다 — 캡처 FOV·랜드마크·렌즈 좌표계는 불변이라
+     * 렌즈 정합과 추적 범위는 그대로다.
+     * 세로 원복을 빠뜨리면 폰 세로가 확대된 채 고착되므로 가로/세로 분기 단일 지점에서 부른다.
+     */
+    private fun pushDisplayZoom() {
+        val z = if (landscapeLayoutApplied) landDisplayZoom else 1.0f
+        cameraGLView.setDisplayZoom(z)
+        overlayView.displayZoom = z
+        Log.d(TAG, "Display zoom → $z (landscape=$landscapeLayoutApplied)")
+    }
+
+    private fun applyOrientationLayout(landscape: Boolean) {
+        if (landscape == landscapeLayoutApplied) return
+        landscapeLayoutApplied = landscape
+        if (landscape) enterLandscapeLayout() else enterPortraitLayout()
+        pushDisplayZoom()
+    }
+
+    private fun savePortraitParamsOnce() {
+        if (portraitParamsSaved) return
+        rvLensesPortraitParams = rvLenses.layoutParams
+        tabLayoutPortraitParams = tabLayout.layoutParams
+        tabContentPortraitParams = tabContentContainer.layoutParams
+        portraitParamsSaved = true
+    }
+
+    private fun enterLandscapeLayout() {
+        savePortraitParamsOnce()
+
+        // 바텀시트에서 떼어내 좌/우 패널로 이동 (dragHandle만 남는다 → 시트 자체를 숨김)
+        bottomSheet.removeView(rvLenses)
+        bottomSheet.removeView(tabLayout)
+        bottomSheet.removeView(tabContentContainer)
+        bottomSheet.visibility = View.GONE
+
+        landLeftPanel.addView(
+            tabLayout,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        // 세로의 고정 280dp 대신 좌패널 잔여 높이를 전부 사용 (슬라이더가 잘리지 않게)
+        landLeftPanel.addView(
+            tabContentContainer,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+        landRightPanel.addView(
+            rvLenses,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        // 렌즈 레일: 가로 스크롤 썸네일 → 세로 리스트 + 행(row) 아이템
+        rvLenses.layoutManager = LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false)
+        rvLenses.isNestedScrollingEnabled = true
+        lensAdapter.setItemLayout(R.layout.item_lens_land)
+
+        btnLandLeftHandle.visibility = View.VISIBLE
+        btnLandRightHandle.visibility = View.VISIBLE
+        setLeftPanelOpen(leftPanelOpen, animate = false)
+        setRightPanelOpen(rightPanelOpen, animate = false)
+
+        Log.i(TAG, "가로 레이아웃 적용 (좌=기능설정 / 우=렌즈선택)")
+    }
+
+    private fun enterPortraitLayout() {
+        // 패널 슬라이드 도중 회전하면 살아 있는 애니메이터가 아래 translationX=0 대입을 덮어써
+        // HUD·기어 버튼이 세로 화면에서 밀린 채 고착된다 → 먼저 전부 취소.
+        listOf<View>(
+            landLeftPanel, landRightPanel, btnLandLeftHandle, btnLandRightHandle,
+            statusOverlay, devPanelContainer, btnGearToggle
+        ).forEach { it.animate().cancel() }
+
+        landLeftPanel.removeView(tabLayout)
+        landLeftPanel.removeView(tabContentContainer)
+        landRightPanel.removeView(rvLenses)
+
+        landLeftPanel.visibility = View.GONE
+        landRightPanel.visibility = View.GONE
+        btnLandLeftHandle.visibility = View.GONE
+        btnLandRightHandle.visibility = View.GONE
+
+        // 바텀시트 원위치 (dragHandle 다음 = index 1, 2, 3)
+        bottomSheet.addView(
+            rvLenses, 1,
+            rvLensesPortraitParams ?: LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(120).toInt()
+            )
+        )
+        bottomSheet.addView(
+            tabLayout, 2,
+            tabLayoutPortraitParams ?: LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        bottomSheet.addView(
+            tabContentContainer, 3,
+            tabContentPortraitParams ?: LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(280).toInt()
+            )
+        )
+        bottomSheet.visibility = View.VISIBLE
+
+        rvLenses.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+        rvLenses.isNestedScrollingEnabled = false
+        lensAdapter.setItemLayout(R.layout.item_lens)
+
+        // 가로에서 패널을 피해 밀어 두었던 오버레이 원위치
+        statusOverlay.translationX = 0f
+        devPanelContainer.translationX = 0f
+        btnGearToggle.translationX = 0f
+
+        Log.i(TAG, "세로 레이아웃 복귀 (바텀시트)")
+    }
+
+    /**
+     * translationX 이동. 진행 중인 애니메이션을 먼저 취소한다 —
+     * 취소 없이 값만 대입하면 살아 있는 ViewPropertyAnimator가 다음 프레임에 덮어써
+     * 목표값으로 끝나버린다(회전/연타 시 뷰가 화면 밖에 고착).
+     */
+    private fun moveX(v: View, x: Float, animate: Boolean) {
+        v.animate().cancel()
+        if (animate) {
+            v.animate().translationX(x).setDuration(PANEL_ANIM_MS).start()
+        } else {
+            v.translationX = x
+        }
+    }
+
+    private fun setLeftPanelOpen(open: Boolean, animate: Boolean = true) {
+        leftPanelOpen = open
+        val w = landLeftPanel.width.takeIf { it > 0 }?.toFloat() ?: dp(LEFT_PANEL_DP)
+        btnLandLeftHandle.text = if (open) "◀" else "▶"
+        slidePanel(landLeftPanel, open, -w, animate)
+        val shift = if (open) w else 0f
+        moveX(btnLandLeftHandle, shift, animate)
+        moveX(statusOverlay, shift, animate)   // HUD가 좌패널에 가리지 않게
+    }
+
+    private fun setRightPanelOpen(open: Boolean, animate: Boolean = true) {
+        rightPanelOpen = open
+        val w = landRightPanel.width.takeIf { it > 0 }?.toFloat() ?: dp(RIGHT_PANEL_DP)
+        btnLandRightHandle.text = if (open) "▶" else "◀"
+        slidePanel(landRightPanel, open, w, animate)
+        val shift = if (open) -w else 0f
+        moveX(btnLandRightHandle, shift, animate)
+        // 기어/개발 패널은 우상단이라 렌즈 패널과 겹친다 → 같이 밀어준다
+        moveX(devPanelContainer, shift, animate)
+        moveX(btnGearToggle, shift, animate)
+    }
+
+    /** 패널 슬라이드 인/아웃. [hiddenX] = 화면 밖으로 밀어낼 translationX. */
+    private fun slidePanel(panel: View, open: Boolean, hiddenX: Float, animate: Boolean) {
+        // 진행 중 애니메이션 취소 — withEndAction의 GONE 처리가 뒤늦게 발화하는 것도 함께 막는다.
+        panel.animate().cancel()
+        if (open) {
+            panel.visibility = View.VISIBLE
+            if (animate) {
+                panel.translationX = hiddenX
+                panel.animate().translationX(0f).setDuration(PANEL_ANIM_MS).start()
+            } else {
+                panel.translationX = 0f
+            }
+        } else {
+            if (animate) {
+                panel.animate().translationX(hiddenX).setDuration(PANEL_ANIM_MS)
+                    .withEndAction { panel.visibility = View.GONE }.start()
+            } else {
+                panel.translationX = hiddenX
+                panel.visibility = View.GONE
+            }
+        }
+    }
+
+    //=========================================================================
     // 라이프사이클
     //=========================================================================
 
     override fun onResume() {
         super.onResume()
         cameraGLView.onResume()
+        // 회전 상태는 백그라운드에서 바뀌었을 수 있다 → 복귀 시 재주입 + 리스너 등록
+        (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
+            .registerDisplayListener(displayListener, null)
+        pushScreenRotation()
         // P6-W4 env_map 로드는 onGpuInitialized 콜백에서 처리 (GPU lens init 완료 보장).
     }
 
@@ -1510,6 +2000,10 @@ class GpuRenderActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         cameraGLView.onPause()
+        runCatching {
+            (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
+                .unregisterDisplayListener(displayListener)
+        }
     }
 
     override fun onDestroy() {

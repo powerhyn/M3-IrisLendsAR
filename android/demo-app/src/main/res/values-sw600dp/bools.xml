@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    태블릿(최소 폭 600dp 이상)에서만 가로 전환을 허용한다.
+    가로에서는 하단 바텀시트 대신 좌(기능 설정)/우(렌즈 선택) 접이식 패널로 재배치된다
+    (GpuRenderActivity.applyOrientationLayout).
+-->
+<resources>
+    <bool name="allow_landscape">true</bool>
+</resources>

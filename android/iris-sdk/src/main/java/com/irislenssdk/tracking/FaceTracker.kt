@@ -159,6 +159,74 @@ class FaceTracker(
     /** 샘플 오프셋 재사용 버퍼 (프레임당 힙 할당 0) */
     private val lumaSampleOffsets = IntArray(IrisLumaSampler.MAX_SAMPLES)
 
+    /**
+     * ImageProxy 없는 RGBA_8888 진입점 — **단일 스트림(GL readback) 경로 전용**.
+     *
+     * CameraX ImageAnalysis 대신 GL 다운샘플 FBO를 glReadPixels 로 읽어 넘길 때 쓴다.
+     * [analyze] 와 동일한 추론·결과 경로를 타므로 좌표 계약도 동일하다(비미러 센서 공간).
+     *
+     * @param rgba **direct** ByteBuffer, capacity 가 정확히 width*4*height 여야 한다(패딩 불가).
+     *             이 함수가 반환할 때까지 호출자가 내용 유효성을 보장한다(반환 후 재사용 가능).
+     * @param rotationDegrees ImageAnalysis 의 imageInfo.rotationDegrees 와 같은 의미.
+     *             버퍼가 이미 upright 면 0. (본 기기 실측: SurfaceTexture 변환행렬이 항등이라
+     *             GL 버퍼는 센서 방향 그대로 → 카메라가 주던 값을 그대로 넘겨야 한다.)
+     * @param frameTimestampNs 센서 타임스탬프(ns) — frame-sync 매칭 키.
+     *
+     * 백프레셔는 호출자 책임이다(ImageProxy 경로의 KEEP_ONLY_LATEST 가 없다).
+     * 스레드 규약은 [analyze] 와 동일 — 반드시 같은 분석 executor 스레드에서 호출한다.
+     */
+    fun analyzeRgba(
+        rgba: ByteBuffer,
+        width: Int,
+        height: Int,
+        rotationDegrees: Int,
+        frameTimestampNs: Long
+    ) {
+        if (closed) return
+        if (!rgba.isDirect) {
+            onError("analyzeRgba: direct ByteBuffer 필요")
+            return
+        }
+        val rowBytes = width * 4
+        if (rgba.capacity() != rowBytes * height) {
+            onError("analyzeRgba: capacity ${rgba.capacity()} != ${rowBytes * height} (${width}x$height)")
+            return
+        }
+        ensureLandmarker()
+        val lm = landmarker ?: return
+
+        lastRotationDegrees = rotationDegrees
+
+        // 홍채 평균 휘도 — ImageProxy 경로와 동일하게 detect 전 동기 샘플.
+        sampleIrisLuma(rgba, width, height, rowBytes)
+
+        rgba.rewind()
+        val mpImage: MPImage =
+            ByteBufferImageBuilder(rgba, width, height, MPImage.IMAGE_FORMAT_RGBA).build()
+
+        // 타임스탬프 단조 증가 보장 (VIDEO 모드 필수 조건)
+        val ts = maxOf(SystemClock.uptimeMillis(), lastTimestampMs + 1)
+        lastTimestampMs = ts
+
+        try {
+            val result = if (runningModeActive == MODE_IMAGE) {
+                lm.detect(mpImage, processingOptions(rotationDegrees))
+            } else {
+                lm.detectForVideo(mpImage, processingOptions(rotationDegrees), ts)
+            }
+            onResult(result, mpImage, frameTimestampNs, ts)
+            try {
+                onRawResult?.invoke(
+                    result, rotationDegrees, width, height, rgba, rowBytes, frameTimestampNs
+                )
+            } catch (e: RuntimeException) {
+                onError("onRawResult 소비자 오류: ${e.message}")
+            }
+        } catch (e: RuntimeException) {
+            handleDetectError(e)
+        }
+    }
+
     /** 분석 executor 스레드 전용. */
     fun analyze(imageProxy: ImageProxy) {
         if (closed) {
@@ -473,14 +541,57 @@ class FaceTracker(
         return FaceLandmarker.createFromOptions(context, builder.build())
     }
 
-    private fun processingOptions(rotation: Int): ImageProcessingOptions {
-        if (rotation != cachedRotation || cachedProcessingOptions == null) {
-            cachedRotation = rotation
-            cachedProcessingOptions = ImageProcessingOptions.builder()
-                .setRotationDegrees(rotation)
-                .build()
+    /**
+     * 검출 힌트 회전 오프셋 (SHARP-ROT).
+     *
+     * `imageInfo.rotationDegrees`는 `targetRotation=ROTATION_0` 핀 때문에 **기기를 물리적으로
+     * 어떻게 들든 상수**다(실측 SM-X920: 가로·세로 모두 270). 그래서 이 값을 그대로 MediaPipe
+     * 힌트로 쓰면 '기기 natural orientation 기준 정립'까지만 맞고, 기기를 90° 돌려 든 상태에서는
+     * **MediaPipe가 옆으로 누운 얼굴을 본다**. 검출 단계(BlazeFace)는 정립 얼굴 위주로 학습돼
+     * 있어 랜드마크가 불안정해진다(실측: 태블릿 가로에서 고개를 조금만 돌려도 메시가 일그러짐,
+     * 같은 기기 세로에서는 안정).
+     *
+     * 이 오프셋은 **힌트에만** 더해진다. 출력 랜드마크는 힌트와 무관하게 원본(미회전) 센서
+     * 정규화 공간으로 반환되므로([onRawResult] 계약) 좌표 변환 경로는 건드리지 않는다.
+     *
+     * ⚠️ 호출자가 넣을 값의 부호는 **카메라 방향에 따라 다르다**. CameraX 의
+     * getRelativeImageRotation 은 same-facing(전면+디스플레이)에서 `sensor + destDegrees`,
+     * opposite-facing(후면)에서 `sensor - destDegrees` 로 계산한다. 따라서
+     *   전면: +screenRotation / 후면: -screenRotation
+     * 이다. 이 SDK 의 현재 소비자는 전면 카메라만 쓴다.
+     */
+    @Volatile private var detectionRotationOffset = 0
+
+    /**
+     * 검출 힌트 오프셋 설정 (도, **90의 배수만**). 어느 스레드에서나 안전 — 다음 detect부터 반영.
+     *
+     * 90 배수가 아니면 거부한다. MediaPipe `ImageProcessingOptions.build()` 가
+     * "Expected rotation to be a multiple of 90°" 로 IllegalArgumentException 을 던지는데,
+     * 그 예외는 detect 를 감싼 `catch (e: RuntimeException)` 에 잡혀 **추론 오류로 오진**되어
+     * GPU→CPU 폴백과 랜드마커 재생성을 유발한다. 회전 설정 실수가 추론 경로 장애로 위장된다.
+     */
+    fun setDetectionRotationOffset(deg: Int) {
+        if (deg % 90 != 0) {
+            onError("검출 힌트 오프셋은 90의 배수여야 합니다 (받은 값: $deg) — 무시함")
+            return
         }
-        return cachedProcessingOptions!!
+        detectionRotationOffset = ((deg % 360) + 360) % 360
+    }
+
+    private fun processingOptions(rotation: Int): ImageProcessingOptions {
+        val offset = detectionRotationOffset          // volatile 1회 읽기 — 로그와 힌트가 갈리지 않게
+        val hint = ((rotation + offset) % 360 + 360) % 360
+        val cached = cachedProcessingOptions
+        if (hint == cachedRotation && cached != null) return cached
+
+        // ⚠️ 캐시 키를 값보다 **먼저** 커밋하면 안 된다. build() 가 던졌을 때 키만 새 값으로
+        //    오염되고 값은 낡은 객체가 남아, 다음 프레임부터 캐시 히트가 되어 조용히 이전
+        //    힌트로 계속 검출한다(로그도 안 찍혀 상태가 거짓말을 한다).
+        val opts = ImageProcessingOptions.builder().setRotationDegrees(hint).build()
+        cachedProcessingOptions = opts
+        cachedRotation = hint
+        android.util.Log.i(TAG, "검출 힌트 회전 → $hint (버퍼 $rotation + 오프셋 $offset)")
+        return opts
     }
 
     private fun obtainCompactBuffer(size: Int): ByteBuffer {
@@ -757,6 +868,8 @@ class FaceTracker(
          * demo-app 내장 모델 — assets/models/ (REFACTOR-3-3 plan §2 대상 경로).
          * [이식 적응] 원본(LensSimulator)은 "lenssdk/face_landmarker.task" — 경로만 demo assets에 맞춤.
          */
+        private const val TAG = "FaceTracker"
+
         private const val MODEL_ASSET_PATH = "models/face_landmarker.task"
 
         // 실행 모드 (벤치 토글 — setTrackingRunningMode)

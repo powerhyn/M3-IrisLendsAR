@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IrisLensSDK Android - Lens Item Layout (가로 모드 / 세로 리스트용)
+
+    가로 화면 우측 렌즈 패널에서 쓰는 행(row) 형태 아이템.
+    썸네일 + 이름을 좌우로 배치해 한 화면에 더 많은 렌즈를 노출한다.
+    ⚠️ id는 item_lens.xml과 동일해야 한다 (LensAdapter.LensViewHolder 공용).
+
+    @version 1.0.0
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/lensContainer"
+    android:layout_width="match_parent"
+    android:layout_height="72dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:background="?attr/selectableItemBackground">
+
+    <ImageView
+        android:id="@+id/lensImage"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:padding="4dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="@string/lens_thumbnail"
+        tools:src="@drawable/ic_lens_placeholder" />
+
+    <TextView
+        android:id="@+id/lensName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="10dp"
+        android:gravity="center_vertical"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        tools:text="Bonbon Gray" />
+
+</LinearLayout>
