@@ -1,7 +1,7 @@
 # SHARP — 선명도 격차 원인 확정: 링 FBO 전치(transpose) 리샘플
 
-> 상태: **✅ 원인 확정 · ✅ 본수정 구현 · ✅ 게이트 전부 통과 (태블릿 10/10 + 폰 G8)** — 미머지·미푸시
-> 브랜치: 실측 `feature/sharpness-measure`(098e0f7) → 본수정 `fix/ring-fbo-transpose`
+> 상태: **✅ 트랙 종결** — 원인 확정 · 본수정 · 게이트 전부 통과(태블릿 10/10 + 폰 G8) · 뷰티 재판정(재튜닝 불필요) · 진단 제거 · **develop 머지·push 완료(머지 `e4d85e4`, 2026-07-31)**
+> 브랜치: 실측 `feature/sharpness-measure`(098e0f7) → 본수정 `fix/ring-fbo-transpose` (머지됨)
 > 기저: `feature/single-stream-camera` @ 1579bc7
 > 선행 문서: `docs/ar-report/FMLENS_vs_IRISLENS_선명도_실측.md` (§6 절차를 이 문서가 실행)
 > 실측 일시: 2026-07-28 21:13 ~ 22:15 / 기기 Samsung SM-X920 (Galaxy Tab S10 Ultra), Android 16
