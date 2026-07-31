@@ -223,7 +223,7 @@ ROI `x 1450–1950, y 1150–1500` (더 평탄한 타일면):
 | **G7-1 홈→복귀** | ✅ 링 1080×1920 유지(뷰 종횡비로 덮이지 않음). 전환 중 `onSurfaceChanged: 1848x2823` 과도기에도 불변 |
 | **G7-2 화면 회전** | ✅ `Screen rotation set: 0 (quadrant=0)`에서도 링 1080×1920 불변, 세로 기하 정상(등방 ×1.711) |
 | **G9 native 풀** | ✅ `TexturePool full` / `exceeds max` / `SDK lens render FAILED` 로그 없음 |
-| **G4 렌즈 정합** | ✅ 렌즈(`claset doll choco`)가 양쪽 홍채에 **원형·중심 정합·좌우 대칭**. 타원 찌그러짐·반전·오프셋 없음 |
+| **G4 렌즈 정합** | ✅ 렌즈(`claset doll choco`)가 양쪽 홍채에 **원형·중심 정합·좌우 대칭**. 타원 찌그러짐·반전·오프셋 없음<br>⚠️ 이는 **진단 제거 이전**(2026-07-29) 판정이다. 제거 후 재확인은 **미완** — §7-4-7 참조 |
 | **G5 뷰티 (턱 워프·스킨 마스크)** | ✅ 뷰티 ON에서 얼굴 비례 정상, 워프 위치 이동·반전 없음. 구동작 대비 머리카락·수염이 낱개로 분해됨 |
 | **G6 OverlayView 마커** | ✅ FaceMesh 478점이 얼굴에 밀착, 홍채 마커 원형·중심 정합, 눈 윤곽선 정확. **OverlayView는 한 줄도 안 고쳤다** — 계약이 원래 맞았다는 뜻 |
 | **G8 폰 (SM-S916N, 세로 고정)** | ✅ **폰도 `frameRotation=270`** — 무회귀가 아니라 동일 개선. 링 공간 직접 비교로 **전체 1.92배 / 세로 2.25배 / 가로 1.48배**, 화면(머리카락 ROI) **2.09배**. 마커·기하·60fps 정상 |
@@ -290,16 +290,30 @@ RMS·평균밝기가 사실상 동일 → 같은 장면·같은 노출의 통제
 ### 7-4. 남은 일
 
 1. **~~G4 / G5 / G6~~ 완료** (2026-07-29). 셋 다 통과했고 `rot:±` 부호도 정방향(`rotSignInverted=false`)에서 마커·렌즈가 모두 붙으므로 **demo-land 트랙의 부호 미결도 함께 해소**된다.
+   ⚠️ 단 **G4 는 진단 제거(`f7d0fbd`) 이후 재확인이 미완**이다 — 아래 7번 참조.
 2. **~~G8 폰~~ 완료** (2026-07-29) — §7-3b 참조. 폰도 270이라 동일 개선이었다.
 3. **~~뷰티 튜닝 상수 재판정~~ 완료** (2026-07-31) — `kSigmaRatio 0.13` / `kMaxDispRatio 0.032` **재튜닝 불필요 판정**. 태블릿 가로에서 뷰티 ON·턱 V라인 슬림 `0` ↔ `0.2`(기본) 육안 대조 결과 **턱 워프 자연스러움**. 등방화가 회귀가 아니라 정상화였음이 확인됐다. 킬스위치 A/B는 불필요해 미사용. 상수 무변경.
 4. **분석 경로(`ensureAnalysisTarget`)** — 같은 전치 버그가 잠복해 있다(현재 미배선). 배선 시 **치수와 회전을 반드시 함께** 바꿀 것. 반쪽만 바꾸면 `TasksToIrisResult` upright 스왑 결과가 링 종횡비와 어긋나 렌즈가 3.16:1 타원이 된다. 코드에 경고 주석 삽입 완료.
 5. **기기 일반성** — '회전 90/270 ⇒ 링 치수 스왑' 규칙은 SM-X920 1대 실측에서 역산했다. 다만 회전이 버퍼에 구워져 있든 `stMatrix`에 실려 있든 FBO가 받는 콘텐츠는 upright이므로 규칙은 양쪽에서 동일하게 옳다. 반증 기기가 나오면 `hasCameraTransform` / stMatrix 교차항으로 분기하는 가드를 검토.
 6. **~~진단 코드 제거~~ 완료** (2026-07-31) — `SET_RING_SWAP`(킬스위치) / `DUMP_RING` / `SET_UPSCALE` / `SET_DET_ROT` / `DET_BLIND_*` 리시버 전체, `dumpRingSlot`·`requestRingDump`·`setRingLegacyTranspose`·`ringRecreatePending`·`detRotAuto`·블라인드 상태 제거. 3파일 289줄 삭제. 조건식 2곳(`renderToScreen` `isRotated` / `ringDimsFor` `!ringLegacyTranspose`)은 반전 주의해 수동 정리. `setUpscaleMode`는 UI 버튼 호출처가 따로 있어 존치.
    - **미정리(머지 무관, 선택)**: `resolveCoordinateSpace`(호출자 0) / `createLensFbo`+`lensFboId`(도달 불가) dead. 경고 주석 있음.
+7. **G4 제거 후 재확인 — ⏳ 미완 (렌즈 렌더링 트랙으로 이월)**. 진단 제거(`f7d0fbd`) 후 렌즈 ON 상태의
+   홍채 정합을 **육안으로 닫지 못했다** — 캡처 시점에 시선이 크게 옆으로 가 홍채가 가려졌다.
+   확인된 것은 렌즈 정상 활성 · `nativeRenderLensTexture 1080x1920`(치수 전파 불변식) · `TexturePool` 실패 0건까지다.
+   §7-3 표의 G4 ✅ 는 **제거 이전** 판정이므로 그것으로 갈음하지 말 것.
+   위험도는 낮다(제거는 순수 삭제, 렌즈 좌표 경로 무변경). 진입점 = `docs/workPaper/LENS-RENDER_resume_kickoff.md` §3-A
 
 ## 8. 실측 재현 방법
 
-### 진단 브로드캐스트 (디버그 빌드 전용)
+### 진단 브로드캐스트 — ⛔ 현재 동작하지 않음
+
+> **아래 브로드캐스트는 `f7d0fbd`(진단 표면 제거)에서 리시버가 전부 삭제됐다.**
+> 검증: `grep -rn 'DUMP_RING\|SET_RING_SWAP\|SET_UPSCALE' android/ --exclude-dir=build` → **0건**.
+> **명령을 쳐도 조용히 no-op 한다** — 실패 신호가 없으므로 "측정했는데 값이 안 변한다"로 오인하기 쉽다.
+> (이 트랙은 같은 함정을 이미 한 번 겪었다 — 변경 이력 2026-07-30 의 `on`→`legacy` extra 이름 건.)
+>
+> 재측정하려면 `f7d0fbd` 이전을 체크아웃하거나 진단 경로를 재삽입할 것.
+> 아래는 그때를 위한 **기록**이다.
 
 ```bash
 ADB=~/Library/Android/sdk/platform-tools/adb
